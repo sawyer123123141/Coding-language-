@@ -354,3 +354,25 @@ describe("interpreter / run()", () => {
     assert.deepEqual(output, ["a 1 true"]);
   });
 });
+
+describe("example programs", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const readExample = (name) =>
+    fs.readFileSync(path.join(__dirname, "../examples", name), "utf8");
+
+  test("fibonacci.kes prints fib(0..9)", () => {
+    const { output } = runCollect(readExample("fibonacci.kes"));
+    assert.deepEqual(output, [
+      "fib 0 = 0", "fib 1 = 1", "fib 2 = 1", "fib 3 = 2", "fib 4 = 3",
+      "fib 5 = 5", "fib 6 = 8", "fib 7 = 13", "fib 8 = 21", "fib 9 = 34",
+    ]);
+  });
+
+  test("purity_violation.kes fails the purity check as intended", () => {
+    assert.throws(
+      () => Kestrel.run(readExample("purity_violation.kes")),
+      /'oops' is marked pure/
+    );
+  });
+});
