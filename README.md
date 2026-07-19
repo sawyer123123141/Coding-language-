@@ -16,7 +16,9 @@ for the syntax reference and grammar.
   Node or as a browser `<script>`.
 - `kestrel-editor.html` — a single-file mobile code editor/IDE (embeds
   `kestrel.js` inline; add to iPhone home screen via Safari for an
-  app-like experience).
+  app-like experience). Auto-deployed to GitHub Pages on every push to
+  `main` (see `.github/workflows/pages.yml`) — once Pages is enabled in
+  repo Settings, it's served live at the repo's Pages URL.
 - `docs/SYNTAX.md` — syntax reference and full grammar.
 - `examples/` — runnable example programs:
   - `basics.kes` — `pure fn`, arrays, `where`-bounded access.
