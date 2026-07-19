@@ -12,8 +12,9 @@ for the syntax reference and grammar.
 ## Structure
 
 - `kestrel.js` — lexer, parser, purity checker, bounds-proof notes, and
-  a tree-walking interpreter. Zero dependencies; runs unmodified in
-  Node or as a browser `<script>`.
+  two backends: `Kestrel.run` (tree-walking interpreter) and
+  `Kestrel.runFast` (bytecode compiler + stack VM). Zero dependencies;
+  runs unmodified in Node or as a browser `<script>`.
 - `kestrel-editor.html` — a single-file mobile code editor/IDE (embeds
   `kestrel.js` inline; add to iPhone home screen via Safari for an
   app-like experience). Auto-deployed to GitHub Pages on every push to
@@ -34,6 +35,10 @@ for the syntax reference and grammar.
 node -e 'require("./kestrel.js").run(require("fs").readFileSync("examples/basics.kes", "utf8"))'
 ```
 
+Swap `.run(` for `.runFast(` to use the bytecode VM instead — same
+output, same errors. It's not uniformly faster yet (see Status below),
+so `run` is still the safer default.
+
 ## Testing
 
 ```sh
@@ -42,7 +47,12 @@ npm test
 
 ## Status
 
-The tree-walking interpreter is the only backend implemented so far.
-Next up, in priority order (see the design doc): a real bytecode or
-native (LLVM/Cranelift) backend, the persistent cross-run optimization
-cache, layout polymorphism, and a more general proof system.
+Two backends now exist — `run` (tree-walking) and `runFast` (bytecode
+VM) — and are semantics-identical, but `runFast` is only faster on
+loop/array-heavy code (~40-54% in early benchmarks) and currently
+slightly *slower* on deep-recursion-heavy code. See the benchmark table
+and honest writeup in `kestrel-DESIGN.md` before picking one for
+performance-sensitive code. Next up, in priority order: closing that
+recursion gap, then a native (LLVM/Cranelift) backend, the persistent
+cross-run optimization cache, layout polymorphism, and a more general
+proof system.

@@ -98,10 +98,20 @@ to an explicitly-checked variant of the function.
 
 ## What's implemented so far (this prototype)
 
-This is a tree-walking interpreter, not a compiler — it exists to let the
-language's *semantics* be tested and iterated on before investing in a
-real backend (LLVM/Cranelift). It currently supports:
+Two backends share the same front end (lexer, parser, purity checker,
+bounds-proof notes) and are semantics-identical — every example program
+produces the same output, and every error case throws the same
+`KestrelError` message, on either one:
 
+- **`Kestrel.run`** — a tree-walking interpreter directly over the AST.
+  This is what let the language's *semantics* get tested and iterated on
+  before investing in a faster backend.
+- **`Kestrel.runFast`** — compiles each function to a flat bytecode
+  instruction list first, then executes it on a stack-based VM where
+  variables are array-index slots instead of name-keyed object
+  properties (see `docs/SYNTAX.md` for how it's built).
+
+Both support:
 - variables, arithmetic, `if`/`else`, `while`
 - functions, including `pure fn` with a real (if simplified) purity
   checker: a pure function is rejected at compile time if it calls an
@@ -112,11 +122,36 @@ real backend (LLVM/Cranelift). It currently supports:
   programmer
 - a `print` builtin
 
+**Honest performance status:** `runFast` is not uniformly faster than
+`run` yet. Measured with `node`, best-of-N, on this machine:
+
+| Workload | `run` (tree-walk) | `runFast` (bytecode VM) |
+|---|---|---|
+| Tight loop, 20M iterations, arithmetic only | 5155 ms | 3082 ms (~**40% faster**) |
+| Tight loop, 3M iterations, array indexing | 869 ms | 403 ms (~**54% faster**) |
+| `fib(30)`, naive recursion | 404 ms | 519 ms (~**28% slower**) |
+
+The loop/array wins are exactly the "array slots beat dictionary-mode
+property lookups" argument this design doc has always made. The
+recursion regression is a different, so-far-unsolved cost: every Kestrel
+function call is a real recursive JS call in the VM (`call()` calling
+itself), and the per-call frame bookkeeping — even reduced to index math
+on one shared stack array — still loses to how aggressively V8's own
+JIT optimizes the tree-walker's small, simple, monomorphic
+`evalExpr`/`execStmt` functions. Making calls cheaper (a trampoline
+instead of JS recursion, or inlining small pure functions at compile
+time) is the next thing to attack here, before reaching for a native
+backend — a native compiler pays a *different* set of costs and this
+regression would need to not still be there underneath it.
+
 Not yet implemented (future work, roughly in priority order):
-1. A real bytecode or native backend (currently pure tree-walking)
-2. The persistent cross-run optimization cache
-3. Layout polymorphism
-4. A more general proof system beyond simple bounds checks
+1. Making the bytecode VM's call/return path actually faster than the
+   tree-walker's, not just its loops and array access
+2. A native backend (LLVM/Cranelift) — see the discussion above on why
+   this comes after fixing the call-overhead regression, not before
+3. The persistent cross-run optimization cache
+4. Layout polymorphism
+5. A more general proof system beyond simple bounds checks
 
 ## Naming
 
