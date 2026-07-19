@@ -244,13 +244,19 @@ would." That's the honest ceiling of what's measured here, and also
 exactly where the next work goes.
 
 Not yet implemented (future work, roughly in priority order):
-1. Proof-based bounds-check *elision* in `kestrelc` — a first, narrow
-   slice now exists (a literal index into a `let`-literal array is
-   proven safe/unsafe entirely at compile time, no runtime check either
-   way, per idea #4 above). Still missing: reasoning across a function
-   call boundary (proving a *parameter's* `where i < N` from what the
-   caller passed, the general case in the design example), and a
-   friendlier failure than a bare trap on the runtime-check fallback.
+1. Proof-based bounds-check *elision* in `kestrelc` — **the design
+   doc's own `get_safe` example now works exactly as originally
+   specified**: `where i < N` is proven at every call site (a literal
+   index against a literal-length array), an unprovable call site is a
+   *compile error* per the doc's own stated rule ("if the compiler can't
+   prove the where clause... it's a compile error, not a runtime
+   check"), and the check inside the function body is fully elided —
+   zero runtime cost, not just a faster check. Still narrow: the prover
+   only handles a literal index and a literal-length array argument at
+   the call site (not, say, an index derived from another proven-safe
+   variable) — see `kestrelc/README.md`. Also still missing: a friendlier
+   failure than a bare trap on the runtime-check fallback for genuinely
+   dynamic accesses.
 2. Closing the remaining ~9% call-overhead gap in `runFast` on
    recursion-heavy code — lower priority now that `kestrelc` exists and
    already dwarfs any remaining VM-tuning gains

@@ -30,6 +30,48 @@ pub struct Codegen {
     printf_id: FuncId,
     str_cache: HashMap<String, StrConst>,
     str_counter: usize,
+    where_info: HashMap<String, WhereInfo>,
+}
+
+// A recognized `where i < N` clause: `i` names a scalar parameter, `N`
+// matches the symbolic size of some `[T; N]` parameter. `idx_pos`/
+// `arr_pos` are that parameter's position in the *Kestrel* parameter
+// list (not the Cranelift ABI slot list — array params take two ABI
+// slots but one Kestrel position), used to find the matching argument
+// expression at a call site. Any other where-clause shape isn't
+// recognized at all — no elision, no error, just the plain runtime
+// check on every access, same as before this feature existed.
+struct WhereInfo {
+    idx_param: String,
+    arr_param: String,
+    idx_pos: usize,
+    arr_pos: usize,
+}
+
+fn extract_where_info(f: &Fn) -> Option<WhereInfo> {
+    let cond = f.where_clause.as_ref()?;
+    let (left, right) = match cond {
+        Expr::Binop { op: BinOp::Lt, left, right } => (left, right),
+        _ => return None,
+    };
+    let idx_param = match left.as_ref() {
+        Expr::Ident(n) => n.clone(),
+        _ => return None,
+    };
+    let n_name = match right.as_ref() {
+        Expr::Ident(n) => n.clone(),
+        _ => return None,
+    };
+    let idx_pos = f.params.iter().position(|p| p.name == idx_param && matches!(p.ty, Type::Named(_)))?;
+    let (arr_pos, arr_param) = f
+        .params
+        .iter()
+        .enumerate()
+        .find_map(|(i, p)| match &p.ty {
+            Type::Array { size, .. } if *size == n_name => Some((i, p.name.clone())),
+            _ => None,
+        })?;
+    Some(WhereInfo { idx_param, arr_param, idx_pos, arr_pos })
 }
 
 impl Codegen {
@@ -70,6 +112,7 @@ impl Codegen {
             printf_id,
             str_cache: HashMap::new(),
             str_counter: 0,
+            where_info: HashMap::new(),
         })
     }
 
@@ -102,6 +145,9 @@ impl Codegen {
                 .declare_function(&f.name, Linkage::Export, &sig)
                 .map_err(|e| CodegenError(e.to_string()))?;
             self.fn_ids.insert(f.name.clone(), id);
+            if let Some(info) = extract_where_info(f) {
+                self.where_info.insert(f.name.clone(), info);
+            }
         }
 
         // Pass 2: generate bodies.
@@ -112,9 +158,6 @@ impl Codegen {
     }
 
     fn compile_fn(&mut self, f: &Fn) -> Result<(), CodegenError> {
-        if let Some(w) = &f.where_clause {
-            let _ = w; // bounds proofs aren't enforced by kestrelc yet — see README.
-        }
         let func_id = self.fn_ids[&f.name];
         let sig = Self::fn_signature(f);
 
@@ -176,6 +219,8 @@ impl Codegen {
                 module: &mut self.module,
                 str_cache: &mut self.str_cache,
                 str_counter: &mut self.str_counter,
+                where_info: &self.where_info,
+                my_where: self.where_info.get(&f.name),
             };
             let terminated = fc.gen_block(&f.body)?;
             if !terminated {
@@ -284,6 +329,12 @@ struct FnCodegen<'a> {
     module: &'a mut ObjectModule,
     str_cache: &'a mut HashMap<String, StrConst>,
     str_counter: &'a mut usize,
+    where_info: &'a HashMap<String, WhereInfo>,
+    /// This function's own `where` pair, if it has one recognized —
+    /// lets its body trust the precondition (elide the check on
+    /// `arr_param[idx_param]`) since every call site is required to
+    /// prove it before the call is even allowed to compile.
+    my_where: Option<&'a WhereInfo>,
 }
 
 type CgResult<T> = Result<T, CodegenError>;
@@ -554,14 +605,11 @@ impl<'a> FnCodegen<'a> {
                 "kestrelc only supports array literals as the direct value of a `let`/assignment so far".into(),
             )),
             Expr::Index { target, index } => {
-                // Proof-carrying fast path: a literal index into an array
-                // whose length is also known at compile time (a `let`
-                // literal, not a parameter) can be proven safe — or
+                // Proof-carrying fast path #1: a literal index into an
+                // array whose length is also known at compile time (a
+                // `let` literal, not a parameter) can be proven safe — or
                 // proven *unsafe* — right now, with no runtime check
-                // needed either way. This is deliberately narrow (see
-                // kestrelc/README.md): it doesn't yet reason about a
-                // `where i < N` clause across a call boundary, only this
-                // direct, fully-static case.
+                // needed either way.
                 if let (Expr::Num(n), Some(static_len)) = (index.as_ref(), self.static_array_len(target)) {
                     if *n < 0 || *n as usize >= static_len {
                         return Err(CodegenError(format!(
@@ -570,6 +618,27 @@ impl<'a> FnCodegen<'a> {
                     }
                     let (ptr, _len) = self.resolve_array(target)?;
                     return Ok(self.builder.ins().load(types::I64, MemFlags::new(), ptr, (*n * 8) as i32));
+                }
+
+                // Proof-carrying fast path #2: this function has a
+                // `where idx_param < N` clause tying exactly this
+                // (array parameter, index parameter) pair together, and
+                // this is exactly that access (`arr_param[idx_param]`).
+                // Every call site to this function is required (see the
+                // Call arm below) to prove the precondition before the
+                // call is even allowed to compile — so by the time we're
+                // generating code *inside* this function, the precondition
+                // is already guaranteed, and the check would be redundant.
+                if let (Expr::Ident(t), Expr::Ident(i)) = (target.as_ref(), index.as_ref()) {
+                    if let Some(w) = self.my_where {
+                        if t == &w.arr_param && i == &w.idx_param {
+                            let (ptr, _len) = self.resolve_array(target)?;
+                            let idx = self.gen_expr(index)?;
+                            let offset = self.builder.ins().imul_imm(idx, 8);
+                            let addr = self.builder.ins().iadd(ptr, offset);
+                            return Ok(self.builder.ins().load(types::I64, MemFlags::new(), addr, 0));
+                        }
+                    }
                 }
 
                 let (ptr, len) = self.resolve_array(target)?;
@@ -653,6 +722,41 @@ impl<'a> FnCodegen<'a> {
                     .fn_ids
                     .get(name)
                     .ok_or_else(|| CodegenError(format!("Unknown function '{name}'")))?;
+
+                // If the callee has a recognized `where idx < N` clause,
+                // its precondition must be proven right here, at compile
+                // time, before the call is allowed at all — matching
+                // kestrel-DESIGN.md's own stated rule: "If the compiler
+                // can't prove the where clause at a call site, it's a
+                // compile error, not a runtime check." Our prover is
+                // narrow (see kestrelc/README.md): only a literal index
+                // against a literal-length array argument is provable;
+                // anything else is rejected, not silently trusted.
+                if let Some(w) = self.where_info.get(name) {
+                    let idx_arg = &args[w.idx_pos];
+                    let arr_arg = &args[w.arr_pos];
+                    let idx_lit = match idx_arg {
+                        Expr::Num(n) => *n,
+                        _ => {
+                            return Err(CodegenError(format!(
+                                "kestrelc: can't prove '{name}''s `where {} < ...` clause here — the index argument must be a literal number so far",
+                                w.idx_param
+                            )))
+                        }
+                    };
+                    let arr_len = self.static_array_len(arr_arg).ok_or_else(|| {
+                        CodegenError(format!(
+                            "kestrelc: can't prove '{name}''s where clause here — the array argument must be a fixed-size array literal (`let x = [...]`) so far, not a parameter passed further down"
+                        ))
+                    })?;
+                    if idx_lit < 0 || idx_lit as usize >= arr_len {
+                        return Err(CodegenError(format!(
+                            "kestrelc: call to '{name}' can't satisfy its own `where {} < N` clause — index {idx_lit} is out of bounds for an array of length {arr_len}",
+                            w.idx_param
+                        )));
+                    }
+                }
+
                 let mut arg_vals = Vec::with_capacity(args.len());
                 for a in args {
                     // An array argument expands to two Cranelift values

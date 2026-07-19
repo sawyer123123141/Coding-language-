@@ -51,23 +51,27 @@ Codegen, however, currently supports a subset:
   a (pointer, length) pair. Array values can only be indexed or passed to
   a function so far — not returned, not stored inside another array, not
   aliased with a second `let`.
-- **A first, narrow slice of proof-carrying bounds elision**: a literal
-  index into a `let`-literal array (`a[2]` where `a = [1,2,3]`) is proven
-  safe — or proven *unsafe* — entirely at compile time, with **no runtime
-  check at all** either way. A provably-out-of-bounds literal index is a
-  **compile error**, not a runtime surprise, matching the design doc's
-  own stated philosophy exactly. Anything less static than that (a
-  variable index, or an array-typed parameter whose length is a runtime
-  value) still falls back to a runtime bounds check, same as `run`/
-  `runFast`; a failing runtime check **traps the process (`SIGILL`)
-  immediately** rather than printing a message and exiting cleanly like
-  the other two backends do — a real, known difference, not yet fixed.
+- **Proof-carrying bounds elision, including across function calls**:
+  a literal index into a `let`-literal array (`a[2]`, `a = [1,2,3]`) is
+  proven safe/unsafe entirely at compile time, no runtime check either
+  way. And the design doc's own `get_safe(arr: [i32;N], i) where i < N`
+  example now works as originally specified: every call site must prove
+  the clause (literal index, literal-length array argument) or it's a
+  **compile error** — never a silent trust — and once proven, the check
+  inside `get_safe`'s own body is fully elided too. Anything less static
+  (a variable index, or proving one call's safety from another's) isn't
+  provable yet and is rejected at compile time rather than silently
+  falling back to a runtime check for `where`-guarded calls specifically.
+  Indexing *without* a `where` clause still falls back to an ordinary
+  runtime check, same as `run`/`runFast`; a failing runtime check
+  **traps the process (`SIGILL`) immediately** rather than printing a
+  message and exiting cleanly like the other two backends do — a real,
+  known difference, not yet fixed.
 
 **Not supported yet — a clear compile error, never a silent miscompile:**
-- The general `where i < N` clause — reasoning across a function-call
-  boundary (proving a *parameter's* index is safe based on what the
-  caller passed) isn't implemented, only the fully-local literal case
-  above. `where` clauses are currently parsed and otherwise ignored.
+- Proving a `where` clause from anything other than a literal index and
+  a literal-length array at the call site (e.g. chaining one proven-safe
+  call's guarantee into another).
 - Strings as general values (only as literal print arguments)
 - Floats with real fractional semantics
 - Indexing/passing anything other than a plain array variable (e.g. the
