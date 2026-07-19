@@ -12,11 +12,9 @@ that haven't been tried together in one language. Both are marked below.
 ---
 
 ## 1. Persistent cross-run optimization cache
-
 **Status: novel combination**
 
 Most languages force a choice:
-
 - **AOT (ahead-of-time) compilation** — compile once, run fast, but the
   compiler has to guess how the program will actually be used.
 - **JIT (just-in-time) compilation** — watch the program run and optimize
@@ -31,12 +29,11 @@ Over repeated runs on the same machine, the program keeps getting faster
 and plateaus at what a JIT would eventually reach, but without ever
 paying the warmup cost more than once per machine.
 
-**Trade-off to be honest about:** this only helps for programs run
+Trade-off to be honest about: this only helps for programs run
 repeatedly on the same machine (servers, CLIs, dev loops) — a one-shot
 script gets no benefit.
 
 ## 2. Effect-tracked purity
-
 **Status: extension of known ideas (Haskell's purity + Rust's ownership)**
 
 Rust's borrow checker proves memory-safety at compile time so there's no
@@ -46,7 +43,6 @@ another part of the program can see?
 
 A function marked `pure` is checked by the compiler to guarantee none of
 that happens. Once proven pure, the compiler is free to:
-
 - run it early or speculatively
 - run multiple calls in parallel with zero risk of data races
 - cache ("memoize") results automatically
@@ -57,7 +53,6 @@ ownership instead of replacing it — you get *both* deterministic memory
 management *and* algebraic freedom for the optimizer.
 
 ## 3. Layout polymorphism
-
 **Status: novel extension of data-oriented design**
 
 CPUs read contiguous memory much faster than scattered memory. Game
@@ -74,7 +69,6 @@ calls for. The logical shape of your data and its physical layout become
 fully decoupled.
 
 ## 4. Proof-carrying optimization
-
 **Status: extension of known ideas (dependent types / Idris / Agda)**
 
 Even Rust keeps some runtime safety nets (e.g. array bounds checks)
@@ -83,16 +77,16 @@ dependently-typed languages let you write proofs inline that make
 certain classes of bugs structurally impossible — but they're research
 tools, not practical languages.
 
-**Kestrel's approach:** a *lightweight* proof system — not full
-dependent types — focused specifically on the checks that are expensive
-at runtime: bounds checks, overflow checks, aliasing checks. Example:
+**Kestrel's approach:** a *lightweight* proof system — not full dependent
+types — focused specifically on the checks that are expensive at
+runtime: bounds checks, overflow checks, aliasing checks. Example:
 
 ```
 fn get_safe(arr: [i32; N], i: usize) -> i32
     where i < N
 {
-    arr[i]  // compiler proves this in bounds at every call site,
-            // so no runtime check is emitted at all
+    arr[i]   // compiler proves this in bounds at every call site,
+             // so no runtime check is emitted at all
 }
 ```
 
@@ -104,9 +98,9 @@ to an explicitly-checked variant of the function.
 
 ## What's implemented so far (this prototype)
 
-This is a tree-walking interpreter, not a compiler — it exists to let
-the language's semantics be tested and iterated on before investing in
-a real backend (LLVM/Cranelift). It currently supports:
+This is a tree-walking interpreter, not a compiler — it exists to let the
+language's *semantics* be tested and iterated on before investing in a
+real backend (LLVM/Cranelift). It currently supports:
 
 - variables, arithmetic, `if`/`else`, `while`
 - functions, including `pure fn` with a real (if simplified) purity
@@ -118,8 +112,7 @@ a real backend (LLVM/Cranelift). It currently supports:
   programmer
 - a `print` builtin
 
-## Not yet implemented (future work, roughly in priority order)
-
+Not yet implemented (future work, roughly in priority order):
 1. A real bytecode or native backend (currently pure tree-walking)
 2. The persistent cross-run optimization cache
 3. Layout polymorphism
