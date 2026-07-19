@@ -94,6 +94,50 @@ If the compiler can't prove the `where` clause at a call site, it's a
 compile error, not a runtime check — you fix the call site, or fall back
 to an explicitly-checked variant of the function.
 
+## 5. Fearless parallelism, powered by purity
+
+**Status: extension of known ideas (Rust's Rayon/fork-join, auto-vectorization)**
+
+Most languages that let you spread work across CPU cores make you prove
+it's safe by hand — audit the code for shared mutable state, add locks,
+hope you didn't miss a case. Rust's borrow checker gets partway there at
+compile time; most languages don't get there at all.
+
+**Kestrel's approach:** this is mostly already paid for by idea #2. A
+function the compiler has proven `pure` — no I/O, no mutation outside
+its own locals — is, by that same proof, provably safe to run many times
+over in parallel with zero risk of a data race, because there's nothing
+shared for two calls to race over. So: calling a `pure` function once
+per element of a large array or collection is a natural place for the
+compiler to automatically split the work across available CPU cores,
+no `unsafe`, no manual thread-safety audit, no opt-in required beyond
+having written `pure` in the first place (which you'd want to do anyway,
+for the reasons in idea #2).
+
+Two further-out extensions of the same idea, roughly in order of how
+soon they're realistic:
+- **SIMD** — the same kind of straightforward numeric `pure` function
+  applied across an array is also a natural candidate for doing the
+  operation to several array elements in a single CPU instruction,
+  not just spreading elements across cores.
+- **GPU compute** — for the largest embarrassingly-parallel numeric
+  workloads (physics, voxel/grid processing, and similar), eventually
+  targeting a GPU backend for `pure` functions applied over big
+  collections. This is a substantially bigger, more specialized
+  undertaking than CPU-side parallelism (different execution model,
+  real data-transfer overhead between CPU and GPU memory) and is a
+  longer-term goal, not a near-term one.
+
+**Trade-off to be honest about:** this only helps code that's both
+`pure` and operating over genuinely independent chunks of work.
+Sequentially-dependent code (naive recursive Fibonacci is the running
+example throughout this doc) has nothing to split up and sees no
+benefit. This also isn't a free unlock the moment the native backend
+exists — it's real additional engineering (a work-stealing scheduler,
+heuristics for when splitting the work is actually worth its own
+overhead, eventually a GPU backend) that comes after the native
+compiler, not alongside it.
+
 ---
 
 ## What's implemented so far (this prototype)
@@ -169,6 +213,10 @@ Not yet implemented (future work, roughly in priority order):
 3. The persistent cross-run optimization cache
 4. Layout polymorphism
 5. A more general proof system beyond simple bounds checks
+6. CPU-side parallelism for `pure` functions over collections (idea #5)
+   — comes after (2), since there's nothing to distribute across cores
+   until Kestrel is generating real machine code
+7. SIMD, then (much further out) a GPU backend — both extensions of (6)
 
 ## Naming
 
