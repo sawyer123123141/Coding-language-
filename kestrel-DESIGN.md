@@ -155,6 +155,15 @@ produces the same output, and every error case throws the same
   variables are array-index slots instead of name-keyed object
   properties (see `docs/SYNTAX.md` for how it's built).
 
+**In progress:** `kestrelc/`, a real native compiler using
+[Cranelift](https://cranelift.dev/) to emit an actual standalone
+executable (via `cranelift-object` + the system linker) instead of
+running on a VM at all. It's a separate Rust program from `kestrel.js`,
+not something that runs in the browser editor — see `kestrelc/README.md`
+once it lands for its current status and supported subset. This section
+will be updated with real, measured numbers once it can compile and run
+a program end to end — no performance claims for it until then.
+
 Both support:
 - variables, arithmetic, `if`/`else`, `while`
 - functions, including `pure fn` with a real (if simplified) purity
