@@ -123,32 +123,49 @@ Both support:
 - a `print` builtin
 
 **Honest performance status:** `runFast` is not uniformly faster than
-`run` yet. Measured with `node`, best-of-N, on this machine:
+`run`. Measured with `node`, best-of-N, on this machine:
 
 | Workload | `run` (tree-walk) | `runFast` (bytecode VM) |
 |---|---|---|
-| Tight loop, 20M iterations, arithmetic only | 5155 ms | 3082 ms (~**40% faster**) |
-| Tight loop, 3M iterations, array indexing | 869 ms | 403 ms (~**54% faster**) |
-| `fib(30)`, naive recursion | 404 ms | 519 ms (~**28% slower**) |
+| Tight loop, 20M iterations, arithmetic only | 5150 ms | 2600 ms (~**98% faster**) |
+| Tight loop, 3M iterations, array indexing | 865 ms | 352 ms (~**146% faster**) |
+| `fib(30)`, naive recursion (2.7M calls) | 384 ms | 420 ms (~**9% slower**) |
 
 The loop/array wins are exactly the "array slots beat dictionary-mode
 property lookups" argument this design doc has always made. The
-recursion regression is a different, so-far-unsolved cost: every Kestrel
-function call is a real recursive JS call in the VM (`call()` calling
-itself), and the per-call frame bookkeeping — even reduced to index math
-on one shared stack array — still loses to how aggressively V8's own
-JIT optimizes the tree-walker's small, simple, monomorphic
-`evalExpr`/`execStmt` functions. Making calls cheaper (a trampoline
-instead of JS recursion, or inlining small pure functions at compile
-time) is the next thing to attack here, before reaching for a native
-backend — a native compiler pays a *different* set of costs and this
-regression would need to not still be there underneath it.
+recursion column used to be worse — an initial version of `runFast`
+was ~28% *slower* than `run` on `fib(30)`, because every Kestrel
+function call was a real recursive JavaScript call, and profiling
+(`node --prof`) showed that call/return bookkeeping as the dominant
+cost, worse than any single instruction. The fix: `execute()` no longer
+recurses in JS at all. It's one flat loop over a shared stack; a Kestrel
+call/return just swaps which function's code/base/instruction-pointer
+the loop is currently reading, saving/restoring the caller's own on a
+hand-managed call stack (three parallel arrays + an index, not an array
+of objects — allocating one object per call was exactly the mistake
+being fixed). That closed most of the gap (28% slower → 9% slower) but
+not all of it; the remaining cost is believed to be inherent to still
+using a real (if now shallow) JS function-call boundary for `execute`
+itself plus the per-call stack bookkeeping, and would need either a
+JIT-style specialization for hot call sites or inlining small functions
+at compile time to close fully.
+
+For scale, the same three workloads in Rust (`rustc -O`) and C++
+(`g++ -O2`) run in low single-digit milliseconds each — roughly
+100-800x faster than either Kestrel backend, depending on the workload.
+That gap is expected and not a sign of an unusually slow implementation:
+Kestrel is currently an interpreter running *on top of* JavaScript
+(itself not compiling straight to machine code), while Rust/C++ compile
+directly to native instructions with no interpreter loop underneath at
+all. That gap — not the run-vs-runFast difference — is the real
+argument for eventually reaching for a native backend.
 
 Not yet implemented (future work, roughly in priority order):
-1. Making the bytecode VM's call/return path actually faster than the
-   tree-walker's, not just its loops and array access
-2. A native backend (LLVM/Cranelift) — see the discussion above on why
-   this comes after fixing the call-overhead regression, not before
+1. Closing the remaining ~9% call-overhead gap on recursion-heavy code
+   (hot-call specialization or compile-time inlining of small functions)
+2. A native backend (LLVM/Cranelift) — worth revisiting once (1) is
+   closed, since the 100-800x gap against native code dwarfs anything
+   left to gain from further VM tuning
 3. The persistent cross-run optimization cache
 4. Layout polymorphism
 5. A more general proof system beyond simple bounds checks

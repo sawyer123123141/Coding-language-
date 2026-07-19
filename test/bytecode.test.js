@@ -108,6 +108,65 @@ describe("runFast() equivalence with run()", () => {
   });
 });
 
+describe("call stack correctness (execute() has no JS recursion)", () => {
+  // execute() manages Kestrel calls itself, via a hand-rolled call stack
+  // (three parallel arrays + an index) instead of recursive JS function
+  // calls — the fix for runFast() originally being slower than run() on
+  // recursive code. These specifically target that rewrite: interleaved
+  // returns, mutual recursion between different functions (so `code`
+  // must be swapped correctly per frame, not just `frameBase`), and
+  // deeper recursion than the other tests exercise.
+
+  test("deeper recursion still produces the correct result", () => {
+    assertEquivalent(`
+      fn fib(n: i32) -> i32 {
+        if (n < 2) { return n; }
+        return fib(n - 1) + fib(n - 2);
+      }
+      fn main() { return fib(20); }
+    `);
+  });
+
+  test("mutual recursion between two different functions", () => {
+    // Forces the call stack to restore a *different* function's code
+    // array on return, not just re-enter the same one — a bug here
+    // would show up as running the wrong bytecode after a return.
+    assertEquivalent(`
+      fn is_even(n: i32) -> bool {
+        if (n == 0) { return true; }
+        return is_odd(n - 1);
+      }
+      fn is_odd(n: i32) -> bool {
+        if (n == 0) { return false; }
+        return is_even(n - 1);
+      }
+      fn main() {
+        let i = 0;
+        while (i < 12) {
+          print(i, "is_even:", is_even(i));
+          i = i + 1;
+        }
+      }
+    `);
+  });
+
+  test("sibling calls in one expression interleave without clobbering each other's frames", () => {
+    // square(a) fully returns and pops its frame before square(b) is
+    // even evaluated, but both calls share the same underlying code
+    // array — this would catch a frame/base mixup between them.
+    assertEquivalent(`
+      fn square(x: i32) -> i32 { return x * x; }
+      fn main() {
+        let i = 0;
+        while (i < 10) {
+          print(square(i) + square(i + 1));
+          i = i + 1;
+        }
+      }
+    `);
+  });
+});
+
 describe("runFast() error parity with run()", () => {
   test("purity_violation.kes fails identically on both backends", () => {
     const src = fs.readFileSync(path.join(__dirname, "../examples/purity_violation.kes"), "utf8");

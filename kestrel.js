@@ -693,123 +693,154 @@ function compile(program) {
 
 // ============================== BYTECODE VM ==============================
 
-function binop(op, l, r) {
-  switch (op) {
-    case "+": return l + r;
-    case "-": return l - r;
-    case "*": return l * r;
-    case "/": return l / r;
-    case "%": return l % r;
-    case "==": return l === r;
-    case "!=": return l !== r;
-    case "<": return l < r;
-    case ">": return l > r;
-    case "<=": return l <= r;
-    case ">=": return l >= r;
-    case "&&": return l && r;
-    case "||": return l || r;
-  }
-}
-
 // One array is shared by every frame for the entire run — both operand
 // stack and locals. A call's arguments are already sitting, contiguous,
 // exactly where its locals need to start (the caller just pushed them to
 // evaluate them), so a frame is just a base index into this one array,
 // not a fresh locals array + fresh operand stack allocated per call. That
-// was the other big allocation cost recursion paid per call (on top of
-// the megamorphic instruction shapes fixed above) — profiling showed
+// was one big allocation cost recursion paid per call (on top of the
+// megamorphic instruction shapes fixed above) — profiling showed
 // `GrowFastSmiOrObjectElements` from a brand-new `[]` growing on every
 // single call. Locals live at stack[frameBase .. frameBase+slotCount), the
-// operand stack is whatever's pushed above that, and returning is just
-// `stack.length = frameBase; stack.push(value)` — which also happens to
-// leave the array exactly where the CALL site left off, one slot higher.
+// operand stack is whatever's pushed above that.
+//
+// A second cost remained even after that fix: a Kestrel function call was
+// still a *real* recursive JavaScript call (this function calling itself),
+// and profiling showed that overhead — not any single instruction — as the
+// dominant cost on call-heavy programs like naive fibonacci, enough to
+// make the VM slower than the tree-walker there despite winning everywhere
+// else. So calls no longer recurse in JS at all: `execute` is one flat
+// loop, and a Kestrel call/return just swaps which function's code/base/ip
+// the loop is currently reading, saving/restoring the caller's own
+// code/base/return-ip on a manually-managed call stack (three parallel
+// arrays + an index, not an array of objects, to avoid allocating a fresh
+// object per call — the same lesson as the instruction-shape fix above).
 function execute(functions, entryName, args, onPrint) {
   const stack = [];
-
-  function call(fn, frameBase) {
-    // Extending .length fills any locals beyond the passed-in args with
-    // `undefined`; shrinking it silently drops extra args — both match
-    // the tree-walker's `fn.params.forEach((p,i) => env[p.name]=args[i])`.
-    stack.length = frameBase + fn.slotCount;
-    const code = fn.code;
-    let ip = 0;
-
-    for (;;) {
-      const ins = code[ip];
-      switch (ins.op) {
-        case OP.CONST: stack.push(ins.a); ip++; break;
-        case OP.LOAD: stack.push(stack[frameBase + ins.a]); ip++; break;
-        case OP.STORE: stack[frameBase + ins.a] = stack.pop(); ip++; break;
-        case OP.ARRAY: {
-          const arr = stack.splice(stack.length - ins.a, ins.a);
-          stack.push(arr);
-          ip++;
-          break;
-        }
-        case OP.INDEX: {
-          const idx = stack.pop();
-          const arr = stack.pop();
-          if (idx < 0 || idx >= arr.length) {
-            throw new KestrelError(
-              `Index ${idx} out of bounds for array of length ${arr.length}`
-            );
-          }
-          stack.push(arr[idx]);
-          ip++;
-          break;
-        }
-        case OP.UNOP: {
-          const v = stack.pop();
-          stack.push(ins.a === "-" ? -v : !v);
-          ip++;
-          break;
-        }
-        case OP.BINOP: {
-          const r = stack.pop();
-          const l = stack.pop();
-          stack.push(binop(ins.a, l, r));
-          ip++;
-          break;
-        }
-        case OP.CALL: {
-          const calleeBase = stack.length - ins.b;
-          const result = call(ins.a, calleeBase);
-          stack.length = calleeBase; // drop the callee's frame, args included
-          stack.push(result);
-          ip++;
-          break;
-        }
-        case OP.PRINT: {
-          const vals = stack.splice(stack.length - ins.a, ins.a);
-          onPrint(vals.join(" "));
-          ip++;
-          break;
-        }
-        case OP.POP: stack.pop(); ip++; break;
-        case OP.JUMP: ip = ins.a; break;
-        case OP.JUMP_IF_FALSE: {
-          const cond = stack.pop();
-          ip = cond ? ip + 1 : ins.a;
-          break;
-        }
-        case OP.RETURN_VALUE: {
-          const value = stack.pop();
-          stack.length = frameBase; // drop this frame's locals/operands; caller re-pushes the result
-          return value;
-        }
-        case OP.RETURN_NULL:
-          stack.length = frameBase;
-          return null;
-        default:
-          throw new KestrelError(`Cannot execute instruction of kind '${ins.op}'`);
-      }
-    }
-  }
+  const csCode = [], csBase = [], csIp = [];
+  let csTop = 0;
 
   const entryFn = functions.get(entryName);
   if (!entryFn) throw new KestrelError("No 'main' function found");
   for (const a of args) stack.push(a);
-  return call(entryFn, stack.length - args.length);
+
+  let frameBase = stack.length - args.length;
+  let code = entryFn.code;
+  let ip = 0;
+  // Extending .length fills any locals beyond the passed-in args with
+  // `undefined`; shrinking it silently drops extra args — both match the
+  // tree-walker's `fn.params.forEach((p,i) => env[p.name]=args[i])`.
+  stack.length = frameBase + entryFn.slotCount;
+
+  for (;;) {
+    const ins = code[ip];
+    switch (ins.op) {
+      case OP.CONST: stack.push(ins.a); ip++; break;
+      case OP.LOAD: stack.push(stack[frameBase + ins.a]); ip++; break;
+      case OP.STORE: stack[frameBase + ins.a] = stack.pop(); ip++; break;
+      case OP.ARRAY: {
+        const arr = stack.splice(stack.length - ins.a, ins.a);
+        stack.push(arr);
+        ip++;
+        break;
+      }
+      case OP.INDEX: {
+        const idx = stack.pop();
+        const arr = stack.pop();
+        if (idx < 0 || idx >= arr.length) {
+          throw new KestrelError(
+            `Index ${idx} out of bounds for array of length ${arr.length}`
+          );
+        }
+        stack.push(arr[idx]);
+        ip++;
+        break;
+      }
+      case OP.UNOP: {
+        const v = stack.pop();
+        stack.push(ins.a === "-" ? -v : !v);
+        ip++;
+        break;
+      }
+      case OP.BINOP: {
+        const r = stack.pop();
+        const l = stack.pop();
+        // Inlined instead of a separate binop() helper: this is the
+        // single hottest instruction in arithmetic-heavy code, and a real
+        // function call per operation was showing up as its own
+        // measurable cost on top of this switch's own dispatch.
+        let result;
+        switch (ins.a) {
+          case "+": result = l + r; break;
+          case "-": result = l - r; break;
+          case "*": result = l * r; break;
+          case "/": result = l / r; break;
+          case "%": result = l % r; break;
+          case "==": result = l === r; break;
+          case "!=": result = l !== r; break;
+          case "<": result = l < r; break;
+          case ">": result = l > r; break;
+          case "<=": result = l <= r; break;
+          case ">=": result = l >= r; break;
+          case "&&": result = l && r; break;
+          case "||": result = l || r; break;
+        }
+        stack.push(result);
+        ip++;
+        break;
+      }
+      case OP.CALL: {
+        const callee = ins.a;
+        const calleeBase = stack.length - ins.b;
+        // Save where to resume in the caller once the callee returns.
+        csCode[csTop] = code;
+        csBase[csTop] = frameBase;
+        csIp[csTop] = ip + 1;
+        csTop++;
+        code = callee.code;
+        frameBase = calleeBase;
+        ip = 0;
+        stack.length = frameBase + callee.slotCount;
+        break;
+      }
+      case OP.PRINT: {
+        const vals = stack.splice(stack.length - ins.a, ins.a);
+        onPrint(vals.join(" "));
+        ip++;
+        break;
+      }
+      case OP.POP: stack.pop(); ip++; break;
+      case OP.JUMP: ip = ins.a; break;
+      case OP.JUMP_IF_FALSE: {
+        const cond = stack.pop();
+        ip = cond ? ip + 1 : ins.a;
+        break;
+      }
+      case OP.RETURN_VALUE: {
+        const value = stack.pop();
+        stack.length = frameBase;
+        if (csTop === 0) return value;
+        stack.push(value);
+        csTop--;
+        code = csCode[csTop];
+        frameBase = csBase[csTop];
+        ip = csIp[csTop];
+        break;
+      }
+      case OP.RETURN_NULL: {
+        stack.length = frameBase;
+        if (csTop === 0) return null;
+        stack.push(null);
+        csTop--;
+        code = csCode[csTop];
+        frameBase = csBase[csTop];
+        ip = csIp[csTop];
+        break;
+      }
+      default:
+        throw new KestrelError(`Cannot execute instruction of kind '${ins.op}'`);
+    }
+  }
 }
 
 // ============================== PUBLIC API ==============================
