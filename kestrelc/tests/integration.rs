@@ -291,3 +291,102 @@ fn while_loop_with_mutation_produces_correct_result() {
     let run = Command::new(&bin).output().expect("failed to run compiled binary");
     assert_eq!(String::from_utf8_lossy(&run.stdout), "4950\n");
 }
+
+#[test]
+fn where_clause_call_site_proof_accepts_valid_literal_call() {
+    // This is the design doc's own get_safe example, verbatim, with a
+    // call site whose index/array are both provable at compile time —
+    // should compile and elide the check inside get_safe entirely.
+    let scratch = scratch_dir("where_ok");
+    let src_path = scratch.join("where_ok.kes");
+    fs::write(
+        &src_path,
+        r#"
+        fn get_safe(arr: [i32; N], i: usize) -> i32 where i < N {
+            return arr[i];
+        }
+        fn main() {
+            let nums = [3, 4, 5, 6];
+            print(get_safe(nums, 2));
+        }
+        "#,
+    )
+    .unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(out.status.success(), "compile failed:\n{}", String::from_utf8_lossy(&out.stderr));
+
+    let bin = scratch.join("where_ok");
+    let run = Command::new(&bin).output().expect("failed to run compiled binary");
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "5\n");
+}
+
+#[test]
+fn where_clause_call_site_rejects_provably_invalid_index() {
+    let scratch = scratch_dir("where_bad_index");
+    let src_path = scratch.join("where_bad_index.kes");
+    fs::write(
+        &src_path,
+        r#"
+        fn get_safe(arr: [i32; N], i: usize) -> i32 where i < N {
+            return arr[i];
+        }
+        fn main() {
+            let nums = [3, 4, 5, 6];
+            print(get_safe(nums, 9));
+        }
+        "#,
+    )
+    .unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(!out.status.success(), "kestrelc should have rejected a provably out-of-bounds where-clause call");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("can't satisfy its own"),
+        "expected a where-clause proof-failure error, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn where_clause_call_site_rejects_unprovable_dynamic_index() {
+    // The design doc is explicit that an unprovable call site is a
+    // compile error, not a silent fallback to a runtime check — our
+    // prover can't reason about a variable index, so this must fail.
+    let scratch = scratch_dir("where_unprovable");
+    let src_path = scratch.join("where_unprovable.kes");
+    fs::write(
+        &src_path,
+        r#"
+        fn get_safe(arr: [i32; N], i: usize) -> i32 where i < N {
+            return arr[i];
+        }
+        fn main() {
+            let nums = [3, 4, 5, 6];
+            let idx = 2;
+            print(get_safe(nums, idx));
+        }
+        "#,
+    )
+    .unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(!out.status.success(), "kestrelc should have rejected an unprovable where-clause call site");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("can't prove"),
+        "expected a where-clause unprovable-call-site error, got:\n{stderr}"
+    );
+}
