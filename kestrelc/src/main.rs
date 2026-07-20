@@ -1,9 +1,4 @@
-mod ast;
-mod codegen;
-mod lexer;
-mod parser;
-mod purity;
-mod wasm_codegen;
+use kestrelc::{codegen, lexer, parser, purity, wasm_codegen};
 
 use std::fs;
 use std::path::Path;

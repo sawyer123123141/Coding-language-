@@ -34,11 +34,12 @@ The resulting `.wasm` runs in any WASM host (a browser, Node's
 calls for output, since WASM has no I/O of its own — see
 `tests/integration.rs`'s wasm tests for a minimal working host
 (`env.print_i64(value, is_last)` and `env.print_str(ptr, len, is_last)`).
-**Not yet wired into `kestrel-editor.html`** — `kestrelc` itself is
-still a native program you run from a terminal; getting this into the
-browser editor needs `kestrelc`'s *front end* also compiled to WASM (so
-the compiler runs client-side), which is a separate, not-yet-done step.
-Same scope limits as the native backend for now: no arrays.
+**This is now wired into `kestrel-editor.html`** — pick "engine: native
+(wasm)" in the editor. `kestrelc` itself is also compiled to WASM
+(`kestrelc-web/`), so the whole pipeline (compile Kestrel source to a
+`.wasm` module, then run it) happens client-side, no server involved.
+See `kestrelc-web/README.md`. Same scope limits as the native backend
+for now: no arrays.
 
 `kestrelc <file.kes>` (no `--wasm`) compiles and links `<file>.kes` into
 a native executable named after the file (in the current directory),

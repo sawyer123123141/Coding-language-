@@ -159,9 +159,10 @@
     <option value="fib">fibonacci</option>
     <option value="purity">purity check</option>
   </select>
-  <select class="examples" id="engine" title="Fast: bytecode VM, faster on loops/arrays. Compat: tree-walking interpreter, ~9% faster on deep recursion.">
+  <select class="examples" id="engine" title="Fast: bytecode VM, faster on loops/arrays. Compat: tree-walking interpreter, ~9% faster on deep recursion. Native: compiles to WASM client-side, near-native speed — integers/functions/control-flow/print only, no arrays yet.">
     <option value="fast" selected>engine: fast</option>
     <option value="compat">engine: compat</option>
+    <option value="native">engine: native (wasm)</option>
   </select>
   <button class="run-btn" id="runBtn">▶ Run</button>
 </header>
@@ -1244,9 +1245,19 @@ function runProgram() {
   runBtn.disabled = true;
   switchView('output');
 
+  const engine = engineEl.value;
+
   // Let the run-indicator animation paint before the (blocking) run.
   setTimeout(() => {
-    const useFast = engineEl.value === 'fast';
+    if (engine === 'native') {
+      runNative().finally(() => {
+        markEl.classList.remove('running');
+        runBtn.disabled = false;
+      });
+      return;
+    }
+
+    const useFast = engine === 'fast';
     const runFn = useFast ? Kestrel.runFast : Kestrel.run;
     const start = performance.now();
     try {
@@ -1267,6 +1278,79 @@ function runProgram() {
       runBtn.disabled = false;
     }
   }, 60);
+}
+
+// The "native" engine: compiles the current source to a real .wasm
+// module client-side using kestrelc itself (also built as WASM — see
+// kestrelc-web/), then instantiates and runs *that* module. Two WASM
+// modules involved: the compiler (fetched once, cached) and whatever it
+// produces from the user's code (built fresh every run). No server
+// involved in either step.
+let compilerPromise = null;
+function loadCompiler() {
+  if (!compilerPromise) {
+    compilerPromise = fetch('kestrelc.wasm')
+      .then((r) => {
+        if (!r.ok) throw new Error(`couldn't fetch kestrelc.wasm (${r.status})`);
+        return r.arrayBuffer();
+      })
+      .then((bytes) => WebAssembly.instantiate(bytes, {}))
+      .then(({ instance }) => instance);
+  }
+  return compilerPromise;
+}
+
+async function runNative() {
+  const start = performance.now();
+  try {
+    const compiler = await loadCompiler();
+    const mem = compiler.exports.memory;
+
+    const srcBytes = new TextEncoder().encode(codeEl.value);
+    const srcPtr = compiler.exports.alloc(srcBytes.length);
+    new Uint8Array(mem.buffer, srcPtr, srcBytes.length).set(srcBytes);
+
+    const headerPtr = compiler.exports.compile(srcPtr, srcBytes.length);
+    // mem.buffer may have been detached/regrown by allocations during
+    // compile(), so re-view it fresh before reading the header.
+    const header = new DataView(mem.buffer, headerPtr, 9);
+    const ok = header.getUint8(0) === 1;
+    const dataLen = header.getUint32(1, true);
+    const dataPtr = header.getUint32(5, true);
+    const data = new Uint8Array(mem.buffer.slice(dataPtr, dataPtr + dataLen));
+    compiler.exports.dealloc(srcPtr, srcBytes.length);
+    compiler.exports.dealloc(dataPtr, dataLen);
+    compiler.exports.dealloc(headerPtr, 9);
+
+    if (!ok) {
+      const elapsed = performance.now() - start;
+      printLine(new TextDecoder().decode(data), 'err');
+      printLine(`— failed after ${formatElapsed(elapsed)} (native) —`, 'err');
+      return;
+    }
+
+    let programInstance;
+    const lineBuf = [];
+    const flush = () => { if (lineBuf.length) { printLine(lineBuf.join(' ')); lineBuf.length = 0; } };
+    const imports = { env: {
+      print_i64: (v, isLast) => { lineBuf.push(v.toString()); if (isLast) flush(); },
+      print_str: (ptr, len, isLast) => {
+        const bytes = new Uint8Array(programInstance.exports.memory.buffer, ptr, len);
+        lineBuf.push(new TextDecoder().decode(bytes));
+        if (isLast) flush();
+      },
+    }};
+    const { instance } = await WebAssembly.instantiate(data.buffer, imports);
+    programInstance = instance;
+    instance.exports.main();
+
+    const elapsed = performance.now() - start;
+    printLine(`— finished in ${formatElapsed(elapsed)} (native) —`, 'ok');
+  } catch (e) {
+    const elapsed = performance.now() - start;
+    printLine((e && e.message) ? e.message : String(e), 'err');
+    printLine(`— failed after ${formatElapsed(elapsed)} (native) —`, 'err');
+  }
 }
 
 function formatElapsed(ms) {
