@@ -715,56 +715,83 @@ function compile(program) {
 // code/base/return-ip on a manually-managed call stack (three parallel
 // arrays + an index, not an array of objects, to avoid allocating a fresh
 // object per call — the same lesson as the instruction-shape fix above).
+// Initial backing size for the operand/locals stack. Grown (doubled) on
+// demand if a program ever needs more — this is just a generous starting
+// capacity to avoid the common case ever reallocating.
+const INITIAL_STACK_CAP = 1 << 16;
+
 function execute(functions, entryName, args, onPrint) {
-  const stack = [];
+  // `sp` (not the array's own `.length`) is the real stack pointer. The
+  // previous version used `stack.length` as the stack pointer directly
+  // (`stack.push`, `stack.pop`, `stack.length = ...` to shrink/grow) —
+  // simple, but it means *every* call and return mutates the backing
+  // array's length, which pushes V8 to redo bookkeeping (capacity
+  // checks, possible reallocation, elements-kind tracking) on the
+  // hottest path in the VM. Decoupling the logical top-of-stack from the
+  // physical array length, and only growing the backing array (never
+  // shrinking it), turns that into a plain integer increment/decrement.
+  let stack = new Array(INITIAL_STACK_CAP);
+  let sp = 0;
   const csCode = [], csBase = [], csIp = [];
   let csTop = 0;
 
+  function ensureCapacity(min) {
+    if (min <= stack.length) return;
+    let cap = stack.length * 2;
+    while (cap < min) cap *= 2;
+    const grown = new Array(cap);
+    for (let i = 0; i < sp; i++) grown[i] = stack[i];
+    stack = grown;
+  }
+
   const entryFn = functions.get(entryName);
   if (!entryFn) throw new KestrelError("No 'main' function found");
-  for (const a of args) stack.push(a);
+  for (const a of args) stack[sp++] = a;
 
-  let frameBase = stack.length - args.length;
+  let frameBase = sp - args.length;
   let code = entryFn.code;
   let ip = 0;
-  // Extending .length fills any locals beyond the passed-in args with
-  // `undefined`; shrinking it silently drops extra args — both match the
-  // tree-walker's `fn.params.forEach((p,i) => env[p.name]=args[i])`.
-  stack.length = frameBase + entryFn.slotCount;
+  // Filling any locals beyond the passed-in args with `undefined`, and
+  // dropping extra args, both match the tree-walker's
+  // `fn.params.forEach((p,i) => env[p.name]=args[i])`.
+  ensureCapacity(frameBase + entryFn.slotCount);
+  for (let i = frameBase + args.length; i < frameBase + entryFn.slotCount; i++) stack[i] = undefined;
+  sp = frameBase + entryFn.slotCount;
 
   for (;;) {
     const ins = code[ip];
     switch (ins.op) {
-      case OP.CONST: stack.push(ins.a); ip++; break;
-      case OP.LOAD: stack.push(stack[frameBase + ins.a]); ip++; break;
-      case OP.STORE: stack[frameBase + ins.a] = stack.pop(); ip++; break;
+      case OP.CONST: stack[sp++] = ins.a; ip++; break;
+      case OP.LOAD: stack[sp++] = stack[frameBase + ins.a]; ip++; break;
+      case OP.STORE: stack[frameBase + ins.a] = stack[--sp]; ip++; break;
       case OP.ARRAY: {
-        const arr = stack.splice(stack.length - ins.a, ins.a);
-        stack.push(arr);
+        const arr = stack.slice(sp - ins.a, sp);
+        sp -= ins.a;
+        stack[sp++] = arr;
         ip++;
         break;
       }
       case OP.INDEX: {
-        const idx = stack.pop();
-        const arr = stack.pop();
+        const idx = stack[--sp];
+        const arr = stack[--sp];
         if (idx < 0 || idx >= arr.length) {
           throw new KestrelError(
             `Index ${idx} out of bounds for array of length ${arr.length}`
           );
         }
-        stack.push(arr[idx]);
+        stack[sp++] = arr[idx];
         ip++;
         break;
       }
       case OP.UNOP: {
-        const v = stack.pop();
-        stack.push(ins.a === "-" ? -v : !v);
+        const v = stack[sp - 1];
+        stack[sp - 1] = ins.a === "-" ? -v : !v;
         ip++;
         break;
       }
       case OP.BINOP: {
-        const r = stack.pop();
-        const l = stack.pop();
+        const r = stack[--sp];
+        const l = stack[--sp];
         // Inlined instead of a separate binop() helper: this is the
         // single hottest instruction in arithmetic-heavy code, and a real
         // function call per operation was showing up as its own
@@ -785,13 +812,13 @@ function execute(functions, entryName, args, onPrint) {
           case "&&": result = l && r; break;
           case "||": result = l || r; break;
         }
-        stack.push(result);
+        stack[sp++] = result;
         ip++;
         break;
       }
       case OP.CALL: {
         const callee = ins.a;
-        const calleeBase = stack.length - ins.b;
+        const calleeBase = sp - ins.b;
         // Save where to resume in the caller once the callee returns.
         csCode[csTop] = code;
         csBase[csTop] = frameBase;
@@ -800,27 +827,31 @@ function execute(functions, entryName, args, onPrint) {
         code = callee.code;
         frameBase = calleeBase;
         ip = 0;
-        stack.length = frameBase + callee.slotCount;
+        const newSp = frameBase + callee.slotCount;
+        ensureCapacity(newSp);
+        for (let i = sp; i < newSp; i++) stack[i] = undefined;
+        sp = newSp;
         break;
       }
       case OP.PRINT: {
-        const vals = stack.splice(stack.length - ins.a, ins.a);
+        const vals = stack.slice(sp - ins.a, sp);
+        sp -= ins.a;
         onPrint(vals.join(" "));
         ip++;
         break;
       }
-      case OP.POP: stack.pop(); ip++; break;
+      case OP.POP: sp--; ip++; break;
       case OP.JUMP: ip = ins.a; break;
       case OP.JUMP_IF_FALSE: {
-        const cond = stack.pop();
+        const cond = stack[--sp];
         ip = cond ? ip + 1 : ins.a;
         break;
       }
       case OP.RETURN_VALUE: {
-        const value = stack.pop();
-        stack.length = frameBase;
+        const value = stack[sp - 1];
+        sp = frameBase;
         if (csTop === 0) return value;
-        stack.push(value);
+        stack[sp++] = value;
         csTop--;
         code = csCode[csTop];
         frameBase = csBase[csTop];
@@ -828,9 +859,9 @@ function execute(functions, entryName, args, onPrint) {
         break;
       }
       case OP.RETURN_NULL: {
-        stack.length = frameBase;
+        sp = frameBase;
         if (csTop === 0) return null;
-        stack.push(null);
+        stack[sp++] = null;
         csTop--;
         code = csCode[csTop];
         frameBase = csBase[csTop];

@@ -48,8 +48,8 @@ node -e 'require("./kestrel.js").run(require("fs").readFileSync("examples/basics
 ```
 
 Swap `.run(` for `.runFast(` to use the bytecode VM instead — same
-output, same errors. It's not uniformly faster yet (see Status below),
-so `run` is still the safer default.
+output, same errors, and faster on every workload measured so far (see
+Status below). The editor defaults to it for this reason.
 
 ## Testing
 
@@ -61,8 +61,9 @@ npm test
 
 Four ways to run Kestrel now exist. `run` (tree-walking) and `runFast`
 (bytecode VM) are semantics-identical and both cover the full language;
-`runFast` is faster on loop/array-heavy code and currently slightly
-slower on deep-recursion-heavy code. `kestrelc` (native, via Cranelift)
+`runFast` is faster than `run` on every workload measured so far
+(59-89% faster, depending on the workload — see `kestrel-DESIGN.md` for
+the numbers and methodology). `kestrelc` (native, via Cranelift)
 compiles a subset of the language straight to a real executable and is
 **~50-175x faster than `runFast`**, landing within a few multiples of
 hand-written Rust/C++ on its first working version — see
