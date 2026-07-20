@@ -409,6 +409,25 @@ fn wasm_backend_compiles_and_runs_fibonacci_kes_with_correct_output() {
     let wasm_path = scratch.join("fibonacci.wasm");
     assert!(wasm_path.exists(), "expected fibonacci.wasm to be written");
 
+    let run = run_wasm_via_node(&wasm_path);
+    assert!(run.status.success(), "node failed to run the wasm module:\n{}", String::from_utf8_lossy(&run.stderr));
+
+    let expected = "\
+fib 0 = 0
+fib 1 = 1
+fib 2 = 1
+fib 3 = 2
+fib 4 = 3
+fib 5 = 5
+fib 6 = 8
+fib 7 = 13
+fib 8 = 21
+fib 9 = 34
+";
+    assert_eq!(String::from_utf8_lossy(&run.stdout), expected);
+}
+
+fn run_wasm_via_node(wasm_path: &std::path::Path) -> std::process::Output {
     let node_script = r#"
         const fs = require("fs");
         const bytes = fs.readFileSync(process.argv[1]);
@@ -428,32 +447,19 @@ fn wasm_backend_compiles_and_runs_fibonacci_kes_with_correct_output() {
             process.stdout.write(lines.join("\n") + "\n");
         }).catch((e) => { console.error(e); process.exit(1); });
     "#;
-    let run = Command::new("node")
+    Command::new("node")
         .arg("-e")
         .arg(node_script)
-        .arg(&wasm_path)
+        .arg(wasm_path)
         .output()
-        .expect("failed to run node (required for WASM backend tests)");
-    assert!(run.status.success(), "node failed to run the wasm module:\n{}", String::from_utf8_lossy(&run.stderr));
-
-    let expected = "\
-fib 0 = 0
-fib 1 = 1
-fib 2 = 1
-fib 3 = 2
-fib 4 = 3
-fib 5 = 5
-fib 6 = 8
-fib 7 = 13
-fib 8 = 21
-fib 9 = 34
-";
-    assert_eq!(String::from_utf8_lossy(&run.stdout), expected);
+        .expect("failed to run node (required for WASM backend tests)")
 }
 
 #[test]
-fn wasm_backend_rejects_arrays_with_a_clear_error() {
-    let scratch = scratch_dir("wasm_arrays");
+fn wasm_backend_compiles_and_runs_basics_kes_with_correct_output() {
+    // basics.kes exercises array literals, an array parameter, indexing,
+    // and a `where`-guarded call — the WASM backend's array support.
+    let scratch = scratch_dir("wasm_basics");
     let src = repo_root().join("examples").join("basics.kes");
     let out = Command::new(kestrelc_bin())
         .arg("--wasm")
@@ -461,10 +467,65 @@ fn wasm_backend_rejects_arrays_with_a_clear_error() {
         .current_dir(&scratch)
         .output()
         .expect("failed to run kestrelc");
-    assert!(!out.status.success(), "kestrelc --wasm should have rejected array usage");
+    assert!(out.status.success(), "kestrelc --wasm failed:\n{}", String::from_utf8_lossy(&out.stderr));
+
+    let wasm_path = scratch.join("basics.wasm");
+    let run = run_wasm_via_node(&wasm_path);
+    assert!(run.status.success(), "node failed to run the wasm module:\n{}", String::from_utf8_lossy(&run.stderr));
+
+    let expected = "\
+square: 9
+square: 16
+square: 25
+square: 36
+sum of squares(3,4) = 25
+safe get nums[2] = 5
+";
+    assert_eq!(String::from_utf8_lossy(&run.stdout), expected);
+}
+
+#[test]
+fn wasm_backend_traps_on_out_of_bounds_array_index() {
+    let scratch = scratch_dir("wasm_oob");
+    let src_path = scratch.join("oob.kes");
+    std::fs::create_dir_all(&scratch).unwrap();
+    std::fs::write(&src_path, "fn main() {\n    let a = [1, 2, 3];\n    let i = 5;\n    print(\"val =\", a[i]);\n}\n").unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg("--wasm")
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(out.status.success(), "kestrelc --wasm failed:\n{}", String::from_utf8_lossy(&out.stderr));
+
+    let wasm_path = scratch.join("oob.wasm");
+    let run = run_wasm_via_node(&wasm_path);
+    assert!(!run.status.success(), "expected the wasm module to trap on out-of-bounds access");
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains("unreachable"),
+        "expected a wasm 'unreachable' trap, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn wasm_backend_rejects_statically_provable_out_of_bounds_index_at_compile_time() {
+    let scratch = scratch_dir("wasm_static_oob");
+    let src_path = scratch.join("bad.kes");
+    std::fs::create_dir_all(&scratch).unwrap();
+    std::fs::write(&src_path, "fn main() {\n    let a = [1, 2, 3];\n    print(\"val =\", a[9]);\n}\n").unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg("--wasm")
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(!out.status.success(), "kestrelc --wasm should have rejected a statically-provable out-of-bounds index");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("doesn't support arrays yet"),
-        "expected the arrays-not-supported error, got:\n{stderr}"
+        stderr.contains("proven at compile time"),
+        "expected a compile-time bounds-proof error, got:\n{stderr}"
     );
 }

@@ -38,8 +38,11 @@ calls for output, since WASM has no I/O of its own — see
 (wasm)" in the editor. `kestrelc` itself is also compiled to WASM
 (`kestrelc-web/`), so the whole pipeline (compile Kestrel source to a
 `.wasm` module, then run it) happens client-side, no server involved.
-See `kestrelc-web/README.md`. Same scope limits as the native backend
-for now: no arrays.
+See `kestrelc-web/README.md`. **Arrays are supported**, same as the
+native backend, including compile-time-proven bounds elision for literal
+indices into literal-length arrays — see "Scope" below for the one real
+difference (no cross-function `where`-clause elision yet in this
+backend; those accesses still get a runtime check).
 
 `kestrelc <file.kes>` (no `--wasm`) compiles and links `<file>.kes` into
 a native executable named after the file (in the current directory),
@@ -87,7 +90,11 @@ Codegen, however, currently supports a subset:
   runtime check, same as `run`/`runFast`; a failing runtime check
   **traps the process (`SIGILL`) immediately** rather than printing a
   message and exiting cleanly like the other two backends do — a real,
-  known difference, not yet fixed.
+  known difference, not yet fixed. The WASM backend (below) has the same
+  scope, except it doesn't (yet) elide the check *inside* a `where`-guarded
+  function body from its call sites' proofs — that fast path is native-only
+  for now, so those accesses still get a runtime check there (and trap via
+  WASM's `unreachable` instruction instead of `SIGILL`).
 
 **Not supported yet — a clear compile error, never a silent miscompile:**
 - Proving a `where` clause from anything other than a literal index and

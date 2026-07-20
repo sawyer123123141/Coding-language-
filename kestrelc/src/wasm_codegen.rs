@@ -1,9 +1,7 @@
 // AST -> WebAssembly module, directly (not via Cranelift — Cranelift's
 // codegen targets real CPUs, not WASM as an output format; Wasmtime uses
 // it the other way around, compiling *from* WASM). Uses wasm-encoder to
-// build a real .wasm binary. Scope for this first version, matching how
-// the native backend started: integers, functions/recursion, control
-// flow, print — no arrays yet. See kestrelc/README.md.
+// build a real .wasm binary.
 //
 // WASM's instruction encoding is inherently stack-based and its control
 // flow (`if`/`else`/`end`, `block`/`loop`/`br`) is structured, so this
@@ -11,12 +9,21 @@
 // blocks, no SSA construction, no lazy merge-block trick for early
 // returns — WASM's own `return` instruction and structured nesting
 // handle all of that for free.
+//
+// Arrays are a (pointer, length) pair, same idea as the native backend —
+// but WASM has no `alloca`/stack-slot instruction, so array literals are
+// allocated from a simple bump allocator: a single mutable global ($bump)
+// that only ever moves forward, out of a fixed-size arena reserved after
+// the string data. Nothing is ever freed. That's a real, deliberate
+// limitation (fine for short-lived toy programs, not for anything
+// long-running or allocation-heavy) — see kestrelc-web/README.md.
 
 use crate::ast::*;
 use std::collections::HashMap;
 use wasm_encoder::{
     CodeSection, ConstExpr, EntityType, ExportKind, ExportSection, Function, FunctionSection,
-    ImportSection, MemorySection, MemoryType, Module, TypeSection, ValType,
+    GlobalSection, GlobalType, ImportSection, MemArg, MemorySection, MemoryType, Module,
+    TypeSection, ValType,
 };
 
 pub struct WasmError(pub String);
@@ -31,6 +38,14 @@ const IMPORT_PRINT_I64: u32 = 0; // (value: i64, is_last: i32) -> ()
 const IMPORT_PRINT_STR: u32 = 1; // (ptr: i32, len: i32, is_last: i32) -> ()
 const NUM_IMPORTS: u32 = 2;
 
+const BUMP_GLOBAL: u32 = 0;
+// Fixed, non-growing arena for array data. Plenty for toy programs;
+// exhausting it silently corrupts memory rather than trapping — a known,
+// undocumented-until-now-in-code limitation, same spirit as the native
+// backend not guarding against real OS stack overflow on deep recursion.
+const ARENA_BYTES: u32 = 1 << 20; // 1 MiB
+const WASM_PAGE: u32 = 65536;
+
 pub fn compile_to_wasm(program: &Program) -> Result<Vec<u8>, WasmError> {
     let mut types = TypeSection::new();
     let mut imports = ImportSection::new();
@@ -43,36 +58,26 @@ pub fn compile_to_wasm(program: &Program) -> Result<Vec<u8>, WasmError> {
     // Type 0: print_i64, Type 1: print_str.
     types.ty().function([ValType::I64, ValType::I32], []);
     types.ty().function([ValType::I32, ValType::I32, ValType::I32], []);
-    imports.import(
-        "env",
-        "print_i64",
-        EntityType::Function(0),
-    );
-    imports.import(
-        "env",
-        "print_str",
-        EntityType::Function(1),
-    );
-
-    // One WASM memory, exported so the host can read string data written
-    // into it by the data section below — this is how a WASM module
-    // shares byte data with its host without any I/O syscalls.
-    let mut memories = MemorySection::new();
-    memories.memory(MemoryType { minimum: 1, maximum: None, memory64: false, shared: false, page_size_log2: None });
-    exports.export("memory", ExportKind::Memory, 0);
+    imports.import("env", "print_i64", EntityType::Function(0));
+    imports.import("env", "print_str", EntityType::Function(1));
 
     // Declare every function's type + a name -> wasm-func-index map
     // first, so calls (forward references, recursion) resolve regardless
     // of source order — same two-pass structure as the native backend.
+    // An array-typed parameter expands to two i32 params (pointer, then
+    // length), matching the native backend's two AbiParams per array.
     let mut fn_indices: HashMap<String, u32> = HashMap::new();
     for (i, f) in program.iter().enumerate() {
-        if f.params.iter().any(|p| matches!(p.ty, Type::Array { .. })) {
-            return Err(WasmError(format!(
-                "kestrelc's WASM backend doesn't support arrays yet ('{}' has an array parameter) — see kestrelc/README.md",
-                f.name
-            )));
+        let mut params = Vec::with_capacity(f.params.len());
+        for p in &f.params {
+            match &p.ty {
+                Type::Array { .. } => {
+                    params.push(ValType::I32); // pointer
+                    params.push(ValType::I32); // length
+                }
+                Type::Named(_) => params.push(ValType::I64),
+            }
         }
-        let params = vec![ValType::I64; f.params.len()];
         types.ty().function(params, [ValType::I64]);
         let type_idx = NUM_IMPORTS + i as u32;
         functions.function(type_idx);
@@ -92,11 +97,36 @@ pub fn compile_to_wasm(program: &Program) -> Result<Vec<u8>, WasmError> {
         data.active(0, &ConstExpr::i32_const(0), data_bytes.iter().copied());
     }
 
+    // The array arena starts right after the string data, 8-byte aligned
+    // so i64 element stores land on aligned addresses.
+    let arena_start = (data_bytes.len() as u32 + 7) & !7;
+    let total_bytes = arena_start + ARENA_BYTES;
+    let pages = total_bytes.div_ceil(WASM_PAGE);
+
+    let mut memories = MemorySection::new();
+    memories.memory(MemoryType {
+        minimum: pages as u64,
+        maximum: None,
+        memory64: false,
+        shared: false,
+        page_size_log2: None,
+    });
+    // Exported so the host can read string data written into it by the
+    // data section, and (for debugging) array data from the bump arena.
+    exports.export("memory", ExportKind::Memory, 0);
+
+    let mut globals = GlobalSection::new();
+    globals.global(
+        GlobalType { val_type: ValType::I32, mutable: true, shared: false },
+        &ConstExpr::i32_const(arena_start as i32),
+    );
+
     let mut module = Module::new();
     module.section(&types);
     module.section(&imports);
     module.section(&functions);
     module.section(&memories);
+    module.section(&globals);
     module.section(&exports);
     module.section(&code);
     module.section(&data);
@@ -104,17 +134,49 @@ pub fn compile_to_wasm(program: &Program) -> Result<Vec<u8>, WasmError> {
     Ok(module.finish())
 }
 
-fn add_slot(name: &str, slots: &mut Vec<String>, seen: &mut HashMap<String, u32>) {
-    if !seen.contains_key(name) {
-        seen.insert(name.to_string(), slots.len() as u32);
-        slots.push(name.to_string());
+#[derive(Clone, Copy)]
+enum SlotKind {
+    Scalar,
+    Array { literal_len: Option<u32> },
+}
+
+// A scalar gets one i64 local. An array gets two i32 locals — a base
+// pointer and a length — since a WASM local is a single value. `len` is
+// still materialized as a real local even when `literal_len` is known
+// (kept uniform with the native backend's Slot::Array; the constant is
+// used directly wherever it's known, at compile time, and the runtime
+// copy exists mainly so array parameters — where the length only exists
+// at runtime — use the exact same code paths as array locals).
+enum VarLoc {
+    Scalar(u32),
+    Array { ptr: u32, len: u32, literal_len: Option<u32> },
+}
+
+fn slot_kind_for_let(value: &Expr) -> SlotKind {
+    match value {
+        Expr::ArrayLit(elems) => SlotKind::Array { literal_len: Some(elems.len() as u32) },
+        _ => SlotKind::Scalar,
     }
 }
 
-fn walk_slots(stmts: &[Stmt], slots: &mut Vec<String>, seen: &mut HashMap<String, u32>) {
+fn slot_kind_for_param(ty: &Type) -> SlotKind {
+    match ty {
+        Type::Array { .. } => SlotKind::Array { literal_len: None },
+        Type::Named(_) => SlotKind::Scalar,
+    }
+}
+
+fn add_slot(name: &str, kind: SlotKind, slots: &mut Vec<(String, SlotKind)>, seen: &mut HashMap<String, ()>) {
+    if !seen.contains_key(name) {
+        seen.insert(name.to_string(), ());
+        slots.push((name.to_string(), kind));
+    }
+}
+
+fn walk_slots(stmts: &[Stmt], slots: &mut Vec<(String, SlotKind)>, seen: &mut HashMap<String, ()>) {
     for s in stmts {
         match s {
-            Stmt::Let { name, .. } => add_slot(name, slots, seen),
+            Stmt::Let { name, value } => add_slot(name, slot_kind_for_let(value), slots, seen),
             Stmt::If { then_block, else_block, .. } => {
                 walk_slots(then_block, slots, seen);
                 if let Some(eb) = else_block {
@@ -127,23 +189,63 @@ fn walk_slots(stmts: &[Stmt], slots: &mut Vec<String>, seen: &mut HashMap<String
     }
 }
 
+fn collect_slots(f: &Fn) -> Vec<(String, SlotKind)> {
+    let mut slots: Vec<(String, SlotKind)> = Vec::new();
+    let mut seen: HashMap<String, ()> = HashMap::new();
+    for p in &f.params {
+        add_slot(&p.name, slot_kind_for_param(&p.ty), &mut slots, &mut seen);
+    }
+    walk_slots(&f.body, &mut slots, &mut seen);
+    slots
+}
+
 fn gen_fn(
     f: &Fn,
     fn_indices: &HashMap<String, u32>,
     data_bytes: &mut Vec<u8>,
     str_offsets: &mut HashMap<String, (u32, u32)>,
 ) -> Result<Function, WasmError> {
-    let mut slots: Vec<String> = Vec::new();
-    let mut seen: HashMap<String, u32> = HashMap::new();
-    for p in &f.params {
-        add_slot(&p.name, &mut slots, &mut seen);
-    }
-    let param_count = slots.len() as u32;
-    walk_slots(&f.body, &mut slots, &mut seen);
-    let extra_locals = slots.len() as u32 - param_count;
+    let slot_kinds = collect_slots(f);
 
-    let mut func = Function::new(if extra_locals > 0 { vec![(extra_locals, ValType::I64)] } else { vec![] });
-    let mut fc = FnWasm { func: &mut func, slots: seen, fn_indices, data_bytes, str_offsets };
+    // Assign WASM local indices: params first (their count/types must
+    // match the function's declared signature exactly), then every other
+    // slot as an additional declared local.
+    let mut vars: HashMap<String, VarLoc> = HashMap::new();
+    let mut next_local: u32 = 0;
+    let mut extra_locals: Vec<(u32, ValType)> = Vec::new();
+    let param_names: std::collections::HashSet<&str> = f.params.iter().map(|p| p.name.as_str()).collect();
+
+    for (name, kind) in &slot_kinds {
+        let is_param = param_names.contains(name.as_str());
+        match kind {
+            SlotKind::Scalar => {
+                let idx = next_local;
+                next_local += 1;
+                if !is_param {
+                    extra_locals.push((1, ValType::I64));
+                }
+                vars.insert(name.clone(), VarLoc::Scalar(idx));
+            }
+            SlotKind::Array { literal_len } => {
+                let ptr = next_local;
+                let len = next_local + 1;
+                next_local += 2;
+                if !is_param {
+                    extra_locals.push((2, ValType::I32));
+                }
+                vars.insert(name.clone(), VarLoc::Array { ptr, len, literal_len: *literal_len });
+            }
+        }
+    }
+
+    // One scratch i32 local per function, reused for duplicating an
+    // index value across the bounds check and the address computation —
+    // WASM has no stack-dup instruction, only `local.tee`.
+    let scratch = next_local;
+    extra_locals.push((1, ValType::I32));
+
+    let mut func = Function::new(extra_locals);
+    let mut fc = FnWasm { func: &mut func, vars, fn_indices, data_bytes, str_offsets, scratch };
     fc.gen_block(&f.body)?;
     // Falling off the end returns 0, matching the other two backends.
     func.instructions().i64_const(0).return_();
@@ -153,10 +255,11 @@ fn gen_fn(
 
 struct FnWasm<'a> {
     func: &'a mut Function,
-    slots: HashMap<String, u32>,
+    vars: HashMap<String, VarLoc>,
     fn_indices: &'a HashMap<String, u32>,
     data_bytes: &'a mut Vec<u8>,
     str_offsets: &'a mut HashMap<String, (u32, u32)>,
+    scratch: u32,
 }
 
 type WResult<T> = Result<T, WasmError>;
@@ -169,22 +272,57 @@ impl<'a> FnWasm<'a> {
         Ok(())
     }
 
-    fn gen_stmt(&mut self, s: &Stmt) -> WResult<()> {
-        match s {
-            Stmt::Let { name, value } => {
+    /// Shared by `let` and `=`: binds `name` to `value`, handling both
+    /// the scalar case and the array-literal case (bump-allocate, one
+    /// store per element, then set the ptr/len locals).
+    fn gen_binding(&mut self, name: &str, value: &Expr) -> WResult<()> {
+        match (&self.vars[name], value) {
+            (VarLoc::Scalar(idx), _) => {
+                let idx = *idx;
                 self.gen_expr(value)?;
-                let idx = self.slots[name];
                 self.func.instructions().local_set(idx);
                 Ok(())
             }
-            Stmt::Assign { name, value } => {
-                let idx = *self
-                    .slots
-                    .get(name)
-                    .ok_or_else(|| WasmError(format!("Assignment to unknown variable '{name}'")))?;
-                self.gen_expr(value)?;
-                self.func.instructions().local_set(idx);
+            (VarLoc::Array { ptr, len, literal_len }, Expr::ArrayLit(elems)) => {
+                let (ptr, len) = (*ptr, *len);
+                let expected = literal_len.expect("array let-bindings always have a literal_len");
+                if elems.len() as u32 != expected {
+                    return Err(WasmError(format!(
+                        "kestrelc: array variable '{name}' rebound with a different length ({} vs {expected}) — not supported",
+                        elems.len()
+                    )));
+                }
+                let size_bytes = elems.len() as u32 * 8;
+                // ptr = $bump; $bump += size_bytes
+                self.func.instructions().global_get(BUMP_GLOBAL);
+                self.func.instructions().local_set(ptr);
+                self.func.instructions().global_get(BUMP_GLOBAL);
+                self.func.instructions().i32_const(size_bytes as i32);
+                self.func.instructions().i32_add();
+                self.func.instructions().global_set(BUMP_GLOBAL);
+                for (i, el) in elems.iter().enumerate() {
+                    self.func.instructions().local_get(ptr);
+                    self.gen_expr(el)?;
+                    self.func.instructions().i64_store(MemArg { offset: (i * 8) as u64, align: 3, memory_index: 0 });
+                }
+                self.func.instructions().i32_const(elems.len() as i32);
+                self.func.instructions().local_set(len);
                 Ok(())
+            }
+            (VarLoc::Array { .. }, _) => Err(WasmError(format!(
+                "kestrelc: '{name}' is an array variable and can only be (re)bound to an array literal so far"
+            ))),
+        }
+    }
+
+    fn gen_stmt(&mut self, s: &Stmt) -> WResult<()> {
+        match s {
+            Stmt::Let { name, value } => self.gen_binding(name, value),
+            Stmt::Assign { name, value } => {
+                if !self.vars.contains_key(name) {
+                    return Err(WasmError(format!("Assignment to unknown variable '{name}'")));
+                }
+                self.gen_binding(name, value)
             }
             Stmt::If { cond, then_block, else_block } => {
                 self.gen_expr(cond)?;
@@ -268,6 +406,39 @@ impl<'a> FnWasm<'a> {
         Ok(())
     }
 
+    /// The array's element count, if known at compile time (a `let x =
+    /// [literal, ...]` local — array *parameters* never have a
+    /// compile-time-known length). Used only to decide whether a bounds
+    /// check can be proven/elided at compile time.
+    fn static_array_len(&self, e: &Expr) -> Option<u32> {
+        match e {
+            Expr::Ident(name) => match self.vars.get(name) {
+                Some(VarLoc::Array { literal_len, .. }) => *literal_len,
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Resolves an expression that must denote an array to its (ptr, len)
+    /// local indices. Scope for now: only a plain identifier naming an
+    /// array local/parameter, matching the native backend.
+    fn resolve_array(&self, e: &Expr) -> WResult<(u32, u32)> {
+        let name = match e {
+            Expr::Ident(name) => name,
+            _ => {
+                return Err(WasmError(
+                    "kestrelc only supports indexing/passing a plain array variable so far".into(),
+                ))
+            }
+        };
+        match self.vars.get(name) {
+            Some(VarLoc::Array { ptr, len, .. }) => Ok((*ptr, *len)),
+            Some(VarLoc::Scalar(_)) => Err(WasmError(format!("'{name}' is not an array"))),
+            None => Err(WasmError(format!("Unknown identifier '{name}'"))),
+        }
+    }
+
     fn gen_expr(&mut self, e: &Expr) -> WResult<()> {
         match e {
             Expr::Num(n) => {
@@ -281,17 +452,70 @@ impl<'a> FnWasm<'a> {
             Expr::Str(_) => Err(WasmError(
                 "kestrelc's WASM backend only supports string literals as direct print() arguments so far".into(),
             )),
-            Expr::Ident(name) => {
-                let idx = *self
-                    .slots
-                    .get(name)
-                    .ok_or_else(|| WasmError(format!("Unknown identifier '{name}'")))?;
-                self.func.instructions().local_get(idx);
+            Expr::Ident(name) => match self.vars.get(name) {
+                Some(VarLoc::Scalar(idx)) => {
+                    self.func.instructions().local_get(*idx);
+                    Ok(())
+                }
+                Some(VarLoc::Array { .. }) => Err(WasmError(format!(
+                    "'{name}' is an array — it can only be indexed (arr[i]) or passed to a function, not used as a value directly"
+                ))),
+                None => Err(WasmError(format!("Unknown identifier '{name}'"))),
+            },
+            Expr::ArrayLit(_) => Err(WasmError(
+                "kestrelc only supports array literals as the direct value of a `let`/assignment so far".into(),
+            )),
+            Expr::Index { target, index } => {
+                // Proof-carrying fast path: a literal index into an array
+                // whose length is also known at compile time (a `let`
+                // literal, not a parameter) is proven safe — or proven
+                // *unsafe* — right now, with no runtime check either way.
+                // (The native backend's second fast path, eliding checks
+                // inside a `where`-guarded function body, isn't ported
+                // here yet — see kestrelc-web/README.md.)
+                if let (Expr::Num(n), Some(static_len)) = (index.as_ref(), self.static_array_len(target)) {
+                    if *n < 0 || *n as u32 >= static_len {
+                        return Err(WasmError(format!(
+                            "index {n} is out of bounds for array of length {static_len} — proven at compile time, not deferred to a runtime check"
+                        )));
+                    }
+                    let (ptr, _len) = self.resolve_array(target)?;
+                    self.func.instructions().local_get(ptr);
+                    self.func.instructions().i64_load(MemArg { offset: (*n as u64) * 8, align: 3, memory_index: 0 });
+                    return Ok(());
+                }
+
+                let (ptr, len) = self.resolve_array(target)?;
+                let scratch = self.scratch;
+                self.gen_expr(index)?; // pushes i64 index
+                self.func.instructions().i32_wrap_i64();
+                self.func.instructions().local_tee(scratch); // stash idx32, leave a copy on the stack
+
+                // idx32 <s 0
+                self.func.instructions().i32_const(0);
+                self.func.instructions().i32_lt_s();
+                // idx32 >=s len32
+                self.func.instructions().local_get(scratch);
+                self.func.instructions().local_get(len);
+                self.func.instructions().i32_ge_s();
+                self.func.instructions().i32_or();
+                self.func.instructions().if_(wasm_encoder::BlockType::Empty);
+                // Matches run()/runFast()'s "always check" behavior, but
+                // not (yet) their friendly error message — trapping here
+                // halts the module immediately rather than printing and
+                // exiting cleanly.
+                self.func.instructions().unreachable();
+                self.func.instructions().end();
+
+                // address = ptr + idx32 * 8
+                self.func.instructions().local_get(ptr);
+                self.func.instructions().local_get(scratch);
+                self.func.instructions().i32_const(3);
+                self.func.instructions().i32_shl();
+                self.func.instructions().i32_add();
+                self.func.instructions().i64_load(MemArg { offset: 0, align: 3, memory_index: 0 });
                 Ok(())
             }
-            Expr::ArrayLit(_) | Expr::Index { .. } => Err(WasmError(
-                "kestrelc's WASM backend doesn't support arrays yet — see kestrelc/README.md".into(),
-            )),
             Expr::Unary { op, expr } => {
                 self.gen_expr(expr)?;
                 match op {
@@ -332,7 +556,15 @@ impl<'a> FnWasm<'a> {
                     .get(name)
                     .ok_or_else(|| WasmError(format!("Unknown function '{name}'")))?;
                 for a in args {
-                    self.gen_expr(a)?;
+                    let is_array_ident =
+                        matches!(a, Expr::Ident(n) if matches!(self.vars.get(n), Some(VarLoc::Array { .. })));
+                    if is_array_ident {
+                        let (ptr, len) = self.resolve_array(a)?;
+                        self.func.instructions().local_get(ptr);
+                        self.func.instructions().local_get(len);
+                    } else {
+                        self.gen_expr(a)?;
+                    }
                 }
                 self.func.instructions().call(idx);
                 Ok(())
