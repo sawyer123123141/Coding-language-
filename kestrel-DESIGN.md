@@ -484,9 +484,18 @@ the exact same whole-program analysis `inline.rs` already computes for
 a different reason, reused here) — a function excluded that way is
 provably only ever called from the one thread that calls it directly,
 so the cache (`kestrelc_runtime.c`'s `kestrelc_memo_lookup`/
-`kestrelc_memo_store`, a fixed-size array of growable per-function
-tables, one linear-scan table per memoized function) needs zero
-locking. Also scoped down from the JS version in two more ways: only
+`kestrelc_memo_store`, a fixed-size array of per-function hash tables —
+open addressing, linear probing, grown at load factor 0.5) needs zero
+locking. That per-function table started as a plain linear-scan array,
+which is where a real bug was later found and fixed: a hot pure
+function called with many *distinct* arguments (not a contrived case)
+made every lookup scan the whole array so far, going quadratic overall
+— a benchmark calling a memoized function 5,000,000 times with a
+different argument each time hung for minutes, still burning CPU, never
+erroring. Replaced with an actual hash table so lookup/insert stays
+average O(1) regardless of how many distinct argument lists a function
+accumulates — see `kestrelc/examples/bench_loop.kes` and its test in
+`kestrelc/tests/integration.rs`. Also scoped down from the JS version in two more ways: only
 functions with *scalar* (no array) parameters are eligible — arrays
 would need per-element hashing this first pass doesn't implement — and
 the cache is a compile-time-assigned fixed slot per function (capped at

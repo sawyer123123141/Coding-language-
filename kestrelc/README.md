@@ -337,10 +337,16 @@ function ever runs concurrently, and any function that could be called
 that way is compiled unmemoized instead. Eligible functions get a
 compile-time-assigned "slot" (capped at 64 per program — a function
 past the cap just compiles unmemoized, not an error); each slot is a
-plain growable array of `(args, result)` entries, linear-scanned, since
-these are small toy programs, not a scale target for a hash table yet.
-Recursive functions memoize correctly too (each recursive call is a
-normal lookup-or-compute-and-store against the same slot).
+real open-addressing hash table (linear probing, grown at load factor
+0.5), so lookup/insert stays average O(1) no matter how many distinct
+argument lists a function has been called with. (It started as a plain
+linear-scan array — fine for a handful of calls, but a hot function
+called with many *distinct* arguments made that go quadratic overall; a
+5,000,000-call benchmark exposed it hanging for minutes before the fix
+— see `examples/bench_loop.kes` and its regression test in
+`tests/integration.rs`.) Recursive functions memoize correctly too
+(each recursive call is a normal lookup-or-compute-and-store against
+the same slot).
 
 ## Benchmarks
 

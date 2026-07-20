@@ -238,31 +238,104 @@ void kestrelc_profile_record(const char* path, long long path_len, const char* n
 // itself, so caching by argument value is always safe. `run`/`runFast`
 // (kestrel.js) already do this per-interpreter-run; this is the native
 // backend's version. One table per memoized function ("slot", assigned
-// at compile time by codegen.rs — see MemoState), each table a plain
-// growable array scanned linearly. No locking anywhere: codegen.rs only
-// ever assigns a slot to a function that's never passed as
-// parallel_map's callback argument (see inline.rs's
+// at compile time by codegen.rs — see MemoState). No locking anywhere:
+// codegen.rs only ever assigns a slot to a function that's never passed
+// as parallel_map's callback argument (see inline.rs's
 // collect_parallel_map_callbacks, reused for exactly this exclusion),
 // so a memoized function's cache is provably only ever touched from the
 // single calling thread — real safety from a compile-time exclusion,
 // not a runtime lock nobody profiles this small would want to pay for.
 //
-// Fixed-size slot table, not a dynamic map: kestrelc assigns slots
-// sequentially per compiled program and never exceeds
+// Real open-addressing hash table per slot (power-of-2 capacity, linear
+// probing, grown at load factor 0.5), not the linear-scan array this
+// used to be. The linear scan was fine for a handful of memoized calls
+// but silently went quadratic — total cost O(n^2) — for a hot pure
+// function called with many *distinct* arguments (a completely
+// realistic case, not a contrived one): a benchmark calling a memoized
+// function 5,000,000 times with a different argument each time hung for
+// minutes, still burning CPU, no error, no timeout — worse than
+// kestrel.js's memoization hitting a hard `Map` size limit and crashing
+// cleanly. A hash table keeps each lookup/insert average O(1)
+// regardless of how many distinct argument lists a function has seen.
+//
+// Fixed-size slot table, not a dynamic map of tables: kestrelc assigns
+// slots sequentially per compiled program and never exceeds
 // KESTRELC_MEMO_MAX_SLOTS (see codegen.rs) — a plain array indexed by
-// slot is simplest and fastest for a compiler this scoped.
+// slot is simplest for a compiler this scoped; only the per-slot table
+// itself needed to become a real hash table.
 #define KESTRELC_MEMO_MAX_SLOTS 64
 #define KESTRELC_MEMO_MAX_ARGS 4
+#define KESTRELC_MEMO_INITIAL_CAP 16 // must be a power of 2
 
 typedef struct {
     long long args[KESTRELC_MEMO_MAX_ARGS];
     int nargs;
     long long result;
+    int occupied; // 0 = empty slot in the open-addressing table
 } kestrelc_memo_entry;
 
 static kestrelc_memo_entry* kestrelc_memo_tables[KESTRELC_MEMO_MAX_SLOTS];
-static int kestrelc_memo_counts[KESTRELC_MEMO_MAX_SLOTS];
-static int kestrelc_memo_caps[KESTRELC_MEMO_MAX_SLOTS];
+static int kestrelc_memo_counts[KESTRELC_MEMO_MAX_SLOTS]; // occupied entries
+static int kestrelc_memo_caps[KESTRELC_MEMO_MAX_SLOTS]; // always a power of 2
+
+// FNV-1a over the raw argument bytes — not cryptographic, doesn't need
+// to be; this is a cache key for a single process's own memoized calls,
+// not a security boundary. Same algorithm as cache.rs's own fnv1a64 on
+// the Rust side (independent implementations, same well-known constants
+// — no shared code between the two, this is C linked into the compiled
+// binary while that one runs inside kestrelc itself).
+static unsigned long long kestrelc_memo_hash(const long long* args, int nargs) {
+    unsigned long long h = 0xcbf29ce484222325ULL;
+    const unsigned char* bytes = (const unsigned char*)args;
+    size_t n = (size_t)nargs * sizeof(long long);
+    for (size_t i = 0; i < n; i++) {
+        h ^= bytes[i];
+        h *= 0x100000001b3ULL;
+    }
+    return h;
+}
+
+static int kestrelc_memo_args_eq(const kestrelc_memo_entry* e, const long long* args, int nargs) {
+    return e->nargs == nargs && memcmp(e->args, args, (size_t)nargs * sizeof(long long)) == 0;
+}
+
+// Inserts into `table` (capacity `cap`, a power of 2) via linear
+// probing, for the initial fill and for rehashing into a grown table.
+// Never called on an already-occupied key — callers only ever move
+// distinct entries (a fresh miss's data, or another live entry being
+// rehashed), so no duplicate-key case to handle here.
+static void kestrelc_memo_raw_insert(kestrelc_memo_entry* table, int cap, const kestrelc_memo_entry* e) {
+    unsigned long long h = kestrelc_memo_hash(e->args, e->nargs);
+    int i = (int)(h & (unsigned long long)(cap - 1));
+    while (table[i].occupied) {
+        i = (i + 1) & (cap - 1);
+    }
+    table[i] = *e;
+}
+
+// Doubles a slot's table capacity and rehashes every live entry into
+// it. A failed allocation here just means this slot's cache stops
+// growing for the rest of the run (falls back to always missing once
+// full, via the `occupied` check `kestrelc_memo_store` already does) —
+// same "caching is always an optimization, never a correctness
+// dependency" rule as everywhere else this cache touches the runtime.
+static void kestrelc_memo_grow(int slot) {
+    int old_cap = kestrelc_memo_caps[slot];
+    kestrelc_memo_entry* old_table = kestrelc_memo_tables[slot];
+    int new_cap = old_cap == 0 ? KESTRELC_MEMO_INITIAL_CAP : old_cap * 2;
+    kestrelc_memo_entry* new_table = calloc((size_t)new_cap, sizeof(kestrelc_memo_entry));
+    if (!new_table) {
+        return;
+    }
+    for (int i = 0; i < old_cap; i++) {
+        if (old_table[i].occupied) {
+            kestrelc_memo_raw_insert(new_table, new_cap, &old_table[i]);
+        }
+    }
+    free(old_table);
+    kestrelc_memo_tables[slot] = new_table;
+    kestrelc_memo_caps[slot] = new_cap;
+}
 
 // Returns 1 and writes the cached result to *out if this exact argument
 // list was seen before; returns 0 (leaving *out untouched) on a miss.
@@ -270,40 +343,52 @@ int kestrelc_memo_lookup(int slot, const long long* args, int nargs, long long* 
     if (slot < 0 || slot >= KESTRELC_MEMO_MAX_SLOTS) {
         return 0;
     }
+    int cap = kestrelc_memo_caps[slot];
+    if (cap == 0) {
+        return 0; // table not yet allocated — nothing has ever been stored
+    }
     kestrelc_memo_entry* table = kestrelc_memo_tables[slot];
-    int n = kestrelc_memo_counts[slot];
-    for (int i = 0; i < n; i++) {
-        if (table[i].nargs == nargs && memcmp(table[i].args, args, (size_t)nargs * sizeof(long long)) == 0) {
+    unsigned long long h = kestrelc_memo_hash(args, nargs);
+    int i = (int)(h & (unsigned long long)(cap - 1));
+    // Bounded by cap: every slot visited at most once, since insert
+    // never lets the table fill completely (grown well before that —
+    // see kestrelc_memo_store's load-factor check).
+    for (int probes = 0; probes < cap; probes++) {
+        if (!table[i].occupied) {
+            return 0; // empty slot on the probe chain -> definitely not present
+        }
+        if (kestrelc_memo_args_eq(&table[i], args, nargs)) {
             *out = table[i].result;
             return 1;
         }
+        i = (i + 1) & (cap - 1);
     }
     return 0;
 }
 
 // Called once per genuinely-computed (cache-miss) call, right before
 // that call actually returns — see codegen.rs's memoized-function
-// epilogue. A realloc failure here just means this one entry never gets
-// cached (the function still returns the correct value either way) —
-// same "caching is always an optimization, never a correctness
-// dependency" rule as cache.rs and profile.rs.
+// epilogue.
 void kestrelc_memo_store(int slot, const long long* args, int nargs, long long result) {
     if (slot < 0 || slot >= KESTRELC_MEMO_MAX_SLOTS || nargs < 0 || nargs > KESTRELC_MEMO_MAX_ARGS) {
         return;
     }
-    if (kestrelc_memo_counts[slot] >= kestrelc_memo_caps[slot]) {
-        int new_cap = kestrelc_memo_caps[slot] == 0 ? 16 : kestrelc_memo_caps[slot] * 2;
-        kestrelc_memo_entry* grown = realloc(kestrelc_memo_tables[slot], (size_t)new_cap * sizeof(kestrelc_memo_entry));
-        if (!grown) {
-            return;
+    // Grow before inserting whenever occupied would reach half of
+    // capacity — keeps probe chains short (load factor <= 0.5) no
+    // matter how many distinct argument lists a function accumulates.
+    if (kestrelc_memo_caps[slot] == 0 || kestrelc_memo_counts[slot] * 2 >= kestrelc_memo_caps[slot]) {
+        kestrelc_memo_grow(slot);
+        if (kestrelc_memo_caps[slot] == 0) {
+            return; // allocation failed in kestrelc_memo_grow; skip caching this entry
         }
-        kestrelc_memo_tables[slot] = grown;
-        kestrelc_memo_caps[slot] = new_cap;
     }
-    kestrelc_memo_entry* e = &kestrelc_memo_tables[slot][kestrelc_memo_counts[slot]++];
+    kestrelc_memo_entry e;
     for (int i = 0; i < nargs; i++) {
-        e->args[i] = args[i];
+        e.args[i] = args[i];
     }
-    e->nargs = nargs;
-    e->result = result;
+    e.nargs = nargs;
+    e.result = result;
+    e.occupied = 1;
+    kestrelc_memo_raw_insert(kestrelc_memo_tables[slot], kestrelc_memo_caps[slot], &e);
+    kestrelc_memo_counts[slot]++;
 }
