@@ -1,0 +1,13 @@
+pure fn square(x: i64) -> i64 {
+    return x * x;
+}
+
+fn main() {
+    let i = 0;
+    let total = 0;
+    while (i < 5000000) {
+        total = (total + square(i)) % 1000000007;
+        i = i + 1;
+    }
+    print(total);
+}

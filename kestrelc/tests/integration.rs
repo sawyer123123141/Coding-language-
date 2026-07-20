@@ -1420,6 +1420,61 @@ fn a_function_used_as_a_parallel_map_callback_is_never_memoized_and_still_runs_c
     assert_eq!(native_stdout(&run), "3 15\n27\n");
 }
 
+#[test]
+fn a_memoized_function_called_with_many_distinct_arguments_stays_fast_and_correct() {
+    // Regression test: kestrelc_runtime.c's per-function memo cache used
+    // to be a plain array, scanned linearly on every lookup. Fine for a
+    // handful of memoized calls, but a hot pure function called with
+    // many *distinct* arguments (a completely realistic case — not a
+    // contrived adversarial one) made every lookup rescan everything
+    // seen so far, going quadratic overall. A 5,000,000-call version of
+    // exactly this (kestrelc/examples/bench_loop.kes) hung for minutes,
+    // still burning CPU, before the fix (a real open-addressing hash
+    // table). This uses a smaller N so the test suite itself stays
+    // fast, but it's the same shape of program, run through an actual
+    // compiled binary with a hard wall-clock bound — if the O(n^2)
+    // behavior ever comes back, this test times out and fails instead
+    // of quietly passing on a program too small to notice.
+    let scratch = scratch_dir("memo_many_distinct_args");
+    let src_path = scratch.join("prog.kes");
+    fs::write(
+        &src_path,
+        "pure fn square(x: i64) -> i64 { return x * x; }\n\
+         fn main() {\n\
+         \x20   let i = 0;\n\
+         \x20   let total = 0;\n\
+         \x20   while (i < 200000) {\n\
+         \x20       total = (total + square(i)) % 1000000007;\n\
+         \x20       i = i + 1;\n\
+         \x20   }\n\
+         \x20   print(total);\n\
+         }\n",
+    )
+    .unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(out.status.success(), "compile failed:\n{}", String::from_utf8_lossy(&out.stderr));
+
+    let bin = scratch.join("prog");
+    let start = std::time::Instant::now();
+    let run = Command::new(&bin).output().expect("failed to run compiled binary");
+    let elapsed = start.elapsed();
+    assert!(run.status.success(), "compiled binary exited with failure");
+    // O(1)-average lookups: 200,000 distinct calls should finish in
+    // well under a second on any machine this runs on. The old
+    // linear-scan implementation would have taken tens of seconds at
+    // this N (and minutes at bench_loop.kes's 5,000,000).
+    assert!(
+        elapsed.as_secs() < 10,
+        "memoized calls with many distinct arguments took {elapsed:?} — looks like the O(n^2) linear-scan bug is back"
+    );
+    assert_eq!(native_stdout(&run), "648033478\n");
+}
+
 // ==================== codegen error positions ====================
 
 #[test]
