@@ -454,15 +454,15 @@ Not yet implemented (future work, roughly in priority order):
    *compile error* per the doc's own stated rule ("if the compiler can't
    prove the where clause... it's a compile error, not a runtime
    check"), and the check inside the function body is fully elided —
-   zero runtime cost, not just a faster check. Still narrow: the prover
-   only handles a literal index and a literal-length array argument at
-   the call site (not, say, an index derived from another proven-safe
-   variable) — see `kestrelc/README.md`. Also still missing: a friendlier
-   failure than a bare trap on the runtime-check fallback for genuinely
-   dynamic accesses, and this specific cross-function elision fast path
-   is native-only so far — the WASM backend (`kestrelc --wasm` /
-   `kestrelc-web`) has array support too, but still runtime-checks
-   `where`-guarded accesses rather than eliding them.
+   zero runtime cost, not just a faster check. Both backends now do
+   this: the WASM backend (`kestrelc --wasm` / `kestrelc-web`) picked up
+   the identical elision (moved the shared `WhereInfo`
+   analysis into `kestrelc/src/where_info.rs` so both backends run the
+   same proof, not two copies). Still narrow: the prover only handles a
+   literal index and a literal-length array argument at the call site
+   (not, say, an index derived from another proven-safe variable) — see
+   `kestrelc/README.md`. Still missing: a friendlier failure than a bare
+   trap on the runtime-check fallback for genuinely dynamic accesses.
 4. The full runtime-profile-guided version of the persistent cache (idea
    #1) — the on-disk/in-memory *compile-result* cache is done; branch/
    shape profiling and pre-specialization from it are not
