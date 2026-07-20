@@ -242,3 +242,49 @@ describe("VM internals", () => {
     assert.equal(result, 42);
   });
 });
+
+describe("pure fn memoization (runFast)", () => {
+  // Same guarantees as run()'s memoization, checked against the bytecode
+  // VM's own call-stack-based CALL/RETURN memo bookkeeping.
+  test("a null-returning call and a NaN-argument call don't collide on the same cache key", () => {
+    assertEquivalent(`
+      pure fn maybe(x: i32) -> i32 {
+        if (x > 0) { return x; }
+        return;
+      }
+      pure fn tag(x: i32) -> i32 {
+        if (x == x) { return 100; } else { return 200; }
+      }
+      fn main() {
+        let a = maybe(-1);
+        let b = 0 / 0;
+        print(tag(a));
+        print(tag(b));
+      }
+    `);
+  });
+
+  test("an impure function is never memoized: identical calls still both run", () => {
+    const { output } = runFastCollect(`
+      fn noisy(x: i32) -> i32 {
+        print("called", x);
+        return x * 2;
+      }
+      fn main() {
+        print(noisy(5));
+        print(noisy(5));
+      }
+    `);
+    assert.deepEqual(output, ["called 5", "10", "called 5", "10"]);
+  });
+
+  test("memoized recursive pure fn still matches run() on deeper recursion", () => {
+    assertEquivalent(`
+      pure fn fib(n: i32) -> i32 {
+        if (n < 2) { return n; }
+        return fib(n - 1) + fib(n - 2);
+      }
+      fn main() { return fib(24); }
+    `);
+  });
+});

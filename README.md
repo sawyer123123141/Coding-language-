@@ -96,8 +96,12 @@ include line, column, and a length too, not just a line number —
 `kestrel-editor.html` print `file:line:col: message` with a `^` under
 the offending span. Honest scope: only lex/parse errors carry a
 position so far — purity check, type check, and runtime errors are
-still message-only; see `kestrel-DESIGN.md` for the gap. Next up, in
-priority order: extending that position-tracking to the rest of the
-compiler's error stages, pure-function loop fusion and memoization, the
+still message-only; see `kestrel-DESIGN.md` for the gap. `pure fn`
+calls are now memoized too, in both JS backends (`run` and `runFast`)
+— a repeated call with identical arguments returns the cached result
+instead of re-executing, scoped to a single run, always safe per the
+purity proof. `kestrelc` doesn't memoize yet — JS-backends-first, a
+known gap. Next up, in priority order: extending position-tracking to
+the rest of the compiler's error stages, pure-function loop fusion, the
 fuller profile-guided cache, and layout polymorphism (blocked on
 structs, which don't exist yet).

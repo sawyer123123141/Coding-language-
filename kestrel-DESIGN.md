@@ -363,15 +363,30 @@ location too) is real, separate future work — it needs a span field on
 every expression/statement node, not just tokens, which is a bigger
 structural change than this first step.
 
+**Memoization, shipped (JS backends only):** both `run` and `runFast`
+now cache a `pure fn`'s result by argument value, scoped to a single
+`run`/`runFast` call — a repeated call with identical arguments returns
+the cached value instead of re-executing. This is always safe per the
+idea #2/#4 purity proof: a `pure fn` can't observe or be affected by
+any other call to itself, so caching changes nothing observable. Cache
+key is a canonicalized `JSON.stringify` of the argument list; the one
+correctness wrinkle was that `JSON.stringify(NaN) === JSON.stringify(null)`,
+and Kestrel can produce a real runtime `null` via a bare `return;` even
+with a declared return type — so `NaN` is swapped for a sentinel string
+before stringifying to keep those cases from colliding on the same key.
+**Scope, honestly:** `kestrelc` (native, via Cranelift) does not memoize
+at all yet — this is JS-backends-first, matching the project's usual
+pattern of new semantics landing there before the native compiler.
+
 Not yet implemented (future work, roughly in priority order):
 1. Extending source-position tracking (see above) from lex/parse errors
    to purity check, type check, and runtime errors — needs a span on
    every AST node, not just tokens.
-2. Pure-function loop fusion and automatic memoization, extending idea
-   #2/#4's purity proof the same way `parallel_map` (idea #5) already
-   does — e.g. turning a chain of `pure fn` calls over an array into
-   one pass instead of several, or caching a `pure fn`'s result across
-   calls with the same arguments within a single run.
+2. Pure-function loop fusion, extending idea #2/#4's purity proof the
+   same way `parallel_map` (idea #5) already does — turning a chain of
+   `pure fn` calls over an array into one pass instead of several.
+   Memoization (the other half of this idea) is now shipped, see above.
+   Also: bringing memoization itself to `kestrelc`.
 3. Proof-based bounds-check *elision* in `kestrelc` — **the design
    doc's own `get_safe` example now works exactly as originally
    specified**: `where i < N` is proven at every call site (a literal

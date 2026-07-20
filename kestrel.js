@@ -666,8 +666,30 @@ class ReturnSignal {
   constructor(value) { this.value = value; }
 }
 
+// Builds a stable cache key for a `pure fn`'s argument list, used by both
+// backends' memoization below. Plain JSON.stringify almost works — Kestrel
+// values are only numbers, booleans, and (possibly nested) arrays of those,
+// with no `null`-producing literal in the language itself, EXCEPT that a
+// falling-off-the-end/bare-`return;` function call yields `null` at
+// runtime, and `NaN` (from e.g. a `0/0` division) also stringifies to
+// `"null"` — so two calls with genuinely different arguments could
+// collide on the same cache key without this. Recursively swapping NaN
+// for a sentinel string no ordinary value can produce avoids that.
+function memoKey(args) {
+  const canon = (v) => Array.isArray(v) ? v.map(canon) : (typeof v === "number" && Number.isNaN(v)) ? "__NaN__" : v;
+  return JSON.stringify(args.map(canon));
+}
+
 function interpret(program, { onPrint = (s) => console.log(s) } = {}) {
   const fns = new Map(program.map((f) => [f.name, f]));
+  // A `pure fn` can't observe or be affected by any other call to itself
+  // (see kestrel-DESIGN.md idea #2/#4) — calling it twice with identical
+  // arguments is guaranteed to produce the identical result with zero
+  // observable difference from calling it once, so caching by argument
+  // value is always safe. Scoped to a single run (this Map lives only as
+  // long as this `interpret()` call), per the design doc's own wording —
+  // not the fuller persistent, cross-run cache idea #1 describes.
+  const memoCache = new Map(); // pure fn name -> Map(argsKey -> value)
 
   function evalExpr(e, env) {
     switch (e.kind) {
@@ -764,10 +786,19 @@ function interpret(program, { onPrint = (s) => console.log(s) } = {}) {
   function callFn(name, args) {
     const fn = fns.get(name);
     if (!fn) throw new KestrelError(`Unknown function '${name}'`);
+    let cache = null, key = null;
+    if (fn.pure) {
+      cache = memoCache.get(name);
+      if (!cache) { cache = new Map(); memoCache.set(name, cache); }
+      key = memoKey(args);
+      if (cache.has(key)) return cache.get(key);
+    }
     const env = {};
     fn.params.forEach((p, i) => { env[p.name] = args[i]; });
     const result = execBlock(fn.body, env);
-    return result instanceof ReturnSignal ? result.value : null;
+    const value = result instanceof ReturnSignal ? result.value : null;
+    if (cache) cache.set(key, value);
+    return value;
   }
 
   if (!fns.has("main")) {
@@ -835,6 +866,7 @@ function compile(program) {
     const slots = collectSlots(fn);
     functions.set(fn.name, {
       name: fn.name,
+      pure: fn.pure,
       paramCount: fn.params.length,
       slotCount: slots.size,
       slots,
@@ -1006,8 +1038,17 @@ function execute(functions, entryName, args, onPrint) {
   // shrinking it), turns that into a plain integer increment/decrement.
   let stack = new Array(INITIAL_STACK_CAP);
   let sp = 0;
-  const csCode = [], csBase = [], csIp = [];
+  const csCode = [], csBase = [], csIp = [], csFnName = [], csKey = [];
   let csTop = 0;
+  // Memoization for `pure fn` calls (see kestrel.js's `memoKey` and
+  // kestrel-DESIGN.md idea #2/#4) — scoped to this single `execute()` call,
+  // same as the tree-walker. `curFnName`/`curKey` describe the frame
+  // *currently executing*: non-null only while inside a memoizable pure
+  // call, so RETURN_VALUE/RETURN_NULL below know whether (and under what
+  // key) to record the result. Saved/restored on csFnName/csKey alongside
+  // the rest of the call stack, exactly like code/frameBase/ip.
+  const memoCache = new Map(); // pure fn name -> Map(argsKey -> value)
+  let curFnName = null, curKey = null;
 
   function ensureCapacity(min) {
     if (min <= stack.length) return;
@@ -1021,6 +1062,11 @@ function execute(functions, entryName, args, onPrint) {
   const entryFn = functions.get(entryName);
   if (!entryFn) throw new KestrelError("No 'main' function found");
   for (const a of args) stack[sp++] = a;
+  if (entryFn.pure) {
+    curFnName = entryName;
+    curKey = memoKey(args);
+    memoCache.set(entryName, new Map());
+  }
 
   let frameBase = sp - args.length;
   let code = entryFn.code;
@@ -1093,14 +1139,34 @@ function execute(functions, entryName, args, onPrint) {
       case OP.CALL: {
         const callee = ins.a;
         const calleeBase = sp - ins.b;
-        // Save where to resume in the caller once the callee returns.
+        let key = null;
+        if (callee.pure) {
+          key = memoKey(stack.slice(calleeBase, calleeBase + ins.b));
+          let cache = memoCache.get(callee.name);
+          if (!cache) { cache = new Map(); memoCache.set(callee.name, cache); }
+          if (cache.has(key)) {
+            // Cache hit: pop the (already-evaluated) args and push the
+            // cached result in their place — no new frame, no re-execution.
+            sp = calleeBase;
+            stack[sp++] = cache.get(key);
+            ip++;
+            break;
+          }
+        }
+        // Save where to resume in the caller once the callee returns, plus
+        // the caller's own pending-memo state (curFnName/curKey describe
+        // the frame we're *leaving*, not the one we're entering).
         csCode[csTop] = code;
         csBase[csTop] = frameBase;
         csIp[csTop] = ip + 1;
+        csFnName[csTop] = curFnName;
+        csKey[csTop] = curKey;
         csTop++;
         code = callee.code;
         frameBase = calleeBase;
         ip = 0;
+        curFnName = callee.pure ? callee.name : null;
+        curKey = key;
         const newSp = frameBase + callee.slotCount;
         ensureCapacity(newSp);
         for (let i = sp; i < newSp; i++) stack[i] = undefined;
@@ -1140,6 +1206,7 @@ function execute(functions, entryName, args, onPrint) {
       }
       case OP.RETURN_VALUE: {
         const value = stack[sp - 1];
+        if (curFnName !== null) memoCache.get(curFnName).set(curKey, value);
         sp = frameBase;
         if (csTop === 0) return value;
         stack[sp++] = value;
@@ -1147,9 +1214,12 @@ function execute(functions, entryName, args, onPrint) {
         code = csCode[csTop];
         frameBase = csBase[csTop];
         ip = csIp[csTop];
+        curFnName = csFnName[csTop];
+        curKey = csKey[csTop];
         break;
       }
       case OP.RETURN_NULL: {
+        if (curFnName !== null) memoCache.get(curFnName).set(curKey, null);
         sp = frameBase;
         if (csTop === 0) return null;
         stack[sp++] = null;
@@ -1157,6 +1227,8 @@ function execute(functions, entryName, args, onPrint) {
         code = csCode[csTop];
         frameBase = csBase[csTop];
         ip = csIp[csTop];
+        curFnName = csFnName[csTop];
+        curKey = csKey[csTop];
         break;
       }
       default:

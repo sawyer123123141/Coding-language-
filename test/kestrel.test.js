@@ -526,3 +526,58 @@ describe("checkTypes() — first honest type checker", () => {
     assert.deepEqual(output, ["42"]);
   });
 });
+
+describe("pure fn memoization", () => {
+  // A `pure fn` cannot observe or be affected by any other call to itself
+  // (no I/O, no calls to impure fns, no mutation outside its own locals),
+  // so caching its result by argument value is always safe. This checks
+  // the correctness fix for a specific hazard: JSON.stringify(NaN) and
+  // JSON.stringify(null) are both "null", and Kestrel can produce a real
+  // `null` at runtime via a bare `return;` even with a declared return
+  // type — so two calls with genuinely different arguments (one null,
+  // one NaN) must not collide on the same memo cache key.
+  test("a null-returning call and a NaN-argument call don't collide on the same cache key", () => {
+    const { output } = runCollect(`
+      pure fn maybe(x: i32) -> i32 {
+        if (x > 0) { return x; }
+        return;
+      }
+      pure fn tag(x: i32) -> i32 {
+        if (x == x) { return 100; } else { return 200; }
+      }
+      fn main() {
+        let a = maybe(-1);
+        let b = 0 / 0;
+        print(tag(a));
+        print(tag(b));
+      }
+    `);
+    assert.deepEqual(output, ["100", "200"]);
+  });
+
+  test("an impure function is never memoized: identical calls still both run", () => {
+    const { output } = runCollect(`
+      fn noisy(x: i32) -> i32 {
+        print("called", x);
+        return x * 2;
+      }
+      fn main() {
+        print(noisy(5));
+        print(noisy(5));
+      }
+    `);
+    assert.deepEqual(output, ["called 5", "10", "called 5", "10"]);
+  });
+
+  test("a pure fn's side-effect-free body still returns correct values across repeated identical calls", () => {
+    const { output } = runCollect(`
+      pure fn square(x: i32) -> i32 { return x * x; }
+      fn main() {
+        print(square(4));
+        print(square(4));
+        print(square(5));
+      }
+    `);
+    assert.deepEqual(output, ["16", "16", "25"]);
+  });
+});
