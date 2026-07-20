@@ -188,33 +188,46 @@ Both `run`/`runFast` support:
   programmer
 - a `print` builtin
 
-**Honest performance status:** `runFast` is not uniformly faster than
-`run`. Measured with `node`, best-of-N, on this machine:
+**Honest performance status:** `runFast` is now faster than `run` on
+every workload measured, including recursion. Measured externally
+(fresh `node` process per run, best-of-5), on this machine:
 
 | Workload | `run` (tree-walk) | `runFast` (bytecode VM) |
 |---|---|---|
-| Tight loop, 20M iterations, arithmetic only | 5150 ms | 2600 ms (~**98% faster**) |
-| Tight loop, 3M iterations, array indexing | 865 ms | 352 ms (~**146% faster**) |
-| `fib(30)`, naive recursion (2.7M calls) | 384 ms | 420 ms (~**9% slower**) |
+| Tight loop, 20M iterations, arithmetic only | 5219 ms | 2977 ms (~**75% faster**) |
+| Tight loop, 3M iterations, array indexing | 779 ms | 412 ms (~**89% faster**) |
+| `fib(30)`, naive recursion (2.7M calls) | 426 ms | 268 ms (~**59% faster**) |
 
 The loop/array wins are exactly the "array slots beat dictionary-mode
 property lookups" argument this design doc has always made. The
-recursion column used to be worse — an initial version of `runFast`
+recursion column has a longer history: an initial version of `runFast`
 was ~28% *slower* than `run` on `fib(30)`, because every Kestrel
 function call was a real recursive JavaScript call, and profiling
 (`node --prof`) showed that call/return bookkeeping as the dominant
-cost, worse than any single instruction. The fix: `execute()` no longer
-recurses in JS at all. It's one flat loop over a shared stack; a Kestrel
-call/return just swaps which function's code/base/instruction-pointer
-the loop is currently reading, saving/restoring the caller's own on a
-hand-managed call stack (three parallel arrays + an index, not an array
-of objects — allocating one object per call was exactly the mistake
-being fixed). That closed most of the gap (28% slower → 9% slower) but
-not all of it; the remaining cost is believed to be inherent to still
-using a real (if now shallow) JS function-call boundary for `execute`
-itself plus the per-call stack bookkeeping, and would need either a
-JIT-style specialization for hot call sites or inlining small functions
-at compile time to close fully.
+cost, worse than any single instruction. Rewriting `execute()` to not
+recurse in JS at all — one flat loop over a shared stack, a Kestrel
+call/return just swapping which function's code/base/instruction-pointer
+the loop is currently reading, with a hand-managed call stack (three
+parallel arrays + an index) — closed most of that gap (28% slower → 9%
+slower) but left a real remainder, which for a while was believed to be
+an inherent cost of the VM's own function-call boundary.
+
+It wasn't. The actual cause: the VM used the *operand/locals stack's own
+`.length`* as its stack pointer (`stack.push`/`stack.pop`/
+`stack.length = ...`), so every single call and return — 2.7M of them,
+for `fib(30)` — mutated a real JS array's length, which pushes V8 to redo
+bookkeeping (capacity checks, possible reallocation) on the hottest path
+in the interpreter. Decoupling the logical stack pointer from the
+backing array's length — a plain `sp` integer, with the array
+preallocated and only ever grown (via manual copy), never shrunk — turned
+that per-call cost into an integer increment/decrement. Confirmed with
+`node --prof` on a fresh (unwarmed) process, the realistic case for a
+short-lived script: before the fix, cold `fib(30)` measured ~452 ms on
+`runFast` vs. ~410 ms on `run` (`runFast` slower, matching the
+previously-reported 9%); after, ~268 ms vs. ~426 ms — `runFast` now
+**faster** on recursion too, not just at parity. All 61 JS tests still
+pass; `run` and `runFast` remain semantics-identical, verified by the
+equivalence tests, not just the timing.
 
 For scale, the same workloads in Rust (`rustc -O`) and C++ (`g++ -O2`)
 run in low single-digit milliseconds each — roughly 100-800x faster
@@ -273,15 +286,15 @@ Not yet implemented (future work, roughly in priority order):
    is native-only so far — the WASM backend (`kestrelc --wasm` /
    `kestrelc-web`) has array support too, but still runtime-checks
    `where`-guarded accesses rather than eliding them.
-2. Closing the remaining ~9% call-overhead gap in `runFast` on
-   recursion-heavy code — lower priority now that `kestrelc` exists and
-   already dwarfs any remaining VM-tuning gains
-3. The persistent cross-run optimization cache, built on top of `kestrelc`
-4. Layout polymorphism
-5. A more general proof system beyond simple bounds checks
-6. CPU-side parallelism for `pure` functions over collections (idea #5)
+2. The persistent cross-run optimization cache, built on top of `kestrelc`
+3. Layout polymorphism
+4. A more general proof system beyond simple bounds checks
+5. CPU-side parallelism for `pure` functions over collections (idea #5)
    — now unblocked, since `kestrelc` generates real machine code
-7. SIMD, then (much further out) a GPU backend — both extensions of (6)
+6. SIMD, then (much further out) a GPU backend — both extensions of (5)
+
+(`runFast`'s recursion overhead, formerly listed here, is resolved — see
+the benchmark table above.)
 
 ## Naming
 
