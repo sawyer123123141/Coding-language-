@@ -238,13 +238,14 @@ function parse(tokens) {
   }
 
   function parseStmt() {
+    const line = peek().line;
     if (at("LET")) {
       advance();
       const name = expect("IDENT").value;
       expect("=");
       const value = parseExpr();
       expect(";");
-      return { kind: "let", name, value };
+      return { kind: "let", name, value, line };
     }
     if (at("IF")) {
       advance();
@@ -254,7 +255,7 @@ function parse(tokens) {
       const thenBlock = parseBlock();
       let elseBlock = null;
       if (at("ELSE")) { advance(); elseBlock = parseBlock(); }
-      return { kind: "if", cond, thenBlock, elseBlock };
+      return { kind: "if", cond, thenBlock, elseBlock, line };
     }
     if (at("WHILE")) {
       advance();
@@ -262,7 +263,7 @@ function parse(tokens) {
       const cond = parseExpr();
       expect(")");
       const body = parseBlock();
-      return { kind: "while", cond, body };
+      return { kind: "while", cond, body, line };
     }
     if (at("PRINT")) {
       advance();
@@ -270,25 +271,25 @@ function parse(tokens) {
       const args = parseArgs();
       expect(")");
       expect(";");
-      return { kind: "print", args };
+      return { kind: "print", args, line };
     }
     if (at("RETURN")) {
       advance();
       const value = at(";") ? null : parseExpr();
       expect(";");
-      return { kind: "return", value };
+      return { kind: "return", value, line };
     }
     if (at("IDENT") && peekAhead(1).type === "=") {
       const name = advance().value;
       advance(); // '='
       const value = parseExpr();
       expect(";");
-      return { kind: "assign", name, value };
+      return { kind: "assign", name, value, line };
     }
 
     const expr = parseExpr();
     expect(";");
-    return { kind: "expr_stmt", expr };
+    return { kind: "expr_stmt", expr, line };
   }
 
   function parseFnDecl() {
@@ -329,46 +330,51 @@ function checkPurity(program) {
     stack.add(fn.name);
 
     let impure = false;
+    let impureLine = null; // line of the statement that first made this fn impure
     const locals = new Set(fn.params.map((p) => p.name));
 
     function visitStmt(s) {
       if (impure) return;
       switch (s.kind) {
-        case "let": locals.add(s.name); visitExpr(s.value); break;
+        case "let": locals.add(s.name); visitExpr(s.value, s.line); break;
         case "assign":
-          if (!locals.has(s.name)) { impure = true; return; } // mutating something outside itself
-          visitExpr(s.value);
+          if (!locals.has(s.name)) { impure = true; impureLine = s.line; return; } // mutating something outside itself
+          visitExpr(s.value, s.line);
           break;
-        case "if": visitExpr(s.cond); s.thenBlock.forEach(visitStmt);
+        case "if": visitExpr(s.cond, s.line); s.thenBlock.forEach(visitStmt);
           if (s.elseBlock) s.elseBlock.forEach(visitStmt); break;
-        case "while": visitExpr(s.cond); s.body.forEach(visitStmt); break;
-        case "print": impure = true; break; // I/O
-        case "return": if (s.value) visitExpr(s.value); break;
-        case "expr_stmt": visitExpr(s.expr); break;
+        case "while": visitExpr(s.cond, s.line); s.body.forEach(visitStmt); break;
+        case "print": impure = true; impureLine = s.line; break; // I/O
+        case "return": if (s.value) visitExpr(s.value, s.line); break;
+        case "expr_stmt": visitExpr(s.expr, s.line); break;
       }
     }
-    function visitExpr(e) {
+    function visitExpr(e, line = null) {
       if (!e || impure) return;
       switch (e.kind) {
         case "call": {
           const callee = fns.get(e.name);
           if (callee) {
-            if (!callee.pure) { impure = true; return; }
-            if (isImpure(callee, stack)) { impure = true; return; }
+            if (!callee.pure) { impure = true; impureLine = line; return; }
+            if (isImpure(callee, stack)) { impure = true; impureLine = line; return; }
           }
-          e.args.forEach(visitExpr);
+          e.args.forEach((a) => visitExpr(a, line));
           break;
         }
-        case "binop": visitExpr(e.left); visitExpr(e.right); break;
-        case "unary": visitExpr(e.expr); break;
-        case "index": visitExpr(e.target); visitExpr(e.index); break;
-        case "array_lit": e.elems.forEach(visitExpr); break;
+        case "binop": visitExpr(e.left, line); visitExpr(e.right, line); break;
+        case "unary": visitExpr(e.expr, line); break;
+        case "index": visitExpr(e.target, line); visitExpr(e.index, line); break;
+        case "array_lit": e.elems.forEach((el) => visitExpr(el, line)); break;
         default: break;
       }
     }
 
     fn.body.forEach(visitStmt);
     impureCache.set(fn.name, impure);
+    // Only meaningful for functions declared `pure` themselves — the
+    // checker below only reads this when fn.pure is true, so an
+    // ordinary impure helper's line is never surfaced or relied on.
+    fn.impureLine = impureLine;
     stack.delete(fn.name);
     return impure;
   }
@@ -376,8 +382,9 @@ function checkPurity(program) {
   const errors = [];
   for (const fn of program) {
     if (fn.pure && isImpure(fn, new Set())) {
+      const where = fn.impureLine ? ` (line ${fn.impureLine})` : "";
       errors.push(
-        `'${fn.name}' is marked pure but calls print or an impure function`
+        `'${fn.name}' is marked pure but calls print or an impure function${where}`
       );
     }
   }
@@ -498,62 +505,68 @@ function checkTypes(program) {
     return k === KIND.UNKNOWN ? "unknown" : k;
   }
 
-  function inferExpr(e, locals, errors) {
+  // `line` is the *enclosing statement's* line, threaded down through
+  // every recursive call — not a per-expression span (that would need a
+  // line on every AST node, not just statements; see kestrel-DESIGN.md's
+  // note on this being future work). Good enough to point at the right
+  // statement, which is what actually matters for tracking an error down.
+  function inferExpr(e, locals, errors, line) {
     if (!e) return KIND.UNKNOWN;
+    const at = line ? ` (line ${line})` : "";
     switch (e.kind) {
       case "num": return KIND.INT;
       case "bool": return KIND.BOOL;
       case "str": return KIND.STR;
       case "ident": return locals.has(e.name) ? locals.get(e.name) : KIND.UNKNOWN;
       case "array_lit":
-        e.elems.forEach((el) => inferExpr(el, locals, errors));
+        e.elems.forEach((el) => inferExpr(el, locals, errors, line));
         return KIND.ARRAY;
       case "index": {
-        inferExpr(e.target, locals, errors);
-        const idxKind = inferExpr(e.index, locals, errors);
+        inferExpr(e.target, locals, errors, line);
+        const idxKind = inferExpr(e.index, locals, errors, line);
         if (idxKind !== KIND.UNKNOWN && idxKind !== KIND.INT) {
-          errors.push(`array index must be a number, found ${kindName(idxKind)}`);
+          errors.push(`array index must be a number, found ${kindName(idxKind)}${at}`);
         }
         return KIND.INT; // Kestrel arrays are integer-valued so far
       }
       case "unary": {
-        const k = inferExpr(e.expr, locals, errors);
+        const k = inferExpr(e.expr, locals, errors, line);
         if (e.op === "-") {
           if (k !== KIND.UNKNOWN && k !== KIND.INT) {
-            errors.push(`'-' needs a number, found ${kindName(k)}`);
+            errors.push(`'-' needs a number, found ${kindName(k)}${at}`);
           }
           return KIND.INT;
         }
         // e.op === "!"
         if (k !== KIND.UNKNOWN && k !== KIND.BOOL) {
-          errors.push(`'!' needs a boolean, found ${kindName(k)}`);
+          errors.push(`'!' needs a boolean, found ${kindName(k)}${at}`);
         }
         return KIND.BOOL;
       }
       case "binop": {
-        const l = inferExpr(e.left, locals, errors);
-        const r = inferExpr(e.right, locals, errors);
+        const l = inferExpr(e.left, locals, errors, line);
+        const r = inferExpr(e.right, locals, errors, line);
         const isNumeric = (k) => k === KIND.UNKNOWN || k === KIND.INT;
         const isBoolean = (k) => k === KIND.UNKNOWN || k === KIND.BOOL;
         switch (e.op) {
           case "+": case "-": case "*": case "/": case "%":
             if (!isNumeric(l) || !isNumeric(r)) {
-              errors.push(`'${e.op}' needs two numbers, found ${kindName(l)} and ${kindName(r)}`);
+              errors.push(`'${e.op}' needs two numbers, found ${kindName(l)} and ${kindName(r)}${at}`);
             }
             return KIND.INT;
           case "<": case ">": case "<=": case ">=":
             if (!isNumeric(l) || !isNumeric(r)) {
-              errors.push(`'${e.op}' needs two numbers, found ${kindName(l)} and ${kindName(r)}`);
+              errors.push(`'${e.op}' needs two numbers, found ${kindName(l)} and ${kindName(r)}${at}`);
             }
             return KIND.BOOL;
           case "&&": case "||":
             if (!isBoolean(l) || !isBoolean(r)) {
-              errors.push(`'${e.op}' needs two booleans, found ${kindName(l)} and ${kindName(r)}`);
+              errors.push(`'${e.op}' needs two booleans, found ${kindName(l)} and ${kindName(r)}${at}`);
             }
             return KIND.BOOL;
           case "==": case "!=":
             if (l !== KIND.UNKNOWN && r !== KIND.UNKNOWN && l !== r) {
-              errors.push(`'${e.op}' compares mismatched types: ${kindName(l)} and ${kindName(r)}`);
+              errors.push(`'${e.op}' compares mismatched types: ${kindName(l)} and ${kindName(r)}${at}`);
             }
             return KIND.BOOL;
         }
@@ -562,16 +575,16 @@ function checkTypes(program) {
       case "call": {
         if (e.name === "parallel_map") {
           // Already validated by checkParallelMap; just infer the array arg.
-          inferExpr(e.args[1], locals, errors);
+          inferExpr(e.args[1], locals, errors, line);
           return KIND.ARRAY;
         }
         const callee = fns.get(e.name);
         if (callee && callee.params.length !== e.args.length) {
           errors.push(
-            `'${e.name}' expects ${callee.params.length} argument${callee.params.length === 1 ? "" : "s"}, got ${e.args.length}`
+            `'${e.name}' expects ${callee.params.length} argument${callee.params.length === 1 ? "" : "s"}, got ${e.args.length}${at}`
           );
         }
-        e.args.forEach((a) => inferExpr(a, locals, errors));
+        e.args.forEach((a) => inferExpr(a, locals, errors, line));
         return KIND.UNKNOWN; // return kind isn't tracked yet
       }
       default:
@@ -580,40 +593,41 @@ function checkTypes(program) {
   }
 
   function visitStmt(s, locals, errors) {
+    const at = s.line ? ` (line ${s.line})` : "";
     switch (s.kind) {
       case "let": {
-        const k = inferExpr(s.value, locals, errors);
+        const k = inferExpr(s.value, locals, errors, s.line);
         if (!locals.has(s.name)) locals.set(s.name, k);
         break;
       }
       case "assign": {
-        const k = inferExpr(s.value, locals, errors);
+        const k = inferExpr(s.value, locals, errors, s.line);
         const prior = locals.get(s.name);
         if (prior !== undefined && prior !== KIND.UNKNOWN && k !== KIND.UNKNOWN && prior !== k) {
-          errors.push(`'${s.name}' was first bound as ${kindName(prior)}, can't assign ${kindName(k)} to it`);
+          errors.push(`'${s.name}' was first bound as ${kindName(prior)}, can't assign ${kindName(k)} to it${at}`);
         }
         break;
       }
       case "if": {
-        const k = inferExpr(s.cond, locals, errors);
+        const k = inferExpr(s.cond, locals, errors, s.line);
         if (k !== KIND.UNKNOWN && k !== KIND.BOOL) {
-          errors.push(`if-condition must be a boolean expression, found ${kindName(k)}`);
+          errors.push(`if-condition must be a boolean expression, found ${kindName(k)}${at}`);
         }
         s.thenBlock.forEach((st) => visitStmt(st, locals, errors));
         if (s.elseBlock) s.elseBlock.forEach((st) => visitStmt(st, locals, errors));
         break;
       }
       case "while": {
-        const k = inferExpr(s.cond, locals, errors);
+        const k = inferExpr(s.cond, locals, errors, s.line);
         if (k !== KIND.UNKNOWN && k !== KIND.BOOL) {
-          errors.push(`while-condition must be a boolean expression, found ${kindName(k)}`);
+          errors.push(`while-condition must be a boolean expression, found ${kindName(k)}${at}`);
         }
         s.body.forEach((st) => visitStmt(st, locals, errors));
         break;
       }
-      case "print": s.args.forEach((a) => inferExpr(a, locals, errors)); break;
-      case "return": if (s.value) inferExpr(s.value, locals, errors); break;
-      case "expr_stmt": inferExpr(s.expr, locals, errors); break;
+      case "print": s.args.forEach((a) => inferExpr(a, locals, errors, s.line)); break;
+      case "return": if (s.value) inferExpr(s.value, locals, errors, s.line); break;
+      case "expr_stmt": inferExpr(s.expr, locals, errors, s.line); break;
     }
   }
 
@@ -666,8 +680,30 @@ class ReturnSignal {
   constructor(value) { this.value = value; }
 }
 
+// Builds a stable cache key for a `pure fn`'s argument list, used by both
+// backends' memoization below. Plain JSON.stringify almost works — Kestrel
+// values are only numbers, booleans, and (possibly nested) arrays of those,
+// with no `null`-producing literal in the language itself, EXCEPT that a
+// falling-off-the-end/bare-`return;` function call yields `null` at
+// runtime, and `NaN` (from e.g. a `0/0` division) also stringifies to
+// `"null"` — so two calls with genuinely different arguments could
+// collide on the same cache key without this. Recursively swapping NaN
+// for a sentinel string no ordinary value can produce avoids that.
+function memoKey(args) {
+  const canon = (v) => Array.isArray(v) ? v.map(canon) : (typeof v === "number" && Number.isNaN(v)) ? "__NaN__" : v;
+  return JSON.stringify(args.map(canon));
+}
+
 function interpret(program, { onPrint = (s) => console.log(s) } = {}) {
   const fns = new Map(program.map((f) => [f.name, f]));
+  // A `pure fn` can't observe or be affected by any other call to itself
+  // (see kestrel-DESIGN.md idea #2/#4) — calling it twice with identical
+  // arguments is guaranteed to produce the identical result with zero
+  // observable difference from calling it once, so caching by argument
+  // value is always safe. Scoped to a single run (this Map lives only as
+  // long as this `interpret()` call), per the design doc's own wording —
+  // not the fuller persistent, cross-run cache idea #1 describes.
+  const memoCache = new Map(); // pure fn name -> Map(argsKey -> value)
 
   function evalExpr(e, env) {
     switch (e.kind) {
@@ -764,10 +800,19 @@ function interpret(program, { onPrint = (s) => console.log(s) } = {}) {
   function callFn(name, args) {
     const fn = fns.get(name);
     if (!fn) throw new KestrelError(`Unknown function '${name}'`);
+    let cache = null, key = null;
+    if (fn.pure) {
+      cache = memoCache.get(name);
+      if (!cache) { cache = new Map(); memoCache.set(name, cache); }
+      key = memoKey(args);
+      if (cache.has(key)) return cache.get(key);
+    }
     const env = {};
     fn.params.forEach((p, i) => { env[p.name] = args[i]; });
     const result = execBlock(fn.body, env);
-    return result instanceof ReturnSignal ? result.value : null;
+    const value = result instanceof ReturnSignal ? result.value : null;
+    if (cache) cache.set(key, value);
+    return value;
   }
 
   if (!fns.has("main")) {
@@ -835,6 +880,7 @@ function compile(program) {
     const slots = collectSlots(fn);
     functions.set(fn.name, {
       name: fn.name,
+      pure: fn.pure,
       paramCount: fn.params.length,
       slotCount: slots.size,
       slots,
@@ -1006,8 +1052,17 @@ function execute(functions, entryName, args, onPrint) {
   // shrinking it), turns that into a plain integer increment/decrement.
   let stack = new Array(INITIAL_STACK_CAP);
   let sp = 0;
-  const csCode = [], csBase = [], csIp = [];
+  const csCode = [], csBase = [], csIp = [], csFnName = [], csKey = [];
   let csTop = 0;
+  // Memoization for `pure fn` calls (see kestrel.js's `memoKey` and
+  // kestrel-DESIGN.md idea #2/#4) — scoped to this single `execute()` call,
+  // same as the tree-walker. `curFnName`/`curKey` describe the frame
+  // *currently executing*: non-null only while inside a memoizable pure
+  // call, so RETURN_VALUE/RETURN_NULL below know whether (and under what
+  // key) to record the result. Saved/restored on csFnName/csKey alongside
+  // the rest of the call stack, exactly like code/frameBase/ip.
+  const memoCache = new Map(); // pure fn name -> Map(argsKey -> value)
+  let curFnName = null, curKey = null;
 
   function ensureCapacity(min) {
     if (min <= stack.length) return;
@@ -1021,6 +1076,11 @@ function execute(functions, entryName, args, onPrint) {
   const entryFn = functions.get(entryName);
   if (!entryFn) throw new KestrelError("No 'main' function found");
   for (const a of args) stack[sp++] = a;
+  if (entryFn.pure) {
+    curFnName = entryName;
+    curKey = memoKey(args);
+    memoCache.set(entryName, new Map());
+  }
 
   let frameBase = sp - args.length;
   let code = entryFn.code;
@@ -1093,14 +1153,34 @@ function execute(functions, entryName, args, onPrint) {
       case OP.CALL: {
         const callee = ins.a;
         const calleeBase = sp - ins.b;
-        // Save where to resume in the caller once the callee returns.
+        let key = null;
+        if (callee.pure) {
+          key = memoKey(stack.slice(calleeBase, calleeBase + ins.b));
+          let cache = memoCache.get(callee.name);
+          if (!cache) { cache = new Map(); memoCache.set(callee.name, cache); }
+          if (cache.has(key)) {
+            // Cache hit: pop the (already-evaluated) args and push the
+            // cached result in their place — no new frame, no re-execution.
+            sp = calleeBase;
+            stack[sp++] = cache.get(key);
+            ip++;
+            break;
+          }
+        }
+        // Save where to resume in the caller once the callee returns, plus
+        // the caller's own pending-memo state (curFnName/curKey describe
+        // the frame we're *leaving*, not the one we're entering).
         csCode[csTop] = code;
         csBase[csTop] = frameBase;
         csIp[csTop] = ip + 1;
+        csFnName[csTop] = curFnName;
+        csKey[csTop] = curKey;
         csTop++;
         code = callee.code;
         frameBase = calleeBase;
         ip = 0;
+        curFnName = callee.pure ? callee.name : null;
+        curKey = key;
         const newSp = frameBase + callee.slotCount;
         ensureCapacity(newSp);
         for (let i = sp; i < newSp; i++) stack[i] = undefined;
@@ -1140,6 +1220,7 @@ function execute(functions, entryName, args, onPrint) {
       }
       case OP.RETURN_VALUE: {
         const value = stack[sp - 1];
+        if (curFnName !== null) memoCache.get(curFnName).set(curKey, value);
         sp = frameBase;
         if (csTop === 0) return value;
         stack[sp++] = value;
@@ -1147,9 +1228,12 @@ function execute(functions, entryName, args, onPrint) {
         code = csCode[csTop];
         frameBase = csBase[csTop];
         ip = csIp[csTop];
+        curFnName = csFnName[csTop];
+        curKey = csKey[csTop];
         break;
       }
       case OP.RETURN_NULL: {
+        if (curFnName !== null) memoCache.get(curFnName).set(curKey, null);
         sp = frameBase;
         if (csTop === 0) return null;
         stack[sp++] = null;
@@ -1157,6 +1241,8 @@ function execute(functions, entryName, args, onPrint) {
         code = csCode[csTop];
         frameBase = csBase[csTop];
         ip = csIp[csTop];
+        curFnName = csFnName[csTop];
+        curKey = csKey[csTop];
         break;
       }
       default:
