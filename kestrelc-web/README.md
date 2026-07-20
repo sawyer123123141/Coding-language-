@@ -40,7 +40,12 @@ from plain JS with no dependencies.
 ## Scope
 
 Same as `kestrelc`'s native WASM backend (`kestrelc --wasm`) — see
-`../kestrelc/README.md`. No arrays yet. Cranelift and everything it
-depends on (native-only: probes the host CPU, needs a real object-file
-writer) is excluded from this build entirely via `kestrelc`'s `native`
-Cargo feature, not just unused — see `../kestrelc/Cargo.toml`.
+`../kestrelc/README.md`, including array support (literals, parameters,
+indexing, compile-time-proven bounds elision for literal indices into
+literal-length arrays). Array data lives in a small fixed-size (1 MiB),
+never-freed bump-allocated arena in the module's linear memory — fine
+for short toy programs, not for anything long-running or
+allocation-heavy. Cranelift and everything it depends on (native-only:
+probes the host CPU, needs a real object-file writer) is excluded from
+this build entirely via `kestrelc`'s `native` Cargo feature, not just
+unused — see `../kestrelc/Cargo.toml`.

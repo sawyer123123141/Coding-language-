@@ -243,12 +243,14 @@ process timing was used for every column so the comparison is apples to
 apples; an in-process/compute-only estimate is also given there and is
 even closer).
 
-The honest caveats: `kestrelc` only supports integers, `if`/`while`,
-functions/recursion, and `print` so far — no arrays, no strings as
-general values, no bounds proofs enforced yet (see `kestrelc/README.md`
-for the exact scope and why). And the *interesting* ideas in this
-document — the persistent cache, proof-carrying bounds elimination,
-layout polymorphism — aren't implemented in `kestrelc` at all yet; this
+The honest caveats: `kestrelc` (both the native and WASM backends,
+including `kestrelc-web`) only supports integers, `if`/`while`,
+functions/recursion, `print`, and arrays so far — no strings as general
+values, and cross-function `where`-clause bounds elision is native-only
+for now (see `kestrelc/README.md` for the exact scope and why). And the
+*interesting* ideas in this document — the persistent cache, layout
+polymorphism, a more general proof system beyond array bounds — aren't
+implemented in `kestrelc` at all yet; this
 is "compile straight to machine code with a mature, off-the-shelf
 optimizing backend," not yet "compile *smarter* than a normal compiler
 would." That's the honest ceiling of what's measured here, and also
@@ -267,7 +269,10 @@ Not yet implemented (future work, roughly in priority order):
    the call site (not, say, an index derived from another proven-safe
    variable) — see `kestrelc/README.md`. Also still missing: a friendlier
    failure than a bare trap on the runtime-check fallback for genuinely
-   dynamic accesses.
+   dynamic accesses, and this specific cross-function elision fast path
+   is native-only so far — the WASM backend (`kestrelc --wasm` /
+   `kestrelc-web`) has array support too, but still runtime-checks
+   `where`-guarded accesses rather than eliding them.
 2. Closing the remaining ~9% call-overhead gap in `runFast` on
    recursion-heavy code — lower priority now that `kestrelc` exists and
    already dwarfs any remaining VM-tuning gains
