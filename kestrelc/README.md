@@ -39,10 +39,11 @@ calls for output, since WASM has no I/O of its own — see
 (`kestrelc-web/`), so the whole pipeline (compile Kestrel source to a
 `.wasm` module, then run it) happens client-side, no server involved.
 See `kestrelc-web/README.md`. **Arrays are supported**, same as the
-native backend, including compile-time-proven bounds elision for literal
-indices into literal-length arrays — see "Scope" below for the one real
-difference (no cross-function `where`-clause elision yet in this
-backend; those accesses still get a runtime check).
+native backend, including both proof-carrying bounds-elision fast paths
+— literal indices into literal-length arrays, and cross-function
+`where`-clause elision (see "Scope" below) — both backends run the
+exact same `WhereInfo` proof (`kestrelc/src/where_info.rs`), not two
+separately-maintained copies.
 
 `kestrelc <file.kes>` (no `--wasm`) compiles and links `<file>.kes` into
 a native executable named after the file (in the current directory),
@@ -155,11 +156,12 @@ Codegen, however, currently supports a subset:
   runtime check, same as `run`/`runFast`; a failing runtime check
   **traps the process (`SIGILL`) immediately** rather than printing a
   message and exiting cleanly like the other two backends do — a real,
-  known difference, not yet fixed. The WASM backend (below) has the same
-  scope, except it doesn't (yet) elide the check *inside* a `where`-guarded
-  function body from its call sites' proofs — that fast path is native-only
-  for now, so those accesses still get a runtime check there (and trap via
-  WASM's `unreachable` instruction instead of `SIGILL`).
+  known difference, not yet fixed. The WASM backend (below) now has the
+  identical scope, including eliding the check *inside* a `where`-guarded
+  function body from its call sites' proofs (both backends share one
+  `WhereInfo` analysis in `kestrelc/src/where_info.rs`); a failing
+  runtime check there traps via WASM's `unreachable` instruction instead
+  of `SIGILL`.
 - **`parallel_map(f, arr)`**, with real OS-thread parallelism — see
   "Parallel map" below. `f` must be a `pure fn` taking exactly one
   scalar parameter; `arr` must be a fixed-size array *literal*

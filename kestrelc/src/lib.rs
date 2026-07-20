@@ -5,6 +5,7 @@ pub mod parser;
 pub mod purity;
 pub mod typecheck;
 pub mod wasm_codegen;
+pub mod where_info;
 
 #[cfg(feature = "native")]
 pub mod cache;

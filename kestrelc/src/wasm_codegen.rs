@@ -19,6 +19,7 @@
 // long-running or allocation-heavy) — see kestrelc-web/README.md.
 
 use crate::ast::*;
+use crate::where_info::{extract_where_info, WhereInfo};
 use std::collections::HashMap;
 use wasm_encoder::{
     CodeSection, ConstExpr, EntityType, ExportKind, ExportSection, Function, FunctionSection,
@@ -67,6 +68,7 @@ pub fn compile_to_wasm(program: &Program) -> Result<Vec<u8>, WasmError> {
     // An array-typed parameter expands to two i32 params (pointer, then
     // length), matching the native backend's two AbiParams per array.
     let mut fn_indices: HashMap<String, u32> = HashMap::new();
+    let mut where_infos: HashMap<String, WhereInfo> = HashMap::new();
     for (i, f) in program.iter().enumerate() {
         let mut params = Vec::with_capacity(f.params.len());
         for p in &f.params {
@@ -85,10 +87,14 @@ pub fn compile_to_wasm(program: &Program) -> Result<Vec<u8>, WasmError> {
         if f.name == "main" {
             exports.export("main", ExportKind::Func, NUM_IMPORTS + i as u32);
         }
+        if let Some(info) = extract_where_info(f) {
+            where_infos.insert(f.name.clone(), info);
+        }
     }
 
     for f in program {
-        let body = gen_fn(f, &fn_indices, &mut data_bytes, &mut str_offsets)?;
+        let my_where = where_infos.get(&f.name);
+        let body = gen_fn(f, &fn_indices, &where_infos, my_where, &mut data_bytes, &mut str_offsets)?;
         code.function(&body);
     }
 
@@ -230,6 +236,8 @@ fn collect_slots(f: &Fn) -> Vec<(String, SlotKind)> {
 fn gen_fn(
     f: &Fn,
     fn_indices: &HashMap<String, u32>,
+    where_info: &HashMap<String, WhereInfo>,
+    my_where: Option<&WhereInfo>,
     data_bytes: &mut Vec<u8>,
     str_offsets: &mut HashMap<String, (u32, u32)>,
 ) -> Result<Function, WasmError> {
@@ -273,7 +281,7 @@ fn gen_fn(
     extra_locals.push((1, ValType::I32));
 
     let mut func = Function::new(extra_locals);
-    let mut fc = FnWasm { func: &mut func, vars, fn_indices, data_bytes, str_offsets, scratch };
+    let mut fc = FnWasm { func: &mut func, vars, fn_indices, where_info, my_where, data_bytes, str_offsets, scratch };
     fc.gen_block(&f.body)?;
     // Falling off the end returns 0, matching the other two backends.
     func.instructions().i64_const(0).return_();
@@ -285,6 +293,14 @@ struct FnWasm<'a> {
     func: &'a mut Function,
     vars: HashMap<String, VarLoc>,
     fn_indices: &'a HashMap<String, u32>,
+    // `where_info` covers every function with a recognized `where idx <
+    // N` clause, used to validate the precondition at each *call site*.
+    // `my_where` is this specific function's own entry (if any), used to
+    // elide the redundant runtime check on the one access inside its own
+    // body that the precondition already covers — see codegen.rs's
+    // identical native-backend logic for the full rationale.
+    where_info: &'a HashMap<String, WhereInfo>,
+    my_where: Option<&'a WhereInfo>,
     data_bytes: &'a mut Vec<u8>,
     str_offsets: &'a mut HashMap<String, (u32, u32)>,
     scratch: u32,
@@ -574,13 +590,11 @@ impl<'a> FnWasm<'a> {
                 "kestrelc only supports array literals as the direct value of a `let`/assignment so far".into(),
             )),
             Expr::Index { target, index } => {
-                // Proof-carrying fast path: a literal index into an array
-                // whose length is also known at compile time (a `let`
-                // literal, not a parameter) is proven safe — or proven
-                // *unsafe* — right now, with no runtime check either way.
-                // (The native backend's second fast path, eliding checks
-                // inside a `where`-guarded function body, isn't ported
-                // here yet — see kestrelc-web/README.md.)
+                // Proof-carrying fast path #1: a literal index into an
+                // array whose length is also known at compile time (a
+                // `let` literal, not a parameter) is proven safe — or
+                // proven *unsafe* — right now, with no runtime check
+                // either way.
                 if let (Expr::Num(n), Some(static_len)) = (index.as_ref(), self.static_array_len(target)) {
                     if *n < 0 || *n as u32 >= static_len {
                         return Err(WasmError(format!(
@@ -591,6 +605,33 @@ impl<'a> FnWasm<'a> {
                     self.func.instructions().local_get(ptr);
                     self.func.instructions().i64_load(MemArg { offset: (*n as u64) * 8, align: 3, memory_index: 0 });
                     return Ok(());
+                }
+
+                // Proof-carrying fast path #2: this function has a
+                // `where idx_param < N` clause tying exactly this (array
+                // parameter, index parameter) pair together, and this is
+                // exactly that access (`arr_param[idx_param]`). Every
+                // call site to this function is required (see the Call
+                // arm below) to prove the precondition before the call
+                // is even allowed to compile, so by the time we're
+                // generating code *inside* this function, the
+                // precondition is already guaranteed and the check would
+                // be redundant. Same logic as the native backend's
+                // identical fast path in codegen.rs.
+                if let (Expr::Ident(t), Expr::Ident(i)) = (target.as_ref(), index.as_ref()) {
+                    if let Some(w) = self.my_where {
+                        if t == &w.arr_param && i == &w.idx_param {
+                            let (ptr, _len) = self.resolve_array(target)?;
+                            self.gen_expr(index)?; // pushes i64 index
+                            self.func.instructions().i32_wrap_i64();
+                            self.func.instructions().i32_const(3);
+                            self.func.instructions().i32_shl();
+                            self.func.instructions().local_get(ptr);
+                            self.func.instructions().i32_add();
+                            self.func.instructions().i64_load(MemArg { offset: 0, align: 3, memory_index: 0 });
+                            return Ok(());
+                        }
+                    }
                 }
 
                 let (ptr, len) = self.resolve_array(target)?;
@@ -663,6 +704,40 @@ impl<'a> FnWasm<'a> {
                     .fn_indices
                     .get(name)
                     .ok_or_else(|| WasmError(format!("Unknown function '{name}'")))?;
+
+                // If the callee has a recognized `where idx < N` clause,
+                // its precondition must be proven right here, at compile
+                // time, before the call is allowed at all — matching
+                // kestrel-DESIGN.md's own stated rule and the native
+                // backend's identical check in codegen.rs. Narrow prover:
+                // only a literal index against a literal-length array
+                // argument is provable; anything else is rejected, not
+                // silently trusted.
+                if let Some(w) = self.where_info.get(name) {
+                    let idx_arg = &args[w.idx_pos];
+                    let arr_arg = &args[w.arr_pos];
+                    let idx_lit = match idx_arg {
+                        Expr::Num(n) => *n,
+                        _ => {
+                            return Err(WasmError(format!(
+                                "kestrelc: can't prove '{name}''s `where {} < ...` clause here — the index argument must be a literal number so far",
+                                w.idx_param
+                            )))
+                        }
+                    };
+                    let arr_len = self.static_array_len(arr_arg).ok_or_else(|| {
+                        WasmError(format!(
+                            "kestrelc: can't prove '{name}''s where clause here — the array argument must be a fixed-size array literal (`let x = [...]`) so far, not a parameter passed further down"
+                        ))
+                    })?;
+                    if idx_lit < 0 || idx_lit as u32 >= arr_len {
+                        return Err(WasmError(format!(
+                            "kestrelc: call to '{name}' can't satisfy its own `where {} < N` clause — index {idx_lit} is out of bounds for an array of length {arr_len}",
+                            w.idx_param
+                        )));
+                    }
+                }
+
                 for a in args {
                     let is_array_ident =
                         matches!(a, Expr::Ident(n) if matches!(self.vars.get(n), Some(VarLoc::Array { .. })));

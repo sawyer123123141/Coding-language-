@@ -336,6 +336,42 @@ fn where_clause_call_site_proof_accepts_valid_literal_call() {
 }
 
 #[test]
+fn wasm_backend_where_clause_call_site_proof_accepts_valid_literal_call() {
+    // Same design-doc get_safe example as the native test above, proving
+    // the WASM backend's own copy of the elision fast path (added
+    // alongside the native one — see wasm_codegen.rs's Index/Call arms)
+    // actually runs correctly, not just compiles.
+    let scratch = scratch_dir("wasm_where_ok");
+    let src_path = scratch.join("where_ok.kes");
+    fs::write(
+        &src_path,
+        r#"
+        fn get_safe(arr: [i32; N], i: usize) -> i32 where i < N {
+            return arr[i];
+        }
+        fn main() {
+            let nums = [3, 4, 5, 6];
+            print(get_safe(nums, 2));
+        }
+        "#,
+    )
+    .unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg("--wasm")
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(out.status.success(), "kestrelc --wasm failed:\n{}", String::from_utf8_lossy(&out.stderr));
+
+    let wasm_path = scratch.join("where_ok.wasm");
+    let run = run_wasm_via_node(&wasm_path);
+    assert!(run.status.success(), "node failed to run the wasm module:\n{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "5\n");
+}
+
+#[test]
 fn where_clause_call_site_rejects_provably_invalid_index() {
     let scratch = scratch_dir("where_bad_index");
     let src_path = scratch.join("where_bad_index.kes");
@@ -359,6 +395,38 @@ fn where_clause_call_site_rejects_provably_invalid_index() {
         .output()
         .expect("failed to run kestrelc");
     assert!(!out.status.success(), "kestrelc should have rejected a provably out-of-bounds where-clause call");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("can't satisfy its own"),
+        "expected a where-clause proof-failure error, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn wasm_backend_where_clause_call_site_rejects_provably_invalid_index() {
+    let scratch = scratch_dir("wasm_where_bad_index");
+    let src_path = scratch.join("where_bad_index.kes");
+    fs::write(
+        &src_path,
+        r#"
+        fn get_safe(arr: [i32; N], i: usize) -> i32 where i < N {
+            return arr[i];
+        }
+        fn main() {
+            let nums = [3, 4, 5, 6];
+            print(get_safe(nums, 9));
+        }
+        "#,
+    )
+    .unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg("--wasm")
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(!out.status.success(), "kestrelc --wasm should have rejected a provably out-of-bounds where-clause call");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         stderr.contains("can't satisfy its own"),
@@ -394,6 +462,39 @@ fn where_clause_call_site_rejects_unprovable_dynamic_index() {
         .output()
         .expect("failed to run kestrelc");
     assert!(!out.status.success(), "kestrelc should have rejected an unprovable where-clause call site");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("can't prove"),
+        "expected a where-clause unprovable-call-site error, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn wasm_backend_where_clause_call_site_rejects_unprovable_dynamic_index() {
+    let scratch = scratch_dir("wasm_where_unprovable");
+    let src_path = scratch.join("where_unprovable.kes");
+    fs::write(
+        &src_path,
+        r#"
+        fn get_safe(arr: [i32; N], i: usize) -> i32 where i < N {
+            return arr[i];
+        }
+        fn main() {
+            let nums = [3, 4, 5, 6];
+            let idx = 2;
+            print(get_safe(nums, idx));
+        }
+        "#,
+    )
+    .unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg("--wasm")
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(!out.status.success(), "kestrelc --wasm should have rejected an unprovable where-clause call site");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         stderr.contains("can't prove"),

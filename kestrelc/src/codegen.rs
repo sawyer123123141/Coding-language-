@@ -6,6 +6,7 @@
 // clear compile error, not a silent miscompile.
 
 use crate::ast::*;
+use crate::where_info::{extract_where_info, WhereInfo};
 use cranelift_codegen::ir::{
     condcodes::IntCC, types, AbiParam, Function, InstBuilder, MemFlags, Signature, StackSlotData,
     StackSlotKind, TrapCode, UserFuncName, Value,
@@ -40,47 +41,6 @@ pub struct Codegen {
     // wrong registers for whatever `cc` actually links against on this
     // platform.
     call_conv: CallConv,
-}
-
-// A recognized `where i < N` clause: `i` names a scalar parameter, `N`
-// matches the symbolic size of some `[T; N]` parameter. `idx_pos`/
-// `arr_pos` are that parameter's position in the *Kestrel* parameter
-// list (not the Cranelift ABI slot list — array params take two ABI
-// slots but one Kestrel position), used to find the matching argument
-// expression at a call site. Any other where-clause shape isn't
-// recognized at all — no elision, no error, just the plain runtime
-// check on every access, same as before this feature existed.
-struct WhereInfo {
-    idx_param: String,
-    arr_param: String,
-    idx_pos: usize,
-    arr_pos: usize,
-}
-
-fn extract_where_info(f: &Fn) -> Option<WhereInfo> {
-    let cond = f.where_clause.as_ref()?;
-    let (left, right) = match cond {
-        Expr::Binop { op: BinOp::Lt, left, right } => (left, right),
-        _ => return None,
-    };
-    let idx_param = match left.as_ref() {
-        Expr::Ident(n) => n.clone(),
-        _ => return None,
-    };
-    let n_name = match right.as_ref() {
-        Expr::Ident(n) => n.clone(),
-        _ => return None,
-    };
-    let idx_pos = f.params.iter().position(|p| p.name == idx_param && matches!(p.ty, Type::Named(_)))?;
-    let (arr_pos, arr_param) = f
-        .params
-        .iter()
-        .enumerate()
-        .find_map(|(i, p)| match &p.ty {
-            Type::Array { size, .. } if *size == n_name => Some((i, p.name.clone())),
-            _ => None,
-        })?;
-    Some(WhereInfo { idx_param, arr_param, idx_pos, arr_pos })
 }
 
 impl Codegen {
