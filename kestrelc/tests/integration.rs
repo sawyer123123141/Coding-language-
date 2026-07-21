@@ -2150,3 +2150,65 @@ fn rejects_an_array_literal_too_large_to_safely_compile() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("too large to compile"), "got: {stderr}");
 }
+
+#[test]
+fn a_small_array_literal_at_the_stack_heap_boundary_still_works() {
+    // 512 elements * 8 bytes = exactly 4096 (4KB) -- the boundary
+    // itself, still expected to take the stack path unchanged.
+    let scratch = scratch_dir("array_at_boundary");
+    let src_path = scratch.join("prog.kes");
+    let mut src = String::from("fn main() {\n    let arr = [");
+    for i in 0..512u32 {
+        if i > 0 {
+            src.push_str(", ");
+        }
+        src.push_str(&i.to_string());
+    }
+    src.push_str("];\n    print(arr[0], arr[511]);\n}\n");
+    fs::write(&src_path, src).unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(out.status.success(), "compile failed:\n{}", String::from_utf8_lossy(&out.stderr));
+
+    let bin = scratch.join("prog");
+    let run = Command::new(&bin).output().expect("failed to run compiled binary");
+    assert!(run.status.success(), "compiled binary exited with failure");
+    assert_eq!(native_stdout(&run), "0 511\n");
+}
+
+#[test]
+fn a_large_array_literal_above_the_threshold_heap_allocates_instead_of_crashing() {
+    // This is the direct regression test for the crash found in
+    // benchmarks/: a 500,000-element i64 array literal (4MB) reliably
+    // crashed with STATUS_STACK_OVERFLOW before this fix. 20,000
+    // elements (160KB) is comfortably above the 4KB threshold, small
+    // enough to keep this test fast.
+    let scratch = scratch_dir("large_array_literal");
+    let src_path = scratch.join("prog.kes");
+    let mut src = String::from("fn main() {\n    let arr = [");
+    for i in 0..20_000u32 {
+        if i > 0 {
+            src.push_str(", ");
+        }
+        src.push_str(&i.to_string());
+    }
+    src.push_str("];\n    let total = 0;\n    let i = 0;\n    while (i < 20000) {\n        total = total + arr[i];\n        i = i + 1;\n    }\n    print(total);\n}\n");
+    fs::write(&src_path, src).unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(out.status.success(), "compile failed:\n{}", String::from_utf8_lossy(&out.stderr));
+
+    let bin = scratch.join("prog");
+    let run = Command::new(&bin).output().expect("failed to run compiled binary");
+    assert!(run.status.success(), "compiled binary exited with failure (this is exactly the stack-overflow crash this task fixes)");
+    // sum of 0..20000 = 20000*19999/2 = 199990000
+    assert_eq!(native_stdout(&run), "199990000\n");
+}

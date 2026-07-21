@@ -282,6 +282,7 @@ pub struct Codegen {
     printf_id: FuncId,
     pmap_id: FuncId,
     bounds_fail_id: FuncId,
+    malloc_id: FuncId,
     profile: Option<ProfileState>,
     memo: MemoState,
     str_cache: HashMap<String, StrConst>,
@@ -347,6 +348,20 @@ impl Codegen {
         printf_sig.returns.push(AbiParam::new(types::I32));
         let printf_id = module
             .declare_function("printf", Linkage::Import, &printf_sig)
+            .map_err(|e| KestrelcError::internal(ErrorKind::Codegen, e.to_string()))?;
+
+        // malloc(size: i64) -> i64 ptr — a real libc function, already
+        // linked (kestrelc_runtime.c includes <stdlib.h> and the
+        // runtime it's part of is always linked in). Used by
+        // FnCodegen::alloc_array_buffer for array literals too large
+        // to safely stack-allocate (see that method's own doc comment
+        // for the threshold and why). Declared exactly like printf
+        // above — a real ABI function, fixed non-variadic signature.
+        let mut malloc_sig = Signature::new(call_conv);
+        malloc_sig.params.push(AbiParam::new(types::I64)); // size
+        malloc_sig.returns.push(AbiParam::new(types::I64)); // ptr
+        let malloc_id = module
+            .declare_function("malloc", Linkage::Import, &malloc_sig)
             .map_err(|e| KestrelcError::internal(ErrorKind::Codegen, e.to_string()))?;
 
         // kestrelc_parallel_map_i64(in: i64 ptr, len: i64, f: i64 fn ptr,
@@ -448,6 +463,7 @@ impl Codegen {
             printf_id,
             pmap_id,
             bounds_fail_id,
+            malloc_id,
             profile,
             memo: MemoState { lookup_id: memo_lookup_id, store_id: memo_store_id, slots: HashMap::new() },
             str_cache: HashMap::new(),
@@ -796,6 +812,7 @@ impl Codegen {
                 printf_id: self.printf_id,
                 pmap_id: self.pmap_id,
                 bounds_fail_id: self.bounds_fail_id,
+                malloc_id: self.malloc_id,
                 module: &mut self.module,
                 str_cache: &mut self.str_cache,
                 str_counter: &mut self.str_counter,
@@ -1000,6 +1017,7 @@ struct FnCodegen<'a> {
     printf_id: FuncId,
     pmap_id: FuncId,
     bounds_fail_id: FuncId,
+    malloc_id: FuncId,
     module: &'a mut ObjectModule,
     str_cache: &'a mut HashMap<String, StrConst>,
     str_counter: &'a mut usize,
@@ -1051,6 +1069,41 @@ impl<'a> FnCodegen<'a> {
         Ok(false)
     }
 
+    /// Returns a base pointer for an N-element (i64) array buffer --
+    /// stack-allocated at or below 4KB (the overwhelming majority of
+    /// real array literals: the existing examples all use 4-6
+    /// elements), heap-allocated via `malloc` above it. Never freed --
+    /// matches the language's existing no-lifetime-tracking memory
+    /// model (arrays are immutable, constructed once, no concept of
+    /// scope-based cleanup exists anywhere in the language today), the
+    /// same way a stack-allocated array's real lifetime today is
+    /// already just "until the process exits" for anything reachable
+    /// from `main`.
+    ///
+    /// Fixes a real crash: a 500,000-element (4MB) array literal
+    /// reliably crashed with STATUS_STACK_OVERFLOW against Windows'
+    /// default 1MB thread stack before this existed (see
+    /// benchmarks/results.md). resolve.rs separately rejects anything
+    /// over 100MB at compile time, so `elem_count` here is always
+    /// already known to be sane.
+    fn alloc_array_buffer(&mut self, elem_count: usize) -> Value {
+        let size_bytes = elem_count * 8;
+        const STACK_HEAP_THRESHOLD_BYTES: usize = 4096;
+        if size_bytes <= STACK_HEAP_THRESHOLD_BYTES {
+            let ss = self.builder.create_sized_stack_slot(StackSlotData::new(
+                StackSlotKind::ExplicitSlot,
+                size_bytes as u32,
+                3, // 8-byte (2^3) alignment for i64 elements
+            ));
+            self.builder.ins().stack_addr(types::I64, ss, 0)
+        } else {
+            let local_malloc = self.module.declare_func_in_func(self.malloc_id, self.builder.func);
+            let size_val = self.builder.ins().iconst(types::I64, size_bytes as i64);
+            let call = self.builder.ins().call(local_malloc, &[size_val]);
+            self.builder.inst_results(call)[0]
+        }
+    }
+
     /// Shared by `let` and `=`: binds `name` to `value`, handling both
     /// the scalar case (one Variable) and the array-literal case (stack
     /// allocation + one store per element, then the ptr/len Variables).
@@ -1074,13 +1127,7 @@ impl<'a> FnCodegen<'a> {
                         elems.len()
                     )));
                 }
-                let size_bytes = (elems.len() * 8) as u32;
-                let ss = self.builder.create_sized_stack_slot(StackSlotData::new(
-                    StackSlotKind::ExplicitSlot,
-                    size_bytes,
-                    3, // 8-byte (2^3) alignment for i64 elements
-                ));
-                let base = self.builder.ins().stack_addr(types::I64, ss, 0);
+                let base = self.alloc_array_buffer(elems.len());
                 for (i, el) in elems.iter().enumerate() {
                     let v = self.gen_expr(el)?;
                     self.builder.ins().store(MemFlags::new(), v, base, (i * 8) as i32);
@@ -1117,13 +1164,7 @@ impl<'a> FnCodegen<'a> {
                 }
                 let (in_ptr, _in_len) = self.resolve_array(&args[1])?;
 
-                let size_bytes = (elem_count * 8) as u32;
-                let out_slot = self.builder.create_sized_stack_slot(StackSlotData::new(
-                    StackSlotKind::ExplicitSlot,
-                    size_bytes,
-                    3,
-                ));
-                let out_base = self.builder.ins().stack_addr(types::I64, out_slot, 0);
+                let out_base = self.alloc_array_buffer(elem_count);
 
                 // The callee's own machine-code address, as a plain i64
                 // value — this is what the C runtime shim
