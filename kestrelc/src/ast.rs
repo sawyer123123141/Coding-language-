@@ -52,6 +52,15 @@ pub enum ExprKind {
     Binop { op: BinOp, left: Box<Expr>, right: Box<Expr> },
     Index { target: Box<Expr>, index: Box<Expr> },
     Call { name: Symbol, args: Vec<Expr> },
+    /// `Point { x: 1, y: 2 }` — `fields` is in the order written in
+    /// source, not necessarily the struct's declared field order (see
+    /// resolve.rs/codegen.rs for where that reordering happens).
+    StructLit { name: Symbol, fields: Vec<(Symbol, Expr)> },
+    /// `p.x` — `target` is expected (by codegen; enforced with a clear
+    /// error otherwise) to be a plain identifier naming a struct-typed
+    /// local or parameter, matching the same restriction array
+    /// indexing already has via `resolve_array`.
+    Field { target: Box<Expr>, field: Symbol },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

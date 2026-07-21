@@ -803,6 +803,12 @@ impl<'a> FnWasm<'a> {
                 self.func.instructions().call(idx);
                 Ok(())
             }
+            ExprKind::StructLit { .. } => {
+                Err(self.err("struct literals are not yet supported in kestrelc".into()))
+            }
+            ExprKind::Field { .. } => {
+                Err(self.err("field access is not yet supported in kestrelc".into()))
+            }
         }
     }
 }

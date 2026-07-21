@@ -140,6 +140,14 @@ fn resolve_expr(
                 resolve_expr(a, locals, fns, span, errors);
             }
         }
+        ExprKind::StructLit { fields, .. } => {
+            for (_, expr) in fields {
+                resolve_expr(expr, locals, fns, span, errors);
+            }
+        }
+        ExprKind::Field { target, .. } => {
+            resolve_expr(target, locals, fns, span, errors);
+        }
     }
 }
 

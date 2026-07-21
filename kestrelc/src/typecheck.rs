@@ -175,6 +175,16 @@ pub fn check_types(program: &Program, fns: &HashMap<Symbol, &Fn>) -> Vec<Kestrel
                 }
                 Kind::Unknown // return kind isn't tracked yet
             }
+            ExprKind::StructLit { fields, .. } => {
+                for (_, expr) in fields {
+                    infer_expr(expr, locals, fns, errors);
+                }
+                Kind::Unknown
+            }
+            ExprKind::Field { target, .. } => {
+                infer_expr(target, locals, fns, errors);
+                Kind::Unknown
+            }
         }
     }
 

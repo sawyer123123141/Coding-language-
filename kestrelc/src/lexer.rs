@@ -11,6 +11,7 @@ pub enum Tok {
     Str(Symbol),
     Ident(Symbol),
     Fn,
+    Struct,
     Pure,
     Let,
     If,
@@ -112,6 +113,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, KestrelcError> {
             let word: String = chars[start..i].iter().collect();
             let tok = match word.as_str() {
                 "fn" => Tok::Fn,
+                "struct" => Tok::Struct,
                 "pure" => Tok::Pure,
                 "let" => Tok::Let,
                 "if" => Tok::If,
@@ -242,5 +244,12 @@ mod tests {
             tokens.iter().filter_map(|t| if let Tok::Ident(s) = t.tok { Some(s) } else { None }).collect();
         assert_eq!(idents.len(), 3);
         assert!(idents.iter().all(|&s| s == idents[0]), "every 'x' should intern to the same Symbol");
+    }
+
+    #[test]
+    fn lexes_the_struct_keyword_distinctly_from_an_identifier() {
+        let tokens = lex("struct Point { x: i64 }").unwrap();
+        assert_eq!(tokens[0].tok, Tok::Struct);
+        assert!(matches!(tokens[1].tok, Tok::Ident(_)));
     }
 }

@@ -197,6 +197,14 @@ fn infer_array_param_lengths(program: &Program) -> HashMap<Symbol, Vec<usize>> {
                 }
             }
             ExprKind::Num(_) | ExprKind::Str(_) | ExprKind::Bool(_) | ExprKind::Ident(_) => {}
+            ExprKind::StructLit { fields, .. } => {
+                for (_, expr) in fields {
+                    visit_expr(expr, known_lens, array_positions, proofs);
+                }
+            }
+            ExprKind::Field { target, .. } => {
+                visit_expr(target, known_lens, array_positions, proofs);
+            }
         }
     }
 
@@ -1457,6 +1465,12 @@ impl<'a> FnCodegen<'a> {
                 let local_func = self.module.declare_func_in_func(func_id, self.builder.func);
                 let call = self.builder.ins().call(local_func, &arg_vals);
                 Ok(self.builder.inst_results(call)[0])
+            }
+            ExprKind::StructLit { .. } => {
+                Err(self.err("struct literals are not yet supported in kestrelc".into()))
+            }
+            ExprKind::Field { .. } => {
+                Err(self.err("field access is not yet supported in kestrelc".into()))
             }
         }
     }

@@ -74,6 +74,12 @@ fn expr_calls(e: &Expr, name: Symbol, found: &mut bool) {
                 expr_calls(el, name, found);
             }
         }
+        ExprKind::StructLit { fields, .. } => {
+            for (_, expr) in fields {
+                expr_calls(expr, name, found);
+            }
+        }
+        ExprKind::Field { target, .. } => expr_calls(target, name, found),
         ExprKind::Num(_) | ExprKind::Str(_) | ExprKind::Bool(_) | ExprKind::Ident(_) => {}
     }
 }
@@ -181,6 +187,17 @@ fn substitute(e: &Expr, subst: &HashMap<Symbol, &Expr>) -> Expr {
             span,
         ),
         ExprKind::ArrayLit(elems) => Expr::new(ExprKind::ArrayLit(elems.iter().map(|e| substitute(e, subst)).collect()), span),
+        ExprKind::StructLit { name, fields } => Expr::new(
+            ExprKind::StructLit {
+                name: *name,
+                fields: fields.iter().map(|(n, e)| (*n, substitute(e, subst))).collect(),
+            },
+            span,
+        ),
+        ExprKind::Field { target, field } => Expr::new(
+            ExprKind::Field { target: Box::new(substitute(target, subst)), field: *field },
+            span,
+        ),
         ExprKind::Num(_) | ExprKind::Str(_) | ExprKind::Bool(_) => e.clone(),
     }
 }
@@ -216,6 +233,17 @@ fn inline_expr(e: &Expr, candidates: &HashMap<Symbol, Candidate>) -> Expr {
             span,
         ),
         ExprKind::ArrayLit(elems) => Expr::new(ExprKind::ArrayLit(elems.iter().map(|e| inline_expr(e, candidates)).collect()), span),
+        ExprKind::StructLit { name, fields } => Expr::new(
+            ExprKind::StructLit {
+                name: *name,
+                fields: fields.iter().map(|(n, e)| (*n, inline_expr(e, candidates))).collect(),
+            },
+            span,
+        ),
+        ExprKind::Field { target, field } => Expr::new(
+            ExprKind::Field { target: Box::new(inline_expr(target, candidates)), field: *field },
+            span,
+        ),
         ExprKind::Num(_) | ExprKind::Str(_) | ExprKind::Bool(_) | ExprKind::Ident(_) => e.clone(),
     }
 }

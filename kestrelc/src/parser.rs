@@ -5,6 +5,7 @@ use crate::ast::*;
 use crate::error::{ErrorKind, KestrelcError};
 use crate::interner::Symbol;
 use crate::lexer::{Tok, Token};
+use crate::span::Span;
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -63,10 +64,15 @@ impl Parser {
 
     pub fn parse_program(&mut self) -> PResult<Program> {
         let mut fns = Vec::new();
+        let mut structs = Vec::new();
         while !self.at(&Tok::Eof) {
-            fns.push(self.parse_fn_decl()?);
+            if self.at(&Tok::Struct) {
+                structs.push(self.parse_struct_decl()?);
+            } else {
+                fns.push(self.parse_fn_decl()?);
+            }
         }
-        Ok(Program { fns, structs: Vec::new() })
+        Ok(Program { fns, structs })
     }
 
     fn parse_type(&mut self) -> PResult<Type> {
@@ -97,6 +103,56 @@ impl Parser {
             }
         }
         Ok(params)
+    }
+
+    fn parse_struct_decl(&mut self) -> PResult<StructDecl> {
+        let span = self.peek().span;
+        self.expect(Tok::Struct)?;
+        let name = self.expect_ident()?;
+        self.expect(Tok::LBrace)?;
+        let mut fields = Vec::new();
+        if !self.at(&Tok::RBrace) {
+            loop {
+                let field_name = self.expect_ident()?;
+                self.expect(Tok::Colon)?;
+                let ty = self.parse_type()?;
+                fields.push(Param { name: field_name, ty });
+                if self.at(&Tok::Comma) {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+        self.expect(Tok::RBrace)?;
+        Ok(StructDecl { name, fields, span })
+    }
+
+    /// Called from `parse_primary` once it's seen `IDENT {` — `name`
+    /// and `span` are the already-consumed identifier's own name/span.
+    /// See the design doc's documented edge case: a `where` clause
+    /// (unparenthesized) immediately followed by a function body could
+    /// misparse here if the clause bare-references a name that
+    /// collides with a declared struct name. Accepted, not fixed, in
+    /// v1 — the program wouldn't type-check either way.
+    fn parse_struct_lit(&mut self, name: Symbol, span: Span) -> PResult<Expr> {
+        self.expect(Tok::LBrace)?;
+        let mut fields = Vec::new();
+        if !self.at(&Tok::RBrace) {
+            loop {
+                let field_name = self.expect_ident()?;
+                self.expect(Tok::Colon)?;
+                let value = self.parse_expr()?;
+                fields.push((field_name, value));
+                if self.at(&Tok::Comma) {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+        self.expect(Tok::RBrace)?;
+        Ok(Expr::new(ExprKind::StructLit { name, fields }, span))
     }
 
     fn parse_args(&mut self) -> PResult<Vec<Expr>> {
@@ -158,6 +214,9 @@ impl Parser {
             }
             Tok::Ident(name) => {
                 self.advance();
+                if self.at(&Tok::LBrace) {
+                    return self.parse_struct_lit(name, span);
+                }
                 Ok(Expr::new(ExprKind::Ident(name), span))
             }
             other => Err(KestrelcError::new(
@@ -187,6 +246,10 @@ impl Parser {
                 } else {
                     break;
                 }
+            } else if self.at(&Tok::Dot) {
+                self.advance();
+                let field = self.expect_ident()?;
+                expr = Expr::new(ExprKind::Field { target: Box::new(expr), field }, span);
             } else {
                 break;
             }
@@ -406,5 +469,50 @@ mod tests {
         assert_eq!(err.span.line, 1);
         assert_eq!(err.span.col, 21); // the ';' where an expression was expected
         assert_eq!(err.span.len, 1);
+    }
+
+    #[test]
+    fn parses_a_struct_declaration_and_adds_it_to_program_structs() {
+        let program = parse(lex("struct Point { x: i64, y: i64 }\nfn main() {}\n").unwrap()).unwrap();
+        assert_eq!(program.structs.len(), 1);
+        let decl = &program.structs[0];
+        assert_eq!(&*decl.name.resolve(), "Point");
+        assert_eq!(decl.fields.len(), 2);
+        assert_eq!(&*decl.fields[0].name.resolve(), "x");
+        assert_eq!(&*decl.fields[1].name.resolve(), "y");
+    }
+
+    #[test]
+    fn parses_a_struct_literal_with_fields_in_written_order() {
+        let program = parse(lex(
+            "struct Point { x: i64, y: i64 }\nfn main() { let p = Point { y: 2, x: 1 }; }\n"
+        ).unwrap()).unwrap();
+        let Stmt::Let { value, .. } = &program.fns[0].body[0] else { panic!("expected a let") };
+        let ExprKind::StructLit { name, fields } = &value.kind else { panic!("expected a struct literal") };
+        assert_eq!(&*name.resolve(), "Point");
+        assert_eq!(fields.len(), 2);
+        assert_eq!(&*fields[0].0.resolve(), "y"); // written order preserved
+        assert_eq!(&*fields[1].0.resolve(), "x");
+    }
+
+    #[test]
+    fn parses_field_access_as_a_postfix_operator() {
+        let program = parse(lex("fn main() { let a = p.x; }\n").unwrap()).unwrap();
+        let Stmt::Let { value, .. } = &program.fns[0].body[0] else { panic!("expected a let") };
+        let ExprKind::Field { target, field } = &value.kind else { panic!("expected field access") };
+        assert!(matches!(&target.kind, ExprKind::Ident(_)));
+        assert_eq!(&*field.resolve(), "x");
+    }
+
+    #[test]
+    fn parses_chained_field_access() {
+        // Doesn't need to *mean* anything yet (nested structs are out
+        // of scope) -- this only proves the parser's postfix loop
+        // handles more than one `.` in a row without special-casing.
+        let program = parse(lex("fn main() { let a = p.x.y; }\n").unwrap()).unwrap();
+        let Stmt::Let { value, .. } = &program.fns[0].body[0] else { panic!("expected a let") };
+        let ExprKind::Field { target, field } = &value.kind else { panic!("expected field access") };
+        assert_eq!(&*field.resolve(), "y");
+        assert!(matches!(&target.kind, ExprKind::Field { .. }));
     }
 }
