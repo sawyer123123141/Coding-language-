@@ -69,6 +69,12 @@ pub fn check_purity(program: &Program, fns: &HashMap<Symbol, &Fn>) -> Vec<Kestre
                         visit_expr(el, fns, cache, stack, impure);
                     }
                 }
+                ExprKind::StructLit { fields, .. } => {
+                    for (_, value) in fields {
+                        visit_expr(value, fns, cache, stack, impure);
+                    }
+                }
+                ExprKind::Field { target, .. } => visit_expr(target, fns, cache, stack, impure),
                 _ => {}
             }
         }
@@ -221,6 +227,12 @@ pub fn check_parallel_map(program: &Program, fns: &HashMap<Symbol, &Fn>) -> Vec<
                     visit_expr(el, fns, span, errors);
                 }
             }
+            ExprKind::StructLit { fields, .. } => {
+                for (_, value) in fields {
+                    visit_expr(value, fns, span, errors);
+                }
+            }
+            ExprKind::Field { target, .. } => visit_expr(target, fns, span, errors),
             _ => {}
         }
     }
@@ -267,4 +279,20 @@ pub fn check_parallel_map(program: &Program, fns: &HashMap<Symbol, &Fn>) -> Vec<
         }
     }
     errors
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer::lex;
+    use crate::parser::parse;
+
+    #[test]
+    fn a_pure_fn_constructing_and_reading_a_struct_is_still_pure() {
+        let program = parse(lex(
+            "struct Point { x: i64, y: i64 }\npure fn sum(p: Point) -> i64 { let q = Point { x: p.x, y: p.y }; return q.x + q.y; }",
+        ).unwrap()).unwrap();
+        let fns = crate::resolve::build_fn_table(&program);
+        assert!(check_purity(&program, &fns).is_empty());
+    }
 }

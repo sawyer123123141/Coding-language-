@@ -27,6 +27,12 @@ enum Kind {
     Bool,
     Array,
     Str,
+    /// Carries the struct's own name so a future field-type check could
+    /// use it -- not read for that purpose yet (see infer_expr's Field
+    /// arm: a field's own resulting kind is always Unknown, matching
+    /// the type checker's existing "declared types don't carry kind
+    /// info yet" limitation for every other declared type).
+    Struct(Symbol),
     Unknown,
 }
 
@@ -37,6 +43,7 @@ impl Kind {
             Kind::Bool => "bool",
             Kind::Array => "array",
             Kind::Str => "str",
+            Kind::Struct(_) => "struct",
             Kind::Unknown => "unknown",
         }
     }
@@ -175,14 +182,21 @@ pub fn check_types(program: &Program, fns: &HashMap<Symbol, &Fn>) -> Vec<Kestrel
                 }
                 Kind::Unknown // return kind isn't tracked yet
             }
-            ExprKind::StructLit { fields, .. } => {
-                for (_, expr) in fields {
-                    infer_expr(expr, locals, fns, errors);
+            ExprKind::StructLit { name, fields } => {
+                for (_, value) in fields {
+                    infer_expr(value, locals, fns, errors);
                 }
-                Kind::Unknown
+                Kind::Struct(*name)
             }
             ExprKind::Field { target, .. } => {
-                infer_expr(target, locals, fns, errors);
+                let k = infer_expr(target, locals, fns, errors);
+                if k != Kind::Unknown && !matches!(k, Kind::Struct(_)) {
+                    push(errors, target.span, format!("field access needs a struct, found {}", k.name()));
+                }
+                // The field's own kind isn't tracked -- resolve.rs
+                // already validated the field name exists (see Task 3);
+                // this checker only cares whether `.` was applied to
+                // something that could possibly be a struct at all.
                 Kind::Unknown
             }
         }
@@ -268,4 +282,31 @@ pub fn check_types(program: &Program, fns: &HashMap<Symbol, &Fn>) -> Vec<Kestrel
         }
     }
     errors
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer::lex;
+    use crate::parser::parse;
+
+    #[test]
+    fn a_struct_literal_infers_a_struct_kind() {
+        let program = parse(lex(
+            "struct Point { x: i64, y: i64 }\nfn main() { let p = Point { x: 1, y: 2 }; let n = p + 1; }",
+        ).unwrap()).unwrap();
+        let fns = crate::resolve::build_fn_table(&program);
+        let errors = check_types(&program, &fns);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("needs two numbers"));
+    }
+
+    #[test]
+    fn field_access_on_a_non_struct_value_is_a_type_error() {
+        let program = parse(lex("fn main() { let x = 5; let y = x.field; }").unwrap()).unwrap();
+        let fns = crate::resolve::build_fn_table(&program);
+        let errors = check_types(&program, &fns);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("field access needs a struct"));
+    }
 }
