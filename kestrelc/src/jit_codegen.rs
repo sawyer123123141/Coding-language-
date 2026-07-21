@@ -165,34 +165,47 @@ pub fn check_jit_supported(program: &Program) -> Result<(), KestrelcError> {
 fn check_stmts_supported(stmts: &[Stmt]) -> Result<(), KestrelcError> {
     for s in stmts {
         match s {
-            Stmt::Let { value, .. } | Stmt::Assign { value, .. } => check_expr_supported(value)?,
+            Stmt::Let { value, .. } | Stmt::Assign { value, .. } => check_expr_supported(value, false)?,
             Stmt::If { cond, then_block, else_block, .. } => {
-                check_expr_supported(cond)?;
+                check_expr_supported(cond, false)?;
                 check_stmts_supported(then_block)?;
                 if let Some(eb) = else_block {
                     check_stmts_supported(eb)?;
                 }
             }
             Stmt::While { cond, body, .. } => {
-                check_expr_supported(cond)?;
+                check_expr_supported(cond, false)?;
                 check_stmts_supported(body)?;
             }
+            // `direct_print_arg: true` -- gen_expr's ExprKind::Str arm
+            // only actually supports a string literal used directly as a
+            // print() argument (codegen.rs's AOT backend has the exact
+            // same restriction). Every other position is rejected below
+            // so an unsupported program is caught here, with a clear
+            // message and a graceful fallback to the AOT path, instead of
+            // reaching codegen and surfacing as an opaque internal error.
             Stmt::Print { args, .. } => {
                 for a in args {
-                    check_expr_supported(a)?;
+                    check_expr_supported(a, true)?;
                 }
             }
-            Stmt::Return { value: Some(v), .. } => check_expr_supported(v)?,
+            Stmt::Return { value: Some(v), .. } => check_expr_supported(v, false)?,
             Stmt::Return { value: None, .. } => {}
-            Stmt::ExprStmt { expr, .. } => check_expr_supported(expr)?,
+            Stmt::ExprStmt { expr, .. } => check_expr_supported(expr, false)?,
         }
     }
     Ok(())
 }
 
-fn check_expr_supported(e: &Expr) -> Result<(), KestrelcError> {
+fn check_expr_supported(e: &Expr, direct_print_arg: bool) -> Result<(), KestrelcError> {
     match &e.kind {
-        ExprKind::Num(_) | ExprKind::Bool(_) | ExprKind::Str(_) | ExprKind::Ident(_) => Ok(()),
+        ExprKind::Num(_) | ExprKind::Bool(_) | ExprKind::Ident(_) => Ok(()),
+        ExprKind::Str(_) if direct_print_arg => Ok(()),
+        ExprKind::Str(_) => Err(KestrelcError::new(
+            ErrorKind::Codegen,
+            "kestrelc watch: string literals are only supported as direct print() arguments so far".to_string(),
+            e.span,
+        )),
         ExprKind::ArrayLit(_) => Err(KestrelcError::new(
             ErrorKind::Codegen,
             "arrays aren't supported under `kestrelc watch` yet".to_string(),
@@ -208,10 +221,10 @@ fn check_expr_supported(e: &Expr) -> Result<(), KestrelcError> {
             "structs aren't supported under `kestrelc watch` yet".to_string(),
             e.span,
         )),
-        ExprKind::Unary { expr, .. } => check_expr_supported(expr),
+        ExprKind::Unary { expr, .. } => check_expr_supported(expr, false),
         ExprKind::Binop { left, right, .. } => {
-            check_expr_supported(left)?;
-            check_expr_supported(right)
+            check_expr_supported(left, false)?;
+            check_expr_supported(right, false)
         }
         ExprKind::Call { name, args } => {
             if &*name.resolve() == "parallel_map" {
@@ -222,7 +235,11 @@ fn check_expr_supported(e: &Expr) -> Result<(), KestrelcError> {
                 ));
             }
             for a in args {
-                check_expr_supported(a)?;
+                // A call argument is never a direct print() argument,
+                // even for a call nested inside print()'s own arg list
+                // (e.g. `print(f("x"))`) -- `f`'s argument is passed to
+                // `f`, not to printf.
+                check_expr_supported(a, false)?;
             }
             Ok(())
         }
@@ -457,6 +474,20 @@ impl JitCodegen {
         // afterward (e.g. a "finished in Xms" status line).
         unsafe {
             fflush(std::ptr::null_mut());
+        }
+        // A fresh JitCodegen/JITModule is built on every `kestrelc watch`
+        // save (see this struct's own doc comment), and JITModule's Drop
+        // impl does not release the executable/data memory it mmap'd --
+        // that requires this explicit call. Safe here specifically
+        // because `main_fn()` above has already returned: no JIT-compiled
+        // code from this module is still executing or could be called
+        // again (`self` is consumed by this function, so there's no way
+        // to reach `code_ptr` afterward), so freeing the module's memory
+        // now can't leave a dangling call in flight. Without this, a long
+        // watch session leaks the previous compile's executable pages on
+        // every single save.
+        unsafe {
+            self.module.free_memory();
         }
         Ok(result)
     }
@@ -939,6 +970,25 @@ mod tests {
              }\n",
         );
         assert_eq!(result, 1);
+    }
+
+    #[test]
+    fn a_string_literal_not_used_directly_in_print_is_rejected_with_a_clear_message() {
+        // Regression test: gen_expr's ExprKind::Str arm only actually
+        // supports a string literal as a direct print() argument (same
+        // restriction codegen.rs's AOT backend has), but check_jit_supported
+        // used to accept ExprKind::Str unconditionally -- so a program like
+        // this one passed the "supported" check and only failed once
+        // compile_program actually ran, surfacing as an opaque internal
+        // codegen error instead of the clear, specific message every other
+        // unsupported construct gets before codegen ever starts.
+        let program = parse(lex("fn main() { let s = \"hi\"; }").unwrap()).unwrap();
+        let err = check_jit_supported(&program).unwrap_err();
+        assert!(
+            err.message.contains("string literals are only supported as direct print() arguments"),
+            "got: {}",
+            err.message
+        );
     }
 
     #[test]

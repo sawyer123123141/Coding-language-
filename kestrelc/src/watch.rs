@@ -115,6 +115,19 @@ fn compile_and_run(exe: &Path, path: &str, stem: &str) {
             // like the old, slower path instead of silently varying.
             println!("kestrelc watch: {reason} -- using the normal compile path for this run");
         }
+        JitOutcome::InternalError(reason) => {
+            // A bug in the JIT backend itself (a Cranelift
+            // declare_function/define_function failure, or a caught
+            // panic in jit_codegen.rs), not a problem with the user's
+            // program -- codegen.rs's AOT backend doesn't share any of
+            // that JIT-specific machinery and would very plausibly still
+            // succeed on the same source. Falling back here (rather than
+            // giving up, as a plain CompileError does) means a bug in the
+            // new, narrowly-scoped JIT backend degrades this one save to
+            // the old, slower path instead of making `kestrelc watch`
+            // stop working entirely for an otherwise-valid program.
+            println!("kestrelc watch: JIT backend error ({reason}) -- using the normal compile path for this run");
+        }
     }
 
     let compile_status = Command::new(exe).arg(path).status();
@@ -146,15 +159,24 @@ enum JitOutcome {
     /// Compiled and ran successfully in-process; carries `main`'s
     /// returned i64.
     Ran(i64),
-    /// A real compile error (lex/parse/resolve/purity/typecheck, or a
-    /// JIT-codegen-internal failure) -- already printed to stderr by the
-    /// time this is returned. Not a reason to fall back to the AOT path,
-    /// since that path would hit the exact same front-end error.
+    /// A real front-end compile error (lex/parse/resolve/purity/
+    /// typecheck) -- already printed to stderr by the time this is
+    /// returned. Not a reason to fall back to the AOT path, since that
+    /// path runs the exact same front end and would hit the identical
+    /// error.
     CompileError,
     /// This program uses a construct JIT mode doesn't support yet (see
     /// jit_codegen::check_jit_supported) -- fall back to the AOT path,
     /// not a real failure.
     Unsupported(String),
+    /// The JIT backend itself failed (a Cranelift-level error from
+    /// JitCodegen::new/compile_program/finish_and_run, or a caught panic)
+    /// on a program that passed every front-end check *and*
+    /// check_jit_supported -- distinct from `CompileError` because this
+    /// says nothing about whether the user's program is valid; the AOT
+    /// path doesn't use any of this machinery and would plausibly still
+    /// succeed, so this falls back instead of giving up.
+    InternalError(String),
 }
 
 /// Runs the full front end (lex/parse/resolve/purity/typecheck -- the
@@ -236,14 +258,16 @@ fn try_jit(path: &str) -> JitOutcome {
 
     match jit_result {
         Ok(Ok(result)) => JitOutcome::Ran(result),
-        Ok(Err(e)) => {
-            report_error(&src, path, &e);
-            JitOutcome::CompileError
-        }
-        Err(panic_payload) => {
-            eprintln!("kestrelc: internal error in JIT backend: {}", panic_message(&panic_payload));
-            JitOutcome::CompileError
-        }
+        // A KestrelcError from JitCodegen::new/compile_program/
+        // finish_and_run is a JIT-backend-internal failure (Cranelift
+        // declare_function/define_function, ISA setup, etc.) -- the
+        // program itself already passed every front-end check and
+        // check_jit_supported above, so this isn't the user's program
+        // being invalid. InternalError (not CompileError) so
+        // compile_and_run falls back to the AOT path, which doesn't use
+        // any of this machinery and would plausibly still succeed.
+        Ok(Err(e)) => JitOutcome::InternalError(e.message),
+        Err(panic_payload) => JitOutcome::InternalError(panic_message(&panic_payload)),
     }
 }
 
