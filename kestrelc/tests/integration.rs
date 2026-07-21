@@ -1697,6 +1697,53 @@ fn an_array_param_fn_with_one_agreed_length_actually_gets_memoized() {
 }
 
 #[test]
+fn a_pure_fn_called_with_many_distinct_arguments_stays_bounded_and_fast() {
+    // Regression test for the memoization pathology found while
+    // building benchmarks/: a pure fn called with a different
+    // argument every time never gets a cache hit, but was still
+    // growing its memo table without bound -- 200,000,000 such calls
+    // used 3GB+ RAM and didn't finish within several minutes before
+    // this fix. This test uses a much smaller count (must complete
+    // quickly in CI) but the count is well past KESTRELC_MEMO_MAX_SLOT_CAP
+    // (65536), so it still exercises the capped-growth path, not just
+    // the normal small-cache case.
+    let scratch = scratch_dir("memo_many_distinct");
+    let src_path = scratch.join("prog.kes");
+    fs::write(
+        &src_path,
+        "pure fn f(x: i64) -> i64 { return (x * 2) % 1000000007; }\n\
+         fn main() {\n\
+         \x20   let i = 0;\n\
+         \x20   let total = 0;\n\
+         \x20   while (i < 500000) {\n\
+         \x20       total = (total + f(i)) % 1000000007;\n\
+         \x20       i = i + 1;\n\
+         \x20   }\n\
+         \x20   print(total);\n\
+         }\n",
+    )
+    .unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(out.status.success(), "compile failed:\n{}", String::from_utf8_lossy(&out.stderr));
+
+    let bin = scratch.join("prog");
+    let start = std::time::Instant::now();
+    let run = Command::new(&bin).output().expect("failed to run compiled binary");
+    let elapsed = start.elapsed();
+    assert!(run.status.success(), "compiled binary exited with failure");
+    // 500,000 calls, even all-miss, should complete in well under 5
+    // seconds once capped -- the pre-fix pathology made even 20,000,000
+    // calls take multiple seconds and grow into gigabytes of RAM, so
+    // this is a generous bound, not a tight performance assertion.
+    assert!(elapsed.as_secs() < 5, "took {elapsed:?} -- memo table growth may be unbounded again");
+}
+
+#[test]
 fn a_struct_local_can_be_constructed_and_its_fields_read() {
     let scratch = scratch_dir("struct_local");
     let src_path = scratch.join("prog.kes");

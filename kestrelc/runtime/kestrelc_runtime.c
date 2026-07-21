@@ -278,6 +278,23 @@ void kestrelc_profile_record(const char* path, long long path_len, const char* n
 #define KESTRELC_MEMO_MAX_ARGS 16
 #define KESTRELC_MEMO_INITIAL_CAP 16 // must be a power of 2
 #define KESTRELC_MEMO_INITIAL_SLOT_CAPACITY 16
+// Hard cap on a single memoized function's own table capacity (not the
+// outer per-function slot table -- see kestrelc_memo_ensure_slot_capacity
+// for that one). Without this, a function called with a different
+// argument on every call (e.g. applied over a loop counter) never gets
+// a cache hit but still pays to grow this table forever -- measured:
+// 200,000,000 such calls used 3GB+ RAM and didn't finish within several
+// minutes. Once a slot's table hits this cap, kestrelc_memo_store stops
+// growing it and stops inserting entirely -- new calls simply always
+// miss and recompute, same "always an optimization, never a
+// correctness dependency" posture every other cache in this file
+// already has. 65536 entries * sizeof(kestrelc_memo_entry) (~144 bytes)
+// is under 10MB per memoized function in the worst case -- a real,
+// bounded ceiling instead of unbounded growth. A function whose calls
+// genuinely repeat (the case memoization exists for) is essentially
+// never affected: 65536 distinct arguments is already a very unusual
+// amount of real cache diversity for a small pure function.
+#define KESTRELC_MEMO_MAX_SLOT_CAP 65536
 
 typedef struct {
     long long args[KESTRELC_MEMO_MAX_ARGS];
@@ -430,6 +447,14 @@ void kestrelc_memo_store(int slot, const long long* args, int nargs, long long r
     }
     if (!kestrelc_memo_ensure_slot_capacity(slot)) {
         return; // allocation failure growing the outer table; skip caching this entry
+    }
+    // Already at the hard cap: stop growing and stop inserting new
+    // entries entirely, rather than letting load factor climb toward
+    // 1.0 (which would degrade every future lookup's probe chain even
+    // for the already-cached entries). This function's cache is simply
+    // "full" from here on -- new calls always miss and recompute.
+    if (kestrelc_memo_caps[slot] >= KESTRELC_MEMO_MAX_SLOT_CAP) {
+        return;
     }
     // Grow before inserting whenever occupied would reach half of
     // capacity — keeps probe chains short (load factor <= 0.5) no
