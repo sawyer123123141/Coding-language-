@@ -497,13 +497,25 @@ impl Codegen {
         for f in &program.fns {
             if f.pure && &*f.name.resolve() != "main" && !pmap_callbacks.contains(&f.name) && !f.params.is_empty() {
                 let has_array_params = f.params.iter().any(|p| matches!(p.ty, Type::Array { .. }));
+                // Structs are not memo-eligible in v1 (see kestrel-DESIGN.md):
+                // a struct-typed parameter flattens into N i64 values at the
+                // call site (N = field count), but the memo cache-key buffer
+                // is sized by flattened_nargs, which the fold below computes
+                // as `Type::Named(_) => 1` regardless of field count. Rather
+                // than fix the count, exclude any function with a
+                // struct-typed parameter from memoization entirely — the
+                // same treatment already given to an array parameter whose
+                // length couldn't be proven.
+                let has_struct_params = f.params.iter().any(|p| matches!(&p.ty, Type::Named(name) if struct_table.contains_key(name)));
                 // Either every parameter is scalar (the original,
                 // simpler case), or every array parameter's length was
                 // proven the same at every call site in the program —
                 // see infer_array_param_lengths's doc comment for why
                 // that proof is required, not optional, before an array
                 // parameter can be memoized at all.
-                let array_lens = if has_array_params {
+                let array_lens = if has_struct_params {
+                    None
+                } else if has_array_params {
                     array_param_lens.get(&f.name).cloned()
                 } else {
                     Some(Vec::new())

@@ -1781,6 +1781,47 @@ fn a_struct_can_be_passed_as_a_function_parameter() {
     assert_eq!(native_stdout(&run), "25\n"); // 3*3 + 4*4 = 25
 }
 
+#[test]
+fn a_pure_fn_with_a_struct_param_gives_correct_results_across_multiple_calls() {
+    // Structs are excluded from memoization entirely (see codegen.rs's
+    // has_struct_params check in compile_program's Pass 1) because
+    // flattened_nargs's fold treats every Type::Named as 1 slot instead
+    // of counting the struct's actual field count. If that exclusion
+    // were missing or wrong, the memo cache-key buffer -- sized by the
+    // undercounted flattened_nargs -- would be too small for the N
+    // flattened field values a struct argument actually packs into it,
+    // corrupting the cache key. Calling the same pure fn twice with two
+    // *different* Point values in one program is the scenario that
+    // would surface that corruption (e.g. a wrong cached result being
+    // returned for the second call).
+    let scratch = scratch_dir("struct_param_memo_safety");
+    let src_path = scratch.join("prog.kes");
+    fs::write(
+        &src_path,
+        "struct Point { x: i64, y: i64 }\n\
+         pure fn dist_sq(p: Point) -> i64 { return p.x * p.x + p.y * p.y; }\n\
+         fn main() {\n\
+         \x20   let a = Point { x: 3, y: 4 };\n\
+         \x20   let b = Point { x: 5, y: 12 };\n\
+         \x20   print(dist_sq(a));\n\
+         \x20   print(dist_sq(b));\n\
+         }\n",
+    )
+    .unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(out.status.success(), "compile failed:\n{}", String::from_utf8_lossy(&out.stderr));
+
+    let bin = scratch.join("prog");
+    let run = Command::new(&bin).output().expect("failed to run compiled binary");
+    assert!(run.status.success(), "compiled binary exited with failure");
+    assert_eq!(native_stdout(&run), "25\n169\n"); // 3*3+4*4=25, 5*5+12*12=169
+}
+
 // ==================== per-expression spans ====================
 
 #[test]
