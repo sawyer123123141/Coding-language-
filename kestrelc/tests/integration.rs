@@ -2183,29 +2183,34 @@ fn a_small_array_literal_at_the_stack_heap_boundary_still_works() {
 #[test]
 fn a_large_array_literal_above_the_threshold_heap_allocates_instead_of_crashing() {
     // This is the direct regression test for the crash found in
-    // benchmarks/results.md: an array literal large enough to exceed
-    // Windows' default ~1MB thread stack reliably crashed with
-    // STATUS_STACK_OVERFLOW before this fix. 300,000 elements (2.4MB) is
-    // safely above the empirically-confirmed ~1.6MB threshold where this
-    // system's default stack actually overflows -- verified directly: the
-    // pre-fix codegen genuinely crashes with STATUS_STACK_OVERFLOW at this
-    // size (with a freshly-cleared compile cache -- kestrelc's on-disk
+    // benchmarks/results.md: a 500,000-element i64 array literal (4MB)
+    // reliably crashed with STATUS_STACK_OVERFLOW before this fix, on
+    // Windows' default ~1MB thread stack. This size was empirically
+    // measured to crash pre-fix with a wide margin (this system's default
+    // stack was observed to overflow around ~1.6MB, so 4MB gives ~2.5x
+    // headroom -- deliberately generous rather than sized to the exact
+    // observed threshold, since that threshold is a platform/linker
+    // default, not a guaranteed constant, and could vary across
+    // environments this test runs in). Verified directly with a
+    // freshly-cleared compile cache each time: pre-fix codegen genuinely
+    // crashes with STATUS_STACK_OVERFLOW at this size (kestrelc's on-disk
     // cache is keyed by source content only, not by which compiler binary
     // produced it, so swapping codegen.rs without clearing
     // $HOME/.cache/kestrelc or $USERPROFILE/.cache/kestrelc between
     // before/after runs silently serves a stale cached result instead of
-    // re-testing), and the post-fix codegen (FnCodegen::alloc_array_buffer)
-    // genuinely passes.
+    // re-testing -- this is exactly what produced a false "still crashes"
+    // report during this fix's own development), and the post-fix codegen
+    // (FnCodegen::alloc_array_buffer) genuinely passes.
     let scratch = scratch_dir("large_array_literal");
     let src_path = scratch.join("prog.kes");
     let mut src = String::from("fn main() {\n    let arr = [");
-    for i in 0..300_000u32 {
+    for i in 0..500_000u32 {
         if i > 0 {
             src.push_str(", ");
         }
         src.push_str(&i.to_string());
     }
-    src.push_str("];\n    let total = 0;\n    let i = 0;\n    while (i < 300000) {\n        total = total + arr[i];\n        i = i + 1;\n    }\n    print(total);\n}\n");
+    src.push_str("];\n    let total = 0;\n    let i = 0;\n    while (i < 500000) {\n        total = total + arr[i];\n        i = i + 1;\n    }\n    print(total);\n}\n");
     fs::write(&src_path, src).unwrap();
 
     let out = Command::new(kestrelc_bin())
@@ -2226,6 +2231,6 @@ fn a_large_array_literal_above_the_threshold_heap_allocates_instead_of_crashing(
         stdout,
         String::from_utf8_lossy(&run.stderr)
     );
-    // sum of 0..300000 = 300000*299999/2 = 44999850000
-    assert_eq!(stdout, "44999850000\n");
+    // sum of 0..500000 = 500000*499999/2 = 124999750000
+    assert_eq!(stdout, "124999750000\n");
 }
