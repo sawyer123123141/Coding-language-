@@ -67,15 +67,46 @@ already-loaded function address in the *current* process — which means
 these functions must be linked into `kestrelc.exe` itself, not just into
 its output.
 
-**Decision: compile `kestrelc_runtime.c` into a static library and link it
-into `kestrelc` itself** (via a `build.rs` using the `cc` crate — a build-
-time compile step, not a new runtime dependency), gated behind the
-existing `native` Cargo feature (same as everything else JIT-related).
-This makes every one of `kestrelc_runtime.c`'s functions resident in
-`kestrelc.exe`'s own address space, reachable via `extern "C"` declarations
-in Rust and registered with `JITBuilder::symbol()` by name, pointing at
-their real addresses. `printf` is already resolvable by name (libc is
-already linked into any Rust binary).
+**Original decision (attempted, then reverted after hitting a real
+toolchain blocker):** compile `kestrelc_runtime.c` into a static library
+and link it into `kestrelc` itself via a `build.rs` using the `cc` crate.
+This does not work on this machine: `rustc`'s host/default target here is
+`x86_64-pc-windows-msvc` (confirmed via `rustc -vV`/`rustup show`), so
+Rust's `cc` crate correctly tries to invoke MSVC's `cl.exe` to keep the
+compiled object ABI-compatible with the rest of the MSVC-built binary —
+but no MSVC Build Tools are installed (`VCINSTALLDIR`/`LIB`/`INCLUDE` all
+empty), so it fails outright (`Cannot open include file: 'pthread.h'`,
+since mingw's own `pthread.h` isn't on any path `cl.exe` would search, and
+`cl.exe` itself isn't present anyway). `kestrelc_runtime.c` has only ever
+been built with mingw `gcc`, invoked as a fully separate compile+link step
+for kestrelc's *output* programs (`main.rs`'s `link_and_report`) — mixing
+mingw-compiled objects into an MSVC-target Rust binary isn't a small
+build.rs fix; it's a real cross-toolchain ABI mismatch (different C
+runtime, no native pthreads on the MSVC side at all — Windows has no
+built-in pthreads; mingw's `pthread.h` support comes from bundling
+`winpthread`, which isn't something `cl.exe`/MSVC's linker would resolve).
+Fixing this for real means either installing MSVC Build Tools and
+reworking `kestrelc_runtime.c`'s threading to a Windows-native API instead
+of pthreads, or building `kestrelc.exe` itself for the
+`x86_64-pc-windows-gnu` target instead of MSVC (a project-wide toolchain
+change) — both real, standalone decisions, not something to make silently
+mid-feature without the user weighing in.
+
+**Actual decision for v1, once the scope below is narrowed:** don't link
+`kestrelc_runtime.c` into `kestrelc` at all yet. v1's supported feature
+set (see below) needs exactly one runtime function — `printf` — and
+`printf` is already resolvable with zero extra build machinery: it's part
+of the C runtime every Rust/Windows binary already links against by
+default (`ucrtbase.dll`), reachable via a plain `extern "C" { fn
+printf(...); }` FFI declaration directly in Rust, registered with
+`JITBuilder::symbol()` exactly like this session's spike already proved
+works for an arbitrary Rust function pointer. This sidesteps the
+toolchain blocker entirely for v1. Linking the rest of
+`kestrelc_runtime.c` in (`kestrelc_bounds_fail`, `kestrelc_parallel_map_i64`,
+memoization, profiling) is real, separate follow-up work, deferred
+alongside arrays/structs/`parallel_map`/memoization below — likely via
+reimplementing the small needed subset directly in Rust rather than
+solving the C-toolchain mismatch, when that work is actually taken on.
 
 ## v1 scope: what JIT mode actually supports
 
@@ -135,9 +166,8 @@ clearly for their review, not presented as an unchangeable final scope.
   Consumes the same fully-resolved, purity-checked, type-checked
   `Program` `codegen.rs` does; emits Cranelift IR via `cranelift-jit`'s
   `JITModule` instead of `cranelift-object`'s `ObjectModule`.
-- `kestrelc/build.rs` (new): compiles `runtime/kestrelc_runtime.c` into a
-  static library and links it into the `kestrelc` binary itself, gated
-  behind the `native` feature.
+- No `build.rs` for v1 (reverted — see "runtime imports" above). `printf`
+  is registered via a direct `extern "C"` Rust FFI declaration instead.
 - `kestrelc/src/watch.rs`: `compile_and_run`'s current
   `Command::new(exe).arg(path).status()` (self-invoke) +
   `Command::new(&bin_path).status()` (run the linked binary) pair is
