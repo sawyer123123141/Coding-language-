@@ -1,0 +1,9 @@
+fn main() {
+    let i = 0;
+    let total = 0;
+    while (i < 200000000) {
+        total = (total + i * i) % 1000000007;
+        i = i + 1;
+    }
+    print(total);
+}
