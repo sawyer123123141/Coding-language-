@@ -68,6 +68,8 @@ pub fn compile_to_wasm(program: &Program) -> Result<Vec<u8>, KestrelcError> {
     // of source order — same two-pass structure as the native backend.
     // An array-typed parameter expands to two i32 params (pointer, then
     // length), matching the native backend's two AbiParams per array.
+    let struct_table: HashMap<Symbol, &StructDecl> = program.structs.iter().map(|s| (s.name, s)).collect();
+
     let mut fn_indices: HashMap<Symbol, u32> = HashMap::new();
     let mut where_infos: HashMap<Symbol, WhereInfo> = HashMap::new();
     for (i, f) in program.fns.iter().enumerate() {
@@ -78,7 +80,14 @@ pub fn compile_to_wasm(program: &Program) -> Result<Vec<u8>, KestrelcError> {
                     params.push(ValType::I32); // pointer
                     params.push(ValType::I32); // length
                 }
-                Type::Named(_) => params.push(ValType::I64),
+                Type::Named(name) => match struct_table.get(name) {
+                    Some(decl) => {
+                        for _ in &decl.fields {
+                            params.push(ValType::I64);
+                        }
+                    }
+                    None => params.push(ValType::I64),
+                },
             }
         }
         types.ty().function(params, [ValType::I64]);
@@ -95,7 +104,7 @@ pub fn compile_to_wasm(program: &Program) -> Result<Vec<u8>, KestrelcError> {
 
     for f in &program.fns {
         let my_where = where_infos.get(&f.name);
-        let body = gen_fn(f, &fn_indices, &where_infos, my_where, &mut data_bytes, &mut str_offsets)?;
+        let body = gen_fn(f, &fn_indices, &where_infos, my_where, &struct_table, &mut data_bytes, &mut str_offsets)?;
         code.function(&body);
     }
 
@@ -145,6 +154,10 @@ pub fn compile_to_wasm(program: &Program) -> Result<Vec<u8>, KestrelcError> {
 enum SlotKind {
     Scalar,
     Array { literal_len: Option<u32> },
+    /// Scalar-fields-only struct — carries the struct's own name so
+    /// `collect_slots`'s caller (and gen_binding/gen_expr's Field arm)
+    /// can look up its declared field order via the struct table.
+    Struct(Symbol),
 }
 
 // A scalar gets one i64 local. An array gets two i32 locals — a base
@@ -157,6 +170,8 @@ enum SlotKind {
 enum VarLoc {
     Scalar(u32),
     Array { ptr: u32, len: u32, literal_len: Option<u32> },
+    /// One wasm local index per field, in declared field order.
+    Struct { name: Symbol, locals: Vec<u32> },
 }
 
 // `known_lens` is every literal-length array slot seen *so far* in this
@@ -178,14 +193,23 @@ fn slot_kind_for_let(value: &Expr, known_lens: &HashMap<Symbol, u32>) -> SlotKin
             };
             SlotKind::Array { literal_len: len }
         }
+        // Only a direct struct literal is recognized here -- `let p2 =
+        // p1;` aliasing an existing struct-typed local falls through to
+        // SlotKind::Scalar (wrong, but matches this exact same
+        // documented limitation for arrays just above: only a literal
+        // expression is classified, not an alias).
+        ExprKind::StructLit { name, .. } => SlotKind::Struct(*name),
         _ => SlotKind::Scalar,
     }
 }
 
-fn slot_kind_for_param(ty: &Type) -> SlotKind {
+fn slot_kind_for_param(ty: &Type, struct_table: &HashMap<Symbol, &StructDecl>) -> SlotKind {
     match ty {
         Type::Array { .. } => SlotKind::Array { literal_len: None },
-        Type::Named(_) => SlotKind::Scalar,
+        Type::Named(name) => match struct_table.get(name) {
+            Some(_) => SlotKind::Struct(*name),
+            None => SlotKind::Scalar,
+        },
     }
 }
 
@@ -223,12 +247,12 @@ fn walk_slots(
     }
 }
 
-fn collect_slots(f: &Fn) -> Vec<(Symbol, SlotKind)> {
+fn collect_slots(f: &Fn, struct_table: &HashMap<Symbol, &StructDecl>) -> Vec<(Symbol, SlotKind)> {
     let mut slots: Vec<(Symbol, SlotKind)> = Vec::new();
     let mut seen: HashMap<Symbol, ()> = HashMap::new();
     let mut known_lens: HashMap<Symbol, u32> = HashMap::new();
     for p in &f.params {
-        add_slot(p.name, slot_kind_for_param(&p.ty), &mut slots, &mut seen);
+        add_slot(p.name, slot_kind_for_param(&p.ty, struct_table), &mut slots, &mut seen);
     }
     walk_slots(&f.body, &mut slots, &mut seen, &mut known_lens);
     slots
@@ -239,10 +263,11 @@ fn gen_fn(
     fn_indices: &HashMap<Symbol, u32>,
     where_info: &HashMap<Symbol, WhereInfo>,
     my_where: Option<&WhereInfo>,
+    struct_table: &HashMap<Symbol, &StructDecl>,
     data_bytes: &mut Vec<u8>,
     str_offsets: &mut HashMap<String, (u32, u32)>,
 ) -> Result<Function, KestrelcError> {
-    let slot_kinds = collect_slots(f);
+    let slot_kinds = collect_slots(f, struct_table);
 
     // Assign WASM local indices: params first (their count/types must
     // match the function's declared signature exactly), then every other
@@ -272,6 +297,22 @@ fn gen_fn(
                 }
                 vars.insert(*name, VarLoc::Array { ptr, len, literal_len: *literal_len });
             }
+            SlotKind::Struct(struct_name) => {
+                let field_count = struct_table
+                    .get(struct_name)
+                    .map(|decl| decl.fields.len())
+                    .unwrap_or(0);
+                let mut locals = Vec::with_capacity(field_count);
+                for _ in 0..field_count {
+                    let idx = next_local;
+                    next_local += 1;
+                    if !is_param {
+                        extra_locals.push((1, ValType::I64));
+                    }
+                    locals.push(idx);
+                }
+                vars.insert(*name, VarLoc::Struct { name: *struct_name, locals });
+            }
         }
     }
 
@@ -288,6 +329,7 @@ fn gen_fn(
         fn_indices,
         where_info,
         my_where,
+        struct_table,
         data_bytes,
         str_offsets,
         scratch,
@@ -312,6 +354,7 @@ struct FnWasm<'a> {
     // identical native-backend logic for the full rationale.
     where_info: &'a HashMap<Symbol, WhereInfo>,
     my_where: Option<&'a WhereInfo>,
+    struct_table: &'a HashMap<Symbol, &'a StructDecl>,
     data_bytes: &'a mut Vec<u8>,
     str_offsets: &'a mut HashMap<String, (u32, u32)>,
     scratch: u32,
@@ -453,8 +496,26 @@ impl<'a> FnWasm<'a> {
                 self.func.instructions().local_set(len);
                 Ok(())
             }
-            (VarLoc::Array { .. }, _) => Err(self.err(format!(
-                "kestrelc: '{name}' is an array variable and can only be (re)bound to an array literal so far"
+            (VarLoc::Struct { name: slot_struct_name, locals }, ExprKind::StructLit { name: lit_name, fields }) => {
+                debug_assert_eq!(slot_struct_name, lit_name, "collect_slots and this literal disagree on struct type — a resolve.rs bug, not a user error");
+                let locals = locals.clone();
+                let decl_fields: Vec<Symbol> = self
+                    .struct_table
+                    .get(lit_name)
+                    .map(|decl| decl.fields.iter().map(|f| f.name).collect())
+                    .unwrap_or_default();
+                for (field_name, target_local) in decl_fields.iter().zip(locals.iter()) {
+                    let (_, value_expr) = fields
+                        .iter()
+                        .find(|(n, _)| n == field_name)
+                        .expect("resolve.rs already proved every declared field is present in this literal");
+                    self.gen_expr(value_expr)?;
+                    self.func.instructions().local_set(*target_local);
+                }
+                Ok(())
+            }
+            (VarLoc::Array { .. } | VarLoc::Struct { .. }, _) => Err(self.err(format!(
+                "kestrelc: '{name}' can't be (re)bound to this kind of expression so far"
             ))),
         }
     }
@@ -587,7 +648,7 @@ impl<'a> FnWasm<'a> {
         };
         match self.vars.get(name) {
             Some(VarLoc::Array { ptr, len, .. }) => Ok((*ptr, *len)),
-            Some(VarLoc::Scalar(_)) => Err(self.err(format!("'{name}' is not an array"))),
+            Some(VarLoc::Scalar(_)) | Some(VarLoc::Struct { .. }) => Err(self.err(format!("'{name}' is not an array"))),
             None => Err(self.err(format!("Unknown identifier '{name}'"))),
         }
     }
@@ -612,6 +673,9 @@ impl<'a> FnWasm<'a> {
                 }
                 Some(VarLoc::Array { .. }) => Err(self.err(format!(
                     "'{name}' is an array — it can only be indexed (arr[i]) or passed to a function, not used as a value directly"
+                ))),
+                Some(VarLoc::Struct { .. }) => Err(self.err(format!(
+                    "'{name}' is a struct — access a field (p.field) or pass it to a function, not used as a value directly"
                 ))),
                 None => Err(self.err(format!("Unknown identifier '{name}'"))),
             },
@@ -790,9 +854,25 @@ impl<'a> FnWasm<'a> {
                 }
 
                 for a in args {
+                    // An array argument expands to two locals (pointer,
+                    // length); a struct argument expands to one local
+                    // per field, in declared field order — both match
+                    // the function-declaration pass's own ValType
+                    // expansion for the corresponding parameter type.
+                    let struct_field_locals: Option<Vec<u32>> = match &a.kind {
+                        ExprKind::Ident(n) => match self.vars.get(n) {
+                            Some(VarLoc::Struct { locals, .. }) => Some(locals.clone()),
+                            _ => None,
+                        },
+                        _ => None,
+                    };
                     let is_array_ident =
                         matches!(&a.kind, ExprKind::Ident(n) if matches!(self.vars.get(n), Some(VarLoc::Array { .. })));
-                    if is_array_ident {
+                    if let Some(field_locals) = struct_field_locals {
+                        for l in field_locals {
+                            self.func.instructions().local_get(l);
+                        }
+                    } else if is_array_ident {
                         let (ptr, len) = self.resolve_array(a)?;
                         self.func.instructions().local_get(ptr);
                         self.func.instructions().local_get(len);
@@ -806,8 +886,24 @@ impl<'a> FnWasm<'a> {
             ExprKind::StructLit { .. } => {
                 Err(self.err("struct literals are not yet supported in kestrelc".into()))
             }
-            ExprKind::Field { .. } => {
-                Err(self.err("field access is not yet supported in kestrelc".into()))
+            ExprKind::Field { target, field } => {
+                let ExprKind::Ident(target_name) = &target.kind else {
+                    return Err(self.err(
+                        "kestrelc only supports field access on a plain struct variable so far".into(),
+                    ));
+                };
+                match self.vars.get(target_name) {
+                    Some(VarLoc::Struct { name: struct_name, locals }) => {
+                        let field_idx = self
+                            .struct_table
+                            .get(struct_name)
+                            .and_then(|decl| decl.fields.iter().position(|f| f.name == *field))
+                            .expect("resolve.rs already proved this field exists on this struct");
+                        self.func.instructions().local_get(locals[field_idx]);
+                        Ok(())
+                    }
+                    _ => Err(self.err(format!("'{target_name}' is not a struct"))),
+                }
             }
         }
     }

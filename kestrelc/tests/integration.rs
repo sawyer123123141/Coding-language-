@@ -1822,6 +1822,65 @@ fn a_pure_fn_with_a_struct_param_gives_correct_results_across_multiple_calls() {
     assert_eq!(native_stdout(&run), "25\n169\n"); // 3*3+4*4=25, 5*5+12*12=169
 }
 
+#[test]
+fn wasm_backend_struct_local_can_be_constructed_and_its_fields_read() {
+    let scratch = scratch_dir("wasm_struct_local");
+    let src_path = scratch.join("prog.kes");
+    fs::write(
+        &src_path,
+        "struct Point { x: i64, y: i64 }\n\
+         fn main() {\n\
+         \x20   let p = Point { x: 3, y: 4 };\n\
+         \x20   print(p.x, p.y);\n\
+         }\n",
+    )
+    .unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg("--wasm")
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(out.status.success(), "compile failed:\n{}", String::from_utf8_lossy(&out.stderr));
+
+    let wasm_path = scratch.join("prog.wasm");
+    assert!(wasm_path.exists(), "expected prog.wasm to be written");
+    let run = run_wasm_via_node(&wasm_path);
+    assert!(run.status.success(), "node failed to run the wasm module:\n{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "3 4\n");
+}
+
+#[test]
+fn wasm_backend_struct_can_be_passed_as_a_function_parameter() {
+    let scratch = scratch_dir("wasm_struct_param");
+    let src_path = scratch.join("prog.kes");
+    fs::write(
+        &src_path,
+        "struct Point { x: i64, y: i64 }\n\
+         pure fn dist_sq(p: Point) -> i64 { return p.x * p.x + p.y * p.y; }\n\
+         fn main() {\n\
+         \x20   let p = Point { x: 3, y: 4 };\n\
+         \x20   print(dist_sq(p));\n\
+         }\n",
+    )
+    .unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg("--wasm")
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(out.status.success(), "compile failed:\n{}", String::from_utf8_lossy(&out.stderr));
+
+    let wasm_path = scratch.join("prog.wasm");
+    assert!(wasm_path.exists(), "expected prog.wasm to be written");
+    let run = run_wasm_via_node(&wasm_path);
+    assert!(run.status.success(), "node failed to run the wasm module:\n{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "25\n");
+}
+
 // ==================== per-expression spans ====================
 
 #[test]
