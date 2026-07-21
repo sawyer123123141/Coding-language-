@@ -104,8 +104,9 @@ fn main() -> ExitCode {
     };
 
     let fns = resolve::build_fn_table(&program);
+    let structs = resolve::build_struct_table(&program);
 
-    let resolve_errors = resolve::resolve(&program, &fns);
+    let resolve_errors = resolve::resolve(&program, &fns, &structs);
     if !resolve_errors.is_empty() {
         report_many(&src, &path, &resolve_errors);
         return ExitCode::FAILURE;

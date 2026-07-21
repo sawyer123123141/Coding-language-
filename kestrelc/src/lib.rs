@@ -57,8 +57,9 @@ pub fn compile_to_wasm_bytes(src: &str) -> Result<Vec<u8>, String> {
         .map_err(|e| format_diagnostic(src, "<input>", e.span.line, e.span.col, e.span.len, &e.message))?;
 
     let fns = resolve::build_fn_table(&program);
+    let structs = resolve::build_struct_table(&program);
 
-    let resolve_errors = resolve::resolve(&program, &fns);
+    let resolve_errors = resolve::resolve(&program, &fns, &structs);
     if !resolve_errors.is_empty() {
         let msgs: Vec<String> = resolve_errors
             .iter()
