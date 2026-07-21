@@ -90,13 +90,17 @@ pub fn run(path: &str) -> ExitCode {
 }
 
 fn compile_and_run(exe: &Path, path: &str, stem: &str) {
+    let started = std::time::Instant::now();
     print!("\x1B[2J\x1B[1;1H"); // clear screen, move cursor to top-left
     println!("kestrelc watch: {path}");
 
     let compile_status = Command::new(exe).arg(path).status();
     match compile_status {
         Ok(status) if status.success() => {}
-        Ok(_) => return, // compiler already printed its own error
+        Ok(_) => {
+            println!("--- failed in {:.2?} ---", started.elapsed());
+            return; // compiler already printed its own error
+        }
         Err(e) => {
             eprintln!("kestrelc: failed to invoke self ('{}'): {e}", exe.display());
             return;
@@ -110,7 +114,7 @@ fn compile_and_run(exe: &Path, path: &str, stem: &str) {
     let bin_path = format!("./{stem}");
     println!("--- running {bin_path} ---");
     match Command::new(&bin_path).status() {
-        Ok(status) => println!("--- exited with {status} ---"),
+        Ok(status) => println!("--- exited with {status} (finished in {:.2?}) ---", started.elapsed()),
         Err(e) => eprintln!("kestrelc: failed to run '{bin_path}': {e}"),
     }
 }

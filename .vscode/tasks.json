@@ -1,0 +1,13 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "kestrelc watch",
+      "type": "shell",
+      "command": "${workspaceFolder}/kestrelc/target/release/kestrelc.exe",
+      "args": ["watch", "${file}"],
+      "isBackground": true,
+      "problemMatcher": []
+    }
+  ]
+}
