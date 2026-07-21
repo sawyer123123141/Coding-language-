@@ -412,6 +412,24 @@ call sites legitimately using different lengths on the *same* memoized
 function — would need a real runtime-length copy loop in Cranelift IR;
 deliberately not attempted (see `kestrel-DESIGN.md`).
 
+## Structs
+
+```
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+fn main() {
+    let p = Point { x: 1, y: 2 };
+    print(p.x, p.y);
+}
+```
+
+Scalar-only fields — no arrays, no nested structs — flatten to `N` `i64` values everywhere at runtime, with no memory allocation, matching the array (pointer, length) trick but without the pointer. Three explicit v1 limits: immutable (construct once, read fields, no field assignment), scalar-only, and no function return values (a struct can be a local variable or a function parameter, not a return type). This scope is a deliberate choice: `--wasm` already covers browser/mobile deployment, so the native backend optimizes for what the native backend is actually for — dense, local CPU work — and structs as return values would complicate calling conventions without solving a problem the native backend has.
+
+See `docs/superpowers/specs/2026-07-20-structs-design.md` for the full design rationale.
+
 ## Benchmarks
 
 Measured on this machine, comparing `kestrelc`-compiled binaries against

@@ -273,9 +273,28 @@ primary    := NUMBER | STRING | 'true' | 'false' | IDENT | '(' expr ')' | arrayL
 arrayLit   := '[' args ']'
 ```
 
+## Structs
+
+```
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+fn main() {
+    let p = Point { x: 1, y: 2 };
+    print(p.x, p.y);
+}
+```
+
+`kestrelc` only, as of this writing (`kestrel.js`'s `run()`/`runFast()`
+are frozen — see `kestrel-DESIGN.md`). Immutable: construct once, read
+fields, no field assignment. Scalar fields only — no arrays, no nested
+structs. A struct can be a local variable or a function parameter, not
+a function return value.
+
 ## Known gaps (not bugs — just not built yet)
 
-- No structs/records, no user-defined types beyond arrays.
 - No string operations beyond literals (no concatenation operator,
   no indexing into strings).
 - No `for`, `break`, `continue`, `match`.

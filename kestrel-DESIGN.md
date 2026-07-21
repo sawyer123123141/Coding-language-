@@ -672,6 +672,20 @@ different input, not just missing a cache hit. See
 and `an_array_param_fn_with_one_agreed_length_actually_gets_memoized`
 (a real timing proof, not just a correctness one).
 
+**Structs, shipped (`kestrelc` only):** `kestrelc` now supports user-defined
+structs (records) — immutable aggregates of scalar fields that flatten to
+multiple `i64` values everywhere at runtime, with no memory allocation, matching
+the array (pointer, length) representation but without the indirection. Three
+explicit v1 limits: immutable (construct once, read fields, no field assignment),
+scalar-only fields (no arrays, no nested structs), and no struct-returning
+functions (a struct can be a local variable or a function parameter, not a
+return type). This scope is a deliberate choice: `--wasm` already covers
+browser/mobile deployment, so the native backend optimizes for what it's
+actually for — dense, local CPU work — and returning structs would complicate
+calling conventions without solving a problem the native backend has. See
+`docs/superpowers/specs/2026-07-20-structs-design.md` for the full design
+rationale.
+
 Not yet implemented (future work, roughly in priority order):
 1. `parallel_map`-chain fusion's two `let`s no longer need to be
    textually adjacent (see the loop fusion section above) — still open:
@@ -706,9 +720,10 @@ Not yet implemented (future work, roughly in priority order):
    real (native backend only; see idea #1 above and `kestrelc/src/
    profile.rs` / `inline.rs`), but branch-taken/data-shape profiling and
    general pre-specialization from it are not
-4. Layout polymorphism — blocked on structs/records existing at all
-   (Kestrel doesn't have them yet — see `docs/SYNTAX.md`), a
-   prerequisite bigger than the layout-choice optimization itself
+4. Layout polymorphism — structs now exist (kestrelc only; see above),
+   but only the prerequisite, not the optimization itself. Also still
+   open: mutable struct fields, nested structs, array-typed fields,
+   struct-returning functions.
 5. A more general proof system beyond simple bounds checks
 6. SIMD, then (much further out) a GPU backend — both extensions of
    idea #5's CPU-parallelism work, which now has a first real version
