@@ -10,13 +10,23 @@ use crate::span::Span;
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
+    /// True while parsing a `where` clause's expression, directly at the
+    /// top level (not inside `(...)`/`[...]`/call args). Suppresses
+    /// `IDENT {` being read as a struct literal, since the `{` right
+    /// after a where clause is the function body's opening brace, not a
+    /// literal -- e.g. `fn f(...) -> i32 where i < N { ... }` must not
+    /// parse `N { ... }` as a struct literal swallowing the whole body.
+    /// Cleared inside any delimited sub-expression, where the ambiguity
+    /// doesn't apply (a matching close delimiter still disambiguates
+    /// the ending), and restored after leaving it.
+    suppress_struct_lit: bool,
 }
 
 type PResult<T> = Result<T, KestrelcError>;
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, pos: 0 }
+        Parser { tokens, pos: 0, suppress_struct_lit: false }
     }
 
     fn peek(&self) -> &Token {
@@ -156,6 +166,8 @@ impl Parser {
     }
 
     fn parse_args(&mut self) -> PResult<Vec<Expr>> {
+        let saved = self.suppress_struct_lit;
+        self.suppress_struct_lit = false;
         let mut args = Vec::new();
         if !self.at(&Tok::RParen) {
             loop {
@@ -167,6 +179,7 @@ impl Parser {
                 }
             }
         }
+        self.suppress_struct_lit = saved;
         Ok(args)
     }
 
@@ -192,6 +205,8 @@ impl Parser {
             }
             Tok::LBracket => {
                 self.advance();
+                let saved = self.suppress_struct_lit;
+                self.suppress_struct_lit = false;
                 let mut elems = Vec::new();
                 if !self.at(&Tok::RBracket) {
                     loop {
@@ -203,18 +218,22 @@ impl Parser {
                         }
                     }
                 }
+                self.suppress_struct_lit = saved;
                 self.expect(Tok::RBracket)?;
                 Ok(Expr::new(ExprKind::ArrayLit(elems), span))
             }
             Tok::LParen => {
                 self.advance();
+                let saved = self.suppress_struct_lit;
+                self.suppress_struct_lit = false;
                 let e = self.parse_expr()?;
+                self.suppress_struct_lit = saved;
                 self.expect(Tok::RParen)?;
                 Ok(e)
             }
             Tok::Ident(name) => {
                 self.advance();
-                if self.at(&Tok::LBrace) {
+                if self.at(&Tok::LBrace) && !self.suppress_struct_lit {
                     return self.parse_struct_lit(name, span);
                 }
                 Ok(Expr::new(ExprKind::Ident(name), span))
@@ -432,7 +451,11 @@ impl Parser {
         };
         let where_clause = if self.at(&Tok::Where) {
             self.advance();
-            Some(self.parse_expr()?)
+            let saved = self.suppress_struct_lit;
+            self.suppress_struct_lit = true;
+            let clause = self.parse_expr()?;
+            self.suppress_struct_lit = saved;
+            Some(clause)
         } else {
             None
         };
@@ -449,6 +472,17 @@ pub fn parse(tokens: Vec<Token>) -> PResult<Program> {
 mod tests {
     use super::*;
     use crate::lexer::lex;
+
+    #[test]
+    fn a_where_clause_ending_in_a_bare_identifier_does_not_swallow_the_function_body_as_a_struct_literal() {
+        // Regression test: `where i < N {` must parse `N` as the where
+        // clause's own trailing identifier, not as `N { ... }`, a struct
+        // literal that would swallow the entire function body up to the
+        // first colon-less token and fail there instead.
+        let src = "fn get_safe(arr: [i32; N], i: usize) -> i32 where i < N {\n    return arr[i];\n}\n";
+        let program = parse(lex(src).unwrap()).unwrap();
+        assert_eq!(program.fns[0].body.len(), 1);
+    }
 
     #[test]
     fn missing_semicolon_error_points_at_the_next_token() {
