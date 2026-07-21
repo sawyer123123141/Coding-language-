@@ -22,6 +22,7 @@ use crate::error::KestrelcError;
 use crate::{format_diagnostic, jit_codegen, lexer, parser, purity, resolve, typecheck};
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use std::fs;
+use std::io::Write;
 use std::path::Path;
 use std::process::{Command, ExitCode};
 use std::sync::mpsc::channel;
@@ -96,10 +97,28 @@ fn compile_and_run(exe: &Path, path: &str, stem: &str) {
     let started = std::time::Instant::now();
     print!("\x1B[2J\x1B[1;1H"); // clear screen, move cursor to top-left
     println!("kestrelc watch: {path}");
+    // Rust's own buffered stdout and the C runtime's buffered stdout
+    // (used by JIT-compiled code's printf calls, see jit_codegen.rs's
+    // module doc comment) are two independent buffers over the same fd.
+    // finish_and_run's fflush(NULL) only ever flushes the C side; without
+    // this explicit flush of the Rust side first, this header line could
+    // still be sitting in Rust's buffer when JIT-executed print() output
+    // reaches the terminal/pipe, making them appear out of order.
+    let _ = std::io::stdout().flush();
 
     match try_jit(path) {
         JitOutcome::Ran(result) => {
             println!("--- exited with code {result} (finished in {:.2?}, in-process) ---", started.elapsed());
+            // A JIT-successful run never reaches the AOT compile+link
+            // step below, so no ./{stem} binary is written or refreshed
+            // on this save -- unlike every save before this feature
+            // existed. Doing the link anyway on every JIT-eligible save
+            // would defeat the whole point of skipping it, so instead:
+            // if an old one is still sitting on disk from an earlier AOT
+            // save, say so, rather than letting it look silently current.
+            if Path::new(&format!("./{stem}")).exists() {
+                println!("kestrelc watch: note: ./{stem} on disk is from an earlier run, not this one (in-process runs don't write a binary)");
+            }
             return;
         }
         JitOutcome::CompileError => {
@@ -150,7 +169,18 @@ fn compile_and_run(exe: &Path, path: &str, stem: &str) {
     let bin_path = format!("./{stem}");
     println!("--- running {bin_path} ---");
     match Command::new(&bin_path).status() {
-        Ok(status) => println!("--- exited with {status} (finished in {:.2?}) ---", started.elapsed()),
+        // Matches the JIT-success line's "exited with code N" wording
+        // (see above) rather than ExitStatus's own Display -- previously
+        // these were two different text shapes ("exited with code {i64}"
+        // vs "exited with {status}", e.g. "exit code: 0") for the same
+        // logical event, depending on which path a given save happened
+        // to take. status.code() is None only if the process was killed
+        // by a signal (no numeric exit code to show), where the full
+        // Display is the only thing that actually says anything useful.
+        Ok(status) => match status.code() {
+            Some(code) => println!("--- exited with code {code} (finished in {:.2?}) ---", started.elapsed()),
+            None => println!("--- exited with {status} (finished in {:.2?}) ---", started.elapsed()),
+        },
         Err(e) => eprintln!("kestrelc: failed to run '{bin_path}': {e}"),
     }
 }

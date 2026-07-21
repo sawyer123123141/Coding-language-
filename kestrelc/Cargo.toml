@@ -29,7 +29,6 @@ native = [
     "dep:cranelift-object",
     "dep:cranelift-jit",
     "dep:cranelift-native",
-    "dep:target-lexicon",
     "dep:notify",
 ]
 
@@ -43,7 +42,6 @@ cranelift-object = { version = "0.116", optional = true }
 # reason (irrelevant to kestrelc-web's wasm32 build).
 cranelift-jit = { version = "0.116", optional = true }
 cranelift-native = { version = "0.116", optional = true }
-target-lexicon = { version = "0.12", optional = true }
 wasm-encoder = "0.253.0"
 # `kestrelc watch` only -- file-system watching for the native-only watch
 # subcommand. Gated behind "native" like the Cranelift deps above, for
