@@ -114,17 +114,24 @@ mod tests {
     #[test]
     fn a_burst_of_events_coalesces_into_one_debounced_signal() {
         let (tx, rx) = channel::<()>();
+        // Keep a clone alive past the burst so the channel doesn't
+        // disconnect right around the same time the debounce window
+        // closes -- that race (sender dropping at ~25ms vs. a 50ms
+        // debounce timeout) would make drain_debounced legitimately
+        // observe Disconnected instead of Timeout, which isn't what
+        // this assertion means to exercise.
+        let tx_keepalive = tx.clone();
         thread::spawn(move || {
             for _ in 0..5 {
                 tx.send(()).unwrap();
                 thread::sleep(Duration::from_millis(5));
             }
-            // sender drops here; no more events after the burst
+            // this clone drops here; tx_keepalive still holds the channel open
         });
         // First call should return true once the burst goes quiet.
         assert!(drain_debounced(&rx, Duration::from_millis(50)));
-        // The channel is now empty and disconnected (sender dropped) --
-        // the next call should observe disconnection, not hang.
+        // Now disconnect for real, well after the debounce window above.
+        drop(tx_keepalive);
         assert!(!drain_debounced(&rx, Duration::from_millis(50)));
     }
 
