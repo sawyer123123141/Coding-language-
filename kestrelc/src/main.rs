@@ -94,8 +94,17 @@ fn main() -> ExitCode {
             println!("kestrelc: wrote ./{out_path} (cached)");
             return ExitCode::SUCCESS;
         }
+    } else if let Some(cached_bin) = cache::read(&native_artifact_key, "bin") {
+        // The fast path: not just the object file but the *linked*
+        // binary is cached, so this skips `cc` entirely -- on this
+        // system that's ~1s of fixed linker-invocation overhead that
+        // was previously paid on every single cached compile, even
+        // though nothing about the output could have changed. Same
+        // artifact key as the object-file cache below, so a hit here
+        // only ever happens for byte-identical source + profile state.
+        return write_and_report_binary(&cached_bin, &stem, true);
     } else if let Some(cached) = cache::read(&native_artifact_key, "o") {
-        return link_and_report(&cached, &stem, true);
+        return link_and_report(&cached, &stem, true, &native_artifact_key);
     }
 
     let tokens = match lexer::lex(&src) {
@@ -189,7 +198,37 @@ fn main() -> ExitCode {
     }
     let object_bytes = cg.finish();
     cache::write(&native_artifact_key, "o", &object_bytes);
-    link_and_report(&object_bytes, &stem, false)
+    link_and_report(&object_bytes, &stem, false, &native_artifact_key)
+}
+
+/// Writes previously-linked binary bytes (from the `"bin"` cache) straight
+/// to `<stem>`, skipping `cc` entirely -- the fast path for a genuine
+/// cache hit. On Unix the executable bit isn't preserved by a plain
+/// `fs::write`, so it's set explicitly; on Windows there's no equivalent
+/// permission bit to worry about.
+fn write_and_report_binary(bin_bytes: &[u8], stem: &str, from_cache: bool) -> ExitCode {
+    let out_path = stem.to_string();
+    // Match cc's own naming exactly (see link_and_report's comment on
+    // actual_out_path) so the restored file is findable the same way a
+    // freshly linked one is -- both by a shell typing "./stem" and by
+    // Command::new("./stem") (Windows resolves the .exe automatically
+    // for process launch either way; this is about where the bytes
+    // actually land on disk).
+    let actual_out_path = if cfg!(windows) { format!("{out_path}.exe") } else { out_path.clone() };
+    if let Err(e) = fs::write(&actual_out_path, bin_bytes) {
+        eprintln!("kestrelc: failed to write '{actual_out_path}': {e}");
+        return ExitCode::FAILURE;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(e) = fs::set_permissions(&actual_out_path, fs::Permissions::from_mode(0o755)) {
+            eprintln!("kestrelc: failed to set '{actual_out_path}' executable: {e}");
+            return ExitCode::FAILURE;
+        }
+    }
+    println!("kestrelc: wrote ./{out_path}{}", if from_cache { " (cached)" } else { "" });
+    ExitCode::SUCCESS
 }
 
 // Embedded at compile time so kestrelc is still a single self-contained
@@ -202,14 +241,21 @@ const RUNTIME_C_SRC: &str = include_str!("../runtime/kestrelc_runtime.c");
 /// Writes `object_bytes` to `<stem>.o` and links it, together with
 /// kestrelc's small C runtime shim (real thread-parallel `parallel_map`
 /// support — see `runtime/kestrelc_runtime.c`), into `<stem>` with the
-/// system `cc`. Shared by the normal compile path and the cache-hit path
-/// (which skips straight here with a previously-cached object file) —
-/// linking is cheap enough, and simple enough as "just invoke the system
-/// linker," that it isn't itself worth caching separately from the
-/// object file. The runtime shim is linked in unconditionally, whether
-/// or not the program actually uses parallel_map — it's a handful of
-/// instructions otherwise, not worth a second linker pass to avoid.
-fn link_and_report(object_bytes: &[u8], stem: &str, from_cache: bool) -> ExitCode {
+/// system `cc`. Shared by the normal compile path and the object-cache-hit
+/// path (which skips straight here with a previously-cached object file
+/// but no cached *linked binary* yet — see `write_and_report_binary` for
+/// the faster path once one exists). The runtime shim is linked in
+/// unconditionally, whether or not the program actually uses
+/// parallel_map — it's a handful of instructions otherwise, not worth a
+/// second linker pass to avoid.
+///
+/// On a successful link, also caches the resulting binary under
+/// `artifact_key` (the `"bin"` extension) — `cc` invocation turned out to
+/// be a fixed ~1s cost on Windows even for a trivial program, paid again
+/// on every cache "hit" that only skipped codegen, not linking. Caching
+/// the linked bytes lets a later invocation with the same artifact key
+/// skip straight to `write_and_report_binary`, avoiding `cc` entirely.
+fn link_and_report(object_bytes: &[u8], stem: &str, from_cache: bool, artifact_key: &str) -> ExitCode {
     let obj_path = format!("{stem}.o");
     let out_path = stem.to_string();
     let runtime_path = "kestrelc_runtime.c";
@@ -233,6 +279,17 @@ fn link_and_report(object_bytes: &[u8], stem: &str, from_cache: bool) -> ExitCod
 
     match link_status {
         Ok(status) if status.success() => {
+            // mingw's cc always appends .exe to its -o target on Windows,
+            // regardless of the extension-less name it was given -- the
+            // shell (and Windows' own CreateProcess) transparently
+            // resolves "./stem" to "./stem.exe" when *running* a
+            // program, but a literal fs::read of the bare name finds
+            // nothing, since that resolution is a process-launch
+            // convenience, not a filesystem one.
+            let actual_out_path = if cfg!(windows) { format!("{out_path}.exe") } else { out_path.clone() };
+            if let Ok(bin_bytes) = fs::read(&actual_out_path) {
+                cache::write(artifact_key, "bin", &bin_bytes);
+            }
             println!("kestrelc: wrote ./{out_path}{}", if from_cache { " (cached)" } else { "" });
             ExitCode::SUCCESS
         }
