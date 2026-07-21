@@ -59,6 +59,7 @@ pub fn resolve(
     let mut errors = Vec::new();
     check_duplicate_fns(program, &mut errors);
     check_struct_decls(program, structs, &mut errors);
+    check_no_struct_returning_fns(program, structs, &mut errors);
     for fn_ in &program.fns {
         resolve_fn(fn_, fns, structs, &mut errors);
     }
@@ -99,6 +100,27 @@ fn check_struct_decls(program: &Program, structs: &HashMap<Symbol, &StructDecl>,
                     ErrorKind::Resolve,
                     format!("'{}.{}' must be a scalar field — array fields and nested structs aren't supported yet", decl.name, field.name),
                     decl.span,
+                ));
+            }
+        }
+    }
+}
+
+/// Enforces the v1 scope limit that no function may return a struct
+/// value (design doc). Without this, a `fn make() -> Point { ... }`
+/// isn't caught here at all -- it fails later, but only because a
+/// struct value happens to be unusable in value position everywhere
+/// else in the compiler, which is a confusing error far from the
+/// actual cause. Checking the declared return type directly gives a
+/// clear message right at the function that violates the limit.
+fn check_no_struct_returning_fns(program: &Program, structs: &HashMap<Symbol, &StructDecl>, errors: &mut Vec<KestrelcError>) {
+    for f in &program.fns {
+        if let Some(Type::Named(ty_name)) = &f.return_type {
+            if structs.contains_key(ty_name) {
+                errors.push(KestrelcError::new(
+                    ErrorKind::Resolve,
+                    format!("'{}' can't return a struct — struct return values aren't supported yet", f.name),
+                    f.span,
                 ));
             }
         }
@@ -222,6 +244,22 @@ fn resolve_expr(
                             errors.push(KestrelcError::new(
                                 ErrorKind::Resolve,
                                 format!("'{name}' has no field '{field_name}'"),
+                                e.span,
+                            ));
+                        }
+                    }
+                    // A field written more than once (`Point { x: 1, x: 2,
+                    // y: 3 }`) passes both checks above silently -- `written`
+                    // is a set, so the duplicate doesn't affect missing/
+                    // unknown-field detection at all. Without this,
+                    // gen_binding's `.find()` would quietly take the first
+                    // occurrence and drop the rest with no error anywhere.
+                    let mut seen: HashSet<Symbol> = HashSet::new();
+                    for (field_name, _) in fields {
+                        if !seen.insert(*field_name) {
+                            errors.push(KestrelcError::new(
+                                ErrorKind::Resolve,
+                                format!("'{name}' sets field '{field_name}' more than once"),
                                 e.span,
                             ));
                         }
@@ -470,5 +508,38 @@ mod tests {
         );
         assert_eq!(errors.len(), 1);
         assert!(errors[0].message.contains("'Outer.inner' must be a scalar field"));
+    }
+
+    #[test]
+    fn catches_a_fn_that_returns_a_struct() {
+        // v1 scope limit (design doc): no struct-returning functions.
+        // Without this check, struct return values fail later with a
+        // confusing error far from the actual cause (struct values are
+        // unusable in value position everywhere else) instead of being
+        // rejected clearly here.
+        let errors = resolve_src(
+            "struct Point { x: i64, y: i64 }\nfn make() -> Point { let p = Point { x: 1, y: 2 }; return p; }\nfn main() { }",
+        );
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0]
+            .message
+            .contains("'make' can't return a struct — struct return values aren't supported yet"));
+    }
+
+    #[test]
+    fn a_normal_non_struct_return_type_is_unaffected() {
+        let errors = resolve_src(
+            "pure fn square(x: i64) -> i64 { return x * x; }\nfn main() { print(square(3)); }",
+        );
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn catches_a_struct_literal_setting_the_same_field_twice() {
+        let errors = resolve_src(
+            "struct Point { x: i64, y: i64 }\nfn main() { let p = Point { x: 1, x: 2, y: 3 }; print(p.x); }",
+        );
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("'Point' sets field 'x' more than once"));
     }
 }

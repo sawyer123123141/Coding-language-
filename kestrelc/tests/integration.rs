@@ -1881,6 +1881,36 @@ fn wasm_backend_struct_can_be_passed_as_a_function_parameter() {
     assert_eq!(String::from_utf8_lossy(&run.stdout), "25\n");
 }
 
+#[test]
+fn rejects_a_struct_decl_with_an_array_typed_field_via_the_real_cli_path() {
+    // All the other struct tests above are success-path only. This
+    // proves a resolve.rs struct.rs-validation error (check_struct_decls
+    // rejecting an array-typed field) is genuinely surfaced through
+    // main.rs's real diagnostic path -- not just caught by resolve.rs's
+    // own unit tests -- by actually invoking the kestrelc binary and
+    // checking its exit code and stderr.
+    let scratch = scratch_dir("struct_array_field_error");
+    let src_path = scratch.join("prog.kes");
+    fs::write(
+        &src_path,
+        "struct Bad { xs: [i64; N] }\n\
+         fn main() { }\n",
+    )
+    .unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(!out.status.success(), "kestrelc should have rejected Bad's array-typed field");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("'Bad.xs' must be a scalar field"),
+        "expected the struct field-type error message, got:\n{stderr}"
+    );
+}
+
 // ==================== per-expression spans ====================
 
 #[test]
