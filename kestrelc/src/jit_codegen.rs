@@ -13,24 +13,35 @@
 // design doc for why each of those is deferred rather than attempted
 // here.
 //
-// Only `printf` is needed as a runtime import for this scope (no arrays
-// means no `kestrelc_bounds_fail`; no parallel_map/memoization means none
-// of `kestrelc_runtime.c`'s other functions are needed either) --
-// resolved via a direct `extern "C"` FFI declaration below, since `printf`
-// is already part of the C runtime any Rust/Windows binary links against
-// by default. This deliberately avoids linking `kestrelc_runtime.c` into
-// `kestrelc` itself, which was attempted and reverted: this machine's
-// `rustc` targets `x86_64-pc-windows-msvc` with no MSVC Build Tools
-// installed, and `kestrelc_runtime.c` has only ever been built with mingw
-// `gcc` (a real, separate compile+link step for kestrelc's *output*
-// programs) -- mixing a mingw-compiled object into an MSVC-target Rust
-// binary isn't ABI-safe. See the design doc for the full story.
+// `printf` is the only runtime import needed from `kestrelc_runtime.c`'s
+// world (no arrays means no `kestrelc_bounds_fail`; no
+// parallel_map/memoization means none of that file's other functions are
+// needed either) -- resolved via a direct `extern "C"` FFI declaration
+// below, since `printf` is already part of the C runtime any Rust/Windows
+// binary links against by default. This deliberately avoids linking
+// `kestrelc_runtime.c` into `kestrelc` itself, which was attempted and
+// reverted: this machine's `rustc` targets `x86_64-pc-windows-msvc` with no
+// MSVC Build Tools installed, and `kestrelc_runtime.c` has only ever been
+// built with mingw `gcc` (a real, separate compile+link step for
+// kestrelc's *output* programs) -- mixing a mingw-compiled object into an
+// MSVC-target Rust binary isn't ABI-safe. See the design doc for the full
+// story.
+//
+// `kestrelc_jit_abort` (defined below, a plain Rust fn rather than
+// anything from `kestrelc_runtime.c`) is registered as a second JIT symbol
+// for the same reason `kestrelc_bounds_fail` exists in codegen.rs: raw
+// Cranelift `sdiv`/`srem` trap (hardware fault, not a catchable Rust error)
+// on a zero divisor or `i64::MIN / -1`. In the AOT backend that trap only
+// crashes a disposable spawned child process; here, JIT-compiled code runs
+// in-process (that's the whole point), so an unguarded trap would take
+// `kestrelc watch` itself down with no message. `gen_checked_div_mod`
+// guards both cases and calls this instead.
 
 use crate::ast::*;
 use crate::error::{ErrorKind, KestrelcError};
 use crate::interner::Symbol;
 use crate::span::Span;
-use cranelift_codegen::ir::{condcodes::IntCC, types, AbiParam, Function, InstBuilder, Signature, UserFuncName};
+use cranelift_codegen::ir::{condcodes::IntCC, types, AbiParam, Function, InstBuilder, Signature, TrapCode, UserFuncName, Value};
 use cranelift_codegen::isa::CallConv;
 use cranelift_codegen::settings::{self, Configurable};
 use cranelift_codegen::Context;
@@ -42,6 +53,26 @@ use std::collections::HashMap;
 extern "C" {
     fn printf(fmt: *const u8, arg: i64) -> i32;
     fn fflush(stream: *mut std::ffi::c_void) -> i32;
+}
+
+/// Registered as a JIT symbol (see `JitCodegen::new`) and called directly
+/// by JIT-generated code when a runtime error (division by zero, i64::MIN
+/// / -1 overflow) is detected -- flushes the error message a preceding
+/// JIT-emitted `printf` call already wrote, then exits cleanly. Running
+/// JIT-compiled code in-process (no subprocess isolation, see this file's
+/// module doc comment) means a hardware trap here -- SIGFPE / illegal
+/// instruction from a raw unguarded `sdiv`/`srem` -- would previously take
+/// the whole `kestrelc watch` host process down with an opaque OS-level
+/// crash instead of a clear message. This turns that into a deliberate,
+/// clean exit; it does not make `kestrelc watch` survive the error (that
+/// would need running JIT code in an isolated subprocess, which defeats
+/// the point of JIT execution), but the user sees why it exited instead of
+/// an unexplained crash.
+extern "C" fn kestrelc_jit_abort() -> ! {
+    unsafe {
+        fflush(std::ptr::null_mut());
+    }
+    std::process::exit(101);
 }
 
 /// Walks the whole program and returns a clear, specific reason `Some(..)`
@@ -172,6 +203,7 @@ pub struct JitCodegen {
     module: JITModule,
     fn_ids: HashMap<Symbol, FuncId>,
     printf_id: FuncId,
+    abort_id: FuncId,
     call_conv: CallConv,
     str_cache: HashMap<String, StrConst>,
     str_counter: usize,
@@ -190,6 +222,7 @@ impl JitCodegen {
 
         let mut jit_builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
         jit_builder.symbol("printf", printf as *const u8);
+        jit_builder.symbol("kestrelc_jit_abort", kestrelc_jit_abort as *const u8);
         let mut module = JITModule::new(jit_builder);
 
         let mut printf_sig = Signature::new(call_conv);
@@ -200,10 +233,22 @@ impl JitCodegen {
             .declare_function("printf", Linkage::Import, &printf_sig)
             .map_err(|e| KestrelcError::internal(ErrorKind::Codegen, e.to_string()))?;
 
+        // No params, no return -- kestrelc_jit_abort never returns (it
+        // calls std::process::exit). JIT-generated call sites still need a
+        // terminator instruction after calling it (Cranelift has no
+        // "diverging call" concept), so every call site follows it with an
+        // unreachable `trap` -- same pattern codegen.rs uses for
+        // kestrelc_bounds_fail.
+        let abort_sig = Signature::new(call_conv);
+        let abort_id = module
+            .declare_function("kestrelc_jit_abort", Linkage::Import, &abort_sig)
+            .map_err(|e| KestrelcError::internal(ErrorKind::Codegen, e.to_string()))?;
+
         Ok(JitCodegen {
             module,
             fn_ids: HashMap::new(),
             printf_id,
+            abort_id,
             call_conv,
             str_cache: HashMap::new(),
             str_counter: 0,
@@ -290,6 +335,7 @@ impl JitCodegen {
                 vars,
                 fn_ids: &self.fn_ids,
                 printf_id: self.printf_id,
+                abort_id: self.abort_id,
                 module: &mut self.module,
                 str_cache: &mut self.str_cache,
                 str_counter: &mut self.str_counter,
@@ -379,6 +425,7 @@ struct FnCodegen<'a> {
     vars: HashMap<Symbol, Variable>,
     fn_ids: &'a HashMap<Symbol, FuncId>,
     printf_id: FuncId,
+    abort_id: FuncId,
     module: &'a mut JITModule,
     str_cache: &'a mut HashMap<String, StrConst>,
     str_counter: &'a mut usize,
@@ -502,9 +549,19 @@ impl<'a> FnCodegen<'a> {
             let is_last = i == args.len() - 1;
             match &arg.kind {
                 ExprKind::Str(s) => {
-                    let fmt_text = if is_last { format!("{s}\n") } else { format!("{s} ") };
-                    let fmt = self.intern_str_owned(&fmt_text)?;
-                    self.call_printf(fmt, None)?;
+                    // The literal's own text is passed as printf's *vararg*
+                    // via "%s", never interpolated into the format string
+                    // itself -- a literal containing '%' (e.g. `print("100%
+                    // done")`) would otherwise be read by printf as a real
+                    // format specifier, which is undefined behavior (and,
+                    // since this runs in-process now, would crash the whole
+                    // `kestrelc watch` host rather than a disposable child).
+                    let content = s.resolve();
+                    let str_data = self.intern_str_owned(&content)?;
+                    let str_ptr = self.data_ptr(str_data);
+                    let fmt_text = if is_last { "%s\n" } else { "%s " };
+                    let fmt = self.intern_str_owned(fmt_text)?;
+                    self.call_printf(fmt, Some(str_ptr))?;
                 }
                 _ => {
                     let v = self.gen_expr(arg)?;
@@ -538,13 +595,79 @@ impl<'a> FnCodegen<'a> {
         Ok(data_id)
     }
 
-    fn call_printf(&mut self, fmt_data: DataId, arg: Option<cranelift_codegen::ir::Value>) -> CgResult<()> {
-        let local_data = self.module.declare_data_in_func(fmt_data, self.builder.func);
-        let fmt_ptr = self.builder.ins().symbol_value(types::I64, local_data);
+    fn data_ptr(&mut self, data_id: DataId) -> Value {
+        let local_data = self.module.declare_data_in_func(data_id, self.builder.func);
+        self.builder.ins().symbol_value(types::I64, local_data)
+    }
+
+    fn call_printf(&mut self, fmt_data: DataId, arg: Option<Value>) -> CgResult<()> {
+        let fmt_ptr = self.data_ptr(fmt_data);
         let arg_val = arg.unwrap_or_else(|| self.builder.ins().iconst(types::I64, 0));
         let local_printf = self.module.declare_func_in_func(self.printf_id, self.builder.func);
         self.builder.ins().call(local_printf, &[fmt_ptr, arg_val]);
         Ok(())
+    }
+
+    /// Prints `message` (via the same `printf` path as `print()`, so it
+    /// respects the C runtime's own buffering) then calls the registered
+    /// `kestrelc_jit_abort` host function, which flushes and exits -- used
+    /// by `gen_checked_div_mod` for runtime errors that would otherwise be
+    /// an unguarded hardware trap. `kestrelc_jit_abort` never returns, but
+    /// Cranelift still requires every block to end in a terminator
+    /// instruction, so a `trap` follows the call (unreachable at runtime,
+    /// same pattern codegen.rs uses after calling `kestrelc_bounds_fail`).
+    fn gen_runtime_abort(&mut self, message: &str) -> CgResult<()> {
+        let fmt = self.intern_str_owned(message)?;
+        self.call_printf(fmt, None)?;
+        let local_abort = self.module.declare_func_in_func(self.abort_id, self.builder.func);
+        self.builder.ins().call(local_abort, &[]);
+        self.builder.ins().trap(TrapCode::unwrap_user(1));
+        Ok(())
+    }
+
+    /// `l op r` for `BinOp::Div`/`BinOp::Mod`, guarded against the two
+    /// inputs that trap the raw `sdiv`/`srem` instructions: a zero divisor
+    /// (both ops), and `i64::MIN / -1` (only `Div` -- `Mod` doesn't
+    /// overflow there since the remainder is always 0). Previously these
+    /// traps (SIGFPE / illegal instruction) crashed the whole `kestrelc
+    /// watch` host process with no message, since JIT-compiled code now
+    /// runs in-process rather than in a disposable child.
+    fn gen_checked_div_mod(&mut self, op: BinOp, l: Value, r: Value) -> CgResult<Value> {
+        let zero = self.builder.ins().iconst(types::I64, 0);
+        let is_zero = self.builder.ins().icmp(IntCC::Equal, r, zero);
+
+        let zero_err_blk = self.builder.create_block();
+        let nonzero_blk = self.builder.create_block();
+        self.builder.ins().brif(is_zero, zero_err_blk, &[], nonzero_blk, &[]);
+
+        self.builder.switch_to_block(zero_err_blk);
+        self.builder.seal_block(zero_err_blk);
+        self.gen_runtime_abort("kestrelc watch: runtime error: division by zero\n")?;
+
+        self.builder.switch_to_block(nonzero_blk);
+        self.builder.seal_block(nonzero_blk);
+
+        if matches!(op, BinOp::Mod) {
+            return Ok(self.builder.ins().srem(l, r));
+        }
+
+        let min = self.builder.ins().iconst(types::I64, i64::MIN);
+        let neg_one = self.builder.ins().iconst(types::I64, -1);
+        let is_min = self.builder.ins().icmp(IntCC::Equal, l, min);
+        let is_neg_one = self.builder.ins().icmp(IntCC::Equal, r, neg_one);
+        let would_overflow = self.builder.ins().band(is_min, is_neg_one);
+
+        let overflow_err_blk = self.builder.create_block();
+        let div_ok_blk = self.builder.create_block();
+        self.builder.ins().brif(would_overflow, overflow_err_blk, &[], div_ok_blk, &[]);
+
+        self.builder.switch_to_block(overflow_err_blk);
+        self.builder.seal_block(overflow_err_blk);
+        self.gen_runtime_abort("kestrelc watch: runtime error: integer overflow (i64::MIN / -1)\n")?;
+
+        self.builder.switch_to_block(div_ok_blk);
+        self.builder.seal_block(div_ok_blk);
+        Ok(self.builder.ins().sdiv(l, r))
     }
 
     fn gen_expr(&mut self, e: &Expr) -> CgResult<cranelift_codegen::ir::Value> {
@@ -583,12 +706,14 @@ impl<'a> FnCodegen<'a> {
             ExprKind::Binop { op, left, right } => {
                 let l = self.gen_expr(left)?;
                 let r = self.gen_expr(right)?;
+                if matches!(op, BinOp::Div | BinOp::Mod) {
+                    return self.gen_checked_div_mod(*op, l, r);
+                }
                 let result = match op {
                     BinOp::Add => self.builder.ins().iadd(l, r),
                     BinOp::Sub => self.builder.ins().isub(l, r),
                     BinOp::Mul => self.builder.ins().imul(l, r),
-                    BinOp::Div => self.builder.ins().sdiv(l, r),
-                    BinOp::Mod => self.builder.ins().srem(l, r),
+                    BinOp::Div | BinOp::Mod => unreachable!("handled above"),
                     BinOp::Eq => {
                         let c = self.builder.ins().icmp(IntCC::Equal, l, r);
                         self.builder.ins().uextend(types::I64, c)
@@ -679,6 +804,34 @@ mod tests {
     }
 
     #[test]
+    fn print_of_a_string_literal_containing_percent_runs_without_crashing() {
+        // Regression test: print()'s string-literal path used to
+        // interpolate the literal's raw text directly into printf's
+        // *format* string, so a literal containing '%' (e.g. "100% done")
+        // was read by the real C printf as a format specifier -- reading a
+        // mismatched/absent vararg, undefined behavior. The fix passes the
+        // literal as printf's "%s" *argument* instead, so its content
+        // (including any '%' characters) is never interpreted as format
+        // syntax. Can't assert captured stdout here (same limitation as
+        // print_runs_without_crashing_and_flushes_correctly above -- see
+        // its comment); a `kestrelc watch` subprocess never exits on its
+        // own on success (see watch_rejects_a_nonexistent_file... in
+        // tests/integration.rs), so there's no practical way to capture
+        // its stdout in an automated test either. This test's job is
+        // narrower but still real: the old bug was undefined behavior
+        // (garbage read from a missing vararg), which this exercises by
+        // running to completion and checking the return value instead of
+        // hanging/crashing.
+        let result = jit_run(
+            "fn main() {\n\
+             \x20   print(\"100% done, %s %d not real specifiers\");\n\
+             \x20   return 1;\n\
+             }\n",
+        );
+        assert_eq!(result, 1);
+    }
+
+    #[test]
     fn main_with_parameters_is_rejected_with_a_clear_message() {
         // Regression test for the review finding: finish_and_run
         // transmutes to a fixed zero-parameter function pointer, which
@@ -706,6 +859,27 @@ mod tests {
         );
         // 0+2+4+6+8 = 20
         assert_eq!(result, 20);
+    }
+
+    #[test]
+    fn division_and_modulo_still_produce_correct_results_after_adding_the_zero_and_overflow_guards() {
+        // Regression test for gen_checked_div_mod: the new zero-divisor
+        // and i64::MIN/-1 guards must be pure overhead on every other
+        // input, not change the actual sdiv/srem result. Covers negative
+        // operands specifically since that's where a guard implemented
+        // wrong (e.g. checking the wrong operand, or an off-by-one in the
+        // branch wiring) would most plausibly show up.
+        let result = jit_run(
+            "fn main() {\n\
+             \x20   let a = 17 / 5;\n\
+             \x20   let b = 17 % 5;\n\
+             \x20   let c = -17 / 5;\n\
+             \x20   let d = -17 % 5;\n\
+             \x20   return a * 1000 + b * 100 + (c * -1) * 10 + (d * -1);\n\
+             }\n",
+        );
+        // 17/5 = 3, 17%5 = 2, -17/5 = -3 (truncating), -17%5 = -2
+        assert_eq!(result, 3 * 1000 + 2 * 100 + 3 * 10 + 2);
     }
 
     #[test]

@@ -217,23 +217,43 @@ fn try_jit(path: &str) -> JitOutcome {
         return JitOutcome::Unsupported(e.message);
     }
 
-    let mut cg = match jit_codegen::JitCodegen::new() {
-        Ok(c) => c,
-        Err(e) => {
-            report_error(&src, path, &e);
-            return JitOutcome::CompileError;
-        }
-    };
-    if let Err(e) = cg.compile_program(&program) {
-        report_error(&src, path, &e);
-        return JitOutcome::CompileError;
-    }
-    match cg.finish_and_run() {
-        Ok(result) => JitOutcome::Ran(result),
-        Err(e) => {
+    // jit_codegen.rs is new, hand-written Cranelift IR generation -- a bug
+    // there (an index panic, an unwrap, etc.) previously would have only
+    // taken down a disposable child process under the old subprocess
+    // model. Now that JIT compile-and-run happens directly in this
+    // process, an uncaught panic here would take down `kestrelc watch`
+    // itself. catch_unwind can't help with a hardware trap from JIT-
+    // *generated* machine code (that's not a Rust panic -- see
+    // gen_checked_div_mod for how those are guarded instead), but it does
+    // contain a genuine Rust-side bug in the compiler to "this one save
+    // failed to JIT," matching what the old subprocess model effectively
+    // gave for free.
+    let jit_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<i64, KestrelcError> {
+        let mut cg = jit_codegen::JitCodegen::new()?;
+        cg.compile_program(&program)?;
+        cg.finish_and_run()
+    }));
+
+    match jit_result {
+        Ok(Ok(result)) => JitOutcome::Ran(result),
+        Ok(Err(e)) => {
             report_error(&src, path, &e);
             JitOutcome::CompileError
         }
+        Err(panic_payload) => {
+            eprintln!("kestrelc: internal error in JIT backend: {}", panic_message(&panic_payload));
+            JitOutcome::CompileError
+        }
+    }
+}
+
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        s.to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic".to_string()
     }
 }
 

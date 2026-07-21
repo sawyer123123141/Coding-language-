@@ -2135,6 +2135,38 @@ fn watch_rejects_a_nonexistent_file_immediately_without_hanging() {
 }
 
 #[test]
+fn watch_division_by_zero_exits_cleanly_with_a_message_instead_of_crashing() {
+    // `kestrelc watch` compiles-and-runs the file once synchronously
+    // before ever entering its interactive save-loop (see run() in
+    // watch.rs), so a program whose *first* run divides by zero causes
+    // the process to exit deterministically right there -- unlike the
+    // general "watch mode never exits on its own" case noted on the test
+    // above, this one is safe to assert on with a plain `.output()` call.
+    //
+    // This is a regression test for a real review finding: JIT-compiled
+    // code now runs in-process (no subprocess isolation), so an unguarded
+    // `sdiv`/`srem` by zero used to be a raw hardware trap (SIGFPE /
+    // illegal instruction) that would kill `kestrelc watch` itself with
+    // no message. `gen_checked_div_mod` in jit_codegen.rs now guards this
+    // and exits cleanly (via `kestrelc_jit_abort`, exit code 101) with a
+    // clear diagnostic instead.
+    let scratch = scratch_dir("watch_div_by_zero");
+    let src_path = scratch.join("prog.kes");
+    fs::write(&src_path, "fn main() {\n    print(1 / 0);\n}\n").unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg("watch")
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc watch");
+
+    assert_eq!(out.status.code(), Some(101), "expected the deliberate exit(101), got status {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("division by zero"), "expected a clear runtime error message, got:\n{stdout}");
+}
+
+#[test]
 fn rejects_an_array_literal_too_large_to_safely_compile() {
     // Generates the literal mechanically -- 12,500,001 elements is
     // one past the 100MB (12,500,000 * 8 bytes) cap.
