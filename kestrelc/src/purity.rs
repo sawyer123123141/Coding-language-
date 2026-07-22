@@ -179,7 +179,7 @@ pub fn check_parallel_map(program: &Program, fns: &HashMap<Symbol, &Fn>) -> Vec<
             errors.push(KestrelcError::new(ErrorKind::ParallelMap, message, span));
         };
         match &e.kind {
-            ExprKind::Call { name, args } if &*name.resolve() == "parallel_map" => {
+            ExprKind::Call { name, args } if *name == crate::interner::well_known::parallel_map() => {
                 if args.len() != 2 {
                     push(errors, format!(
                         "parallel_map() takes exactly 2 arguments (a pure function and an array), got {}",

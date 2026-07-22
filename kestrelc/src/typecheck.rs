@@ -160,7 +160,7 @@ pub fn check_types(program: &Program, fns: &HashMap<Symbol, &Fn>) -> Vec<Kestrel
                 }
             }
             ExprKind::Call { name, args } => {
-                if &*name.resolve() == "parallel_map" {
+                if *name == crate::interner::well_known::parallel_map() {
                     // Already validated by check_parallel_map; just infer the array arg.
                     if args.len() == 2 {
                         infer_expr(&args[1], locals, fns, errors);

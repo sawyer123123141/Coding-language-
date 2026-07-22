@@ -111,7 +111,7 @@ fn count_ident_refs_expr(e: &Expr, name: Symbol, count: &mut usize) {
 /// (callee name, array-arg expression).
 fn as_parallel_map_call(e: &Expr) -> Option<(Symbol, &Expr)> {
     if let ExprKind::Call { name, args } = &e.kind {
-        if &*name.resolve() == "parallel_map" && args.len() == 2 {
+        if *name == interner::well_known::parallel_map() && args.len() == 2 {
             if let ExprKind::Ident(f) = &args[0].kind {
                 return Some((*f, &args[1]));
             }
@@ -376,7 +376,7 @@ mod tests {
         // The interposed print must still be there, untouched, and must
         // still be the statement right after whatever now occupies the
         // fused `let a = ...`'s old slot.
-        let main_fn = fused.fns.iter().find(|f| &*f.name.resolve() == "main").unwrap();
+        let main_fn = fused.fns.iter().find(|f| f.name == interner::well_known::main()).unwrap();
         assert!(matches!(&main_fn.body[2], Stmt::Print { .. }), "interposed print should be preserved in place");
     }
 

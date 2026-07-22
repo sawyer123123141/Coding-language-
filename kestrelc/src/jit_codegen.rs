@@ -150,7 +150,7 @@ pub fn check_jit_supported(program: &Program) -> Result<(), KestrelcError> {
         // argument-count check to catch), so this must be checked here,
         // explicitly, rather than merely asserted in a comment next to
         // the transmute.
-        if &*f.name.resolve() == "main" && !f.params.is_empty() {
+        if f.name == crate::interner::well_known::main() && !f.params.is_empty() {
             return Err(KestrelcError::new(
                 ErrorKind::Codegen,
                 "kestrelc watch: 'main' can't take parameters".to_string(),
@@ -227,7 +227,7 @@ fn check_expr_supported(e: &Expr, direct_print_arg: bool) -> Result<(), Kestrelc
             check_expr_supported(right, false)
         }
         ExprKind::Call { name, args } => {
-            if &*name.resolve() == "parallel_map" {
+            if *name == crate::interner::well_known::parallel_map() {
                 return Err(KestrelcError::new(
                     ErrorKind::Codegen,
                     "`parallel_map` isn't supported under `kestrelc watch` yet -- compile normally with `kestrelc file.kes` to test it".to_string(),

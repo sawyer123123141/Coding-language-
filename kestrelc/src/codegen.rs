@@ -525,7 +525,7 @@ impl Codegen {
         // forward references and recursion) can be resolved regardless
         // of source order.
         for f in &program.fns {
-            if f.pure && &*f.name.resolve() != "main" && !pmap_callbacks.contains(&f.name) && !f.params.is_empty() {
+            if f.pure && f.name != crate::interner::well_known::main() && !pmap_callbacks.contains(&f.name) && !f.params.is_empty() {
                 let has_array_params = f.params.iter().any(|p| matches!(p.ty, Type::Array { .. }));
                 // Structs are not memo-eligible in v1 (see kestrel-DESIGN.md):
                 // a struct-typed parameter flattens into N i64 values at the
@@ -808,7 +808,7 @@ impl Codegen {
             // FnCodegen::gen_stmt's Return arm) — mutually exclusive
             // triggers (memoization eligibility excludes `main`), so
             // there's no case where both would need to run.
-            let is_main = &*f.name.resolve() == "main";
+            let is_main = f.name == crate::interner::well_known::main();
             let epilogue: Option<(Block, Variable)> =
                 if (is_main && self.profile.is_some()) || my_memo_slot.is_some() {
                     let epilogue_blk = builder.create_block();
@@ -948,7 +948,7 @@ enum Slot {
 fn slot_kind_for_let(value: &Expr, known_lens: &HashMap<Symbol, usize>) -> SlotKind {
     match &value.kind {
         ExprKind::ArrayLit(elems) => SlotKind::Array { literal_len: Some(elems.len()) },
-        ExprKind::Call { name, args } if &*name.resolve() == "parallel_map" && args.len() == 2 => {
+        ExprKind::Call { name, args } if *name == crate::interner::well_known::parallel_map() && args.len() == 2 => {
             let len = match &args[1].kind {
                 ExprKind::Ident(arr_name) => known_lens.get(arr_name).copied(),
                 _ => None,
@@ -1177,7 +1177,7 @@ impl<'a> FnCodegen<'a> {
                 self.builder.def_var(len, len_val);
                 Ok(())
             }
-            (Slot::Array { ptr, len, literal_len }, ExprKind::Call { name: call_name, args }) if &*call_name.resolve() == "parallel_map" => {
+            (Slot::Array { ptr, len, literal_len }, ExprKind::Call { name: call_name, args }) if *call_name == crate::interner::well_known::parallel_map() => {
                 let (ptr, len) = (*ptr, *len);
                 let func_name = match &args[0].kind {
                     ExprKind::Ident(n) => *n,

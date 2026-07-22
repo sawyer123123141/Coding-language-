@@ -214,7 +214,7 @@ fn resolve_expr(
             resolve_expr(index, locals, struct_locals, fns, structs, span, errors);
         }
         ExprKind::Call { name, args } => {
-            if &*name.resolve() == "parallel_map" {
+            if *name == crate::interner::well_known::parallel_map() {
                 // Its first argument is a bare function name, not a
                 // variable reference — check_parallel_map (purity.rs)
                 // already validates it exists, is pure, and has the

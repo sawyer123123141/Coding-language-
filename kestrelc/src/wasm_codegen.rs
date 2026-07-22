@@ -94,7 +94,7 @@ pub fn compile_to_wasm(program: &Program) -> Result<Vec<u8>, KestrelcError> {
         let type_idx = NUM_IMPORTS + i as u32;
         functions.function(type_idx);
         fn_indices.insert(f.name, NUM_IMPORTS + i as u32);
-        if &*f.name.resolve() == "main" {
+        if f.name == crate::interner::well_known::main() {
             exports.export("main", ExportKind::Func, NUM_IMPORTS + i as u32);
         }
         if let Some(info) = extract_where_info(f) {
@@ -186,7 +186,7 @@ enum VarLoc {
 fn slot_kind_for_let(value: &Expr, known_lens: &HashMap<Symbol, u32>) -> SlotKind {
     match &value.kind {
         ExprKind::ArrayLit(elems) => SlotKind::Array { literal_len: Some(elems.len() as u32) },
-        ExprKind::Call { name, args } if &*name.resolve() == "parallel_map" && args.len() == 2 => {
+        ExprKind::Call { name, args } if *name == crate::interner::well_known::parallel_map() && args.len() == 2 => {
             let len = match &args[1].kind {
                 ExprKind::Ident(arr_name) => known_lens.get(arr_name).copied(),
                 _ => None,
@@ -416,7 +416,7 @@ impl<'a> FnWasm<'a> {
                 self.func.instructions().local_set(len);
                 Ok(())
             }
-            (VarLoc::Array { ptr, len, literal_len }, ExprKind::Call { name: call_name, args }) if &*call_name.resolve() == "parallel_map" => {
+            (VarLoc::Array { ptr, len, literal_len }, ExprKind::Call { name: call_name, args }) if *call_name == crate::interner::well_known::parallel_map() => {
                 let (ptr, len) = (*ptr, *len);
                 let func_name = match &args[0].kind {
                     ExprKind::Ident(n) => *n,

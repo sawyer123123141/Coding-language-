@@ -260,7 +260,7 @@ fn try_jit(path: &str) -> JitOutcome {
         report_errors(&src, path, &type_errors);
         return JitOutcome::CompileError;
     }
-    if !program.fns.iter().any(|f| &*f.name.resolve() == "main") {
+    if !program.fns.iter().any(|f| f.name == crate::interner::well_known::main()) {
         eprintln!("kestrelc: No 'main' function found");
         return JitOutcome::CompileError;
     }
