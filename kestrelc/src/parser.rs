@@ -268,7 +268,25 @@ impl Parser {
             } else if self.at(&Tok::Dot) {
                 self.advance();
                 let field = self.expect_ident()?;
-                expr = Expr::new(ExprKind::Field { target: Box::new(expr), field }, span);
+                // `arr.map(f)` sugar for `parallel_map(f, arr)` -- only
+                // when `map` is immediately followed by `(`, so a real
+                // struct field literally named `map` (`p.map`, no call)
+                // still parses as plain field access below, unchanged.
+                // Argument order swaps deliberately: parallel_map's own
+                // signature takes the callback first
+                // (`parallel_map(f, arr)`), but the receiver naturally
+                // comes first in method-call syntax (`arr.map(f)`).
+                if field == crate::interner::well_known::map() && self.at(&Tok::LParen) {
+                    self.advance();
+                    let callback = self.parse_expr()?;
+                    self.expect(Tok::RParen)?;
+                    expr = Expr::new(
+                        ExprKind::Call { name: crate::interner::well_known::parallel_map(), args: vec![callback, expr] },
+                        span,
+                    );
+                } else {
+                    expr = Expr::new(ExprKind::Field { target: Box::new(expr), field }, span);
+                }
             } else {
                 break;
             }
@@ -548,5 +566,29 @@ mod tests {
         let ExprKind::Field { target, field } = &value.kind else { panic!("expected field access") };
         assert_eq!(&*field.resolve(), "y");
         assert!(matches!(&target.kind, ExprKind::Field { .. }));
+    }
+
+    #[test]
+    fn parses_arr_dot_map_as_sugar_for_parallel_map_with_swapped_argument_order() {
+        let program = parse(lex("fn main() { let out = arr.map(f); }\n").unwrap()).unwrap();
+        let Stmt::Let { value, .. } = &program.fns[0].body[0] else { panic!("expected a let") };
+        let ExprKind::Call { name, args } = &value.kind else { panic!("expected a call, got {:?}", value.kind) };
+        assert_eq!(*name, crate::interner::well_known::parallel_map());
+        assert_eq!(args.len(), 2);
+        // parallel_map(f, arr) takes the callback first -- args[0] must
+        // be the callback (`f`) even though `arr.map(f)` writes the
+        // receiver (`arr`) first.
+        assert!(matches!(&args[0].kind, ExprKind::Ident(n) if &*n.resolve() == "f"));
+        assert!(matches!(&args[1].kind, ExprKind::Ident(n) if &*n.resolve() == "arr"));
+    }
+
+    #[test]
+    fn a_struct_field_literally_named_map_without_parens_still_parses_as_plain_field_access() {
+        // `.map` sugar only triggers when immediately followed by `(` --
+        // a real struct field named `map` (no call) must be unaffected.
+        let program = parse(lex("fn main() { let a = p.map; }\n").unwrap()).unwrap();
+        let Stmt::Let { value, .. } = &program.fns[0].body[0] else { panic!("expected a let") };
+        let ExprKind::Field { field, .. } = &value.kind else { panic!("expected field access, got {:?}", value.kind) };
+        assert_eq!(&*field.resolve(), "map");
     }
 }

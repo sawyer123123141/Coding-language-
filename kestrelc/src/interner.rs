@@ -140,6 +140,7 @@ pub mod well_known {
     thread_local! {
         static MAIN: Cell<Option<Symbol>> = const { Cell::new(None) };
         static PARALLEL_MAP: Cell<Option<Symbol>> = const { Cell::new(None) };
+        static MAP: Cell<Option<Symbol>> = const { Cell::new(None) };
     }
 
     pub fn main() -> Symbol {
@@ -158,6 +159,23 @@ pub mod well_known {
             Some(s) => s,
             None => {
                 let s = intern("parallel_map");
+                c.set(Some(s));
+                s
+            }
+        })
+    }
+
+    /// `map` -- checked by the parser (see `parse_postfix`'s `.map(f)`
+    /// sugar for `parallel_map`, kestrelc/src/parser.rs), not compared
+    /// against a resolved user identifier the way `main`/`parallel_map`
+    /// are elsewhere in the compiler; interned via `well_known` anyway
+    /// for the same cheap-comparison reason and to keep every "identifier
+    /// the compiler itself checks by name" in one place.
+    pub fn map() -> Symbol {
+        MAP.with(|c| match c.get() {
+            Some(s) => s,
+            None => {
+                let s = intern("map");
                 c.set(Some(s));
                 s
             }
