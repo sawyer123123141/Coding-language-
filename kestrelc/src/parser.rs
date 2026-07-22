@@ -381,13 +381,13 @@ impl Parser {
         self.expect(Tok::LBrace)?;
         let mut stmts = Vec::new();
         while !self.at(&Tok::RBrace) {
-            stmts.push(self.parse_stmt()?);
+            stmts.extend(self.parse_stmt()?);
         }
         self.expect(Tok::RBrace)?;
         Ok(stmts)
     }
 
-    fn parse_stmt(&mut self) -> PResult<Stmt> {
+    fn parse_stmt(&mut self) -> PResult<Vec<Stmt>> {
         let span = self.peek().span;
         if self.at(&Tok::Let) {
             self.advance();
@@ -395,7 +395,7 @@ impl Parser {
             self.expect(Tok::Eq)?;
             let value = self.parse_expr()?;
             self.expect(Tok::Semi)?;
-            return Ok(Stmt::Let { name, value, span });
+            return Ok(vec![Stmt::Let { name, value, span }]);
         }
         if self.at(&Tok::If) {
             self.advance();
@@ -409,7 +409,7 @@ impl Parser {
             } else {
                 None
             };
-            return Ok(Stmt::If { cond, then_block, else_block, span });
+            return Ok(vec![Stmt::If { cond, then_block, else_block, span }]);
         }
         if self.at(&Tok::While) {
             self.advance();
@@ -417,7 +417,51 @@ impl Parser {
             let cond = self.parse_expr()?;
             self.expect(Tok::RParen)?;
             let body = self.parse_block()?;
-            return Ok(Stmt::While { cond, body, span });
+            return Ok(vec![Stmt::While { cond, body, span }]);
+        }
+        if self.at(&Tok::For) {
+            self.advance();
+            let var = self.expect_ident()?;
+            if self.at(&Tok::From) {
+                self.advance();
+                let start = self.parse_expr()?;
+                self.expect(Tok::To)?;
+                let end = self.parse_expr()?;
+                let body = self.parse_block()?;
+                return Ok(vec![Stmt::RangeFor { var, start, end, body, span }]);
+            }
+            // General-for: `for i = <init>, <cond>, i = <step> { body }` --
+            // desugars directly into `let i = <init>; while (<cond>) {
+            // body...; i = <step>; }`, so every downstream pass (resolve,
+            // purity, typecheck, all three codegens, fusion, CSE) handles
+            // it automatically via the existing Let/While/Assign arms it
+            // already has -- no new AST node, no new arm anywhere else in
+            // the compiler.
+            self.expect(Tok::Eq)?;
+            let init_value = self.parse_expr()?;
+            self.expect(Tok::Comma)?;
+            let cond = self.parse_expr()?;
+            self.expect(Tok::Comma)?;
+            let step_span = self.peek().span;
+            let step_name = self.expect_ident()?;
+            if step_name != var {
+                return Err(KestrelcError::new(
+                    ErrorKind::Parse,
+                    format!(
+                        "for-loop step must update the same loop variable '{}', found '{}'",
+                        var, step_name
+                    ),
+                    step_span,
+                ));
+            }
+            self.expect(Tok::Eq)?;
+            let step_value = self.parse_expr()?;
+            let mut body = self.parse_block()?;
+            body.push(Stmt::Assign { name: var, value: step_value, span: step_span });
+            return Ok(vec![
+                Stmt::Let { name: var, value: init_value, span },
+                Stmt::While { cond, body, span },
+            ]);
         }
         if self.at(&Tok::Print) {
             self.advance();
@@ -425,13 +469,13 @@ impl Parser {
             let args = self.parse_args()?;
             self.expect(Tok::RParen)?;
             self.expect(Tok::Semi)?;
-            return Ok(Stmt::Print { args, span });
+            return Ok(vec![Stmt::Print { args, span }]);
         }
         if self.at(&Tok::Return) {
             self.advance();
             let value = if self.at(&Tok::Semi) { None } else { Some(self.parse_expr()?) };
             self.expect(Tok::Semi)?;
-            return Ok(Stmt::Return { value, span });
+            return Ok(vec![Stmt::Return { value, span }]);
         }
         if let Tok::Ident(name) = &self.peek().tok {
             let name = name.clone();
@@ -440,12 +484,12 @@ impl Parser {
                 self.advance();
                 let value = self.parse_expr()?;
                 self.expect(Tok::Semi)?;
-                return Ok(Stmt::Assign { name, value, span });
+                return Ok(vec![Stmt::Assign { name, value, span }]);
             }
         }
         let expr = self.parse_expr()?;
         self.expect(Tok::Semi)?;
-        Ok(Stmt::ExprStmt { expr, span })
+        Ok(vec![Stmt::ExprStmt { expr, span }])
     }
 
     fn parse_fn_decl(&mut self) -> PResult<Fn> {
@@ -490,6 +534,48 @@ pub fn parse(tokens: Vec<Token>) -> PResult<Program> {
 mod tests {
     use super::*;
     use crate::lexer::lex;
+
+    #[test]
+    fn parses_range_for_into_a_rangefor_node() {
+        let program = crate::parser::parse(crate::lexer::lex(
+            "fn main() { for i from 0 to 5 { print(i); } }"
+        ).unwrap()).unwrap();
+        let main_fn = &program.fns[0];
+        assert_eq!(main_fn.body.len(), 1);
+        let Stmt::RangeFor { var, start, end, body, .. } = &main_fn.body[0] else {
+            panic!("expected RangeFor, got {:?}", main_fn.body[0]);
+        };
+        assert_eq!(var.resolve().as_ref(), "i");
+        assert!(matches!(start.kind, ExprKind::Num(0)));
+        assert!(matches!(end.kind, ExprKind::Num(5)));
+        assert_eq!(body.len(), 1);
+    }
+
+    #[test]
+    fn parses_general_for_as_a_let_followed_by_a_while() {
+        let program = crate::parser::parse(crate::lexer::lex(
+            "fn main() { for i = 0, i < 5, i = i + 2 { print(i); } }"
+        ).unwrap()).unwrap();
+        let main_fn = &program.fns[0];
+        assert_eq!(main_fn.body.len(), 2, "general-for must desugar to exactly two top-level statements");
+        assert!(matches!(&main_fn.body[0], Stmt::Let { .. }));
+        let Stmt::While { body, .. } = &main_fn.body[1] else {
+            panic!("expected While as the second desugared statement, got {:?}", main_fn.body[1]);
+        };
+        // original print(i) plus the appended step assignment
+        assert_eq!(body.len(), 2);
+        assert!(matches!(&body[1], Stmt::Assign { .. }));
+    }
+
+    #[test]
+    fn general_for_step_targeting_a_different_variable_is_a_parse_error() {
+        let result = crate::parser::parse(crate::lexer::lex(
+            "fn main() { for i = 0, i < 5, j = i + 1 { print(i); } }"
+        ).unwrap());
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.message.contains("same loop variable"), "got: {}", err.message);
+    }
 
     #[test]
     fn a_where_clause_ending_in_a_bare_identifier_does_not_swallow_the_function_body_as_a_struct_literal() {
