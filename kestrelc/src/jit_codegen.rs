@@ -241,6 +241,11 @@ fn check_stmts_supported(stmts: &[Stmt]) -> Result<(), KestrelcError> {
                 check_expr_supported(cond, false)?;
                 check_stmts_supported(body)?;
             }
+            Stmt::RangeFor { start, end, body, .. } => {
+                check_expr_supported(start, false)?;
+                check_expr_supported(end, false)?;
+                check_stmts_supported(body)?;
+            }
             // `direct_print_arg: true` -- gen_expr's ExprKind::Str arm
             // only actually supports a string literal used directly as a
             // print() argument (codegen.rs's AOT backend has the exact
@@ -592,6 +597,10 @@ fn collect_let_names(stmts: &[Stmt]) -> Vec<Symbol> {
                     }
                 }
                 Stmt::While { body, .. } => walk(body, names),
+                Stmt::RangeFor { var, body, .. } => {
+                    names.push(*var);
+                    walk(body, names);
+                }
                 _ => {}
             }
         }
@@ -636,6 +645,7 @@ impl<'a> FnCodegen<'a> {
             | Stmt::Assign { span, .. }
             | Stmt::If { span, .. }
             | Stmt::While { span, .. }
+            | Stmt::RangeFor { span, .. }
             | Stmt::Print { span, .. }
             | Stmt::Return { span, .. }
             | Stmt::ExprStmt { span, .. } => *span,
@@ -695,6 +705,39 @@ impl<'a> FnCodegen<'a> {
                 self.builder.switch_to_block(body_blk);
                 let body_term = self.gen_block(body)?;
                 if !body_term {
+                    self.builder.ins().jump(header_blk, &[]);
+                }
+                self.builder.seal_block(body_blk);
+                self.builder.seal_block(header_blk);
+
+                self.builder.switch_to_block(after_blk);
+                self.builder.seal_block(after_blk);
+                Ok(false)
+            }
+            Stmt::RangeFor { var, start, end, body, .. } => {
+                let start_v = self.gen_expr(start)?;
+                let var_v = self.vars[var];
+                self.builder.def_var(var_v, start_v);
+
+                let end_v = self.gen_expr(end)?;
+
+                let header_blk = self.builder.create_block();
+                let body_blk = self.builder.create_block();
+                let after_blk = self.builder.create_block();
+
+                self.builder.ins().jump(header_blk, &[]);
+
+                self.builder.switch_to_block(header_blk);
+                let cur = self.builder.use_var(var_v);
+                let c = self.builder.ins().icmp(IntCC::SignedLessThan, cur, end_v);
+                self.builder.ins().brif(c, body_blk, &[], after_blk, &[]);
+
+                self.builder.switch_to_block(body_blk);
+                let body_term = self.gen_block(body)?;
+                if !body_term {
+                    let cur = self.builder.use_var(var_v);
+                    let next = self.builder.ins().iadd_imm(cur, 1);
+                    self.builder.def_var(var_v, next);
                     self.builder.ins().jump(header_blk, &[]);
                 }
                 self.builder.seal_block(body_blk);
@@ -1262,5 +1305,33 @@ mod tests {
             "got: {}",
             err.message
         );
+    }
+
+    #[test]
+    fn range_for_sums_zero_through_four_via_jit() {
+        let result = jit_run(
+            "fn main() {\n\
+             \x20   let total = 0;\n\
+             \x20   for i from 0 to 5 {\n\
+             \x20       total = total + i;\n\
+             \x20   }\n\
+             \x20   return total;\n\
+             }\n",
+        );
+        assert_eq!(result, 10);
+    }
+
+    #[test]
+    fn general_for_counts_down_via_jit() {
+        let result = jit_run(
+            "fn main() {\n\
+             \x20   let total = 0;\n\
+             \x20   for i = 5, i > 0, i = i - 1 {\n\
+             \x20       total = total + i;\n\
+             \x20   }\n\
+             \x20   return total;\n\
+             }\n",
+        );
+        assert_eq!(result, 15);
     }
 }
