@@ -53,7 +53,34 @@ fn handle_request(mut request: tiny_http::Request) {
                 let _ = request.respond(Response::from_string("bad request body").with_status_code(400));
                 return;
             }
-            let result = runner::run_source(&body);
+            // A local dev tool exists specifically for a user to type
+            // arbitrary, exploratory, possibly-broken code into -- a
+            // panic anywhere in kestrelc while compiling/running that
+            // input must never take the whole server down (every Run
+            // afterward would then fail to even connect, not just fail
+            // to compile). runner::run_source already wraps the JIT
+            // execution step itself in catch_unwind, but not
+            // compilation -- this outer one is the real safety net,
+            // covering every step (JIT compile, JIT run, AOT paths, and
+            // anything added here later) in one place instead of
+            // needing a matching catch_unwind added inside runner.rs
+            // every time a new path is added.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| runner::run_source(&body)))
+                .unwrap_or_else(|payload| {
+                    let msg = payload
+                        .downcast_ref::<&str>()
+                        .map(|s| s.to_string())
+                        .or_else(|| payload.downcast_ref::<String>().cloned())
+                        .unwrap_or_else(|| "kestrelc-devtool: internal error (unknown panic)".to_string());
+                    runner::RunResult {
+                        engine: "jit",
+                        ok: false,
+                        compile_ms: 0.0,
+                        run_ms: 0.0,
+                        output: String::new(),
+                        error: Some(msg),
+                    }
+                });
             let header = Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap();
             let _ = request.respond(Response::from_string(result.to_json()).with_header(header));
         }
