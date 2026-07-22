@@ -424,9 +424,20 @@ impl Parser {
             let var = self.expect_ident()?;
             if self.at(&Tok::From) {
                 self.advance();
+                // Same ambiguity as a `where` clause: `end` is followed
+                // directly by the loop body's `{`, with no parens in
+                // between (unlike `while (cond) { ... }`) to separate an
+                // `Ident {` from a struct-literal's own `Ident { field:
+                // value }` syntax. Suppress struct-literal parsing for
+                // both bounds so e.g. `for i from 0 to n { ... }` parses
+                // `n` as a plain identifier expression, not the start of
+                // a (invalid, since it has no fields) struct literal.
+                let saved = self.suppress_struct_lit;
+                self.suppress_struct_lit = true;
                 let start = self.parse_expr()?;
                 self.expect(Tok::To)?;
                 let end = self.parse_expr()?;
+                self.suppress_struct_lit = saved;
                 let body = self.parse_block()?;
                 return Ok(vec![Stmt::RangeFor { var, start, end, body, span }]);
             }

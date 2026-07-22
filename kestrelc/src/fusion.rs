@@ -62,6 +62,11 @@ fn count_ident_refs_stmts(stmts: &[Stmt], name: Symbol, count: &mut usize) {
                 count_ident_refs_expr(cond, name, count);
                 count_ident_refs_stmts(body, name, count);
             }
+            Stmt::RangeFor { start, end, body, .. } => {
+                count_ident_refs_expr(start, name, count);
+                count_ident_refs_expr(end, name, count);
+                count_ident_refs_stmts(body, name, count);
+            }
             Stmt::Print { args, .. } => {
                 for a in args {
                     count_ident_refs_expr(a, name, count);
@@ -263,6 +268,7 @@ fn fuse_body(
                 }
             }
             Stmt::While { body: wbody, .. } => fuse_body(wbody, fns, extra_fns, counter),
+            Stmt::RangeFor { body: rbody, .. } => fuse_body(rbody, fns, extra_fns, counter),
             _ => {}
         }
     }
@@ -416,5 +422,24 @@ mod tests {
         );
         let fused = fuse_loops(&program);
         assert_eq!(fused.fns.len(), 2);
+    }
+
+    #[test]
+    fn fuses_two_chained_parallel_map_calls_inside_a_range_for_body() {
+        let program = parse_src(
+            "
+            pure fn square(x: i32) -> i32 { return x * x; }
+            pure fn inc(x: i32) -> i32 { return x + 1; }
+            fn main() {
+                for i from 0 to 3 {
+                    let a = parallel_map(square, [1, 2, 3, 4]);
+                    let b = parallel_map(inc, a);
+                    print(b[0]);
+                }
+            }
+            ",
+        );
+        let fused = fuse_loops(&program);
+        assert_eq!(fused.fns.len(), 4, "should have added exactly one fused function, same as the top-level-body version of this test");
     }
 }

@@ -351,6 +351,7 @@ fn gen_fn(
     // index value across the bounds check and the address computation —
     // WASM has no stack-dup instruction, only `local.tee`.
     let scratch = next_local;
+    next_local += 1;
     extra_locals.push((1, ValType::I32));
 
     let range_for_end_locals: Vec<u32> = (0..count_range_fors(&f.body))

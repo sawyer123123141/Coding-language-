@@ -107,6 +107,11 @@ fn walk_stmts_exprs<'a>(stmts: &'a [Stmt], on_expr: &mut impl FnMut(&'a Expr)) {
                 on_expr(cond);
                 walk_stmts_exprs(body, on_expr);
             }
+            Stmt::RangeFor { start, end, body, .. } => {
+                on_expr(start);
+                on_expr(end);
+                walk_stmts_exprs(body, on_expr);
+            }
             Stmt::Print { args, .. } => {
                 for a in args {
                     on_expr(a);
@@ -269,6 +274,13 @@ fn inline_stmts(stmts: &[Stmt], candidates: &HashMap<Symbol, Candidate>) -> Vec<
                 body: inline_stmts(body, candidates),
                 span: *span,
             },
+            Stmt::RangeFor { var, start, end, body, span } => Stmt::RangeFor {
+                var: *var,
+                start: inline_expr(start, candidates),
+                end: inline_expr(end, candidates),
+                body: inline_stmts(body, candidates),
+                span: *span,
+            },
             Stmt::Print { args, span } => {
                 Stmt::Print { args: args.iter().map(|a| inline_expr(a, candidates)).collect(), span: *span }
             }
@@ -403,6 +415,25 @@ mod tests {
         let weird_sym = crate::interner::intern("weird");
         match &main_fn.body[0] {
             Stmt::Let { value, .. } => assert!(calls_name(&value, weird_sym)),
+            other => panic!("expected a let, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn inlines_a_hot_small_pure_fn_called_inside_a_range_for_body() {
+        let program = parse(
+            "pure fn double(x: i64) -> i64 { return x * 2; }\nfn main() { for i from 0 to 3 { let y = double(5); print(y); } }",
+        );
+        let mut profile = HashMap::new();
+        profile.insert("double".to_string(), 10);
+        let out = inline_hot_fns(&program, &profile);
+        let main_fn = out.fns.iter().find(|f| f.name == crate::interner::well_known::main()).unwrap();
+        let double_sym = crate::interner::intern("double");
+        let Stmt::RangeFor { body, .. } = &main_fn.body[0] else { panic!("expected RangeFor") };
+        match &body[0] {
+            Stmt::Let { value, .. } => {
+                assert!(!calls_name(&value, double_sym), "expected 'double' inlined away, got {value:?}");
+            }
             other => panic!("expected a let, got {other:?}"),
         }
     }

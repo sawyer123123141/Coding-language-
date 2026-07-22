@@ -173,6 +173,11 @@ fn cse_block(body: &mut [Stmt], fns: &HashMap<Symbol, Fn>) {
                 rewrite_expr(cond, fns, &available);
                 cse_block(wbody, fns);
             }
+            Stmt::RangeFor { start, end, body: rbody, .. } => {
+                rewrite_expr(start, fns, &available);
+                rewrite_expr(end, fns, &available);
+                cse_block(rbody, fns);
+            }
             Stmt::Print { args, .. } => {
                 for a in args {
                     rewrite_expr(a, fns, &available);
@@ -286,5 +291,28 @@ mod tests {
         let Stmt::While { body, .. } = &main_fn.body[2] else { panic!("expected while") };
         let Stmt::Let { value, .. } = &body[0] else { panic!("expected let") };
         assert!(matches!(&value.kind, ExprKind::Call { .. }), "a call inside a loop body must not reuse an entry from outside it, got: {:?}", value.kind);
+    }
+
+    #[test]
+    fn reuses_a_let_bound_call_result_inside_a_range_for_body() {
+        let program = parse_src(
+            "
+            pure fn square(x: i32) -> i32 { return x * x; }
+            fn main() {
+                for i from 0 to 3 {
+                    let a = square(5);
+                    let total = 0;
+                    total = total + square(5);
+                    print(total, a);
+                }
+            }
+            ",
+        );
+        let out = eliminate_common_calls(&program);
+        let main_fn = out.fns.iter().find(|f| f.name.resolve().as_ref() == "main").unwrap();
+        let Stmt::RangeFor { body, .. } = &main_fn.body[0] else { panic!("expected RangeFor") };
+        let Stmt::Assign { value, .. } = &body[2] else { panic!("expected assign") };
+        let ExprKind::Binop { right, .. } = &value.kind else { panic!("expected binop") };
+        assert!(matches!(&right.kind, ExprKind::Ident(n) if n.resolve().as_ref() == "a"), "second call inside the range-for body should reuse `a`, got: {:?}", right.kind);
     }
 }
