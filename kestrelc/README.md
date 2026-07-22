@@ -21,33 +21,14 @@ cargo build --release
 ./fibonacci
 ```
 
-There's also a WASM backend, a completely separate code path from the
-native one below (Cranelift's codegen only targets real CPUs, not WASM —
-this uses `wasm-encoder` to build a `.wasm` module directly):
+(An earlier WASM backend — `kestrelc --wasm`, plus the `kestrelc-web`
+browser build and the `kestrel-editor.html` playground that used it —
+has been removed; it was only ever used by that abandoned playground.
+`kestrelc-devtool/` is the current native dev tool, with no WASM
+dependency at all.)
 
-```sh
-./target/release/kestrelc --wasm ../examples/fibonacci.kes   # writes fibonacci.wasm
-```
-
-The resulting `.wasm` runs in any WASM host (a browser, Node's
-`WebAssembly` API) that supplies two host-import functions the module
-calls for output, since WASM has no I/O of its own — see
-`tests/integration.rs`'s wasm tests for a minimal working host
-(`env.print_i64(value, is_last)` and `env.print_str(ptr, len, is_last)`).
-**This is now wired into `kestrel-editor.html`** — pick "engine: native
-(wasm)" in the editor. `kestrelc` itself is also compiled to WASM
-(`kestrelc-web/`), so the whole pipeline (compile Kestrel source to a
-`.wasm` module, then run it) happens client-side, no server involved.
-See `kestrelc-web/README.md`. **Arrays are supported**, same as the
-native backend, including both proof-carrying bounds-elision fast paths
-— literal indices into literal-length arrays, and cross-function
-`where`-clause elision (see "Scope" below) — both backends run the
-exact same `WhereInfo` proof (`kestrelc/src/where_info.rs`), not two
-separately-maintained copies.
-
-`kestrelc <file.kes>` (no `--wasm`) compiles and links `<file>.kes` into
-a native executable named after the file (in the current directory),
-using the
+`kestrelc <file.kes>` compiles and links `<file>.kes` into a native
+executable named after the file (in the current directory), using the
 system `cc` as the linker. Requires a working C toolchain (`cc`) on
 `PATH` — nothing else; Cranelift itself is a pure-Rust dependency with
 no system requirements beyond that.
@@ -82,8 +63,7 @@ kestrelc: fib.kes:3:12: Unexpected token 'RParen'
 ```
 
 `format_diagnostic` (`src/lib.rs`) is the single formatter behind this,
-shared by the CLI (`main.rs`) and `compile_to_wasm_bytes` (and so
-`kestrelc-web`/`kestrel-editor.html`'s "native (wasm)" engine). Every
+used by the CLI (`main.rs`). Every
 `Stmt` in `src/ast.rs` carries a `Span` (`src/span.rs` — `{ line, col,
 len }`) marking its first token, set by the parser. `Span` itself is a
 consolidation — `line`/`col`/`len` used to be three separate fields
@@ -94,19 +74,18 @@ Every stage's error type is unified too, into one
 `error::KestrelcError { kind, message, span }` (`kind` a small
 discriminant-only `ErrorKind` — `Lex`, `Parse`, `Resolve`, `Purity`,
 `ParallelMap`, `Type`, `Codegen`), instead of five separate structs (`LexError`,
-`ParseError`, a purity/type `CheckError`, and one codegen error type per
-backend) that all carried the same message-and-position shape. `main.rs`
-renders every one of them through the same two small helpers
-(`report_one`/`report_many`) instead of five near-duplicated printing
-blocks. Real payoff, not just tidiness: codegen errors (`codegen.rs`'s
-"kestrelc only supports X so far" / "Unknown identifier" messages, and
-`wasm_codegen.rs`'s equivalents — scope errors, not syntax errors) used
-to be message-only or a bare `line:col:` prefix, since neither codegen
-backend had source text threaded through to build a caret. Now that
-every `Stmt` carries a real `Span` (with `len`) and every error is the
-same type main.rs already knows how to render, both codegen backends
-get the exact same full `file:line:col:` + caret treatment as everything
-else, for free.
+`ParseError`, a purity/type `CheckError`, and (historically) one codegen
+error type per backend) that all carried the same message-and-position
+shape. `main.rs` renders every one of them through the same two small
+helpers (`report_one`/`report_many`) instead of five near-duplicated
+printing blocks. Real payoff, not just tidiness: codegen errors
+(`codegen.rs`'s "kestrelc only supports X so far" / "Unknown identifier"
+messages — scope errors, not syntax errors) used to be message-only or a
+bare `line:col:` prefix, since codegen didn't have source text threaded
+through to build a caret. Now that every `Stmt` carries a real `Span`
+(with `len`) and every error is the same type main.rs already knows how
+to render, codegen gets the exact same full `file:line:col:` + caret
+treatment as everything else, for free.
 
 Every `Expr` node (not just `Stmt`) now carries its own `Span` too
 (`ast.rs` — `Expr` is a small `{ kind: ExprKind, span: Span }` wrapper),
@@ -126,15 +105,14 @@ position at all — a compile-time-only pass can't help there. See
 
 Before compiling anything, `src/resolve.rs` walks the whole program once:
 builds the `name -> Fn` table every later stage needs (previously
-rebuilt separately, identically, in `purity.rs`, `typecheck.rs`,
-`codegen.rs`, and `wasm_codegen.rs`), flags two functions sharing a name
-(previously silent — last definition wins — except for a confusing
-internal linker error surfacing from deep inside codegen with no useful
-position), and resolves every identifier read, function call, and
-assignment target against each function's own locals. Unknown-name
-errors used to only ever be caught by whichever backend's codegen you
-happened to compile to (duplicated between the native and WASM
-backends); now they're one shared check, reported as `ErrorKind::Resolve`
+rebuilt separately, identically, in `purity.rs`, `typecheck.rs`, and
+`codegen.rs`), flags two functions sharing a name (previously silent —
+last definition wins — except for a confusing internal linker error
+surfacing from deep inside codegen with no useful position), and
+resolves every identifier read, function call, and assignment target
+against each function's own locals. Unknown-name errors used to only
+ever be caught by codegen; now they're one shared check, reported as
+`ErrorKind::Resolve`
 alongside purity/type errors instead of only showing up at the last
 stage. Out of scope, matching every other stage's existing boundary: a
 `where` clause's expression isn't resolved here — `where_info.rs` is the
@@ -161,11 +139,9 @@ table needs no real synchronization to be safe.
 ## Compile cache
 
 `kestrelc` caches its output across invocations, keyed by a content hash
-of the source text (plus which backend — native and `--wasm` cache
-separately). Compiling the exact same `.kes` file again — the common
-case during a dev loop, or every time the browser editor's native engine
-runs unchanged code — skips lexing/parsing/purity-checking/codegen
-entirely and reuses the cached artifact; the output line says
+of the source text. Compiling the exact same `.kes` file again — the
+common case during a dev loop — skips lexing/parsing/purity-checking/
+codegen entirely and reuses the cached artifact; the output line says
 `(cached)` when this happens. Any edit to the source is a different
 hash, so it's always a correctness-safe cache: a hit only ever happens
 for byte-identical input.
@@ -205,8 +181,7 @@ Honest scope: call-count-driven inlining only, not the fuller
 branch/shape-profiling and speculative pre-specialization
 `kestrel-DESIGN.md`'s idea #1 describes as the end goal — and not
 transitive (if hot function A's body calls hot function B, A's inlined
-copy still calls B as a real function). WASM has no persistent profile
-at all (no filesystem in a browser); this is native-only.
+copy still calls B as a real function).
 
 ## Scope
 
@@ -252,24 +227,17 @@ Codegen, however, currently supports a subset:
   Indexing *without* a `where` clause still falls back to an ordinary
   runtime check, same as `run`/`runFast`; a failing runtime check now
   prints `kestrelc: Index N out of bounds for array of length M` before
-  halting, in both backends — the native backend calls a small runtime
-  function (`kestrelc_bounds_fail` in `runtime/kestrelc_runtime.c`)
-  that writes to stderr and exits(1) instead of a bare trap (still a
-  trap right after, purely to satisfy Cranelift's "every block needs a
-  terminator" — unreachable in practice); the WASM backend prints the
-  same message through the same host `print_i64`/`print_str` imports
-  the program's own `print()` calls use, then traps via `unreachable`.
-  The WASM backend (below) has the identical elision scope too,
-  including eliding the check *inside* a `where`-guarded function body
-  from its call sites' proofs — both backends share one `WhereInfo`
-  analysis in `kestrelc/src/where_info.rs`.
+  halting — the native backend calls a small runtime function
+  (`kestrelc_bounds_fail` in `runtime/kestrelc_runtime.c`) that writes
+  to stderr and exits(1) instead of a bare trap (still a trap right
+  after, purely to satisfy Cranelift's "every block needs a
+  terminator" — unreachable in practice). Elision analysis lives in
+  `kestrelc/src/where_info.rs`.
 - **`parallel_map(f, arr)`**, with real OS-thread parallelism — see
   "Parallel map" below. `f` must be a `pure fn` taking exactly one
   scalar parameter; `arr` must be a fixed-size array *literal*
   (`let x = [...]`), not a parameter, since the output array's size has
-  to be known at compile time (it's a plain stack allocation). The WASM
-  backend accepts the same programs but runs them sequentially — see
-  below for why.
+  to be known at compile time (it's a plain stack allocation).
 
 **Not supported yet — a clear compile error, never a silent miscompile:**
 - Proving a `where` clause from anything other than a literal index and
@@ -324,9 +292,9 @@ for 4 cores (thread overhead, memory bandwidth, and likely some
 virtualization/container overhead on this particular machine all play
 a part) — take the multiplier as this-machine-specific, not universal.
 
-`run`/`runFast` (single-threaded JS) and the WASM backend accept the
-exact same `parallel_map` programs and produce identical results, but
-apply `f` sequentially — kestrel.js's sequential version is what the
+`run`/`runFast` (single-threaded JS) accept the exact same
+`parallel_map` programs and produce identical results, but apply `f`
+sequentially — kestrel.js's sequential version is what the
 native backend's real threaded output is checked against for
 correctness (see `tests/integration.rs`'s large-array test, which
 generates a 20,000-element array to force the real thread-pool path,
@@ -344,8 +312,8 @@ untouched, as long as it doesn't reference `a`; safe because
 get computed relative to an unrelated statement can't change what the
 program observes. `kestrelc/src/fusion.rs`'s `fuse_loops` is a direct
 Rust port of kestrel.js's `fuseLoops` (same matching rules, ported
-identically to both — see `kestrel-DESIGN.md`), wired into both the
-native and `--wasm` backends right before codegen. One real difference
+identically — see `kestrel-DESIGN.md`), wired in right before native
+codegen. One real difference
 from the JS version: this backend's codegen requires a `parallel_map`
 array argument to always be a plain identifier bound via a
 literal-length `let`, never an inline array literal, so the fused
@@ -426,7 +394,7 @@ fn main() {
 }
 ```
 
-Scalar-only fields — no arrays, no nested structs — flatten to `N` `i64` values everywhere at runtime, with no memory allocation, matching the array (pointer, length) trick but without the pointer. Three explicit v1 limits: immutable (construct once, read fields, no field assignment), scalar-only, and no function return values (a struct can be a local variable or a function parameter, not a return type). This scope is a deliberate choice: `--wasm` already covers browser/mobile deployment, so the native backend optimizes for what the native backend is actually for — dense, local CPU work — and structs as return values would complicate calling conventions without solving a problem the native backend has.
+Scalar-only fields — no arrays, no nested structs — flatten to `N` `i64` values everywhere at runtime, with no memory allocation, matching the array (pointer, length) trick but without the pointer. Three explicit v1 limits: immutable (construct once, read fields, no field assignment), scalar-only, and no function return values (a struct can be a local variable or a function parameter, not a return type). This scope is a deliberate choice: the native backend optimizes for what it's actually for — dense, local CPU work — and structs as return values would complicate calling conventions without solving a problem the native backend has.
 
 See `docs/superpowers/specs/2026-07-20-structs-design.md` for the full design rationale.
 

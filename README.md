@@ -21,22 +21,12 @@ for the syntax reference and grammar.
   standalone executable, no VM at runtime at all. Separate program from
   `kestrel.js`; supports a subset of the language so far (see
   `kestrelc/README.md`) but already lands within a few multiples of
-  hand-written Rust/C++ on what it does support. Also has a WASM backend
-  (`kestrelc --wasm`), a persistent on-disk compile cache, and real
-  OS-thread parallelism for `parallel_map(f, arr)` (`runtime/` — a small
-  C shim linked into every native build).
-- `kestrelc-web/` — `kestrelc` itself, compiled to WASM, so it can run
-  *inside* the browser editor and compile Kestrel source to a runnable
-  `.wasm` module client-side — no server, no native binary. See
-  `kestrelc-web/README.md`.
-- `kestrel-editor.html` — a mobile code editor/IDE (loads `kestrel.js`
-  via a `<script src>` tag rather than an embedded copy, so interpreter
-  changes need no manual mirroring; add to iPhone home screen via
-  Safari for an app-like experience). Its engine picker offers all
-  three backends, including "native (wasm)" for near-native speed via
-  `kestrelc-web`. Auto-deployed to GitHub Pages on every push to `main`
-  (see `.github/workflows/pages.yml`, which builds `kestrelc-web` and
-  publishes `kestrel.js` alongside the editor).
+  hand-written Rust/C++ on what it does support. Also has a persistent
+  on-disk compile cache, and real OS-thread parallelism for
+  `parallel_map(f, arr)` (`runtime/` — a small C shim linked into every
+  native build). (An earlier WASM backend and browser playground —
+  `kestrelc-web` + `kestrel-editor.html` — have been removed; see
+  `kestrelc-devtool/` for the current native dev tool.)
 - `docs/SYNTAX.md` — syntax reference and full grammar.
 - `examples/` — runnable example programs:
   - `basics.kes` — `pure fn`, arrays, `where`-bounded access.

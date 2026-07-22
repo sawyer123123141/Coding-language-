@@ -1,24 +1,23 @@
 # Kestrel — Coding Language
 
 ## Project Summary
-Kestrel is a compiled programming language with compile-time purity checking, bounds proof verification, and multi-backend compilation (JS, WASM, native).
+Kestrel is a compiled programming language with compile-time purity checking, bounds proof verification, and native compilation.
 
 ## Core Concepts
 - **Purity System**: Functions marked `@pure` enable fearless parallelism
 - **Bounds Proofs**: Compile-time verification of array bounds (eliminates runtime checks)
 - **Type System**: Static typing with constraint-based reasoning
-- **Multiple Backends**: 
+- **Backends**: 
   - JS interpreter (kestrel.js)
-  - Bytecode VM (kestrelc)
-  - Native Rust compiler (via Cranelift)
-  - WASM (browser-based editor)
+  - Native Rust compiler (via Cranelift AOT/JIT — `kestrelc`)
+
+(The old WASM backend — `kestrelc-web` + the browser-based `kestrel-editor.html` playground — was removed; `kestrelc-devtool` is the current native dev tool.)
 
 ## Directory Structure
 ```
 kestrelc/           - Rust compiler (primary implementation)
-kestrelc-web/       - WASM build for browser
+kestrelc-devtool/   - Native devtool (AOT/JIT, no WASM)
 kestrel.js          - JavaScript interpreter/backend
-kestrel-editor.html - Browser-based IDE
 test/               - Test suite
 examples/           - Example programs
 docs/               - Documentation
@@ -27,7 +26,7 @@ docs/               - Documentation
 ## Key Entry Points
 - **Compiler**: `kestrelc/main.rs` or `kestrelc/lib.rs`
 - **JS Backend**: `kestrel.js`
-- **Web Editor**: `kestrel-editor.html` + WASM compilation
+- **Devtool**: `kestrelc-devtool/`
 - **Design Doc**: `kestrel-DESIGN.md` (for architectural details)
 
 ## Development Commands
