@@ -48,12 +48,76 @@ use cranelift_codegen::Context;
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{DataDescription, DataId, FuncId, Linkage, Module};
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::ffi::CStr;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 extern "C" {
     fn printf(fmt: *const u8, arg: i64) -> i32;
     fn fflush(stream: *mut std::ffi::c_void) -> i32;
+}
+
+thread_local! {
+    static CAPTURE_BUFFER: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// Starts (or restarts) output capture for the next `JitCodegen::new_capturing`
+/// run on this thread -- see `kestrelc_jit_capture_printf` below. Call
+/// before `compile_program`/`finish_and_run`; `kestrelc watch`'s normal
+/// path (`JitCodegen::new`) never touches this at all.
+pub fn begin_capture() {
+    CAPTURE_BUFFER.with(|b| *b.borrow_mut() = Some(String::new()));
+}
+
+/// Takes (and clears) whatever was captured since the last `begin_capture`.
+/// Returns an empty string if capture was never started -- a caller that
+/// forgot `begin_capture` gets silence, not a panic, matching this file's
+/// existing "never a hard failure for something recoverable" posture
+/// (e.g. `kestrelc_memo_ensure_slot_capacity`'s sibling in the runtime C
+/// file treats an allocation failure the same way).
+pub fn take_captured_output() -> String {
+    CAPTURE_BUFFER.with(|b| b.borrow_mut().take().unwrap_or_default())
+}
+
+/// Alternate `printf` symbol, registered only by `JitCodegen::new_capturing`
+/// (see `new_impl` below) instead of the real libc `printf` -- appends to
+/// `CAPTURE_BUFFER` rather than writing to the process's real stdout.
+/// Chosen over OS-level stdout-handle redirection specifically because
+/// this project already hit a real, hard MSVC/mingw CRT mismatch once
+/// tonight (see this file's own module doc comment on the reverted
+/// `build.rs` approach) -- hand-rolling more CRT-internal stdout-handle
+/// tricks is exactly that same fragile territory, and unnecessary here:
+/// `gen_print`/`call_printf` below only ever pass this symbol one of a
+/// small, fully-known set of format strings (never an arbitrary or
+/// user-controlled one), so a full general-purpose `printf`
+/// reimplementation isn't needed, just these exact shapes.
+extern "C" fn kestrelc_jit_capture_printf(fmt: *const u8, arg: i64) -> i32 {
+    let fmt_bytes = unsafe { CStr::from_ptr(fmt as *const std::ffi::c_char) }.to_bytes();
+    let text = match fmt_bytes {
+        b"%s\n" => format!("{}\n", read_c_str(arg)),
+        b"%s " => format!("{} ", read_c_str(arg)),
+        b"%lld\n" => format!("{arg}\n"),
+        b"%lld " => format!("{arg} "),
+        b"\n" => "\n".to_string(),
+        // Unreachable given this file's own gen_print/call_printf call
+        // sites (see the doc comment above) -- kept as silent no-output
+        // rather than a panic, so a future change to those call sites
+        // that adds a new shape fails as "capture came back empty" (an
+        // observable, debuggable symptom) instead of crashing the whole
+        // devtool server mid-request.
+        _ => String::new(),
+    };
+    CAPTURE_BUFFER.with(|b| {
+        if let Some(buf) = b.borrow_mut().as_mut() {
+            buf.push_str(&text);
+        }
+    });
+    0
+}
+
+fn read_c_str(ptr: i64) -> String {
+    unsafe { CStr::from_ptr(ptr as *const std::ffi::c_char) }.to_string_lossy().into_owned()
 }
 
 /// Every JIT-compiled function call increments this on entry and
@@ -270,6 +334,21 @@ pub struct JitCodegen {
 
 impl JitCodegen {
     pub fn new() -> Result<Self, KestrelcError> {
+        Self::new_impl(printf as *const u8)
+    }
+
+    /// Same as `new`, except JIT-executed `print()` output is captured
+    /// into a thread-local buffer (see `begin_capture`/
+    /// `take_captured_output` above) instead of going to the real
+    /// process stdout. Used only by kestrelc-devtool; `kestrelc watch`'s
+    /// existing behavior (via `new`) is completely unaffected -- this
+    /// only changes which function pointer gets registered under the
+    /// `"printf"` JIT symbol name below.
+    pub fn new_capturing() -> Result<Self, KestrelcError> {
+        Self::new_impl(kestrelc_jit_capture_printf as *const u8)
+    }
+
+    fn new_impl(printf_symbol: *const u8) -> Result<Self, KestrelcError> {
         let mut flag_builder = settings::builder();
         flag_builder.set("is_pic", "true").map_err(|e| KestrelcError::internal(ErrorKind::Codegen, e.to_string()))?;
         flag_builder.set("opt_level", "speed").map_err(|e| KestrelcError::internal(ErrorKind::Codegen, e.to_string()))?;
@@ -280,7 +359,7 @@ impl JitCodegen {
         let call_conv = isa.default_call_conv();
 
         let mut jit_builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
-        jit_builder.symbol("printf", printf as *const u8);
+        jit_builder.symbol("printf", printf_symbol);
         jit_builder.symbol("kestrelc_jit_abort", kestrelc_jit_abort as *const u8);
         jit_builder.symbol("kestrelc_jit_enter_frame", kestrelc_jit_enter_frame as *const u8);
         jit_builder.symbol("kestrelc_jit_exit_frame", kestrelc_jit_exit_frame as *const u8);
@@ -913,6 +992,37 @@ mod tests {
         let mut cg = JitCodegen::new().unwrap();
         cg.compile_program(&program).unwrap();
         cg.finish_and_run().unwrap()
+    }
+
+    #[test]
+    fn captured_output_matches_what_print_would_normally_write_to_real_stdout() {
+        begin_capture();
+        let program = parse(lex(
+            "fn main() {\n\
+             \x20   print(\"hello\", 42, \"world\");\n\
+             \x20   print(7);\n\
+             \x20   print();\n\
+             \x20   return 1;\n\
+             }\n",
+        ).unwrap()).unwrap();
+        check_jit_supported(&program).unwrap();
+        let mut cg = JitCodegen::new_capturing().unwrap();
+        cg.compile_program(&program).unwrap();
+        let result = cg.finish_and_run().unwrap();
+        assert_eq!(result, 1);
+        let output = take_captured_output();
+        assert_eq!(output, "hello 42 world\n7\n\n");
+    }
+
+    #[test]
+    fn new_without_capturing_still_writes_to_real_stdout_unaffected() {
+        // Regression guard: new_capturing's addition must not change
+        // new()'s existing behavior. take_captured_output() with no
+        // begin_capture() must return empty (not panic, not pick up
+        // stray output) -- confirms capture is strictly opt-in.
+        let result = jit_run("fn main() { print(\"unaffected\"); return 5; }");
+        assert_eq!(result, 5);
+        assert_eq!(take_captured_output(), "");
     }
 
     #[test]
