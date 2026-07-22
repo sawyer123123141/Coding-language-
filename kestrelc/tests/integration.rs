@@ -2305,3 +2305,86 @@ fn a_large_array_literal_above_the_threshold_heap_allocates_instead_of_crashing(
     // sum of 0..500000 = 500000*499999/2 = 124999750000
     assert_eq!(stdout, "124999750000\n");
 }
+
+#[test]
+fn range_for_sums_an_array_correctly() {
+    let scratch = scratch_dir("range_for_sum");
+    let src_path = scratch.join("prog.kes");
+    fs::write(
+        &src_path,
+        "fn main() {\n\
+         \x20   let arr = [10, 20, 30, 40, 50];\n\
+         \x20   let total = 0;\n\
+         \x20   for i from 0 to 5 {\n\
+         \x20       total = total + arr[i];\n\
+         \x20   }\n\
+         \x20   print(total);\n\
+         }\n",
+    )
+    .unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(out.status.success(), "compile failed:\n{}", String::from_utf8_lossy(&out.stderr));
+
+    let bin = scratch.join("prog");
+    let run = Command::new(&bin).output().expect("failed to run compiled binary");
+    assert_eq!(native_stdout(&run), "150\n");
+}
+
+#[test]
+fn range_for_with_start_equal_to_end_runs_zero_times() {
+    let scratch = scratch_dir("range_for_zero");
+    let src_path = scratch.join("prog.kes");
+    fs::write(
+        &src_path,
+        "fn main() {\n\
+         \x20   let total = 0;\n\
+         \x20   for i from 5 to 5 {\n\
+         \x20       total = total + 1;\n\
+         \x20   }\n\
+         \x20   print(total);\n\
+         }\n",
+    )
+    .unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(out.status.success(), "compile failed:\n{}", String::from_utf8_lossy(&out.stderr));
+
+    let bin = scratch.join("prog");
+    let run = Command::new(&bin).output().expect("failed to run compiled binary");
+    assert_eq!(native_stdout(&run), "0\n");
+}
+
+#[test]
+fn general_for_counts_down_by_two() {
+    let scratch = scratch_dir("general_for_countdown");
+    let src_path = scratch.join("prog.kes");
+    fs::write(
+        &src_path,
+        "fn main() {\n\
+         \x20   for i = 10, i > 0, i = i - 2 {\n\
+         \x20       print(i);\n\
+         \x20   }\n\
+         }\n",
+    )
+    .unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(out.status.success(), "compile failed:\n{}", String::from_utf8_lossy(&out.stderr));
+
+    let bin = scratch.join("prog");
+    let run = Command::new(&bin).output().expect("failed to run compiled binary");
+    assert_eq!(native_stdout(&run), "10\n8\n6\n4\n2\n");
+}

@@ -234,6 +234,11 @@ fn infer_array_param_lengths(program: &Program) -> HashMap<Symbol, Vec<usize>> {
                     visit_expr(cond, known_lens, array_positions, proofs);
                     visit_stmts(body, known_lens, array_positions, proofs);
                 }
+                Stmt::RangeFor { start, end, body, .. } => {
+                    visit_expr(start, known_lens, array_positions, proofs);
+                    visit_expr(end, known_lens, array_positions, proofs);
+                    visit_stmts(body, known_lens, array_positions, proofs);
+                }
                 Stmt::Print { args, .. } => {
                     for a in args {
                         visit_expr(a, known_lens, array_positions, proofs);
@@ -1009,6 +1014,10 @@ fn walk_slots(
                 }
             }
             Stmt::While { body, .. } => walk_slots(body, slots, seen, known_lens),
+            Stmt::RangeFor { var, body, .. } => {
+                add_slot(*var, SlotKind::Scalar, slots, seen);
+                walk_slots(body, slots, seen, known_lens);
+            }
             _ => {}
         }
     }
@@ -1253,6 +1262,7 @@ impl<'a> FnCodegen<'a> {
             | Stmt::Assign { span, .. }
             | Stmt::If { span, .. }
             | Stmt::While { span, .. }
+            | Stmt::RangeFor { span, .. }
             | Stmt::Print { span, .. }
             | Stmt::Return { span, .. }
             | Stmt::ExprStmt { span, .. } => *span,
@@ -1320,6 +1330,49 @@ impl<'a> FnCodegen<'a> {
                 self.builder.switch_to_block(body_blk);
                 let body_term = self.gen_block(body)?;
                 if !body_term {
+                    self.builder.ins().jump(header_blk, &[]);
+                }
+                self.builder.seal_block(body_blk);
+                self.builder.seal_block(header_blk);
+
+                self.builder.switch_to_block(after_blk);
+                self.builder.seal_block(after_blk);
+                Ok(false)
+            }
+            Stmt::RangeFor { var, start, end, body, .. } => {
+                // var = start
+                let start_v = self.gen_expr(start)?;
+                let Slot::Scalar(var_v) = self.vars[var] else {
+                    return Err(self.err(format!(
+                        "internal error: range-for loop variable '{var}' wasn't declared as a scalar slot"
+                    )));
+                };
+                self.builder.def_var(var_v, start_v);
+
+                // end is evaluated exactly once, here, before the loop --
+                // its Cranelift Value dominates every block below (this
+                // block, header_blk, body_blk), so referencing it inside
+                // the loop's condition on every iteration is sound and
+                // never re-evaluates the `end` expression.
+                let end_v = self.gen_expr(end)?;
+
+                let header_blk = self.builder.create_block();
+                let body_blk = self.builder.create_block();
+                let after_blk = self.builder.create_block();
+
+                self.builder.ins().jump(header_blk, &[]);
+
+                self.builder.switch_to_block(header_blk);
+                let cur = self.builder.use_var(var_v);
+                let c = self.builder.ins().icmp(IntCC::SignedLessThan, cur, end_v);
+                self.builder.ins().brif(c, body_blk, &[], after_blk, &[]);
+
+                self.builder.switch_to_block(body_blk);
+                let body_term = self.gen_block(body)?;
+                if !body_term {
+                    let cur = self.builder.use_var(var_v);
+                    let next = self.builder.ins().iadd_imm(cur, 1);
+                    self.builder.def_var(var_v, next);
                     self.builder.ins().jump(header_blk, &[]);
                 }
                 self.builder.seal_block(body_blk);
