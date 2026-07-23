@@ -255,7 +255,7 @@ fn try_jit(path: &str) -> JitOutcome {
         report_errors(&src, path, &pmap_errors);
         return JitOutcome::CompileError;
     }
-    let type_errors = typecheck::check_types(&program, &fns);
+    let type_errors = typecheck::check_types(&program, &fns, &structs);
     if !type_errors.is_empty() {
         report_errors(&src, path, &type_errors);
         return JitOutcome::CompileError;

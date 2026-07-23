@@ -148,7 +148,7 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    let type_errors = typecheck::check_types(&program, &fns);
+    let type_errors = typecheck::check_types(&program, &fns, &structs);
     if !type_errors.is_empty() {
         report_many(&src, &path, &type_errors);
         return ExitCode::FAILURE;

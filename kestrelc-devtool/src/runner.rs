@@ -78,7 +78,7 @@ pub fn run_source(src: &str) -> RunResult {
     if let Some(e) = pmap_errors.first() {
         return compile_error(e, src);
     }
-    let type_errors = typecheck::check_types(&program, &fns);
+    let type_errors = typecheck::check_types(&program, &fns, &structs);
     if let Some(e) = type_errors.first() {
         return compile_error(e, src);
     }
