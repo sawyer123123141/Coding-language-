@@ -102,6 +102,13 @@ pub fn check_purity(program: &Program, fns: &HashMap<Symbol, &Fn>) -> Vec<Kestre
                     }
                     visit_expr(value, fns, cache, stack, impure);
                 }
+                Stmt::FieldAssign { target, value, .. } => {
+                    if !locals.contains(target) {
+                        *impure = true; // mutating something outside itself
+                        return;
+                    }
+                    visit_expr(value, fns, cache, stack, impure);
+                }
                 Stmt::If { cond, then_block, else_block, .. } => {
                     visit_expr(cond, fns, cache, stack, impure);
                     for st in then_block {
@@ -247,7 +254,7 @@ pub fn check_parallel_map(program: &Program, fns: &HashMap<Symbol, &Fn>) -> Vec<
 
     fn visit_stmt(s: &Stmt, fns: &HashMap<Symbol, &Fn>, errors: &mut Vec<KestrelcError>) {
         match s {
-            Stmt::Let { value, span, .. } | Stmt::Assign { value, span, .. } => {
+            Stmt::Let { value, span, .. } | Stmt::Assign { value, span, .. } | Stmt::FieldAssign { value, span, .. } => {
                 visit_expr(value, fns, *span, errors)
             }
             Stmt::If { cond, then_block, else_block, span } => {

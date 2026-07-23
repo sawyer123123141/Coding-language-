@@ -230,6 +230,19 @@ fn check_stmts_supported(stmts: &[Stmt]) -> Result<(), KestrelcError> {
     for s in stmts {
         match s {
             Stmt::Let { value, .. } | Stmt::Assign { value, .. } => check_expr_supported(value, false)?,
+            // Structs aren't supported under `kestrelc watch` at all yet
+            // (see the struct-typed-parameter rejection above) -- a
+            // FieldAssign target is always struct-typed by construction
+            // (resolve.rs only allows `p.x = ...` when `p` is a struct
+            // local), so this is always a fallback to AOT, never reached
+            // by a program this backend could otherwise compile.
+            Stmt::FieldAssign { span, .. } => {
+                return Err(KestrelcError::new(
+                    ErrorKind::Codegen,
+                    "structs aren't supported under `kestrelc watch` yet".to_string(),
+                    *span,
+                ));
+            }
             Stmt::If { cond, then_block, else_block, .. } => {
                 check_expr_supported(cond, false)?;
                 check_stmts_supported(then_block)?;
@@ -643,6 +656,7 @@ impl<'a> FnCodegen<'a> {
         self.cur_span = match s {
             Stmt::Let { span, .. }
             | Stmt::Assign { span, .. }
+            | Stmt::FieldAssign { span, .. }
             | Stmt::If { span, .. }
             | Stmt::While { span, .. }
             | Stmt::RangeFor { span, .. }
@@ -651,6 +665,13 @@ impl<'a> FnCodegen<'a> {
             | Stmt::ExprStmt { span, .. } => *span,
         };
         match s {
+            // check_stmts_supported already rejects any FieldAssign
+            // before compile_program reaches gen_stmt at all (structs
+            // aren't JIT-supported) -- this arm exists only to satisfy
+            // exhaustiveness and is never actually reached.
+            Stmt::FieldAssign { .. } => {
+                Err(self.err("internal error: FieldAssign reached JIT codegen -- check_stmts_supported should have rejected this first".to_string()))
+            }
             Stmt::Let { name, value, .. } | Stmt::Assign { name, value, .. } => {
                 let var = self.vars[name];
                 let v = self.gen_expr(value)?;

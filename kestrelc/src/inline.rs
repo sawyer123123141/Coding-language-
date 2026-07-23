@@ -93,9 +93,10 @@ fn calls_name(e: &Expr, name: Symbol) -> bool {
 fn walk_stmts_exprs<'a>(stmts: &'a [Stmt], on_expr: &mut impl FnMut(&'a Expr)) {
     for s in stmts {
         match s {
-            Stmt::Let { value, .. } | Stmt::Assign { value, .. } | Stmt::ExprStmt { expr: value, .. } => {
-                on_expr(value)
-            }
+            Stmt::Let { value, .. }
+            | Stmt::Assign { value, .. }
+            | Stmt::FieldAssign { value, .. }
+            | Stmt::ExprStmt { expr: value, .. } => on_expr(value),
             Stmt::If { cond, then_block, else_block, .. } => {
                 on_expr(cond);
                 walk_stmts_exprs(then_block, on_expr);
@@ -263,6 +264,12 @@ fn inline_stmts(stmts: &[Stmt], candidates: &HashMap<Symbol, Candidate>) -> Vec<
             Stmt::Assign { name, value, span } => {
                 Stmt::Assign { name: *name, value: inline_expr(value, candidates), span: *span }
             }
+            Stmt::FieldAssign { target, field, value, span } => Stmt::FieldAssign {
+                target: *target,
+                field: *field,
+                value: inline_expr(value, candidates),
+                span: *span,
+            },
             Stmt::If { cond, then_block, else_block, span } => Stmt::If {
                 cond: inline_expr(cond, candidates),
                 then_block: inline_stmts(then_block, candidates),

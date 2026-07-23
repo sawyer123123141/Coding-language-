@@ -162,6 +162,20 @@ fn cse_block(body: &mut [Stmt], fns: &HashMap<Symbol, Fn>) {
                     ids.contains(name)
                 }));
             }
+            Stmt::FieldAssign { target, value, .. } => {
+                // Same invalidation as a plain Assign, keyed on `target`
+                // instead of a reassigned name -- a field mutation
+                // changes what a call like `f(p)` would actually
+                // compute even though `p` itself was never reassigned,
+                // so any available entry whose args mention `target`
+                // must be dropped the same way.
+                rewrite_expr(value, fns, &available);
+                available.retain(|c| !c.args.iter().any(|a| {
+                    let mut ids = Vec::new();
+                    collect_idents(a, &mut ids);
+                    ids.contains(target)
+                }));
+            }
             Stmt::If { cond, then_block, else_block, .. } => {
                 rewrite_expr(cond, fns, &available);
                 cse_block(then_block, fns);

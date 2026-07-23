@@ -93,7 +93,9 @@ pub fn check_size_warnings(program: &Program) -> Vec<KestrelcWarning> {
 fn walk_stmts_for_size_warnings(stmts: &[Stmt], warnings: &mut Vec<KestrelcWarning>) {
     for s in stmts {
         match s {
-            Stmt::Let { value, .. } | Stmt::Assign { value, .. } => walk_expr_for_size_warnings(value, warnings),
+            Stmt::Let { value, .. } | Stmt::Assign { value, .. } | Stmt::FieldAssign { value, .. } => {
+                walk_expr_for_size_warnings(value, warnings)
+            }
             Stmt::If { cond, then_block, else_block, .. } => {
                 walk_expr_for_size_warnings(cond, warnings);
                 walk_stmts_for_size_warnings(then_block, warnings);
@@ -459,6 +461,41 @@ fn resolve_stmt(
                     format!("Assignment to unknown variable '{name}'"),
                     *span,
                 ));
+            }
+        }
+        Stmt::FieldAssign { target, field, value, span } => {
+            resolve_expr(value, locals, struct_locals, fns, structs, *span, errors);
+            match struct_locals.get(target) {
+                None => {
+                    // Same "don't double-report" reasoning as
+                    // ExprKind::Field's resolve_expr arm just below --
+                    // an unknown `target` is already reported wherever
+                    // it's first used/declared, not here.
+                    if locals.contains(target) {
+                        errors.push(KestrelcError::new(
+                            ErrorKind::Resolve,
+                            format!("'{target}' is not a struct"),
+                            *span,
+                        ));
+                    } else {
+                        errors.push(KestrelcError::new(
+                            ErrorKind::Resolve,
+                            format!("Assignment to unknown variable '{target}'"),
+                            *span,
+                        ));
+                    }
+                }
+                Some(struct_name) => {
+                    if let Some(decl) = structs.get(struct_name) {
+                        if !decl.fields.iter().any(|f| f.name == *field) {
+                            errors.push(KestrelcError::new(
+                                ErrorKind::Resolve,
+                                format!("'{struct_name}' has no field '{field}'"),
+                                *span,
+                            ));
+                        }
+                    }
+                }
             }
         }
         Stmt::If { cond, then_block, else_block, span } => {

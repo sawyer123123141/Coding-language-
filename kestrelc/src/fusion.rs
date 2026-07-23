@@ -51,6 +51,12 @@ fn count_ident_refs_stmts(stmts: &[Stmt], name: Symbol, count: &mut usize) {
                 }
                 count_ident_refs_expr(value, name, count);
             }
+            Stmt::FieldAssign { target, value, .. } => {
+                if *target == name {
+                    *count += 1;
+                }
+                count_ident_refs_expr(value, name, count);
+            }
             Stmt::If { cond, then_block, else_block, .. } => {
                 count_ident_refs_expr(cond, name, count);
                 count_ident_refs_stmts(then_block, name, count);

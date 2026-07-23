@@ -223,6 +223,7 @@ fn infer_array_param_lengths(program: &Program) -> HashMap<Symbol, Vec<usize>> {
                     }
                 }
                 Stmt::Assign { value, .. } => visit_expr(value, known_lens, array_positions, proofs),
+                Stmt::FieldAssign { value, .. } => visit_expr(value, known_lens, array_positions, proofs),
                 Stmt::If { cond, then_block, else_block, .. } => {
                     visit_expr(cond, known_lens, array_positions, proofs);
                     visit_stmts(then_block, known_lens, array_positions, proofs);
@@ -1260,6 +1261,7 @@ impl<'a> FnCodegen<'a> {
         self.cur_span = match s {
             Stmt::Let { span, .. }
             | Stmt::Assign { span, .. }
+            | Stmt::FieldAssign { span, .. }
             | Stmt::If { span, .. }
             | Stmt::While { span, .. }
             | Stmt::RangeFor { span, .. }
@@ -1277,6 +1279,27 @@ impl<'a> FnCodegen<'a> {
                     return Err(self.err(format!("Assignment to unknown variable '{name}'")));
                 }
                 self.gen_binding(*name, value)?;
+                Ok(false)
+            }
+            Stmt::FieldAssign { target, field, value, .. } => {
+                let Some(Slot::Struct { name: struct_name, vars: field_vars }) = self.vars.get(target) else {
+                    return Err(self.err(format!(
+                        "kestrelc: '{target}' isn't a struct-typed local so its fields can't be assigned"
+                    )));
+                };
+                let decl_fields: Vec<Symbol> = self
+                    .struct_table
+                    .get(struct_name)
+                    .map(|decl| decl.fields.iter().map(|f| f.name).collect())
+                    .unwrap_or_default();
+                let Some(idx) = decl_fields.iter().position(|f| f == field) else {
+                    return Err(self.err(format!(
+                        "internal error: field '{field}' wasn't found on '{struct_name}' -- resolve.rs should have already rejected this"
+                    )));
+                };
+                let target_var = field_vars[idx];
+                let v = self.gen_expr(value)?;
+                self.builder.def_var(target_var, v);
                 Ok(false)
             }
             Stmt::If { cond, then_block, else_block, .. } => {

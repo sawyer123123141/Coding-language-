@@ -224,6 +224,14 @@ pub fn check_types(program: &Program, fns: &HashMap<Symbol, &Fn>) -> Vec<Kestrel
                     }
                 }
             }
+            Stmt::FieldAssign { value, .. } => {
+                // Same treatment as ExprKind::Field's own inferred kind:
+                // declared field types don't carry Kind info yet (an
+                // existing, documented scope limit elsewhere in this
+                // file), so there's nothing to check the value's kind
+                // against -- just walk it for its own internal errors.
+                infer_expr(value, locals, fns, errors);
+            }
             Stmt::If { cond, then_block, else_block, .. } => {
                 let k = infer_expr(cond, locals, fns, errors);
                 if k != Kind::Unknown && k != Kind::Bool {

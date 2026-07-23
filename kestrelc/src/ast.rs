@@ -93,6 +93,12 @@ pub enum BinOp {
 pub enum Stmt {
     Let { name: Symbol, value: Expr, span: Span },
     Assign { name: Symbol, value: Expr, span: Span },
+    /// `p.x = value;` -- `target` must be a struct-typed local, `field`
+    /// one of its declared fields (both checked in resolve.rs). Structs
+    /// still can't be a function return value or contain arrays/nested
+    /// structs (unchanged, existing scope limits) -- this only adds
+    /// mutability to an existing struct-typed local's own fields.
+    FieldAssign { target: Symbol, field: Symbol, value: Expr, span: Span },
     If { cond: Expr, then_block: Vec<Stmt>, else_block: Option<Vec<Stmt>>, span: Span },
     While { cond: Expr, body: Vec<Stmt>, span: Span },
     RangeFor { var: Symbol, start: Expr, end: Expr, body: Vec<Stmt>, span: Span },

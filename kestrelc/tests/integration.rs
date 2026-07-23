@@ -1401,6 +1401,84 @@ fn a_struct_local_can_be_constructed_and_its_fields_read() {
 }
 
 #[test]
+fn a_struct_fields_can_be_reassigned_after_construction() {
+    let scratch = scratch_dir("struct_field_assign");
+    let src_path = scratch.join("prog.kes");
+    fs::write(
+        &src_path,
+        "struct Point { x: i64, y: i64 }\n\
+         fn main() {\n\
+         \x20   let p = Point { x: 1, y: 2 };\n\
+         \x20   p.x = 10;\n\
+         \x20   p.y = p.x + 5;\n\
+         \x20   print(p.x, p.y);\n\
+         }\n",
+    )
+    .unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(out.status.success(), "compile failed:\n{}", String::from_utf8_lossy(&out.stderr));
+
+    let bin = scratch.join("prog");
+    let run = Command::new(&bin).output().expect("failed to run compiled binary");
+    assert!(run.status.success(), "compiled binary exited with failure");
+    assert_eq!(native_stdout(&run), "10 15\n");
+}
+
+#[test]
+fn assigning_an_unknown_field_is_a_resolve_error() {
+    let scratch = scratch_dir("struct_field_assign_bad_field");
+    let src_path = scratch.join("prog.kes");
+    fs::write(
+        &src_path,
+        "struct Point { x: i64, y: i64 }\n\
+         fn main() {\n\
+         \x20   let p = Point { x: 1, y: 2 };\n\
+         \x20   p.z = 5;\n\
+         \x20   print(p.x);\n\
+         }\n",
+    )
+    .unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(!out.status.success(), "expected a resolve error for an unknown field");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("has no field 'z'"), "got: {stderr}");
+}
+
+#[test]
+fn assigning_a_field_on_a_non_struct_local_is_a_resolve_error() {
+    let scratch = scratch_dir("struct_field_assign_not_a_struct");
+    let src_path = scratch.join("prog.kes");
+    fs::write(
+        &src_path,
+        "fn main() {\n\
+         \x20   let x = 5;\n\
+         \x20   x.y = 5;\n\
+         \x20   print(x);\n\
+         }\n",
+    )
+    .unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(!out.status.success(), "expected a resolve error for assigning a field on a non-struct local");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("is not a struct"), "got: {stderr}");
+}
+
+#[test]
 fn a_struct_literal_can_reorder_fields_and_read_them_back_correctly() {
     // Fields written out of declaration order in the literal --
     // proves gen_binding actually reorders into declaration order

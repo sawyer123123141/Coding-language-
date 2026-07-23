@@ -505,6 +505,26 @@ impl Parser {
         }
         if let Tok::Ident(name) = &self.peek().tok {
             let name = name.clone();
+            // `p.x = value;` -- field assignment. Checked via 4-token
+            // lookahead (ident, dot, ident, eq) before the plain-ident
+            // checks below, since without this `p.x` would otherwise be
+            // parsed as a bare Field expression by parse_expr() and then
+            // choke on the following `=` (ExprStmt expects `;` next, not
+            // `=`) instead of being recognized as an assignment target.
+            if self.tokens.get(self.pos + 1).is_some_and(|t| t.tok == Tok::Dot) {
+                if let Some(Tok::Ident(field)) = self.tokens.get(self.pos + 2).map(|t| &t.tok) {
+                    if self.tokens.get(self.pos + 3).is_some_and(|t| t.tok == Tok::Eq) {
+                        let field = field.clone();
+                        self.advance(); // ident
+                        self.advance(); // dot
+                        self.advance(); // field ident
+                        self.advance(); // =
+                        let value = self.parse_expr()?;
+                        self.expect(Tok::Semi)?;
+                        return Ok(vec![Stmt::FieldAssign { target: name, field, value, span }]);
+                    }
+                }
+            }
             if self.tokens[self.pos + 1].tok == Tok::Eq {
                 self.advance();
                 self.advance();
