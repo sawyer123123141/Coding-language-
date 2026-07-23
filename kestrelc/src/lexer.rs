@@ -51,6 +51,11 @@ pub enum Tok {
     GtEq,
     AndAnd,
     OrOr,
+    PlusEq,
+    MinusEq,
+    StarEq,
+    SlashEq,
+    PercentEq,
     Eof,
 }
 
@@ -159,6 +164,11 @@ pub fn lex(src: &str) -> Result<Vec<Token>, KestrelcError> {
                 ('-', '>') => Some(Tok::Arrow),
                 ('&', '&') => Some(Tok::AndAnd),
                 ('|', '|') => Some(Tok::OrOr),
+                ('+', '=') => Some(Tok::PlusEq),
+                ('-', '=') => Some(Tok::MinusEq),
+                ('*', '=') => Some(Tok::StarEq),
+                ('/', '=') => Some(Tok::SlashEq),
+                ('%', '=') => Some(Tok::PercentEq),
                 _ => None,
             }
         } else {

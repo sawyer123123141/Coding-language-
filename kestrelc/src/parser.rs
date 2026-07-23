@@ -512,6 +512,34 @@ impl Parser {
                 self.expect(Tok::Semi)?;
                 return Ok(vec![Stmt::Assign { name, value, span }]);
             }
+            // Compound assignment (`x += 1;` etc.) desugars directly to
+            // `x = x + 1;` at parse time -- same reasoning as general-for's
+            // step clause: no new AST shape, every existing pass (resolve,
+            // purity, typecheck, both codegens) already handles a plain
+            // `Stmt::Assign` with a `Binop` value with zero changes.
+            let compound_op = match &self.tokens[self.pos + 1].tok {
+                Tok::PlusEq => Some(BinOp::Add),
+                Tok::MinusEq => Some(BinOp::Sub),
+                Tok::StarEq => Some(BinOp::Mul),
+                Tok::SlashEq => Some(BinOp::Div),
+                Tok::PercentEq => Some(BinOp::Mod),
+                _ => None,
+            };
+            if let Some(op) = compound_op {
+                self.advance();
+                self.advance();
+                let rhs = self.parse_expr()?;
+                self.expect(Tok::Semi)?;
+                let value = Expr::new(
+                    ExprKind::Binop {
+                        op,
+                        left: Box::new(Expr::new(ExprKind::Ident(name), span)),
+                        right: Box::new(rhs),
+                    },
+                    span,
+                );
+                return Ok(vec![Stmt::Assign { name, value, span }]);
+            }
         }
         let expr = self.parse_expr()?;
         self.expect(Tok::Semi)?;
@@ -560,6 +588,25 @@ pub fn parse(tokens: Vec<Token>) -> PResult<Program> {
 mod tests {
     use super::*;
     use crate::lexer::lex;
+
+    #[test]
+    fn compound_assignment_desugars_to_a_plain_assign_with_a_binop_value() {
+        let program = crate::parser::parse(crate::lexer::lex(
+            "fn main() { let x = 10; x += 5; }"
+        ).unwrap()).unwrap();
+        let main_fn = &program.fns[0];
+        assert_eq!(main_fn.body.len(), 2);
+        let Stmt::Assign { name, value, .. } = &main_fn.body[1] else {
+            panic!("expected Assign, got {:?}", main_fn.body[1]);
+        };
+        assert_eq!(name.resolve().as_ref(), "x");
+        let ExprKind::Binop { op, left, right } = &value.kind else {
+            panic!("expected Binop value, got {:?}", value.kind);
+        };
+        assert!(matches!(op, BinOp::Add));
+        assert!(matches!(&left.kind, ExprKind::Ident(n) if n.resolve().as_ref() == "x"));
+        assert!(matches!(right.kind, ExprKind::Num(5)));
+    }
 
     #[test]
     fn a_trailing_comma_is_allowed_in_struct_decl_fields_struct_lit_fields_params_call_args_and_array_lits() {
