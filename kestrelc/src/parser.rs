@@ -107,6 +107,9 @@ impl Parser {
                 params.push(Param { name, ty });
                 if self.at(&Tok::Comma) {
                     self.advance();
+                    if self.at(&Tok::RParen) {
+                        break;
+                    }
                 } else {
                     break;
                 }
@@ -129,6 +132,9 @@ impl Parser {
                 fields.push(Param { name: field_name, ty });
                 if self.at(&Tok::Comma) {
                     self.advance();
+                    if self.at(&Tok::RBrace) {
+                        break;
+                    }
                 } else {
                     break;
                 }
@@ -156,6 +162,9 @@ impl Parser {
                 fields.push((field_name, value));
                 if self.at(&Tok::Comma) {
                     self.advance();
+                    if self.at(&Tok::RBrace) {
+                        break;
+                    }
                 } else {
                     break;
                 }
@@ -174,6 +183,9 @@ impl Parser {
                 args.push(self.parse_expr()?);
                 if self.at(&Tok::Comma) {
                     self.advance();
+                    if self.at(&Tok::RParen) {
+                        break;
+                    }
                 } else {
                     break;
                 }
@@ -213,6 +225,9 @@ impl Parser {
                         elems.push(self.parse_expr()?);
                         if self.at(&Tok::Comma) {
                             self.advance();
+                            if self.at(&Tok::RBracket) {
+                                break;
+                            }
                         } else {
                             break;
                         }
@@ -545,6 +560,22 @@ pub fn parse(tokens: Vec<Token>) -> PResult<Program> {
 mod tests {
     use super::*;
     use crate::lexer::lex;
+
+    #[test]
+    fn a_trailing_comma_is_allowed_in_struct_decl_fields_struct_lit_fields_params_call_args_and_array_lits() {
+        let program = crate::parser::parse(crate::lexer::lex(
+            "struct Point { x: i64, y: i64, }\n\
+             pure fn add(a: i64, b: i64,) -> i64 { return a + b; }\n\
+             fn main() {\n\
+             \x20   let p = Point { x: 1, y: 2, };\n\
+             \x20   let arr = [1, 2, 3,];\n\
+             \x20   print(add(p.x, p.y,));\n\
+             }\n"
+        ).unwrap()).unwrap();
+        assert_eq!(program.structs.len(), 1);
+        assert_eq!(program.structs[0].fields.len(), 2);
+        assert_eq!(program.fns.len(), 2);
+    }
 
     #[test]
     fn parses_range_for_into_a_rangefor_node() {
