@@ -1076,6 +1076,7 @@ fn find_loop_bounds_proof(prev: Option<&Stmt>, cond: &Expr, body: &[Stmt]) -> Op
     let (last, rest) = body.split_last()?;
     for s in rest {
         match s {
+            Stmt::Let { name, .. } if *name == idx => return None,
             Stmt::Let { .. } | Stmt::ExprStmt { .. } | Stmt::Print { .. } => {}
             Stmt::Assign { name, .. } if *name == idx => return None,
             Stmt::Assign { .. } => {}
@@ -2000,6 +2001,18 @@ mod loop_bounds_proof_tests {
         let prev = let_stmt("i", num(0));
         let cond = lt(ident("i"), ident("n"));
         let body = vec![assign("total", index("arr", "i")), increment("i")];
+        assert_eq!(find_loop_bounds_proof(Some(&prev), &cond, &body), None);
+    }
+
+    #[test]
+    fn shadow_let_rebinding_index_is_not_proven() {
+        let prev = let_stmt("i", num(0));
+        let cond = lt(ident("i"), num(20000));
+        let body = vec![
+            let_stmt("i", num(999999)),
+            assign("total", index("arr", "i")),
+            increment("i"),
+        ];
         assert_eq!(find_loop_bounds_proof(Some(&prev), &cond, &body), None);
     }
 }
