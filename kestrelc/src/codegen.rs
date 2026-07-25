@@ -844,6 +844,7 @@ impl Codegen {
                 epilogue,
                 cur_span: f.span,
                 loop_stack: Vec::new(),
+                loop_bounds_stack: Vec::new(),
             };
             let terminated = fc.gen_block(&f.body)?;
             if let Some((epilogue_blk, ret_var)) = fc.epilogue {
@@ -1149,6 +1150,13 @@ struct FnCodegen<'a> {
     /// but `gen_stmt`'s Break/Continue arms still handle it defensively
     /// with a clear internal-error message rather than panicking.
     loop_stack: Vec<(Block, Block)>,
+    /// One entry per currently-active enclosing `while` loop, innermost
+    /// last, mirroring `loop_stack`'s lifetime. `Some((idx, bound))`
+    /// when `find_loop_bounds_proof` proved this loop's shape safe;
+    /// `None` otherwise. Consulted by `gen_expr`'s `Index` arm (fast
+    /// path #3) to decide whether an `arr[idx]` access inside this
+    /// loop's body can skip the runtime bounds check.
+    loop_bounds_stack: Vec<Option<(Symbol, i64)>>,
 }
 
 type CgResult<T> = Result<T, KestrelcError>;
@@ -1169,8 +1177,9 @@ impl<'a> FnCodegen<'a> {
     /// Generates a statement sequence. Returns true if every path through
     /// it ends in a `return` (i.e. control can't fall off the end of it).
     fn gen_block(&mut self, stmts: &[Stmt]) -> CgResult<bool> {
-        for s in stmts {
-            if self.gen_stmt(s)? {
+        for (i, s) in stmts.iter().enumerate() {
+            let prev = if i > 0 { Some(&stmts[i - 1]) } else { None };
+            if self.gen_stmt(s, prev)? {
                 return Ok(true); // rest of this block is unreachable
             }
         }
@@ -1339,7 +1348,7 @@ impl<'a> FnCodegen<'a> {
         }
     }
 
-    fn gen_stmt(&mut self, s: &Stmt) -> CgResult<bool> {
+    fn gen_stmt(&mut self, s: &Stmt, prev: Option<&Stmt>) -> CgResult<bool> {
         self.cur_span = match s {
             Stmt::Let { span, .. }
             | Stmt::Assign { span, .. }
@@ -1440,7 +1449,9 @@ impl<'a> FnCodegen<'a> {
                 // back-edge below jumps to) -- a `while` loop has no
                 // separate step to preserve, unlike RangeFor below.
                 self.loop_stack.push((header_blk, after_blk));
+                self.loop_bounds_stack.push(find_loop_bounds_proof(prev, cond, body));
                 let body_term = self.gen_block(body)?;
+                self.loop_bounds_stack.pop();
                 self.loop_stack.pop();
                 if !body_term {
                     self.builder.ins().jump(header_blk, &[]);
@@ -1699,6 +1710,29 @@ impl<'a> FnCodegen<'a> {
                             return Ok(self.builder.ins().load(types::I64, MemFlags::new(), addr, 0));
                         }
                     }
+                }
+
+                // Proof-carrying fast path #3: the innermost enclosing
+                // `while` loop's own shape was proven safe by
+                // find_loop_bounds_proof (pushed in the While arm above)
+                // -- `idx` is provably `0 <= idx < bound` everywhere in
+                // this loop's body, and this array's statically-known
+                // length covers that bound.
+                if let (ExprKind::Ident(t), ExprKind::Ident(i)) = (&target.as_ref().kind, &index.as_ref().kind) {
+                    if let Some(Some((proven_idx, bound))) = self.loop_bounds_stack.last() {
+                        if i == proven_idx {
+                            if let Some(static_len) = self.static_array_len(target) {
+                                if *bound as usize <= static_len {
+                                    let (ptr, _len) = self.resolve_array(target)?;
+                                    let idx = self.gen_expr(index)?;
+                                    let offset = self.builder.ins().imul_imm(idx, 8);
+                                    let addr = self.builder.ins().iadd(ptr, offset);
+                                    return Ok(self.builder.ins().load(types::I64, MemFlags::new(), addr, 0));
+                                }
+                            }
+                        }
+                    }
+                    let _ = t; // t isn't otherwise used in this fast path
                 }
 
                 let (ptr, len) = self.resolve_array(target)?;
