@@ -110,7 +110,15 @@ impl Parser {
         let mut fns = Vec::new();
         let mut structs = Vec::new();
         while !self.at(&Tok::Eof) {
-            if self.at(&Tok::Struct) {
+            // `pub struct`/`pub fn` both start with `Tok::Pub`, so the
+            // dispatch has to look one token past an optional leading
+            // `pub` to tell which parser to call.
+            let is_struct = if self.at(&Tok::Pub) {
+                matches!(self.tokens.get(self.pos + 1).map(|t| &t.tok), Some(Tok::Struct))
+            } else {
+                self.at(&Tok::Struct)
+            };
+            if is_struct {
                 structs.push(self.parse_struct_decl()?);
             } else {
                 fns.push(self.parse_fn_decl()?);
@@ -194,6 +202,12 @@ impl Parser {
 
     fn parse_struct_decl(&mut self) -> PResult<StructDecl> {
         let span = self.peek().span;
+        let pub_ = if self.at(&Tok::Pub) {
+            self.advance();
+            true
+        } else {
+            false
+        };
         self.expect(Tok::Struct)?;
         let name = self.expect_ident()?;
         self.expect(Tok::LBrace)?;
@@ -215,7 +229,7 @@ impl Parser {
             }
         }
         self.expect(Tok::RBrace)?;
-        Ok(StructDecl { name, fields, span })
+        Ok(StructDecl { name, pub_, fields, span })
     }
 
     /// Called from `parse_primary` once it's seen `IDENT {` — `name`
@@ -686,6 +700,17 @@ impl Parser {
 
     fn parse_fn_decl(&mut self) -> PResult<Fn> {
         let span = self.peek().span;
+        // `pub` must precede `pure` when both are present (`pub pure
+        // fn`) -- only this order is checked for here, so `pure pub
+        // fn` falls through to `self.expect(Tok::Fn)` below and fails
+        // as a real parse error, not a silently-accepted alternate
+        // spelling.
+        let pub_ = if self.at(&Tok::Pub) {
+            self.advance();
+            true
+        } else {
+            false
+        };
         let pure = if self.at(&Tok::Pure) {
             self.advance();
             true
@@ -714,7 +739,7 @@ impl Parser {
             None
         };
         let body = self.parse_block()?;
-        Ok(Fn { name, pure, params, return_type, where_clause, body, span })
+        Ok(Fn { name, pure, pub_, params, return_type, where_clause, body, span })
     }
 }
 
@@ -1011,5 +1036,42 @@ mod tests {
         let Stmt::Let { value, .. } = &program.fns[0].body[0] else { panic!("expected a let") };
         let ExprKind::Field { field, .. } = &value.kind else { panic!("expected field access, got {:?}", value.kind) };
         assert_eq!(&*field.resolve(), "map");
+    }
+
+    #[test]
+    fn a_bare_fn_declaration_is_private_by_default() {
+        let program = parse(lex("fn helper() { print(1); }").unwrap()).unwrap();
+        assert!(!program.fns[0].pub_);
+    }
+
+    #[test]
+    fn pub_fn_is_marked_public() {
+        let program = parse(lex("pub fn helper() { print(1); }").unwrap()).unwrap();
+        assert!(program.fns[0].pub_);
+    }
+
+    #[test]
+    fn pub_pure_fn_is_both_pub_and_pure() {
+        let program = parse(lex("pub pure fn square(x: i64) -> i64 { return x * x; }").unwrap()).unwrap();
+        assert!(program.fns[0].pub_);
+        assert!(program.fns[0].pure);
+    }
+
+    #[test]
+    fn pure_pub_fn_wrong_keyword_order_is_a_parse_error() {
+        let result = parse(lex("pure pub fn square(x: i64) -> i64 { return x * x; }").unwrap());
+        assert!(result.is_err(), "expected pure before pub to be a parse error");
+    }
+
+    #[test]
+    fn a_bare_struct_declaration_is_private_by_default() {
+        let program = parse(lex("struct Point { x: i64 }\nfn main() { print(1); }").unwrap()).unwrap();
+        assert!(!program.structs[0].pub_);
+    }
+
+    #[test]
+    fn pub_struct_is_marked_public() {
+        let program = parse(lex("pub struct Point { x: i64 }\nfn main() { print(1); }").unwrap()).unwrap();
+        assert!(program.structs[0].pub_);
     }
 }

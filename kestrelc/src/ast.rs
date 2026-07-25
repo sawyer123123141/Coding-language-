@@ -128,6 +128,13 @@ pub enum Stmt {
 pub struct Fn {
     pub name: Symbol,
     pub pure: bool,
+    /// Cross-module visibility -- see docs/superpowers/specs/
+    /// 2026-07-25-visibility-design.md. Private (`false`) by default;
+    /// `pub` makes a function importable from another module (both
+    /// `use fn_name from module;` and bare `use module;` +
+    /// `module.fn_name(...)`). Never checked for same-module access,
+    /// which this field has no effect on at all.
+    pub pub_: bool,
     pub params: Vec<Param>,
     pub return_type: Option<Type>,
     pub where_clause: Option<Expr>,
@@ -166,6 +173,9 @@ pub enum UseDecl {
 #[derive(Debug, Clone)]
 pub struct StructDecl {
     pub name: Symbol,
+    /// Same meaning as `Fn.pub_` above -- private by default, whole
+    /// struct or nothing (no per-field visibility).
+    pub pub_: bool,
     pub fields: Vec<Param>,
     pub span: Span,
 }

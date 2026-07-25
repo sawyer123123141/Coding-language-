@@ -204,6 +204,7 @@ fn fuse_body(
         let fused_fn = Fn {
             name: fused_name,
             pure: true,
+            pub_: false,
             params: vec![Param { name: x_sym, ty: f_fn.params[0].ty.clone() }],
             return_type: g_fn.return_type.clone(),
             where_clause: None,
