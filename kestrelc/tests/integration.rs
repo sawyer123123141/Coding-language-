@@ -2494,7 +2494,7 @@ fn a_from_import_compiles_and_runs_across_two_files_with_correct_output() {
     fs::write(
         scratch.join("geometry.kes"),
         r#"
-        pure fn square(x: i64) -> i64 {
+        pub pure fn square(x: i64) -> i64 {
             return x * x;
         }
         "#,
@@ -2627,7 +2627,7 @@ fn a_bare_use_qualified_call_compiles_and_runs_across_two_files() {
     let scratch = scratch_dir("modules_qualified_call");
     fs::write(
         scratch.join("geometry.kes"),
-        "pure fn square(x: i64) -> i64 { return x * x; }\n",
+        "pub pure fn square(x: i64) -> i64 { return x * x; }\n",
     )
     .unwrap();
     let entry = scratch.join("main.kes");
@@ -2656,7 +2656,7 @@ fn editing_an_imported_module_invalidates_the_compile_cache() {
     let scratch = scratch_dir("modules_cache_invalidation");
     let cache_dir = scratch.join("cache");
     let geometry_path = scratch.join("geometry.kes");
-    fs::write(&geometry_path, "pure fn square(x: i64) -> i64 { return x * x; }\n").unwrap();
+    fs::write(&geometry_path, "pub pure fn square(x: i64) -> i64 { return x * x; }\n").unwrap();
     let entry = scratch.join("main.kes");
     fs::write(&entry, "use square from geometry;\nfn main() { print(square(7)); }\n").unwrap();
 
@@ -2678,9 +2678,109 @@ fn editing_an_imported_module_invalidates_the_compile_cache() {
     // Edit only the imported module (geometry.kes), not main.kes, then
     // recompile against the same cache dir -- must NOT serve the stale
     // "49" binary.
-    fs::write(&geometry_path, "pure fn square(x: i64) -> i64 { return x * x * x; }\n").unwrap();
+    fs::write(&geometry_path, "pub pure fn square(x: i64) -> i64 { return x * x * x; }\n").unwrap();
     let out2 = compile();
     assert!(out2.status.success(), "second compile failed:\n{}", String::from_utf8_lossy(&out2.stderr));
     let run2 = Command::new(&bin).output().expect("failed to run compiled binary");
     assert_eq!(native_stdout(&run2), "343\n", "cache served a stale binary after editing an imported module");
+}
+
+#[test]
+fn a_from_import_of_a_private_function_is_a_distinct_compile_error() {
+    let scratch = scratch_dir("visibility_from_private");
+    fs::write(
+        scratch.join("geometry.kes"),
+        "fn square(x: i64) -> i64 { return x * x; }\n",
+    )
+    .unwrap();
+    let entry = scratch.join("main.kes");
+    fs::write(&entry, "use square from geometry;\nfn main() { print(square(7)); }\n").unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&entry)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(!out.status.success(), "kestrelc should have rejected importing a private function");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("private"), "got: {stderr}");
+    assert!(!stderr.contains("not found"), "private access should not read as \"not found\", got: {stderr}");
+}
+
+#[test]
+fn a_bare_use_qualified_call_to_a_private_function_is_a_distinct_compile_error() {
+    let scratch = scratch_dir("visibility_qualified_private");
+    fs::write(
+        scratch.join("geometry.kes"),
+        "fn square(x: i64) -> i64 { return x * x; }\n",
+    )
+    .unwrap();
+    let entry = scratch.join("main.kes");
+    fs::write(&entry, "use geometry;\nfn main() { print(geometry.square(7)); }\n").unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&entry)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(!out.status.success(), "kestrelc should have rejected a qualified call to a private function");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("private"), "got: {stderr}");
+}
+
+#[test]
+fn a_pub_function_compiles_and_runs_across_two_files_both_import_forms() {
+    let scratch = scratch_dir("visibility_pub_both_forms");
+    fs::write(
+        scratch.join("geometry.kes"),
+        "pub pure fn square(x: i64) -> i64 { return x * x; }\n",
+    )
+    .unwrap();
+
+    // Form 1: from-import.
+    let entry1 = scratch.join("main_from.kes");
+    fs::write(&entry1, "use square from geometry;\nfn main() { print(square(6)); }\n").unwrap();
+    let out1 = Command::new(kestrelc_bin())
+        .arg(&entry1)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(out1.status.success(), "compile failed:\n{}", String::from_utf8_lossy(&out1.stderr));
+    let run1 = Command::new(scratch.join("main_from")).output().expect("failed to run compiled binary");
+    assert_eq!(native_stdout(&run1), "36\n");
+
+    // Form 2: bare use + qualified call.
+    let entry2 = scratch.join("main_qualified.kes");
+    fs::write(&entry2, "use geometry;\nfn main() { print(geometry.square(7)); }\n").unwrap();
+    let out2 = Command::new(kestrelc_bin())
+        .arg(&entry2)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(out2.status.success(), "compile failed:\n{}", String::from_utf8_lossy(&out2.stderr));
+    let run2 = Command::new(scratch.join("main_qualified")).output().expect("failed to run compiled binary");
+    assert_eq!(native_stdout(&run2), "49\n");
+}
+
+#[test]
+fn a_private_function_still_works_when_called_only_within_its_own_module() {
+    let scratch = scratch_dir("visibility_private_same_module_ok");
+    fs::write(scratch.join("dummy.kes"), "fn noop() {}\n").unwrap();
+    let entry = scratch.join("main.kes");
+    fs::write(
+        &entry,
+        "use dummy;\nfn helper() { print(1); }\nfn main() { helper(); }\n",
+    )
+    .unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&entry)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(out.status.success(), "compile failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    let bin = scratch.join("main");
+    let run = Command::new(&bin).output().expect("failed to run compiled binary");
+    assert!(run.status.success(), "compiled binary exited with failure");
+    assert_eq!(native_stdout(&run), "1\n");
 }
