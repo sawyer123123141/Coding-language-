@@ -1,0 +1,19 @@
+fn main() {
+    let arr = [10, 20, 30, 40, 50];
+    let total = 0;
+    let i = 0;
+    while (i < 5) {
+        total = total + arr[i];
+        i = i + 1;
+    }
+    print(total);
+
+    let arr2 = [1, 2, 3, 4];
+    let sum2 = 0;
+    let i = 0;
+    while (i < 4) {
+        sum2 = sum2 + arr2[i];
+        i = i + 1;
+    }
+    print(sum2);
+}
