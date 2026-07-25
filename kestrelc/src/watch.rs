@@ -19,7 +19,7 @@ pub(crate) fn drain_debounced(rx: &Receiver<()>, timeout: Duration) -> bool {
 }
 
 use crate::error::KestrelcError;
-use crate::{format_diagnostic, jit_codegen, lexer, parser, purity, resolve, typecheck};
+use crate::{format_diagnostic, jit_codegen, modules, purity, resolve, typecheck};
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use std::fs;
 use std::io::Write;
@@ -78,19 +78,57 @@ pub fn run(path: &str) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    // Watches every module `src_path` (transitively) `use`s too, not
+    // just `src_path` itself -- otherwise editing an imported module
+    // would never trigger a recompile at all. Re-synced after every
+    // save (see the loop below) since a save can add or remove a `use`,
+    // changing which files matter. Starts as just `src_path` so a
+    // syntax error in the very first discovery attempt still leaves
+    // *something* watched (the entry file), rather than nothing.
+    let mut watched: std::collections::HashSet<std::path::PathBuf> =
+        std::iter::once(src_path.to_path_buf()).collect();
     if let Err(e) = watcher.watch(src_path, RecursiveMode::NonRecursive) {
         eprintln!("kestrelc: failed to watch '{path}': {e}");
         return ExitCode::FAILURE;
     }
+    sync_watched_files(&mut watcher, &mut watched, src_path);
 
     println!("kestrelc: watching {path} (Ctrl+C to stop)");
     compile_and_run(&exe, path, &stem);
+    sync_watched_files(&mut watcher, &mut watched, src_path);
 
     const DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(100);
     while drain_debounced(&rx, DEBOUNCE) {
         compile_and_run(&exe, path, &stem);
+        sync_watched_files(&mut watcher, &mut watched, src_path);
     }
     ExitCode::SUCCESS
+}
+
+/// Re-discovers `entry`'s module set and updates `watcher`'s watched
+/// paths (and `watched` itself) to match exactly -- unwatches any file
+/// no longer used, watches any newly-used one. On a discovery failure
+/// (a real syntax error mid-edit, most likely), leaves the existing
+/// watched set untouched rather than losing watches over a transient
+/// error the very next save will probably fix.
+fn sync_watched_files(
+    watcher: &mut notify::RecommendedWatcher,
+    watched: &mut std::collections::HashSet<std::path::PathBuf>,
+    entry: &Path,
+) {
+    let Ok(discovered) = modules::discover_modules(entry) else {
+        return;
+    };
+    let current: std::collections::HashSet<std::path::PathBuf> = discovered.keys().cloned().collect();
+    for stale in watched.difference(&current) {
+        let _ = watcher.unwatch(stale);
+    }
+    for new_path in current.difference(watched) {
+        if let Err(e) = watcher.watch(new_path, RecursiveMode::NonRecursive) {
+            eprintln!("kestrelc: failed to watch '{}': {e}", new_path.display());
+        }
+    }
+    *watched = current;
 }
 
 fn compile_and_run(exe: &Path, path: &str, stem: &str) {
@@ -223,14 +261,19 @@ fn try_jit(path: &str) -> JitOutcome {
         }
     };
 
-    let tokens = match lexer::lex(&src) {
-        Ok(t) => t,
+    // Mirrors main.rs's own discover_modules + merge_modules step (see
+    // there for why this must run before anything else) -- without it,
+    // a program using `use`/`from` imports would fail every check below
+    // with "Unknown function" the moment it's saved under `watch`, since
+    // the imported module's functions would never have been merged in.
+    let discovered = match modules::discover_modules(Path::new(path)) {
+        Ok(d) => d,
         Err(e) => {
             report_error(&src, path, &e);
             return JitOutcome::CompileError;
         }
     };
-    let program = match parser::parse(tokens) {
+    let program = match modules::merge_modules(Path::new(path), discovered) {
         Ok(p) => p,
         Err(e) => {
             report_error(&src, path, &e);
@@ -373,5 +416,69 @@ mod tests {
         let (tx, rx) = channel::<()>();
         drop(tx);
         assert!(!drain_debounced(&rx, Duration::from_millis(50)));
+    }
+
+    fn scratch_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("kestrelc-watch-test-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn no_op_watcher() -> notify::RecommendedWatcher {
+        notify::recommended_watcher(|_res: notify::Result<Event>| {}).expect("failed to create test watcher")
+    }
+
+    #[test]
+    fn sync_watched_files_adds_a_newly_discovered_module() {
+        let dir = scratch_dir("sync_add");
+        fs::write(dir.join("geometry.kes"), "fn noop() {}\n").unwrap();
+        let entry = dir.join("main.kes");
+        fs::write(&entry, "use geometry;\nfn main() { print(1); }\n").unwrap();
+
+        let mut watcher = no_op_watcher();
+        let mut watched: std::collections::HashSet<std::path::PathBuf> = std::collections::HashSet::new();
+        sync_watched_files(&mut watcher, &mut watched, &entry);
+
+        assert_eq!(watched.len(), 2, "expected main.kes and geometry.kes both watched, got: {watched:?}");
+    }
+
+    #[test]
+    fn sync_watched_files_drops_a_module_no_longer_used() {
+        let dir = scratch_dir("sync_remove");
+        fs::write(dir.join("geometry.kes"), "fn noop() {}\n").unwrap();
+        let entry = dir.join("main.kes");
+        fs::write(&entry, "use geometry;\nfn main() { print(1); }\n").unwrap();
+
+        let mut watcher = no_op_watcher();
+        let mut watched: std::collections::HashSet<std::path::PathBuf> = std::collections::HashSet::new();
+        sync_watched_files(&mut watcher, &mut watched, &entry);
+        assert_eq!(watched.len(), 2);
+
+        // Remove the use -- geometry.kes should drop out of the watched
+        // set on the next sync, since it's no longer part of the program.
+        fs::write(&entry, "fn main() { print(1); }\n").unwrap();
+        sync_watched_files(&mut watcher, &mut watched, &entry);
+        assert_eq!(watched.len(), 1, "expected only main.kes still watched, got: {watched:?}");
+        assert!(watched.iter().all(|p| p.file_name().unwrap() == "main.kes"));
+    }
+
+    #[test]
+    fn sync_watched_files_leaves_the_set_untouched_on_a_syntax_error() {
+        let dir = scratch_dir("sync_syntax_error");
+        fs::write(dir.join("geometry.kes"), "fn noop() {}\n").unwrap();
+        let entry = dir.join("main.kes");
+        fs::write(&entry, "use geometry;\nfn main() { print(1); }\n").unwrap();
+
+        let mut watcher = no_op_watcher();
+        let mut watched: std::collections::HashSet<std::path::PathBuf> = std::collections::HashSet::new();
+        sync_watched_files(&mut watcher, &mut watched, &entry);
+        let before = watched.clone();
+
+        // A transient syntax error mid-edit must not wipe out the
+        // existing watched set -- the next save will probably fix it.
+        fs::write(&entry, "use geometry\nfn main( { print(1); }\n").unwrap();
+        sync_watched_files(&mut watcher, &mut watched, &entry);
+        assert_eq!(watched, before, "watched set should be untouched after a discovery failure");
     }
 }
