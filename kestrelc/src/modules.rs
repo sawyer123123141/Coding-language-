@@ -41,31 +41,45 @@ fn rewrite_type(ty: &mut Type, rename: &HashMap<Symbol, Symbol>) {
 /// reference, so it's deliberately left untouched here -- renaming it
 /// too would incorrectly rewrite a local variable that happens to
 /// share a name with an imported/declared function.
-fn rewrite_expr(e: &mut Expr, rename: &HashMap<Symbol, Symbol>) {
+///
+/// `denied` holds synthesized "module.name" symbols (see parser.rs's
+/// qualified-call desugar) for names that exist in their source module
+/// but aren't `pub` -- encountering one as a Call/StructLit name is a
+/// compile error naming the module, distinct from the generic "unknown
+/// function" error a genuinely nonexistent name gets instead (that one
+/// is never in `rename` or `denied`, so it just falls through unchanged
+/// to resolve.rs's existing check).
+fn rewrite_expr(e: &mut Expr, rename: &HashMap<Symbol, Symbol>, denied: &HashMap<Symbol, String>) -> Result<(), KestrelcError> {
     match &mut e.kind {
         ExprKind::Num(_) | ExprKind::Str(_) | ExprKind::Bool(_) | ExprKind::Ident(_) => {}
         ExprKind::ArrayLit(elems) => {
             for el in elems {
-                rewrite_expr(el, rename);
+                rewrite_expr(el, rename, denied)?;
             }
         }
-        ExprKind::Unary { expr, .. } => rewrite_expr(expr, rename),
+        ExprKind::Unary { expr, .. } => rewrite_expr(expr, rename, denied)?,
         ExprKind::Binop { left, right, .. } => {
-            rewrite_expr(left, rename);
-            rewrite_expr(right, rename);
+            rewrite_expr(left, rename, denied)?;
+            rewrite_expr(right, rename, denied)?;
         }
         ExprKind::Index { target, index } => {
-            rewrite_expr(target, rename);
-            rewrite_expr(index, rename);
+            rewrite_expr(target, rename, denied)?;
+            rewrite_expr(index, rename, denied)?;
         }
         ExprKind::Call { name, args } => {
             let is_parallel_map = *name == crate::interner::well_known::parallel_map();
+            if let Some(reason) = denied.get(name) {
+                return Err(KestrelcError::internal(ErrorKind::Resolve, reason.clone()));
+            }
             if let Some(&q) = rename.get(name) {
                 *name = q;
             }
             if is_parallel_map {
                 if let Some(first) = args.first_mut() {
                     if let ExprKind::Ident(fn_name) = &mut first.kind {
+                        if let Some(reason) = denied.get(fn_name) {
+                            return Err(KestrelcError::internal(ErrorKind::Resolve, reason.clone()));
+                        }
                         if let Some(&q) = rename.get(fn_name) {
                             *fn_name = q;
                         }
@@ -73,66 +87,71 @@ fn rewrite_expr(e: &mut Expr, rename: &HashMap<Symbol, Symbol>) {
                 }
             }
             for a in args {
-                rewrite_expr(a, rename);
+                rewrite_expr(a, rename, denied)?;
             }
         }
         ExprKind::StructLit { name, fields } => {
+            if let Some(reason) = denied.get(name) {
+                return Err(KestrelcError::internal(ErrorKind::Resolve, reason.clone()));
+            }
             if let Some(&q) = rename.get(name) {
                 *name = q;
             }
             for (_, v) in fields {
-                rewrite_expr(v, rename);
+                rewrite_expr(v, rename, denied)?;
             }
         }
-        ExprKind::Field { target, .. } => rewrite_expr(target, rename),
+        ExprKind::Field { target, .. } => rewrite_expr(target, rename, denied)?,
     }
+    Ok(())
 }
 
-fn rewrite_stmt(s: &mut Stmt, rename: &HashMap<Symbol, Symbol>) {
+fn rewrite_stmt(s: &mut Stmt, rename: &HashMap<Symbol, Symbol>, denied: &HashMap<Symbol, String>) -> Result<(), KestrelcError> {
     match s {
         Stmt::Let { value, .. } | Stmt::Assign { value, .. } | Stmt::FieldAssign { value, .. } => {
-            rewrite_expr(value, rename)
+            rewrite_expr(value, rename, denied)?
         }
         Stmt::Break { .. } | Stmt::Continue { .. } => {}
         Stmt::If { cond, then_block, else_block, .. } => {
-            rewrite_expr(cond, rename);
+            rewrite_expr(cond, rename, denied)?;
             for st in then_block {
-                rewrite_stmt(st, rename);
+                rewrite_stmt(st, rename, denied)?;
             }
             if let Some(eb) = else_block {
                 for st in eb {
-                    rewrite_stmt(st, rename);
+                    rewrite_stmt(st, rename, denied)?;
                 }
             }
         }
         Stmt::While { cond, body, .. } => {
-            rewrite_expr(cond, rename);
+            rewrite_expr(cond, rename, denied)?;
             for st in body {
-                rewrite_stmt(st, rename);
+                rewrite_stmt(st, rename, denied)?;
             }
         }
         Stmt::RangeFor { start, end, body, .. } => {
-            rewrite_expr(start, rename);
-            rewrite_expr(end, rename);
+            rewrite_expr(start, rename, denied)?;
+            rewrite_expr(end, rename, denied)?;
             for st in body {
-                rewrite_stmt(st, rename);
+                rewrite_stmt(st, rename, denied)?;
             }
         }
         Stmt::Print { args, .. } => {
             for a in args {
-                rewrite_expr(a, rename);
+                rewrite_expr(a, rename, denied)?;
             }
         }
         Stmt::Return { value, .. } => {
             if let Some(v) = value {
-                rewrite_expr(v, rename);
+                rewrite_expr(v, rename, denied)?;
             }
         }
-        Stmt::ExprStmt { expr, .. } => rewrite_expr(expr, rename),
+        Stmt::ExprStmt { expr, .. } => rewrite_expr(expr, rename, denied)?,
     }
+    Ok(())
 }
 
-fn rewrite_fn_signature_and_body(f: &mut Fn, rename: &HashMap<Symbol, Symbol>) {
+fn rewrite_fn_signature_and_body(f: &mut Fn, rename: &HashMap<Symbol, Symbol>, denied: &HashMap<Symbol, String>) -> Result<(), KestrelcError> {
     for p in &mut f.params {
         rewrite_type(&mut p.ty, rename);
     }
@@ -140,11 +159,12 @@ fn rewrite_fn_signature_and_body(f: &mut Fn, rename: &HashMap<Symbol, Symbol>) {
         rewrite_type(rt, rename);
     }
     if let Some(wc) = &mut f.where_clause {
-        rewrite_expr(wc, rename);
+        rewrite_expr(wc, rename, denied)?;
     }
     for s in &mut f.body {
-        rewrite_stmt(s, rename);
+        rewrite_stmt(s, rename, denied)?;
     }
+    Ok(())
 }
 
 fn rewrite_struct(s: &mut StructDecl, rename: &HashMap<Symbol, Symbol>) {
@@ -188,14 +208,17 @@ pub fn merge_modules(entry_path: &Path, mut discovered: HashMap<PathBuf, (String
         KestrelcError::internal(ErrorKind::Resolve, format!("kestrelc: can't read '{}': {e}", entry_path.display()))
     })?;
 
-    // module name -> its own declared fn/struct names, used to
-    // validate every from-import actually names something real.
-    let declared: HashMap<String, (Vec<String>, Vec<String>)> = discovered
+    // module name -> its own declared fn/struct names paired with
+    // whether each is `pub` -- used to validate every from-import and
+    // bare-use qualified call actually names something real AND
+    // visible (see docs/superpowers/specs/2026-07-25-visibility-
+    // design.md).
+    let declared: HashMap<String, (Vec<(String, bool)>, Vec<(String, bool)>)> = discovered
         .iter()
         .map(|(path, (_src, prog))| {
             let name = module_name_for_path(path);
-            let fns = prog.fns.iter().map(|f| f.name.resolve().to_string()).collect();
-            let structs = prog.structs.iter().map(|s| s.name.resolve().to_string()).collect();
+            let fns = prog.fns.iter().map(|f| (f.name.resolve().to_string(), f.pub_)).collect();
+            let structs = prog.structs.iter().map(|s| (s.name.resolve().to_string(), s.pub_)).collect();
             (name, (fns, structs))
         })
         .collect();
@@ -208,6 +231,7 @@ pub fn merge_modules(entry_path: &Path, mut discovered: HashMap<PathBuf, (String
         let is_entry = path == entry_canonical;
 
         let mut rename: HashMap<Symbol, Symbol> = HashMap::new();
+        let mut denied: HashMap<Symbol, String> = HashMap::new();
         for f in &program.fns {
             let is_entry_main = is_entry && f.name == crate::interner::well_known::main();
             if !is_entry_main {
@@ -221,16 +245,22 @@ pub fn merge_modules(entry_path: &Path, mut discovered: HashMap<PathBuf, (String
         let mut seen_from_names: HashMap<String, String> = HashMap::new();
         for u in &program.uses {
             if let UseDecl::Module(module) = u {
-                // Bare `use module;` -- every declared name becomes
-                // callable/constructible as `module.name(...)`, which
-                // the parser already desugars to a plain `Call`/
+                // Bare `use module;` -- every declared *public* name
+                // becomes callable/constructible as `module.name(...)`,
+                // which the parser already desugars to a plain `Call`/
                 // `StructLit` under the synthesized symbol
                 // `"module.name"` (see parser.rs's qualified-call
                 // parsing). Map that synthesized symbol straight to
                 // the real qualified `module$name` here -- no new
-                // rewrite logic needed, this reuses the exact same
-                // rename table `rewrite_expr`'s Call/StructLit arms
-                // already consult.
+                // rewrite logic needed for the public case, this reuses
+                // the exact same rename table `rewrite_expr`'s Call/
+                // StructLit arms already consult. A private name gets a
+                // `denied` entry instead, so an actual attempt to call
+                // it (not just the `use module;` line itself) is what
+                // raises the "is private" error, right at the call
+                // site -- there's no way to know at this point whether
+                // the importing module will ever try to call any
+                // particular one of the source module's names.
                 let source_module = module.resolve().to_string();
                 let (source_fns, source_structs) = declared.get(&source_module).ok_or_else(|| {
                     KestrelcError::internal(
@@ -238,17 +268,27 @@ pub fn merge_modules(entry_path: &Path, mut discovered: HashMap<PathBuf, (String
                         format!("kestrelc: module '{source_module}' not found"),
                     )
                 })?;
-                for fn_name in source_fns {
-                    rename.insert(
-                        intern(&format!("{source_module}.{fn_name}")),
-                        intern(&format!("{source_module}${fn_name}")),
-                    );
+                for (fn_name, is_pub) in source_fns {
+                    let qualified_call_symbol = intern(&format!("{source_module}.{fn_name}"));
+                    if *is_pub {
+                        rename.insert(qualified_call_symbol, intern(&format!("{source_module}${fn_name}")));
+                    } else {
+                        denied.insert(
+                            qualified_call_symbol,
+                            format!("kestrelc: '{fn_name}' is private to module '{source_module}'"),
+                        );
+                    }
                 }
-                for struct_name in source_structs {
-                    rename.insert(
-                        intern(&format!("{source_module}.{struct_name}")),
-                        intern(&format!("{source_module}${struct_name}")),
-                    );
+                for (struct_name, is_pub) in source_structs {
+                    let qualified_call_symbol = intern(&format!("{source_module}.{struct_name}"));
+                    if *is_pub {
+                        rename.insert(qualified_call_symbol, intern(&format!("{source_module}${struct_name}")));
+                    } else {
+                        denied.insert(
+                            qualified_call_symbol,
+                            format!("kestrelc: '{struct_name}' is private to module '{source_module}'"),
+                        );
+                    }
                 }
             }
             if let UseDecl::Names { names, module } = u {
@@ -261,11 +301,25 @@ pub fn merge_modules(entry_path: &Path, mut discovered: HashMap<PathBuf, (String
                 })?;
                 for name in names {
                     let name_text = name.resolve().to_string();
-                    if !source_fns.contains(&name_text) && !source_structs.contains(&name_text) {
-                        return Err(KestrelcError::internal(
-                            ErrorKind::Resolve,
-                            format!("kestrelc: '{name_text}' not found in module '{source_module}'"),
-                        ));
+                    let is_pub = source_fns
+                        .iter()
+                        .find(|(n, _)| n == &name_text)
+                        .or_else(|| source_structs.iter().find(|(n, _)| n == &name_text))
+                        .map(|(_, p)| *p);
+                    match is_pub {
+                        None => {
+                            return Err(KestrelcError::internal(
+                                ErrorKind::Resolve,
+                                format!("kestrelc: '{name_text}' not found in module '{source_module}'"),
+                            ));
+                        }
+                        Some(false) => {
+                            return Err(KestrelcError::internal(
+                                ErrorKind::Resolve,
+                                format!("kestrelc: '{name_text}' is private to module '{source_module}'"),
+                            ));
+                        }
+                        Some(true) => {}
                     }
                     let collides_locally = program.fns.iter().any(|f| f.name.resolve().as_ref() == name_text)
                         || program.structs.iter().any(|s| s.name.resolve().as_ref() == name_text);
@@ -292,7 +346,7 @@ pub fn merge_modules(entry_path: &Path, mut discovered: HashMap<PathBuf, (String
         }
 
         for mut f in program.fns {
-            rewrite_fn_signature_and_body(&mut f, &rename);
+            rewrite_fn_signature_and_body(&mut f, &rename, &denied)?;
             if let Some(&qualified) = rename.get(&f.name) {
                 f.name = qualified;
             } // else: the entry file's own `main`, left unqualified.
@@ -581,7 +635,7 @@ mod tests {
     #[test]
     fn a_from_import_resolves_to_the_source_modules_qualified_name() {
         let dir = scratch_dir("merge_from_import");
-        fs::write(dir.join("geometry.kes"), "pure fn sqrt(x: i64) -> i64 { return x; }").unwrap();
+        fs::write(dir.join("geometry.kes"), "pub pure fn sqrt(x: i64) -> i64 { return x; }").unwrap();
         let entry = dir.join("main.kes");
         fs::write(&entry, "use sqrt from geometry;\nfn main() { print(sqrt(4)); }").unwrap();
         let discovered = discover_modules(&entry).unwrap();
@@ -608,7 +662,7 @@ mod tests {
     #[test]
     fn a_from_import_colliding_with_a_local_declaration_is_a_compile_error() {
         let dir = scratch_dir("merge_from_collides_local");
-        fs::write(dir.join("geometry.kes"), "fn helper() {}").unwrap();
+        fs::write(dir.join("geometry.kes"), "pub fn helper() {}").unwrap();
         let entry = dir.join("main.kes");
         fs::write(&entry, "use helper from geometry;\nfn helper() {}\nfn main() { print(1); }").unwrap();
         let discovered = discover_modules(&entry).unwrap();
@@ -619,8 +673,8 @@ mod tests {
     #[test]
     fn two_from_imports_of_the_same_name_from_different_modules_is_a_compile_error() {
         let dir = scratch_dir("merge_from_collides_two_imports");
-        fs::write(dir.join("a.kes"), "fn helper() {}").unwrap();
-        fs::write(dir.join("b.kes"), "fn helper() {}").unwrap();
+        fs::write(dir.join("a.kes"), "pub fn helper() {}").unwrap();
+        fs::write(dir.join("b.kes"), "pub fn helper() {}").unwrap();
         let entry = dir.join("main.kes");
         fs::write(&entry, "use helper from a;\nuse helper from b;\nfn main() { print(1); }").unwrap();
         let discovered = discover_modules(&entry).unwrap();
@@ -645,7 +699,7 @@ mod tests {
     #[test]
     fn a_struct_from_import_is_qualified_and_struct_lit_follows() {
         let dir = scratch_dir("merge_struct_from_import");
-        fs::write(dir.join("shapes.kes"), "struct Point { x: i64, y: i64 }").unwrap();
+        fs::write(dir.join("shapes.kes"), "pub struct Point { x: i64, y: i64 }").unwrap();
         let entry = dir.join("main.kes");
         fs::write(&entry, "use Point from shapes;\nfn main() { let p = Point { x: 1, y: 2 }; print(p.x); }").unwrap();
         let discovered = discover_modules(&entry).unwrap();
@@ -662,7 +716,7 @@ mod tests {
     #[test]
     fn a_bare_use_qualified_call_resolves_to_the_source_modules_qualified_name() {
         let dir = scratch_dir("merge_bare_use_qualified_call");
-        fs::write(dir.join("geometry.kes"), "pure fn square(x: i64) -> i64 { return x * x; }").unwrap();
+        fs::write(dir.join("geometry.kes"), "pub pure fn square(x: i64) -> i64 { return x * x; }").unwrap();
         let entry = dir.join("main.kes");
         fs::write(&entry, "use geometry;\nfn main() { print(geometry.square(7)); }").unwrap();
         let discovered = discover_modules(&entry).unwrap();
@@ -673,5 +727,72 @@ mod tests {
         let Stmt::Print { args, .. } = &main_fn.body[0] else { panic!("expected Print") };
         let ExprKind::Call { name, .. } = &args[0].kind else { panic!("expected Call") };
         assert_eq!(*name, square_fn.name);
+    }
+
+    #[test]
+    fn a_from_import_of_a_private_function_is_a_distinct_compile_error() {
+        let dir = scratch_dir("merge_from_private_fn");
+        fs::write(dir.join("geometry.kes"), "fn square(x: i64) -> i64 { return x * x; }").unwrap();
+        let entry = dir.join("main.kes");
+        fs::write(&entry, "use square from geometry;\nfn main() { print(square(7)); }").unwrap();
+        let discovered = discover_modules(&entry).unwrap();
+        let err = merge_modules(&entry, discovered).unwrap_err();
+        assert!(err.message.contains("private"), "got: {}", err.message);
+        assert!(!err.message.contains("not found"), "private access should not read as \"not found\", got: {}", err.message);
+    }
+
+    #[test]
+    fn a_bare_use_qualified_call_to_a_private_function_is_a_distinct_compile_error() {
+        let dir = scratch_dir("merge_bare_use_private_fn");
+        fs::write(dir.join("geometry.kes"), "fn square(x: i64) -> i64 { return x * x; }").unwrap();
+        let entry = dir.join("main.kes");
+        fs::write(&entry, "use geometry;\nfn main() { print(geometry.square(7)); }").unwrap();
+        let discovered = discover_modules(&entry).unwrap();
+        let err = merge_modules(&entry, discovered).unwrap_err();
+        assert!(err.message.contains("private"), "got: {}", err.message);
+    }
+
+    #[test]
+    fn a_from_import_of_a_private_struct_is_a_distinct_compile_error() {
+        let dir = scratch_dir("merge_from_private_struct");
+        fs::write(dir.join("shapes.kes"), "struct Point { x: i64, y: i64 }").unwrap();
+        let entry = dir.join("main.kes");
+        fs::write(&entry, "use Point from shapes;\nfn main() { let p = Point { x: 1, y: 2 }; print(p.x); }").unwrap();
+        let discovered = discover_modules(&entry).unwrap();
+        let err = merge_modules(&entry, discovered).unwrap_err();
+        assert!(err.message.contains("private"), "got: {}", err.message);
+    }
+
+    #[test]
+    fn a_pub_function_is_importable_via_from_import() {
+        let dir = scratch_dir("merge_pub_fn_from_import");
+        fs::write(dir.join("geometry.kes"), "pub fn square(x: i64) -> i64 { return x * x; }").unwrap();
+        let entry = dir.join("main.kes");
+        fs::write(&entry, "use square from geometry;\nfn main() { print(square(7)); }").unwrap();
+        let discovered = discover_modules(&entry).unwrap();
+        let merged = merge_modules(&entry, discovered).unwrap();
+        find_fn(&merged, "geometry$square");
+    }
+
+    #[test]
+    fn a_pub_function_is_importable_via_bare_use_qualified_call() {
+        let dir = scratch_dir("merge_pub_fn_qualified_call");
+        fs::write(dir.join("geometry.kes"), "pub fn square(x: i64) -> i64 { return x * x; }").unwrap();
+        let entry = dir.join("main.kes");
+        fs::write(&entry, "use geometry;\nfn main() { print(geometry.square(7)); }").unwrap();
+        let discovered = discover_modules(&entry).unwrap();
+        let merged = merge_modules(&entry, discovered).unwrap();
+        find_fn(&merged, "geometry$square");
+    }
+
+    #[test]
+    fn a_private_function_is_still_fully_usable_within_its_own_module() {
+        let dir = scratch_dir("merge_private_same_module_ok");
+        fs::write(dir.join("dummy.kes"), "fn noop() {}").unwrap();
+        let entry = dir.join("main.kes");
+        fs::write(&entry, "use dummy;\nfn helper() { print(1); }\nfn main() { helper(); }").unwrap();
+        let discovered = discover_modules(&entry).unwrap();
+        let merged = merge_modules(&entry, discovered).unwrap();
+        find_fn(&merged, "main$helper");
     }
 }
