@@ -10,7 +10,6 @@
 use crate::ast::{Expr, ExprKind, Fn, Program, Stmt, StructDecl, Type, UseDecl};
 use crate::error::{ErrorKind, KestrelcError};
 use crate::interner::{intern, Symbol};
-use crate::span::Span;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -171,9 +170,22 @@ fn rewrite_struct(s: &mut StructDecl, rename: &HashMap<Symbol, Symbol>) {
 /// (whole-module qualified `module.fn()` access) is recorded by
 /// `discover_modules` but has no resolvable call syntax yet -- see
 /// docs/superpowers/specs/2026-07-25-modules-imports-design.md.
-pub fn merge_modules(entry_path: &Path, discovered: HashMap<PathBuf, Program>) -> Result<Program, KestrelcError> {
+pub fn merge_modules(entry_path: &Path, mut discovered: HashMap<PathBuf, Program>) -> Result<Program, KestrelcError> {
+    // A file with zero `use` items is the only way `discover_modules`
+    // ever returns exactly one entry (any successful `use` discovers at
+    // least one more file, or fails outright) -- skip qualification
+    // entirely for it, so a plain single-file program compiles with
+    // identical function/struct names and identical error messages to
+    // before this feature existed. Qualifying every name unconditionally
+    // (even `helper` -> `myfile$helper` with no imports involved at all)
+    // would be pure noise for the overwhelmingly common no-imports case,
+    // and would change user-visible error message text for no reason.
+    if discovered.len() == 1 {
+        return Ok(discovered.drain().next().expect("len == 1").1);
+    }
+
     let entry_canonical = entry_path.canonicalize().map_err(|e| {
-        KestrelcError::new(ErrorKind::Resolve, format!("kestrelc: can't read '{}': {e}", entry_path.display()), Span::new(1, 1, 0))
+        KestrelcError::internal(ErrorKind::Resolve, format!("kestrelc: can't read '{}': {e}", entry_path.display()))
     })?;
 
     // module name -> its own declared fn/struct names, used to
@@ -211,39 +223,35 @@ pub fn merge_modules(entry_path: &Path, discovered: HashMap<PathBuf, Program>) -
             if let UseDecl::Names { names, module } = u {
                 let source_module = module.resolve().to_string();
                 let (source_fns, source_structs) = declared.get(&source_module).ok_or_else(|| {
-                    KestrelcError::new(
+                    KestrelcError::internal(
                         ErrorKind::Resolve,
                         format!("kestrelc: module '{source_module}' not found"),
-                        Span::new(1, 1, 0),
                     )
                 })?;
                 for name in names {
                     let name_text = name.resolve().to_string();
                     if !source_fns.contains(&name_text) && !source_structs.contains(&name_text) {
-                        return Err(KestrelcError::new(
+                        return Err(KestrelcError::internal(
                             ErrorKind::Resolve,
                             format!("kestrelc: '{name_text}' not found in module '{source_module}'"),
-                            Span::new(1, 1, 0),
                         ));
                     }
                     let collides_locally = program.fns.iter().any(|f| f.name.resolve().as_ref() == name_text)
                         || program.structs.iter().any(|s| s.name.resolve().as_ref() == name_text);
                     if collides_locally {
-                        return Err(KestrelcError::new(
+                        return Err(KestrelcError::internal(
                             ErrorKind::Resolve,
                             format!(
                                 "kestrelc: '{name_text}' imported from '{source_module}' collides with a local declaration in '{module_name}'"
                             ),
-                            Span::new(1, 1, 0),
                         ));
                     }
                     if let Some(prior_module) = seen_from_names.get(&name_text) {
-                        return Err(KestrelcError::new(
+                        return Err(KestrelcError::internal(
                             ErrorKind::Resolve,
                             format!(
                                 "kestrelc: '{name_text}' imported from both '{prior_module}' and '{source_module}' in '{module_name}'"
                             ),
-                            Span::new(1, 1, 0),
                         ));
                     }
                     seen_from_names.insert(name_text.clone(), source_module.clone());
@@ -294,7 +302,7 @@ fn discover_one(
     in_progress: &mut Vec<PathBuf>,
 ) -> Result<(), KestrelcError> {
     let canonical = path.canonicalize().map_err(|e| {
-        KestrelcError::new(ErrorKind::Resolve, format!("kestrelc: can't read '{}': {e}", path.display()), Span::new(1, 1, 0))
+        KestrelcError::internal(ErrorKind::Resolve, format!("kestrelc: can't read '{}': {e}", path.display()))
     })?;
 
     if discovered.contains_key(&canonical) {
@@ -308,15 +316,14 @@ fn discover_one(
             .map(|p| p.display().to_string())
             .collect::<Vec<_>>()
             .join(" -> ");
-        return Err(KestrelcError::new(
+        return Err(KestrelcError::internal(
             ErrorKind::Resolve,
             format!("kestrelc: import cycle detected: {cycle}"),
-            Span::new(1, 1, 0),
         ));
     }
 
     let src = std::fs::read_to_string(&canonical).map_err(|e| {
-        KestrelcError::new(ErrorKind::Resolve, format!("kestrelc: can't read '{}': {e}", canonical.display()), Span::new(1, 1, 0))
+        KestrelcError::internal(ErrorKind::Resolve, format!("kestrelc: can't read '{}': {e}", canonical.display()))
     })?;
     let program = crate::parser::parse(crate::lexer::lex(&src)?)?;
 
@@ -330,13 +337,12 @@ fn discover_one(
         match resolve_module_path(&canonical, &module_name_text) {
             Some(module_path) => discover_one(&module_path, discovered, in_progress)?,
             None => {
-                return Err(KestrelcError::new(
+                return Err(KestrelcError::internal(
                     ErrorKind::Resolve,
                     format!(
                         "kestrelc: module '{module_name_text}' not found -- expected '{}'",
                         canonical.parent().unwrap_or_else(|| Path::new(".")).join(format!("{module_name_text}.kes")).display()
                     ),
-                    Span::new(1, 1, 0),
                 ));
             }
         }
@@ -476,10 +482,32 @@ mod tests {
     }
 
     #[test]
-    fn same_module_functions_get_qualified_names_and_self_calls_follow() {
-        let dir = scratch_dir("merge_self_call");
+    fn a_program_with_no_use_statements_is_left_completely_unqualified() {
+        let dir = scratch_dir("merge_no_imports_no_op");
         let entry = dir.join("main.kes");
         fs::write(&entry, "fn helper() { print(1); } fn main() { helper(); }").unwrap();
+        let discovered = discover_modules(&entry).unwrap();
+        let merged = merge_modules(&entry, discovered).unwrap();
+        // Names must stay exactly as written -- no "main$helper"
+        // qualification for a program that never imports anything.
+        find_fn(&merged, "helper");
+        find_fn(&merged, "main");
+        assert_eq!(merged.fns.len(), 2);
+    }
+
+    #[test]
+    fn same_module_functions_get_qualified_names_and_self_calls_follow() {
+        // Qualification only kicks in once a real second module is
+        // involved (see a_program_with_no_use_statements_is_left_
+        // completely_unqualified for the no-imports case) -- this test
+        // pulls in an unrelated dummy module just to trigger it, then
+        // checks that the entry file's own self-call (helper(), nothing
+        // to do with the import) still gets qualified and rewritten
+        // consistently.
+        let dir = scratch_dir("merge_self_call");
+        fs::write(dir.join("dummy.kes"), "fn noop() {}").unwrap();
+        let entry = dir.join("main.kes");
+        fs::write(&entry, "use dummy;\nfn helper() { print(1); } fn main() { helper(); }").unwrap();
         let discovered = discover_modules(&entry).unwrap();
         let merged = merge_modules(&entry, discovered).unwrap();
 

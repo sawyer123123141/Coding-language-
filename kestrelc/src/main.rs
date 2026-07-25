@@ -1,5 +1,5 @@
 use kestrelc::error::{KestrelcError, KestrelcWarning};
-use kestrelc::{cache, codegen, cse, format_diagnostic, fusion, inline, lexer, parser, profile, purity, resolve, typecheck};
+use kestrelc::{cache, codegen, cse, format_diagnostic, fusion, inline, modules, profile, purity, resolve, typecheck};
 
 use std::fs;
 use std::path::Path;
@@ -110,15 +110,23 @@ fn main() -> ExitCode {
         return link_and_report(&cached, &stem, true, &native_artifact_key);
     }
 
-    let tokens = match lexer::lex(&src) {
-        Ok(t) => t,
+    // Parses `src_path` plus every module it (transitively) `use`s,
+    // qualifying and merging them into one Program -- a no-op merge for
+    // the common case of a file with no `use` statements at all (see
+    // modules::merge_modules's own doc comment). Errors surfaced here
+    // may originate in a different (imported) file than `src_path`;
+    // report_one still formats against the entry file's own `src`/
+    // `path`, which is why every modules.rs error uses a zero span
+    // (renders as a bare message, not a misleading caret into the
+    // wrong file) -- see KestrelcError::internal.
+    let discovered = match modules::discover_modules(src_path) {
+        Ok(d) => d,
         Err(e) => {
             report_one(&src, &path, &e);
             return ExitCode::FAILURE;
         }
     };
-
-    let program = match parser::parse(tokens) {
+    let program = match modules::merge_modules(src_path, discovered) {
         Ok(p) => p,
         Err(e) => {
             report_one(&src, &path, &e);
