@@ -25,11 +25,19 @@ use crate::interner::Symbol;
 use crate::span::Span;
 use std::collections::HashMap;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+// No longer `Copy` -- `Array` now carries a boxed element `Kind` (see
+// `type_to_kind`/`ExprKind::Index` below), and `Box` doesn't implement
+// `Copy`. Every call site that used to rely on implicit copies now
+// either takes `&Kind` (`is_numeric`/`is_boolean`) or threads a
+// reference through (`visit_stmt`'s `expected_return_kind: &Option<Kind>`).
+#[derive(Clone, PartialEq, Eq)]
 enum Kind {
     Int,
     Bool,
-    Array,
+    /// Carries the array's own element kind -- `Kind::Unknown` when the
+    /// element type couldn't be determined (an empty literal, or an
+    /// array value whose source isn't tracked yet).
+    Array(Box<Kind>),
     Str,
     /// Carries the struct's own name -- read by infer_expr's Field arm
     /// to look up the accessed field's own declared type.
@@ -38,11 +46,11 @@ enum Kind {
 }
 
 impl Kind {
-    fn name(self) -> &'static str {
+    fn name(&self) -> &'static str {
         match self {
             Kind::Int => "int",
             Kind::Bool => "bool",
-            Kind::Array => "array",
+            Kind::Array(_) => "array",
             Kind::Str => "str",
             Kind::Struct(_) => "struct",
             Kind::Unknown => "unknown",
@@ -72,7 +80,7 @@ pub fn check_types(
     // integer-family name.
     fn type_to_kind(ty: &Type, structs: &HashMap<Symbol, &StructDecl>) -> Kind {
         match ty {
-            Type::Array { .. } => Kind::Array,
+            Type::Array { elem, .. } => Kind::Array(Box::new(type_to_kind(elem, structs))),
             Type::Named(name) => {
                 if structs.contains_key(name) {
                     Kind::Struct(*name)
@@ -89,10 +97,10 @@ pub fn check_types(
         }
     }
 
-    fn is_numeric(k: Kind) -> bool {
+    fn is_numeric(k: &Kind) -> bool {
         matches!(k, Kind::Unknown | Kind::Int)
     }
-    fn is_boolean(k: Kind) -> bool {
+    fn is_boolean(k: &Kind) -> bool {
         matches!(k, Kind::Unknown | Kind::Bool)
     }
     fn op_symbol(op: BinOp) -> &'static str {
@@ -134,20 +142,32 @@ pub fn check_types(
             ExprKind::Num(_) => Kind::Int,
             ExprKind::Bool(_) => Kind::Bool,
             ExprKind::Str(_) => Kind::Str,
-            ExprKind::Ident(name) => locals.get(name).copied().unwrap_or(Kind::Unknown),
+            ExprKind::Ident(name) => locals.get(name).cloned().unwrap_or(Kind::Unknown),
             ExprKind::ArrayLit(elems) => {
-                for el in elems {
-                    infer_expr(el, locals, fns, structs, errors);
+                // First element's kind wins; an empty literal has no
+                // element to infer from and stays Unknown.
+                let mut elem_kind = Kind::Unknown;
+                for (i, el) in elems.iter().enumerate() {
+                    let k = infer_expr(el, locals, fns, structs, errors);
+                    if i == 0 {
+                        elem_kind = k;
+                    }
                 }
-                Kind::Array
+                Kind::Array(Box::new(elem_kind))
             }
             ExprKind::Index { target, index } => {
-                infer_expr(target, locals, fns, structs, errors);
+                let target_kind = infer_expr(target, locals, fns, structs, errors);
                 let idx_kind = infer_expr(index, locals, fns, structs, errors);
                 if idx_kind != Kind::Unknown && idx_kind != Kind::Int {
                     push(errors, index.span, format!("array index must be a number, found {}", idx_kind.name()));
                 }
-                Kind::Int // Kestrel arrays are integer-valued so far
+                match target_kind {
+                    Kind::Array(elem) => *elem,
+                    // Target's kind wasn't tracked as an array -- same
+                    // "never guess" posture as everywhere else in this
+                    // file, rather than assuming Int as before.
+                    _ => Kind::Unknown,
+                }
             }
             ExprKind::Unary { op, expr } => {
                 let k = infer_expr(expr, locals, fns, structs, errors);
@@ -172,19 +192,19 @@ pub fn check_types(
                 let sym = op_symbol(*op);
                 match op {
                     BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
-                        if !is_numeric(l) || !is_numeric(r) {
+                        if !is_numeric(&l) || !is_numeric(&r) {
                             push(errors, e.span, format!("'{sym}' needs two numbers, found {} and {}", l.name(), r.name()));
                         }
                         Kind::Int
                     }
                     BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => {
-                        if !is_numeric(l) || !is_numeric(r) {
+                        if !is_numeric(&l) || !is_numeric(&r) {
                             push(errors, e.span, format!("'{sym}' needs two numbers, found {} and {}", l.name(), r.name()));
                         }
                         Kind::Bool
                     }
                     BinOp::And | BinOp::Or => {
-                        if !is_boolean(l) || !is_boolean(r) {
+                        if !is_boolean(&l) || !is_boolean(&r) {
                             push(errors, e.span, format!("'{sym}' needs two booleans, found {} and {}", l.name(), r.name()));
                         }
                         Kind::Bool
@@ -203,7 +223,10 @@ pub fn check_types(
                     if args.len() == 2 {
                         infer_expr(&args[1], locals, fns, structs, errors);
                     }
-                    return Kind::Array;
+                    // parallel_map only supports i64 arrays today
+                    // (kestrelc_parallel_map_i64) -- structurally the
+                    // one element kind it can produce.
+                    return Kind::Array(Box::new(Kind::Int));
                 }
                 // Always inferred for every arg regardless of whether the
                 // count matches -- an extra/missing argument shouldn't
@@ -296,7 +319,7 @@ pub fn check_types(
         locals: &mut HashMap<Symbol, Kind>,
         fns: &HashMap<Symbol, &Fn>,
         structs: &HashMap<Symbol, &StructDecl>,
-        expected_return_kind: Option<Kind>,
+        expected_return_kind: &Option<Kind>,
         errors: &mut Vec<KestrelcError>,
     ) {
         match s {
@@ -306,8 +329,8 @@ pub fn check_types(
             }
             Stmt::Assign { name, value, span } => {
                 let k = infer_expr(value, locals, fns, structs, errors);
-                if let Some(&prior) = locals.get(name) {
-                    if prior != Kind::Unknown && k != Kind::Unknown && prior != k {
+                if let Some(prior) = locals.get(name) {
+                    if *prior != Kind::Unknown && k != Kind::Unknown && *prior != k {
                         errors.push(KestrelcError::new(
                             ErrorKind::Type,
                             format!(
@@ -415,8 +438,8 @@ pub fn check_types(
                 // return type in a way this checker can't safely
                 // generalize yet), same "never guess" posture as
                 // everywhere else in this file.
-                if let (Some(expected), Some(actual)) = (expected_return_kind, actual) {
-                    if expected != Kind::Unknown && actual != Kind::Unknown && expected != actual {
+                if let (Some(expected), Some(actual)) = (expected_return_kind.as_ref(), actual) {
+                    if *expected != Kind::Unknown && actual != Kind::Unknown && *expected != actual {
                         errors.push(KestrelcError::new(
                             ErrorKind::Type,
                             format!(
@@ -449,7 +472,7 @@ pub fn check_types(
         let expected_return_kind = fn_.return_type.as_ref().map(|ty| type_to_kind(ty, structs));
         let mut fn_errors = Vec::new();
         for s in &fn_.body {
-            visit_stmt(s, &mut locals, fns, structs, expected_return_kind, &mut fn_errors);
+            visit_stmt(s, &mut locals, fns, structs, &expected_return_kind, &mut fn_errors);
         }
         for e in fn_errors {
             errors.push(KestrelcError::new(e.kind, format!("in '{}': {}", fn_.name, e.message), e.span));
