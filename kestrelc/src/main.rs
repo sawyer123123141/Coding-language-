@@ -79,11 +79,38 @@ fn main() -> ExitCode {
     let src_path = Path::new(&path);
     let stem = src_path.file_stem().unwrap().to_string_lossy();
 
-    // A persistent, cross-invocation cache: if this exact source text
-    // (for this exact backend) has compiled successfully before, skip
-    // lexing/parsing/purity-checking/codegen entirely and reuse the
-    // artifact. See kestrelc/src/cache.rs for the scope and the honest
-    // gap between this and kestrel-DESIGN.md idea #1's full vision.
+    // Parses `src_path` plus every module it (transitively) `use`s --
+    // done *before* the cache check below (not just before merging),
+    // specifically so the cache key can fold in every discovered file's
+    // own content, not just the entry file's. Without this, editing an
+    // imported module without touching the entry file would let a cache
+    // keyed only on `src` silently keep serving a binary compiled
+    // against the old module content. This does mean a module-using
+    // program always pays lex+parse for every involved file even on a
+    // cache hit (unlike a plain single-file program, which still skips
+    // it entirely below) -- an acceptable, honest tradeoff: there's no
+    // way to know the correct cache key without knowing what's actually
+    // used. Errors surfaced here may originate in a different (imported)
+    // file than `src_path`; report_one still formats against the entry
+    // file's own `src`/`path`, which is why every modules.rs error uses
+    // a zero span (renders as a bare message, not a misleading caret
+    // into the wrong file) -- see KestrelcError::internal.
+    let discovered = match modules::discover_modules(src_path) {
+        Ok(d) => d,
+        Err(e) => {
+            report_one(&src, &path, &e);
+            return ExitCode::FAILURE;
+        }
+    };
+    let cache_src = modules::cache_key_material(&discovered);
+
+    // A persistent, cross-invocation cache: if this exact combined
+    // source (entry file plus every discovered module -- see above; for
+    // a plain single-file program, `cache_src` is just its own text) has
+    // compiled successfully before, skip typecheck/purity/codegen
+    // entirely and reuse the artifact. See kestrelc/src/cache.rs for the
+    // scope and the honest gap between this and kestrel-DESIGN.md idea
+    // #1's full vision.
     //
     // The native backend's cache key additionally folds in a fingerprint
     // of the current runtime call-count profile (see profile.rs) — a
@@ -93,10 +120,10 @@ fn main() -> ExitCode {
     // forever, and the whole feedback loop would never actually fire.
     // `source_key` (profile-file naming) stays stable across that churn
     // on purpose; only the artifact key changes.
-    let source_key = cache::key(&src, "native");
+    let source_key = cache::key(&cache_src, "native");
     let profile_map = profile::read(&source_key);
     let profile_fingerprint = profile::fingerprint(&profile_map);
-    let native_artifact_key = cache::artifact_key(&src, "native", &profile_fingerprint);
+    let native_artifact_key = cache::artifact_key(&cache_src, "native", &profile_fingerprint);
     if let Some(cached_bin) = cache::read(&native_artifact_key, "bin") {
         // The fast path: not just the object file but the *linked*
         // binary is cached, so this skips `cc` entirely -- on this
@@ -110,22 +137,6 @@ fn main() -> ExitCode {
         return link_and_report(&cached, &stem, true, &native_artifact_key);
     }
 
-    // Parses `src_path` plus every module it (transitively) `use`s,
-    // qualifying and merging them into one Program -- a no-op merge for
-    // the common case of a file with no `use` statements at all (see
-    // modules::merge_modules's own doc comment). Errors surfaced here
-    // may originate in a different (imported) file than `src_path`;
-    // report_one still formats against the entry file's own `src`/
-    // `path`, which is why every modules.rs error uses a zero span
-    // (renders as a bare message, not a misleading caret into the
-    // wrong file) -- see KestrelcError::internal.
-    let discovered = match modules::discover_modules(src_path) {
-        Ok(d) => d,
-        Err(e) => {
-            report_one(&src, &path, &e);
-            return ExitCode::FAILURE;
-        }
-    };
     let program = match modules::merge_modules(src_path, discovered) {
         Ok(p) => p,
         Err(e) => {

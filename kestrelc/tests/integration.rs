@@ -2645,3 +2645,42 @@ fn a_bare_use_qualified_call_compiles_and_runs_across_two_files() {
     assert!(run.status.success(), "compiled binary exited with failure");
     assert_eq!(native_stdout(&run), "49\n");
 }
+
+#[test]
+fn editing_an_imported_module_invalidates_the_compile_cache() {
+    // Regression test for the exact gap the design doc flagged: the
+    // cache used to key only on the entry file's own text, so editing
+    // an imported module without touching the entry file would silently
+    // keep serving a stale binary. cache_key_material folding in every
+    // discovered file's content is what's supposed to prevent that.
+    let scratch = scratch_dir("modules_cache_invalidation");
+    let cache_dir = scratch.join("cache");
+    let geometry_path = scratch.join("geometry.kes");
+    fs::write(&geometry_path, "pure fn square(x: i64) -> i64 { return x * x; }\n").unwrap();
+    let entry = scratch.join("main.kes");
+    fs::write(&entry, "use square from geometry;\nfn main() { print(square(7)); }\n").unwrap();
+
+    let compile = || {
+        Command::new(kestrelc_bin())
+            .arg(&entry)
+            .current_dir(&scratch)
+            .env("KESTRELC_CACHE_DIR", &cache_dir)
+            .output()
+            .expect("failed to run kestrelc")
+    };
+
+    let out1 = compile();
+    assert!(out1.status.success(), "first compile failed:\n{}", String::from_utf8_lossy(&out1.stderr));
+    let bin = scratch.join("main");
+    let run1 = Command::new(&bin).output().expect("failed to run compiled binary");
+    assert_eq!(native_stdout(&run1), "49\n");
+
+    // Edit only the imported module (geometry.kes), not main.kes, then
+    // recompile against the same cache dir -- must NOT serve the stale
+    // "49" binary.
+    fs::write(&geometry_path, "pure fn square(x: i64) -> i64 { return x * x * x; }\n").unwrap();
+    let out2 = compile();
+    assert!(out2.status.success(), "second compile failed:\n{}", String::from_utf8_lossy(&out2.stderr));
+    let run2 = Command::new(&bin).output().expect("failed to run compiled binary");
+    assert_eq!(native_stdout(&run2), "343\n", "cache served a stale binary after editing an imported module");
+}

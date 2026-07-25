@@ -170,7 +170,7 @@ fn rewrite_struct(s: &mut StructDecl, rename: &HashMap<Symbol, Symbol>) {
 /// (whole-module qualified `module.fn()` access) is recorded by
 /// `discover_modules` but has no resolvable call syntax yet -- see
 /// docs/superpowers/specs/2026-07-25-modules-imports-design.md.
-pub fn merge_modules(entry_path: &Path, mut discovered: HashMap<PathBuf, Program>) -> Result<Program, KestrelcError> {
+pub fn merge_modules(entry_path: &Path, mut discovered: HashMap<PathBuf, (String, Program)>) -> Result<Program, KestrelcError> {
     // A file with zero `use` items is the only way `discover_modules`
     // ever returns exactly one entry (any successful `use` discovers at
     // least one more file, or fails outright) -- skip qualification
@@ -181,7 +181,7 @@ pub fn merge_modules(entry_path: &Path, mut discovered: HashMap<PathBuf, Program
     // would be pure noise for the overwhelmingly common no-imports case,
     // and would change user-visible error message text for no reason.
     if discovered.len() == 1 {
-        return Ok(discovered.drain().next().expect("len == 1").1);
+        return Ok(discovered.drain().next().expect("len == 1").1 .1);
     }
 
     let entry_canonical = entry_path.canonicalize().map_err(|e| {
@@ -192,7 +192,7 @@ pub fn merge_modules(entry_path: &Path, mut discovered: HashMap<PathBuf, Program
     // validate every from-import actually names something real.
     let declared: HashMap<String, (Vec<String>, Vec<String>)> = discovered
         .iter()
-        .map(|(path, prog)| {
+        .map(|(path, (_src, prog))| {
             let name = module_name_for_path(path);
             let fns = prog.fns.iter().map(|f| f.name.resolve().to_string()).collect();
             let structs = prog.structs.iter().map(|s| s.name.resolve().to_string()).collect();
@@ -203,7 +203,7 @@ pub fn merge_modules(entry_path: &Path, mut discovered: HashMap<PathBuf, Program
     let mut merged_fns = Vec::new();
     let mut merged_structs = Vec::new();
 
-    for (path, program) in discovered {
+    for (path, (_src, program)) in discovered {
         let module_name = module_name_for_path(&path);
         let is_entry = path == entry_canonical;
 
@@ -314,22 +314,45 @@ pub fn merge_modules(entry_path: &Path, mut discovered: HashMap<PathBuf, Program
 /// each module it pulls in) `use`s, resolving each by
 /// `resolve_module_path` relative to whichever file wrote the `use`.
 /// Returns every discovered file keyed by its resolved, canonicalized
-/// path (entry file included) -- not yet merged into one `Program`
-/// with qualified symbols; that's separate follow-up work.
+/// path (entry file included), each paired with its own raw source text
+/// -- kept alongside the parsed `Program` specifically so a caller (see
+/// `cache_key_material`) can fold every transitively-used file's actual
+/// content into a compile-cache key, not just the entry file's. Without
+/// this, editing an imported module without touching the entry file
+/// would let a cache keyed only on the entry's text silently keep
+/// serving a stale binary compiled against the old module content.
 ///
 /// Rejects an import cycle (A uses B uses A) as a compile error rather
 /// than recursing forever, and a missing module file as a compile
 /// error naming the expected path.
-pub fn discover_modules(entry_path: &Path) -> Result<HashMap<PathBuf, Program>, KestrelcError> {
+pub fn discover_modules(entry_path: &Path) -> Result<HashMap<PathBuf, (String, Program)>, KestrelcError> {
     let mut discovered = HashMap::new();
     let mut in_progress = Vec::new();
     discover_one(entry_path, &mut discovered, &mut in_progress)?;
     Ok(discovered)
 }
 
+/// Deterministic (path-sorted, so hashing order never depends on
+/// `HashMap` iteration order) concatenation of every discovered file's
+/// path and content -- the actual string a caller should hash/fold into
+/// a compile-cache key so the key reflects every file that could affect
+/// the compiled output, not just the entry file's own text.
+pub fn cache_key_material(discovered: &HashMap<PathBuf, (String, Program)>) -> String {
+    let mut paths: Vec<&PathBuf> = discovered.keys().collect();
+    paths.sort();
+    let mut out = String::new();
+    for p in paths {
+        out.push_str(&p.to_string_lossy());
+        out.push('\0');
+        out.push_str(&discovered[p].0);
+        out.push('\0');
+    }
+    out
+}
+
 fn discover_one(
     path: &Path,
-    discovered: &mut HashMap<PathBuf, Program>,
+    discovered: &mut HashMap<PathBuf, (String, Program)>,
     in_progress: &mut Vec<PathBuf>,
 ) -> Result<(), KestrelcError> {
     let canonical = path.canonicalize().map_err(|e| {
@@ -380,7 +403,7 @@ fn discover_one(
     }
     in_progress.pop();
 
-    discovered.insert(canonical, program);
+    discovered.insert(canonical, (src, program));
     Ok(())
 }
 
