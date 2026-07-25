@@ -1037,6 +1037,71 @@ fn collect_slots(f: &Fn, struct_table: &HashMap<Symbol, &StructDecl>) -> Vec<(Sy
     slots
 }
 
+/// Attempts to prove `Some((idx, bound))` for a `while (idx < bound)`
+/// loop: `idx` starts at exactly `0` (the statement immediately
+/// preceding the loop, in the same block, must be `let idx = 0;`), the
+/// condition is exactly `idx < N` for a literal `N`, the body contains
+/// no nested control flow at all (flat `let`/assignment/expression-
+/// statement/`print` only), and the body's *last* statement is exactly
+/// `idx = idx + 1` with `idx` reassigned nowhere else in the body.
+///
+/// Returns `None` for any deviation from this exact shape -- no
+/// partial credit, no heuristic fallback (see this file's Index
+/// fast-path #3, and docs/superpowers/specs/2026-07-25-loop-indexed-
+/// bounds-proof-design.md for the full soundness argument).
+fn find_loop_bounds_proof(prev: Option<&Stmt>, cond: &Expr, body: &[Stmt]) -> Option<(Symbol, i64)> {
+    let (idx, bound) = match &cond.kind {
+        ExprKind::Binop { op: BinOp::Lt, left, right } => {
+            let idx = match &left.kind {
+                ExprKind::Ident(n) => *n,
+                _ => return None,
+            };
+            let bound = match &right.kind {
+                ExprKind::Num(n) => *n,
+                _ => return None,
+            };
+            (idx, bound)
+        }
+        _ => return None,
+    };
+
+    match prev {
+        Some(Stmt::Let { name, value, .. }) if *name == idx => match &value.kind {
+            ExprKind::Num(0) => {}
+            _ => return None,
+        },
+        _ => return None,
+    }
+
+    let (last, rest) = body.split_last()?;
+    for s in rest {
+        match s {
+            Stmt::Let { .. } | Stmt::ExprStmt { .. } | Stmt::Print { .. } => {}
+            Stmt::Assign { name, .. } if *name == idx => return None,
+            Stmt::Assign { .. } => {}
+            // Any nested control flow (If/While/RangeFor/Return/Break/
+            // Continue) or FieldAssign bails -- the shape must be flat.
+            _ => return None,
+        }
+    }
+
+    match last {
+        Stmt::Assign { name, value, .. } if *name == idx => match &value.kind {
+            ExprKind::Binop { op: BinOp::Add, left, right } => {
+                let l_ok = matches!(&left.kind, ExprKind::Ident(n) if *n == idx);
+                let r_ok = matches!(&right.kind, ExprKind::Num(1));
+                if l_ok && r_ok {
+                    Some((idx, bound))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 struct FnCodegen<'a> {
     builder: FunctionBuilder<'a>,
     vars: HashMap<Symbol, Slot>,
@@ -1807,5 +1872,134 @@ impl<'a> FnCodegen<'a> {
                 Err(self.err("struct literals are not yet supported in kestrelc".into()))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod loop_bounds_proof_tests {
+    use super::find_loop_bounds_proof;
+    use crate::ast::{BinOp, Expr, ExprKind, Stmt};
+    use crate::interner::intern;
+    use crate::span::Span;
+
+    fn sp() -> Span {
+        Span { line: 1, col: 1, len: 1 }
+    }
+
+    fn ident(name: &str) -> Expr {
+        Expr::new(ExprKind::Ident(intern(name)), sp())
+    }
+
+    fn num(n: i64) -> Expr {
+        Expr::new(ExprKind::Num(n), sp())
+    }
+
+    fn let_stmt(name: &str, value: Expr) -> Stmt {
+        Stmt::Let { name: intern(name), value, span: sp() }
+    }
+
+    fn assign(name: &str, value: Expr) -> Stmt {
+        Stmt::Assign { name: intern(name), value, span: sp() }
+    }
+
+    fn lt(left: Expr, right: Expr) -> Expr {
+        Expr::new(ExprKind::Binop { op: BinOp::Lt, left: Box::new(left), right: Box::new(right) }, sp())
+    }
+
+    fn add(left: Expr, right: Expr) -> Expr {
+        Expr::new(ExprKind::Binop { op: BinOp::Add, left: Box::new(left), right: Box::new(right) }, sp())
+    }
+
+    fn index(target: &str, idx: &str) -> Expr {
+        Expr::new(
+            ExprKind::Index { target: Box::new(ident(target)), index: Box::new(ident(idx)) },
+            sp(),
+        )
+    }
+
+    fn increment(name: &str) -> Stmt {
+        assign(name, add(ident(name), num(1)))
+    }
+
+    #[test]
+    fn the_exact_bounds_heavy_shape_is_proven() {
+        let prev = let_stmt("i", num(0));
+        let cond = lt(ident("i"), num(20000));
+        let body = vec![
+            assign("total", index("arr", "i")),
+            increment("i"),
+        ];
+        let proof = find_loop_bounds_proof(Some(&prev), &cond, &body);
+        assert_eq!(proof, Some((intern("i"), 20000)));
+    }
+
+    #[test]
+    fn missing_preceding_let_zero_is_not_proven() {
+        let cond = lt(ident("i"), num(20000));
+        let body = vec![assign("total", index("arr", "i")), increment("i")];
+        assert_eq!(find_loop_bounds_proof(None, &cond, &body), None);
+    }
+
+    #[test]
+    fn preceding_let_with_nonzero_initial_value_is_not_proven() {
+        let prev = let_stmt("i", num(1));
+        let cond = lt(ident("i"), num(20000));
+        let body = vec![assign("total", index("arr", "i")), increment("i")];
+        assert_eq!(find_loop_bounds_proof(Some(&prev), &cond, &body), None);
+    }
+
+    #[test]
+    fn nested_if_in_body_is_not_proven() {
+        let prev = let_stmt("i", num(0));
+        let cond = lt(ident("i"), num(20000));
+        let body = vec![
+            Stmt::If {
+                cond: ident("cond_flag"),
+                then_block: vec![assign("total", index("arr", "i"))],
+                else_block: None,
+                span: sp(),
+            },
+            increment("i"),
+        ];
+        assert_eq!(find_loop_bounds_proof(Some(&prev), &cond, &body), None);
+    }
+
+    #[test]
+    fn missing_increment_is_not_proven() {
+        let prev = let_stmt("i", num(0));
+        let cond = lt(ident("i"), num(20000));
+        let body = vec![assign("total", index("arr", "i"))];
+        assert_eq!(find_loop_bounds_proof(Some(&prev), &cond, &body), None);
+    }
+
+    #[test]
+    fn increment_not_last_statement_is_not_proven() {
+        let prev = let_stmt("i", num(0));
+        let cond = lt(ident("i"), num(20000));
+        let body = vec![
+            increment("i"),
+            assign("total", index("arr", "i")),
+        ];
+        assert_eq!(find_loop_bounds_proof(Some(&prev), &cond, &body), None);
+    }
+
+    #[test]
+    fn extra_reassignment_of_index_is_not_proven() {
+        let prev = let_stmt("i", num(0));
+        let cond = lt(ident("i"), num(20000));
+        let body = vec![
+            assign("i", add(ident("i"), num(5))),
+            assign("total", index("arr", "i")),
+            increment("i"),
+        ];
+        assert_eq!(find_loop_bounds_proof(Some(&prev), &cond, &body), None);
+    }
+
+    #[test]
+    fn condition_not_a_literal_bound_is_not_proven() {
+        let prev = let_stmt("i", num(0));
+        let cond = lt(ident("i"), ident("n"));
+        let body = vec![assign("total", index("arr", "i")), increment("i")];
+        assert_eq!(find_loop_bounds_proof(Some(&prev), &cond, &body), None);
     }
 }
