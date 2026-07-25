@@ -141,6 +141,9 @@ pub mod well_known {
         static MAIN: Cell<Option<Symbol>> = const { Cell::new(None) };
         static PARALLEL_MAP: Cell<Option<Symbol>> = const { Cell::new(None) };
         static MAP: Cell<Option<Symbol>> = const { Cell::new(None) };
+        static BOOL: Cell<Option<Symbol>> = const { Cell::new(None) };
+        static STR: Cell<Option<Symbol>> = const { Cell::new(None) };
+        static STRING: Cell<Option<Symbol>> = const { Cell::new(None) };
     }
 
     pub fn main() -> Symbol {
@@ -176,6 +179,45 @@ pub mod well_known {
             Some(s) => s,
             None => {
                 let s = intern("map");
+                c.set(Some(s));
+                s
+            }
+        })
+    }
+
+    /// `bool`/`str`/`string` -- declared-type names `typecheck.rs`'s
+    /// `type_to_kind` checks by name (`str` and `string` are two
+    /// spellings of the same `Kind::Str`). Same cheap-comparison reason
+    /// as `main`/`parallel_map` above: `Symbol == Symbol` instead of
+    /// resolving to a string and comparing bytes on every declared type
+    /// this checker sees.
+    pub fn bool_() -> Symbol {
+        BOOL.with(|c| match c.get() {
+            Some(s) => s,
+            None => {
+                let s = intern("bool");
+                c.set(Some(s));
+                s
+            }
+        })
+    }
+
+    pub fn str_() -> Symbol {
+        STR.with(|c| match c.get() {
+            Some(s) => s,
+            None => {
+                let s = intern("str");
+                c.set(Some(s));
+                s
+            }
+        })
+    }
+
+    pub fn string() -> Symbol {
+        STRING.with(|c| match c.get() {
+            Some(s) => s,
+            None => {
+                let s = intern("string");
                 c.set(Some(s));
                 s
             }

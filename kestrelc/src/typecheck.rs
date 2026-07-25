@@ -66,22 +66,27 @@ pub fn check_types(
     // there's still only one runtime integer representation (see this
     // file's own module doc comment), so this doesn't invent a new
     // distinction the rest of the compiler doesn't have, it just lets
-    // the checker recognize the existing one. `bool`/`str` are
-    // recognized by name for the same reason; anything else defaults to
-    // `Int` rather than `Unknown`, since every declared scalar type name
-    // actually used in this language today is an integer-family name.
+    // the checker recognize the existing one. `bool`/`str`/`string` are
+    // recognized via pre-interned `well_known` Symbols -- `Symbol ==
+    // Symbol` (u32 equality) instead of resolving to a string and
+    // comparing bytes on every declared type this checker sees; anything
+    // else defaults to `Int` rather than `Unknown`, since every declared
+    // scalar type name actually used in this language today is an
+    // integer-family name.
     fn type_to_kind(ty: &Type, structs: &HashMap<Symbol, &StructDecl>) -> Kind {
         match ty {
             Type::Array { .. } => Kind::Array,
             Type::Named(name) => {
                 if structs.contains_key(name) {
                     Kind::Struct(*name)
+                } else if *name == crate::interner::well_known::bool_() {
+                    Kind::Bool
+                } else if *name == crate::interner::well_known::str_()
+                    || *name == crate::interner::well_known::string()
+                {
+                    Kind::Str
                 } else {
-                    match name.resolve().as_ref() {
-                        "bool" => Kind::Bool,
-                        "str" | "string" => Kind::Str,
-                        _ => Kind::Int,
-                    }
+                    Kind::Int
                 }
             }
         }
