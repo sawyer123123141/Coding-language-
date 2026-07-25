@@ -2487,3 +2487,137 @@ fn a_nested_if_around_the_access_still_compiles_and_produces_correct_output() {
     assert!(run.status.success(), "compiled binary exited with failure");
     assert_eq!(native_stdout(&run), "6\n");
 }
+
+#[test]
+fn a_from_import_compiles_and_runs_across_two_files_with_correct_output() {
+    let scratch = scratch_dir("modules_from_import");
+    fs::write(
+        scratch.join("geometry.kes"),
+        r#"
+        pure fn square(x: i64) -> i64 {
+            return x * x;
+        }
+        "#,
+    )
+    .unwrap();
+    let entry = scratch.join("main.kes");
+    fs::write(
+        &entry,
+        r#"
+        use square from geometry;
+        fn main() {
+            print(square(7));
+        }
+        "#,
+    )
+    .unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&entry)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(out.status.success(), "compile failed:\n{}", String::from_utf8_lossy(&out.stderr));
+
+    let bin = scratch.join("main");
+    let run = Command::new(&bin).output().expect("failed to run compiled binary");
+    assert!(run.status.success(), "compiled binary exited with failure");
+    assert_eq!(native_stdout(&run), "49\n");
+}
+
+#[test]
+fn a_from_import_naming_a_nonexistent_function_is_a_compile_error() {
+    let scratch = scratch_dir("modules_missing_name");
+    fs::write(scratch.join("geometry.kes"), "fn noop() {}\n").unwrap();
+    let entry = scratch.join("main.kes");
+    fs::write(&entry, "use nope from geometry;\nfn main() { print(1); }\n").unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&entry)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(!out.status.success(), "kestrelc should have rejected an import naming a nonexistent function");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("not found in module"), "got: {stderr}");
+}
+
+#[test]
+fn a_missing_module_file_is_a_clear_compile_error() {
+    let scratch = scratch_dir("modules_missing_file");
+    let entry = scratch.join("main.kes");
+    fs::write(&entry, "use nope;\nfn main() { print(1); }\n").unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&entry)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(!out.status.success(), "kestrelc should have rejected a use of a nonexistent module");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("not found"), "got: {stderr}");
+}
+
+#[test]
+fn an_import_cycle_is_a_clear_compile_error_not_a_hang() {
+    let scratch = scratch_dir("modules_cycle");
+    fs::write(scratch.join("a.kes"), "use b;\nfn noop() {}\n").unwrap();
+    fs::write(scratch.join("b.kes"), "use a;\nfn noop() {}\n").unwrap();
+    let entry = scratch.join("a.kes");
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&entry)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(!out.status.success(), "kestrelc should have rejected an import cycle");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("cycle"), "got: {stderr}");
+}
+
+#[test]
+fn same_named_functions_in_two_unrelated_modules_compile_and_run_correctly() {
+    // Neither module imports the other's `helper` unqualified, so this
+    // only compiles at all if the object-file/linker export names are
+    // actually qualified (module$name), not the plain declared name --
+    // otherwise this would fail to link with a duplicate-symbol error.
+    let scratch = scratch_dir("modules_unrelated_same_name");
+    fs::write(scratch.join("a.kes"), "fn helper() {}\n").unwrap();
+    fs::write(scratch.join("b.kes"), "fn helper() {}\n").unwrap();
+    let entry = scratch.join("main.kes");
+    fs::write(&entry, "use a;\nuse b;\nfn main() { print(1); }\n").unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&entry)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(out.status.success(), "compile failed:\n{}", String::from_utf8_lossy(&out.stderr));
+
+    let bin = scratch.join("main");
+    let run = Command::new(&bin).output().expect("failed to run compiled binary");
+    assert!(run.status.success(), "compiled binary exited with failure");
+    assert_eq!(native_stdout(&run), "1\n");
+}
+
+#[test]
+fn a_program_with_no_use_statements_still_compiles_and_runs_identically() {
+    // Regression guard for merge_modules's no-imports short-circuit --
+    // an ordinary single-file program must behave exactly as before
+    // this feature existed.
+    let scratch = scratch_dir("modules_no_imports_regression");
+    let entry = scratch.join("main.kes");
+    fs::write(&entry, "fn helper() { print(1); } fn main() { helper(); }\n").unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&entry)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(out.status.success(), "compile failed:\n{}", String::from_utf8_lossy(&out.stderr));
+
+    let bin = scratch.join("main");
+    let run = Command::new(&bin).output().expect("failed to run compiled binary");
+    assert!(run.status.success(), "compiled binary exited with failure");
+    assert_eq!(native_stdout(&run), "1\n");
+}
