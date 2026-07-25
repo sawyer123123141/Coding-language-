@@ -139,6 +139,23 @@ pub struct Fn {
 pub struct Program {
     pub fns: Vec<Fn>,
     pub structs: Vec<StructDecl>,
+    /// `use` items -- parser-level only so far (see docs/superpowers/
+    /// specs/2026-07-25-modules-imports-design.md). Nothing yet reads
+    /// this to actually locate/merge another file; the multi-file
+    /// discovery, symbol qualification, and codegen-export-name work
+    /// described in that design doc is separate, not-yet-started
+    /// follow-up.
+    pub uses: Vec<UseDecl>,
+}
+
+/// One `use` item: `use module;` (whole-module, qualified access) or
+/// `use a, b from module;` (selected names, unqualified access). Both
+/// forms name the target module the same way (`module`); `Names`
+/// additionally carries which identifiers were selected.
+#[derive(Debug, Clone)]
+pub enum UseDecl {
+    Module(Symbol),
+    Names { names: Vec<Symbol>, module: Symbol },
 }
 
 /// A struct declaration — `fields` mirrors `Fn::params`'s shape

@@ -339,6 +339,7 @@ pub fn inline_hot_fns(program: &Program, profile: &HashMap<String, u64>) -> Prog
     Program {
         fns: program.fns.iter().map(|f| Fn { body: inline_stmts(&f.body, &candidates), ..f.clone() }).collect(),
         structs: program.structs.clone(),
+        uses: program.uses.clone(),
     }
 }
 

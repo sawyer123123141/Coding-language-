@@ -98,6 +98,15 @@ impl Parser {
     }
 
     pub fn parse_program(&mut self) -> PResult<Program> {
+        // `use` items must come before any fn/struct declaration (see
+        // docs/superpowers/specs/2026-07-25-modules-imports-design.md).
+        // Once this loop stops consuming `use`, a later `use` falls
+        // into parse_fn_decl below and fails its own `expect(Tok::Fn)`
+        // -- a real parse error, just not a custom-worded one.
+        let mut uses = Vec::new();
+        while self.at(&Tok::Use) {
+            self.parse_use_item(&mut uses)?;
+        }
         let mut fns = Vec::new();
         let mut structs = Vec::new();
         while !self.at(&Tok::Eof) {
@@ -107,7 +116,47 @@ impl Parser {
                 fns.push(self.parse_fn_decl()?);
             }
         }
-        Ok(Program { fns, structs })
+        Ok(Program { fns, structs, uses })
+    }
+
+    /// Parses one `use` item: either `use module;` / `use a, b from
+    /// module;`, or a `use { ... }` block -- sugar for several of
+    /// either form, semicolon-separated, in any mix. Advances past the
+    /// whole item, including its terminating `;` or the block's `}`.
+    fn parse_use_item(&mut self, uses: &mut Vec<UseDecl>) -> PResult<()> {
+        self.expect(Tok::Use)?;
+        if self.at(&Tok::LBrace) {
+            self.advance();
+            while !self.at(&Tok::RBrace) {
+                self.parse_use_line(uses)?;
+            }
+            self.advance(); // consume '}'
+            Ok(())
+        } else {
+            self.parse_use_line(uses)
+        }
+    }
+
+    /// Parses one `module;` or `a, b from module;` line -- the leading
+    /// `use` keyword is already consumed by the caller (either directly,
+    /// or once per line inside a `use { ... }` block).
+    fn parse_use_line(&mut self, uses: &mut Vec<UseDecl>) -> PResult<()> {
+        let first = self.expect_ident()?;
+        if self.at(&Tok::Comma) || self.at(&Tok::From) {
+            let mut names = vec![first];
+            while self.at(&Tok::Comma) {
+                self.advance();
+                names.push(self.expect_ident()?);
+            }
+            self.expect(Tok::From)?;
+            let module = self.expect_ident()?;
+            self.expect(Tok::Semi)?;
+            uses.push(UseDecl::Names { names, module });
+        } else {
+            self.expect(Tok::Semi)?;
+            uses.push(UseDecl::Module(first));
+        }
+        Ok(())
     }
 
     fn parse_type(&mut self) -> PResult<Type> {
@@ -655,6 +704,59 @@ pub fn parse(tokens: Vec<Token>) -> PResult<Program> {
 mod tests {
     use super::*;
     use crate::lexer::lex;
+
+    #[test]
+    fn a_bare_use_parses_as_a_whole_module_import() {
+        let program = parse(lex("use math_utils;\nfn main() { print(1); }").unwrap()).unwrap();
+        assert_eq!(program.uses.len(), 1);
+        let UseDecl::Module(name) = &program.uses[0] else {
+            panic!("expected UseDecl::Module, got {:?}", program.uses[0]);
+        };
+        assert_eq!(name.resolve().as_ref(), "math_utils");
+    }
+
+    #[test]
+    fn a_from_use_parses_as_selected_names() {
+        let program = parse(lex("use sqrt, abs from geometry;\nfn main() { print(1); }").unwrap()).unwrap();
+        assert_eq!(program.uses.len(), 1);
+        let UseDecl::Names { names, module } = &program.uses[0] else {
+            panic!("expected UseDecl::Names, got {:?}", program.uses[0]);
+        };
+        assert_eq!(names.iter().map(|n| n.resolve().to_string()).collect::<Vec<_>>(), vec!["sqrt", "abs"]);
+        assert_eq!(module.resolve().as_ref(), "geometry");
+    }
+
+    #[test]
+    fn a_single_name_from_use_needs_no_comma() {
+        let program = parse(lex("use sqrt from geometry;\nfn main() { print(1); }").unwrap()).unwrap();
+        let UseDecl::Names { names, .. } = &program.uses[0] else {
+            panic!("expected UseDecl::Names, got {:?}", program.uses[0]);
+        };
+        assert_eq!(names.len(), 1);
+        assert_eq!(names[0].resolve().as_ref(), "sqrt");
+    }
+
+    #[test]
+    fn a_use_block_groups_several_lines_of_either_form() {
+        let program = parse(lex(
+            "use {\n    math_utils;\n    sqrt, abs from geometry;\n}\nfn main() { print(1); }"
+        ).unwrap()).unwrap();
+        assert_eq!(program.uses.len(), 2);
+        assert!(matches!(&program.uses[0], UseDecl::Module(n) if n.resolve().as_ref() == "math_utils"));
+        assert!(matches!(&program.uses[1], UseDecl::Names { module, .. } if module.resolve().as_ref() == "geometry"));
+    }
+
+    #[test]
+    fn a_use_after_a_fn_declaration_is_a_parse_error() {
+        let result = parse(lex("fn main() { print(1); }\nuse math_utils;").unwrap());
+        assert!(result.is_err(), "expected a parse error for a use after a fn declaration");
+    }
+
+    #[test]
+    fn a_program_with_no_use_statements_still_parses_with_an_empty_uses_list() {
+        let program = parse(lex("fn main() { print(1); }").unwrap()).unwrap();
+        assert_eq!(program.uses.len(), 0);
+    }
 
     #[test]
     fn compound_assignment_desugars_to_a_plain_assign_with_a_binop_value() {
