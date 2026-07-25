@@ -1150,11 +1150,15 @@ struct FnCodegen<'a> {
     /// but `gen_stmt`'s Break/Continue arms still handle it defensively
     /// with a clear internal-error message rather than panicking.
     loop_stack: Vec<(Block, Block)>,
-    /// One entry per currently-active enclosing `while` loop, innermost
-    /// last, mirroring `loop_stack`'s lifetime. `Some((idx, bound))`
-    /// when `find_loop_bounds_proof` proved this loop's shape safe;
-    /// `None` otherwise. Consulted by `gen_expr`'s `Index` arm (fast
-    /// path #3) to decide whether an `arr[idx]` access inside this
+    /// Mirrors `loop_stack`'s push/pop lifetime for every loop-body
+    /// compilation -- one entry per currently-active enclosing loop,
+    /// innermost last. `Some((idx, bound))` when `find_loop_bounds_proof`
+    /// proved this loop's shape safe; `None` otherwise, which is what
+    /// `RangeFor` always pushes, since `find_loop_bounds_proof` never
+    /// proves a body containing one. This barrier is what keeps a stale
+    /// proof from leaking into a nested loop's body once the flat-body
+    /// restriction is ever relaxed. Consulted by `gen_expr`'s `Index` arm
+    /// (fast path #3) to decide whether an `arr[idx]` access inside this
     /// loop's body can skip the runtime bounds check.
     loop_bounds_stack: Vec<Option<(Symbol, i64)>>,
 }
@@ -1498,7 +1502,9 @@ impl<'a> FnCodegen<'a> {
 
                 self.builder.switch_to_block(body_blk);
                 self.loop_stack.push((increment_blk, after_blk));
+                self.loop_bounds_stack.push(None);
                 let body_term = self.gen_block(body)?;
+                self.loop_bounds_stack.pop();
                 self.loop_stack.pop();
                 if !body_term {
                     self.builder.ins().jump(increment_blk, &[]);
@@ -1718,11 +1724,11 @@ impl<'a> FnCodegen<'a> {
                 // -- `idx` is provably `0 <= idx < bound` everywhere in
                 // this loop's body, and this array's statically-known
                 // length covers that bound.
-                if let (ExprKind::Ident(t), ExprKind::Ident(i)) = (&target.as_ref().kind, &index.as_ref().kind) {
+                if let ExprKind::Ident(i) = &index.as_ref().kind {
                     if let Some(Some((proven_idx, bound))) = self.loop_bounds_stack.last() {
                         if i == proven_idx {
                             if let Some(static_len) = self.static_array_len(target) {
-                                if *bound as usize <= static_len {
+                                if *bound >= 0 && *bound <= static_len as i64 {
                                     let (ptr, _len) = self.resolve_array(target)?;
                                     let idx = self.gen_expr(index)?;
                                     let offset = self.builder.ins().imul_imm(idx, 8);
@@ -1732,7 +1738,6 @@ impl<'a> FnCodegen<'a> {
                             }
                         }
                     }
-                    let _ = t; // t isn't otherwise used in this fast path
                 }
 
                 let (ptr, len) = self.resolve_array(target)?;
