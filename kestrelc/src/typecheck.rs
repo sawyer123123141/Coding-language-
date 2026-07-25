@@ -31,11 +31,8 @@ enum Kind {
     Bool,
     Array,
     Str,
-    /// Carries the struct's own name so a future field-type check could
-    /// use it -- not read for that purpose yet (see infer_expr's Field
-    /// arm: a field's own resulting kind is always Unknown, matching
-    /// the type checker's existing "declared types don't carry kind
-    /// info yet" limitation for every other declared type).
+    /// Carries the struct's own name -- read by infer_expr's Field arm
+    /// to look up the accessed field's own declared type.
     Struct(Symbol),
     Unknown,
 }
@@ -271,16 +268,24 @@ pub fn check_types(
                 }
                 Kind::Struct(*name)
             }
-            ExprKind::Field { target, .. } => {
+            ExprKind::Field { target, field } => {
                 let k = infer_expr(target, locals, fns, structs, errors);
                 if k != Kind::Unknown && !matches!(k, Kind::Struct(_)) {
                     push(errors, target.span, format!("field access needs a struct, found {}", k.name()));
                 }
-                // The field's own kind isn't tracked -- resolve.rs
-                // already validated the field name exists (see Task 3);
-                // this checker only cares whether `.` was applied to
-                // something that could possibly be a struct at all.
-                Kind::Unknown
+                // Look up the field's declared type the same way
+                // StructLit/FieldAssign already do -- resolve.rs already
+                // validated the field name exists (see Task 3), so a
+                // miss here just means "target's struct kind wasn't
+                // known," not "the field doesn't exist."
+                match k {
+                    Kind::Struct(struct_name) => structs
+                        .get(&struct_name)
+                        .and_then(|decl| decl.fields.iter().find(|f| f.name == *field))
+                        .map(|f| type_to_kind(&f.ty, structs))
+                        .unwrap_or(Kind::Unknown),
+                    _ => Kind::Unknown,
+                }
             }
         }
     }
