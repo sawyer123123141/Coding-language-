@@ -220,6 +220,37 @@ pub fn merge_modules(entry_path: &Path, mut discovered: HashMap<PathBuf, Program
 
         let mut seen_from_names: HashMap<String, String> = HashMap::new();
         for u in &program.uses {
+            if let UseDecl::Module(module) = u {
+                // Bare `use module;` -- every declared name becomes
+                // callable/constructible as `module.name(...)`, which
+                // the parser already desugars to a plain `Call`/
+                // `StructLit` under the synthesized symbol
+                // `"module.name"` (see parser.rs's qualified-call
+                // parsing). Map that synthesized symbol straight to
+                // the real qualified `module$name` here -- no new
+                // rewrite logic needed, this reuses the exact same
+                // rename table `rewrite_expr`'s Call/StructLit arms
+                // already consult.
+                let source_module = module.resolve().to_string();
+                let (source_fns, source_structs) = declared.get(&source_module).ok_or_else(|| {
+                    KestrelcError::internal(
+                        ErrorKind::Resolve,
+                        format!("kestrelc: module '{source_module}' not found"),
+                    )
+                })?;
+                for fn_name in source_fns {
+                    rename.insert(
+                        intern(&format!("{source_module}.{fn_name}")),
+                        intern(&format!("{source_module}${fn_name}")),
+                    );
+                }
+                for struct_name in source_structs {
+                    rename.insert(
+                        intern(&format!("{source_module}.{struct_name}")),
+                        intern(&format!("{source_module}${struct_name}")),
+                    );
+                }
+            }
             if let UseDecl::Names { names, module } = u {
                 let source_module = module.resolve().to_string();
                 let (source_fns, source_structs) = declared.get(&source_module).ok_or_else(|| {
@@ -603,5 +634,21 @@ mod tests {
         let Stmt::Let { value, .. } = &main_fn.body[0] else { panic!("expected Let") };
         let ExprKind::StructLit { name, .. } = &value.kind else { panic!("expected StructLit") };
         assert_eq!(name.resolve().as_ref(), "shapes$Point");
+    }
+
+    #[test]
+    fn a_bare_use_qualified_call_resolves_to_the_source_modules_qualified_name() {
+        let dir = scratch_dir("merge_bare_use_qualified_call");
+        fs::write(dir.join("geometry.kes"), "pure fn square(x: i64) -> i64 { return x * x; }").unwrap();
+        let entry = dir.join("main.kes");
+        fs::write(&entry, "use geometry;\nfn main() { print(geometry.square(7)); }").unwrap();
+        let discovered = discover_modules(&entry).unwrap();
+        let merged = merge_modules(&entry, discovered).unwrap();
+
+        let square_fn = find_fn(&merged, "geometry$square");
+        let main_fn = find_fn(&merged, "main");
+        let Stmt::Print { args, .. } = &main_fn.body[0] else { panic!("expected Print") };
+        let ExprKind::Call { name, .. } = &args[0].kind else { panic!("expected Call") };
+        assert_eq!(*name, square_fn.name);
     }
 }

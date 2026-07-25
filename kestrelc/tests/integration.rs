@@ -2621,3 +2621,27 @@ fn a_program_with_no_use_statements_still_compiles_and_runs_identically() {
     assert!(run.status.success(), "compiled binary exited with failure");
     assert_eq!(native_stdout(&run), "1\n");
 }
+
+#[test]
+fn a_bare_use_qualified_call_compiles_and_runs_across_two_files() {
+    let scratch = scratch_dir("modules_qualified_call");
+    fs::write(
+        scratch.join("geometry.kes"),
+        "pure fn square(x: i64) -> i64 { return x * x; }\n",
+    )
+    .unwrap();
+    let entry = scratch.join("main.kes");
+    fs::write(&entry, "use geometry;\nfn main() { print(geometry.square(7)); }\n").unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&entry)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(out.status.success(), "compile failed:\n{}", String::from_utf8_lossy(&out.stderr));
+
+    let bin = scratch.join("main");
+    let run = Command::new(&bin).output().expect("failed to run compiled binary");
+    assert!(run.status.success(), "compiled binary exited with failure");
+    assert_eq!(native_stdout(&run), "49\n");
+}

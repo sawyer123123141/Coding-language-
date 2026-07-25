@@ -373,6 +373,28 @@ impl Parser {
                         ExprKind::Call { name: crate::interner::well_known::parallel_map(), args: vec![callback, expr] },
                         span,
                     );
+                } else if let (ExprKind::Ident(module), true) = (&expr.kind, self.at(&Tok::LParen)) {
+                    // `module.fn(args)` -- a qualified call into a
+                    // whole-module `use module;` import (see
+                    // docs/superpowers/specs/2026-07-25-modules-imports-
+                    // design.md). Kestrel has no first-class functions
+                    // and no struct methods, so `Ident.Ident(...)` (the
+                    // `.map` sugar above aside) can only ever mean this;
+                    // there's no competing valid interpretation to
+                    // disambiguate against. Desugars directly to an
+                    // ordinary `Call` under a synthesized
+                    // `"module.name"` symbol -- a real identifier can
+                    // never contain `.`, so this can't collide with a
+                    // user-declared function name, and needs no new
+                    // AST variant: modules::merge_modules's existing
+                    // Call-name rename table is what actually resolves
+                    // it to the qualified `module$name` symbol.
+                    let module = *module;
+                    self.advance();
+                    let args = self.parse_args()?;
+                    self.expect(Tok::RParen)?;
+                    let qualified = crate::interner::intern(&format!("{}.{}", module.resolve(), field.resolve()));
+                    expr = Expr::new(ExprKind::Call { name: qualified, args }, span);
                 } else {
                     expr = Expr::new(ExprKind::Field { target: Box::new(expr), field }, span);
                 }
@@ -756,6 +778,31 @@ mod tests {
     fn a_program_with_no_use_statements_still_parses_with_an_empty_uses_list() {
         let program = parse(lex("fn main() { print(1); }").unwrap()).unwrap();
         assert_eq!(program.uses.len(), 0);
+    }
+
+    #[test]
+    fn a_qualified_call_desugars_to_a_call_under_a_synthesized_dotted_symbol() {
+        let program = parse(lex("fn main() { print(geometry.square(7)); }").unwrap()).unwrap();
+        let main_fn = &program.fns[0];
+        let Stmt::Print { args, .. } = &main_fn.body[0] else { panic!("expected Print") };
+        let ExprKind::Call { name, args: call_args } = &args[0].kind else {
+            panic!("expected Call, got {:?}", args[0].kind)
+        };
+        assert_eq!(name.resolve().as_ref(), "geometry.square");
+        assert_eq!(call_args.len(), 1);
+        assert!(matches!(call_args[0].kind, ExprKind::Num(7)));
+    }
+
+    #[test]
+    fn a_plain_field_access_without_a_call_still_parses_as_field() {
+        // `p.x` (no trailing `(`) must still be ordinary struct field
+        // access, not mistaken for a qualified call.
+        let program = parse(lex(
+            "struct Point { x: i64 }\nfn main() { let p = Point { x: 1 }; print(p.x); }"
+        ).unwrap()).unwrap();
+        let main_fn = &program.fns[0];
+        let Stmt::Print { args, .. } = &main_fn.body[1] else { panic!("expected Print") };
+        assert!(matches!(&args[0].kind, ExprKind::Field { .. }));
     }
 
     #[test]
