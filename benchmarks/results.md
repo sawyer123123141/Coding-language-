@@ -79,6 +79,61 @@ excluded.
   doesn't yet cover this pattern at all, so every loop-indexed access
   pays a real runtime check today.
 
+### Re-measured after `find_loop_bounds_proof` (loop-indexed bounds elision)
+
+`docs/superpowers/specs/2026-07-25-loop-indexed-bounds-proof-design.md`
+cites this benchmark's overhead as "16%" as its motivating figure; that
+number doesn't match what this file has actually measured for
+`bounds-heavy` at any point (7-8%, see table above and re-measurement
+below) — it appears to have been a rough/unverified estimate in that
+design doc, not reconciled against this file's own numbers. Recorded
+here honestly rather than silently treating either figure as
+authoritative.
+
+`bounds-heavy`'s `bench.kes` is exactly the shape the new proof
+targets (`let arr = [...]; ... while (i < 20000) { total = (total +
+arr[i]) % M; i = i + 1; }`), and fast path #3 does fire for it —
+verified by re-measuring with two `kestrelc` builds on the same
+machine, same run: one built from `47f45ce` (the commit that wires the
+proof into codegen) and one from its parent `9cfc273` (last commit
+before the proof exists), each compiling `bench.kes` into its own
+isolated `KESTRELC_CACHE_DIR` so neither run could silently reuse the
+other's cached object/binary — a real risk here, since `cache.rs`'s
+cache key is derived only from source text + profile fingerprint, not
+from which `kestrelc` binary produced the artifact.
+
+| Variant | Median of 5 |
+|---|---|
+| Kestrel, with proof (`47f45ce`+) | 0.578s |
+| Kestrel, without proof (`9cfc273`) | 0.578s |
+| C -O3 -march=native | 0.535s |
+| Rust -O3 | 0.556s |
+
+**No measurable difference** between the with-proof and without-proof
+builds — both medians landed at 0.578s, well inside this benchmark's
+own run-to-run noise band (individual runs ranged 0.577-0.590s for the
+without-proof build). Kestrel-vs-C-O3 overhead is unchanged at ~8%
+(1.081x), Kestrel-vs-Rust at ~4% (1.040x) — both consistent with the
+table above's previously-recorded 7-8%/4% figures, just measured on a
+different day/machine load.
+
+Read honestly: eliding the bounds check for this specific access
+pattern did not move this benchmark's wall-clock time. The check being
+elided (two compares, an `or`, and a branch that's essentially always
+not-taken and trivially predicted) was already cheap relative to the
+loop body's real cost — a 64-bit modulo by a large prime — so removing
+it doesn't show up above measurement noise here. This benchmark's
+remaining ~8% gap vs. C -O3 is not explained by the runtime bounds
+check at all; it's better attributed to the same general
+scalar-codegen gap the "Reading these" section above already describes
+for `integer-loop`/`array-sum` (Cranelift vs. LLVM codegen quality on
+tight scalar arithmetic), not to Kestrel's safety net. The proof is
+still a real soundness/codegen improvement (a provably-safe access no
+longer emits a runtime check at all, which matters for workloads where
+the eliminated check *isn't* dwarfed by an expensive loop body, e.g. a
+tight copy loop with no modulo), just not one this particular benchmark
+was able to detect.
+
 ## Two real bugs found while building this suite
 
 Neither is a benchmark artifact — both are genuine, previously-unknown
