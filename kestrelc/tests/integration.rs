@@ -2275,3 +2275,215 @@ fn range_for_bounds_can_be_arbitrary_expressions() {
     // for i from 3 to 6: 3+4+5 = 12
     assert_eq!(native_stdout(&run), "12\n");
 }
+
+#[test]
+fn loop_indexed_access_with_a_provably_bounded_counter_elides_the_check_and_stays_correct() {
+    // The exact bounds-heavy shape: a let-array literal indexed by a
+    // while-loop counter whose bound matches the array's own length.
+    // Also exercises the last valid index (i == len - 1), the boundary
+    // a bug in this proof would most likely get wrong.
+    let scratch = scratch_dir("loop_bounds_ok");
+    let src_path = scratch.join("loop_bounds_ok.kes");
+    fs::write(
+        &src_path,
+        r#"
+        fn main() {
+            let arr = [10, 20, 30, 40, 50];
+            let total = 0;
+            let i = 0;
+            while (i < 5) {
+                total = total + arr[i];
+                i = i + 1;
+            }
+            print(total);
+            print(arr[4]);
+        }
+        "#,
+    )
+    .unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(out.status.success(), "compile failed:\n{}", String::from_utf8_lossy(&out.stderr));
+
+    let bin = scratch.join("loop_bounds_ok");
+    let run = Command::new(&bin).output().expect("failed to run compiled binary");
+    assert!(run.status.success(), "compiled binary exited with failure");
+    assert_eq!(native_stdout(&run), "150\n50\n");
+}
+
+#[test]
+fn two_sequential_loops_reusing_the_same_index_name_are_each_proven_independently() {
+    // The second loop's proof must not leak from (or be blocked by) the
+    // first -- each while loop is checked fresh against its own
+    // immediately-preceding statement.
+    let scratch = scratch_dir("loop_bounds_two_loops");
+    let src_path = scratch.join("loop_bounds_two_loops.kes");
+    fs::write(
+        &src_path,
+        r#"
+        fn main() {
+            let a = [1, 2, 3];
+            let b = [10, 20, 30, 40];
+            let sum_a = 0;
+            let i = 0;
+            while (i < 3) {
+                sum_a = sum_a + a[i];
+                i = i + 1;
+            }
+            let sum_b = 0;
+            let i = 0;
+            while (i < 4) {
+                sum_b = sum_b + b[i];
+                i = i + 1;
+            }
+            print(sum_a);
+            print(sum_b);
+        }
+        "#,
+    )
+    .unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(out.status.success(), "compile failed:\n{}", String::from_utf8_lossy(&out.stderr));
+
+    let bin = scratch.join("loop_bounds_two_loops");
+    let run = Command::new(&bin).output().expect("failed to run compiled binary");
+    assert!(run.status.success(), "compiled binary exited with failure");
+    assert_eq!(native_stdout(&run), "6\n100\n");
+}
+
+#[test]
+fn a_loop_index_reassigned_a_second_time_still_traps_instead_of_reading_garbage() {
+    // idx is reassigned beyond the required `idx = idx + 1`, so it
+    // genuinely exceeds the array partway through -- this shape must
+    // fail find_loop_bounds_proof's "idx assigned nowhere else in the
+    // body" check and fall back to the runtime check, which must still
+    // catch the out-of-bounds access cleanly.
+    let scratch = scratch_dir("loop_bounds_extra_reassign");
+    let src_path = scratch.join("loop_bounds_extra_reassign.kes");
+    fs::write(
+        &src_path,
+        r#"
+        fn main() {
+            let arr = [1, 2, 3, 4, 5];
+            let total = 0;
+            let i = 0;
+            while (i < 100) {
+                total = total + arr[i];
+                i = i + 3;
+                i = i + 1;
+            }
+            print(total);
+        }
+        "#,
+    )
+    .unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(out.status.success(), "compile failed:\n{}", String::from_utf8_lossy(&out.stderr));
+
+    let bin = scratch.join("loop_bounds_extra_reassign");
+    let run = Command::new(&bin).output().expect("failed to run compiled binary");
+    assert!(!run.status.success(), "an eventually out-of-bounds access should not exit successfully");
+    let stderr = String::from_utf8_lossy(&run.stderr).replace("\r\n", "\n");
+    assert!(
+        stderr.contains("out of bounds"),
+        "expected a runtime bounds-check failure message, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn a_loop_bound_exceeding_the_arrays_length_still_traps_instead_of_reading_garbage() {
+    // The while condition's literal bound (6) exceeds arr's actual
+    // static length (5) -- fast path #3's own `bound <= static_len`
+    // check must refuse to elide here, so the runtime check must still
+    // fire on the sixth (out-of-range) iteration.
+    let scratch = scratch_dir("loop_bounds_over_length");
+    let src_path = scratch.join("loop_bounds_over_length.kes");
+    fs::write(
+        &src_path,
+        r#"
+        fn main() {
+            let arr = [1, 2, 3, 4, 5];
+            let total = 0;
+            let i = 0;
+            while (i < 6) {
+                total = total + arr[i];
+                i = i + 1;
+            }
+            print(total);
+        }
+        "#,
+    )
+    .unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(out.status.success(), "compile failed:\n{}", String::from_utf8_lossy(&out.stderr));
+
+    let bin = scratch.join("loop_bounds_over_length");
+    let run = Command::new(&bin).output().expect("failed to run compiled binary");
+    assert!(!run.status.success(), "reading past the array's actual length should not exit successfully");
+    let stderr = String::from_utf8_lossy(&run.stderr).replace("\r\n", "\n");
+    assert!(
+        stderr.contains("out of bounds"),
+        "expected a runtime bounds-check failure message, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn a_nested_if_around_the_access_still_compiles_and_produces_correct_output() {
+    // find_loop_bounds_proof must refuse this shape (nested control
+    // flow in the body), falling back to the runtime check -- since the
+    // loop's own condition keeps this program genuinely safe either
+    // way, this only proves no regression, not that the check was
+    // actually retained (see the design doc's honest note on this
+    // limitation).
+    let scratch = scratch_dir("loop_bounds_nested_if");
+    let src_path = scratch.join("loop_bounds_nested_if.kes");
+    fs::write(
+        &src_path,
+        r#"
+        fn main() {
+            let arr = [1, 2, 3, 4, 5];
+            let total = 0;
+            let i = 0;
+            while (i < 5) {
+                if (i < 3) {
+                    total = total + arr[i];
+                }
+                i = i + 1;
+            }
+            print(total);
+        }
+        "#,
+    )
+    .unwrap();
+
+    let out = Command::new(kestrelc_bin())
+        .arg(&src_path)
+        .current_dir(&scratch)
+        .output()
+        .expect("failed to run kestrelc");
+    assert!(out.status.success(), "compile failed:\n{}", String::from_utf8_lossy(&out.stderr));
+
+    let bin = scratch.join("loop_bounds_nested_if");
+    let run = Command::new(&bin).output().expect("failed to run compiled binary");
+    assert!(run.status.success(), "compiled binary exited with failure");
+    assert_eq!(native_stdout(&run), "6\n");
+}
