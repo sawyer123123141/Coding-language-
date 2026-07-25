@@ -7,11 +7,269 @@
 // or merging of the resolved file happens here yet; that's separate
 // follow-up work this function's callers don't exist yet.
 
-use crate::ast::{Program, UseDecl};
+use crate::ast::{Expr, ExprKind, Fn, Program, Stmt, StructDecl, Type, UseDecl};
 use crate::error::{ErrorKind, KestrelcError};
+use crate::interner::{intern, Symbol};
 use crate::span::Span;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+/// A resolved file's module name is its filename stem
+/// (`math_utils.kes` -> `math_utils`). No validation needed here: no
+/// `use` spelling can ever name a non-identifier module (a hyphenated
+/// filename, say), so that case already failed at discovery time with
+/// "module not found" rather than reaching this far.
+fn module_name_for_path(path: &Path) -> String {
+    path.file_stem().and_then(|s| s.to_str()).unwrap_or("module").to_string()
+}
+
+fn rewrite_type(ty: &mut Type, rename: &HashMap<Symbol, Symbol>) {
+    match ty {
+        Type::Named(name) => {
+            if let Some(&q) = rename.get(name) {
+                *name = q;
+            }
+        }
+        Type::Array { elem, .. } => rewrite_type(elem, rename),
+    }
+}
+
+/// Renames only the Symbol positions that can ever denote a
+/// function/struct *name* -- `Call.name`, `StructLit.name`, and (the
+/// one place a bare function name appears without being called)
+/// `parallel_map`'s first argument. A plain `ExprKind::Ident` anywhere
+/// else is always a local variable/parameter read, never a function
+/// reference, so it's deliberately left untouched here -- renaming it
+/// too would incorrectly rewrite a local variable that happens to
+/// share a name with an imported/declared function.
+fn rewrite_expr(e: &mut Expr, rename: &HashMap<Symbol, Symbol>) {
+    match &mut e.kind {
+        ExprKind::Num(_) | ExprKind::Str(_) | ExprKind::Bool(_) | ExprKind::Ident(_) => {}
+        ExprKind::ArrayLit(elems) => {
+            for el in elems {
+                rewrite_expr(el, rename);
+            }
+        }
+        ExprKind::Unary { expr, .. } => rewrite_expr(expr, rename),
+        ExprKind::Binop { left, right, .. } => {
+            rewrite_expr(left, rename);
+            rewrite_expr(right, rename);
+        }
+        ExprKind::Index { target, index } => {
+            rewrite_expr(target, rename);
+            rewrite_expr(index, rename);
+        }
+        ExprKind::Call { name, args } => {
+            let is_parallel_map = *name == crate::interner::well_known::parallel_map();
+            if let Some(&q) = rename.get(name) {
+                *name = q;
+            }
+            if is_parallel_map {
+                if let Some(first) = args.first_mut() {
+                    if let ExprKind::Ident(fn_name) = &mut first.kind {
+                        if let Some(&q) = rename.get(fn_name) {
+                            *fn_name = q;
+                        }
+                    }
+                }
+            }
+            for a in args {
+                rewrite_expr(a, rename);
+            }
+        }
+        ExprKind::StructLit { name, fields } => {
+            if let Some(&q) = rename.get(name) {
+                *name = q;
+            }
+            for (_, v) in fields {
+                rewrite_expr(v, rename);
+            }
+        }
+        ExprKind::Field { target, .. } => rewrite_expr(target, rename),
+    }
+}
+
+fn rewrite_stmt(s: &mut Stmt, rename: &HashMap<Symbol, Symbol>) {
+    match s {
+        Stmt::Let { value, .. } | Stmt::Assign { value, .. } | Stmt::FieldAssign { value, .. } => {
+            rewrite_expr(value, rename)
+        }
+        Stmt::Break { .. } | Stmt::Continue { .. } => {}
+        Stmt::If { cond, then_block, else_block, .. } => {
+            rewrite_expr(cond, rename);
+            for st in then_block {
+                rewrite_stmt(st, rename);
+            }
+            if let Some(eb) = else_block {
+                for st in eb {
+                    rewrite_stmt(st, rename);
+                }
+            }
+        }
+        Stmt::While { cond, body, .. } => {
+            rewrite_expr(cond, rename);
+            for st in body {
+                rewrite_stmt(st, rename);
+            }
+        }
+        Stmt::RangeFor { start, end, body, .. } => {
+            rewrite_expr(start, rename);
+            rewrite_expr(end, rename);
+            for st in body {
+                rewrite_stmt(st, rename);
+            }
+        }
+        Stmt::Print { args, .. } => {
+            for a in args {
+                rewrite_expr(a, rename);
+            }
+        }
+        Stmt::Return { value, .. } => {
+            if let Some(v) = value {
+                rewrite_expr(v, rename);
+            }
+        }
+        Stmt::ExprStmt { expr, .. } => rewrite_expr(expr, rename),
+    }
+}
+
+fn rewrite_fn_signature_and_body(f: &mut Fn, rename: &HashMap<Symbol, Symbol>) {
+    for p in &mut f.params {
+        rewrite_type(&mut p.ty, rename);
+    }
+    if let Some(rt) = &mut f.return_type {
+        rewrite_type(rt, rename);
+    }
+    if let Some(wc) = &mut f.where_clause {
+        rewrite_expr(wc, rename);
+    }
+    for s in &mut f.body {
+        rewrite_stmt(s, rename);
+    }
+}
+
+fn rewrite_struct(s: &mut StructDecl, rename: &HashMap<Symbol, Symbol>) {
+    for f in &mut s.fields {
+        rewrite_type(&mut f.ty, rename);
+    }
+}
+
+/// Qualifies and merges every module `discover_modules` found into one
+/// `Program`, ready for the existing resolve/typecheck/purity/codegen
+/// pipeline exactly as it runs today. Every function/struct (including
+/// the entry file's own, except its `main`) is renamed to
+/// `{module}${name}` -- this qualified symbol is also what codegen
+/// will use as the object-file/linker export name (a later, separate
+/// codegen change, not this function's job), which is what actually
+/// prevents two unrelated modules' same-named functions from clashing
+/// at the object-file level, not just a Kestrel-level naming trick.
+///
+/// Handles `use a, b from module;` (unqualified) fully: existence is
+/// validated against the target module's real declarations, and a
+/// name colliding with a local declaration or another `from` import in
+/// the same module is a compile error. A bare `use module;`
+/// (whole-module qualified `module.fn()` access) is recorded by
+/// `discover_modules` but has no resolvable call syntax yet -- see
+/// docs/superpowers/specs/2026-07-25-modules-imports-design.md.
+pub fn merge_modules(entry_path: &Path, discovered: HashMap<PathBuf, Program>) -> Result<Program, KestrelcError> {
+    let entry_canonical = entry_path.canonicalize().map_err(|e| {
+        KestrelcError::new(ErrorKind::Resolve, format!("kestrelc: can't read '{}': {e}", entry_path.display()), Span::new(1, 1, 0))
+    })?;
+
+    // module name -> its own declared fn/struct names, used to
+    // validate every from-import actually names something real.
+    let declared: HashMap<String, (Vec<String>, Vec<String>)> = discovered
+        .iter()
+        .map(|(path, prog)| {
+            let name = module_name_for_path(path);
+            let fns = prog.fns.iter().map(|f| f.name.resolve().to_string()).collect();
+            let structs = prog.structs.iter().map(|s| s.name.resolve().to_string()).collect();
+            (name, (fns, structs))
+        })
+        .collect();
+
+    let mut merged_fns = Vec::new();
+    let mut merged_structs = Vec::new();
+
+    for (path, program) in discovered {
+        let module_name = module_name_for_path(&path);
+        let is_entry = path == entry_canonical;
+
+        let mut rename: HashMap<Symbol, Symbol> = HashMap::new();
+        for f in &program.fns {
+            let is_entry_main = is_entry && f.name == crate::interner::well_known::main();
+            if !is_entry_main {
+                rename.insert(f.name, intern(&format!("{module_name}${}", f.name.resolve())));
+            }
+        }
+        for s in &program.structs {
+            rename.insert(s.name, intern(&format!("{module_name}${}", s.name.resolve())));
+        }
+
+        let mut seen_from_names: HashMap<String, String> = HashMap::new();
+        for u in &program.uses {
+            if let UseDecl::Names { names, module } = u {
+                let source_module = module.resolve().to_string();
+                let (source_fns, source_structs) = declared.get(&source_module).ok_or_else(|| {
+                    KestrelcError::new(
+                        ErrorKind::Resolve,
+                        format!("kestrelc: module '{source_module}' not found"),
+                        Span::new(1, 1, 0),
+                    )
+                })?;
+                for name in names {
+                    let name_text = name.resolve().to_string();
+                    if !source_fns.contains(&name_text) && !source_structs.contains(&name_text) {
+                        return Err(KestrelcError::new(
+                            ErrorKind::Resolve,
+                            format!("kestrelc: '{name_text}' not found in module '{source_module}'"),
+                            Span::new(1, 1, 0),
+                        ));
+                    }
+                    let collides_locally = program.fns.iter().any(|f| f.name.resolve().as_ref() == name_text)
+                        || program.structs.iter().any(|s| s.name.resolve().as_ref() == name_text);
+                    if collides_locally {
+                        return Err(KestrelcError::new(
+                            ErrorKind::Resolve,
+                            format!(
+                                "kestrelc: '{name_text}' imported from '{source_module}' collides with a local declaration in '{module_name}'"
+                            ),
+                            Span::new(1, 1, 0),
+                        ));
+                    }
+                    if let Some(prior_module) = seen_from_names.get(&name_text) {
+                        return Err(KestrelcError::new(
+                            ErrorKind::Resolve,
+                            format!(
+                                "kestrelc: '{name_text}' imported from both '{prior_module}' and '{source_module}' in '{module_name}'"
+                            ),
+                            Span::new(1, 1, 0),
+                        ));
+                    }
+                    seen_from_names.insert(name_text.clone(), source_module.clone());
+                    rename.insert(*name, intern(&format!("{source_module}${name_text}")));
+                }
+            }
+        }
+
+        for mut f in program.fns {
+            rewrite_fn_signature_and_body(&mut f, &rename);
+            if let Some(&qualified) = rename.get(&f.name) {
+                f.name = qualified;
+            } // else: the entry file's own `main`, left unqualified.
+            merged_fns.push(f);
+        }
+        for mut s in program.structs {
+            rewrite_struct(&mut s, &rename);
+            if let Some(&qualified) = rename.get(&s.name) {
+                s.name = qualified;
+            }
+            merged_structs.push(s);
+        }
+    }
+
+    Ok(Program { fns: merged_fns, structs: merged_structs, uses: Vec::new() })
+}
 
 /// Parses `entry_path`, then transitively parses every module it (and
 /// each module it pulls in) `use`s, resolving each by
@@ -211,5 +469,111 @@ mod tests {
         let importer = dir.join("main.kes");
         fs::write(&importer, "use math_utils;").unwrap();
         assert_eq!(resolve_module_path(&importer, "math_utils"), None);
+    }
+
+    fn find_fn<'a>(program: &'a Program, name: &str) -> &'a crate::ast::Fn {
+        program.fns.iter().find(|f| f.name.resolve().as_ref() == name).unwrap_or_else(|| panic!("no fn named '{name}' in merged program: {:?}", program.fns.iter().map(|f| f.name.resolve().to_string()).collect::<Vec<_>>()))
+    }
+
+    #[test]
+    fn same_module_functions_get_qualified_names_and_self_calls_follow() {
+        let dir = scratch_dir("merge_self_call");
+        let entry = dir.join("main.kes");
+        fs::write(&entry, "fn helper() { print(1); } fn main() { helper(); }").unwrap();
+        let discovered = discover_modules(&entry).unwrap();
+        let merged = merge_modules(&entry, discovered).unwrap();
+
+        // main itself stays unqualified (entry-file main exclusivity).
+        find_fn(&merged, "main");
+        // helper (a non-main entry-file function) is qualified by its
+        // own module name.
+        let helper = find_fn(&merged, "main$helper");
+        // main's call to helper() must have been rewritten to call the
+        // qualified name, not the original.
+        let main_fn = find_fn(&merged, "main");
+        let Stmt::ExprStmt { expr, .. } = &main_fn.body[0] else { panic!("expected ExprStmt") };
+        let ExprKind::Call { name, .. } = &expr.kind else { panic!("expected Call") };
+        assert_eq!(*name, helper.name);
+    }
+
+    #[test]
+    fn a_from_import_resolves_to_the_source_modules_qualified_name() {
+        let dir = scratch_dir("merge_from_import");
+        fs::write(dir.join("geometry.kes"), "pure fn sqrt(x: i64) -> i64 { return x; }").unwrap();
+        let entry = dir.join("main.kes");
+        fs::write(&entry, "use sqrt from geometry;\nfn main() { print(sqrt(4)); }").unwrap();
+        let discovered = discover_modules(&entry).unwrap();
+        let merged = merge_modules(&entry, discovered).unwrap();
+
+        let sqrt_fn = find_fn(&merged, "geometry$sqrt");
+        let main_fn = find_fn(&merged, "main");
+        let Stmt::Print { args, .. } = &main_fn.body[0] else { panic!("expected Print") };
+        let ExprKind::Call { name, .. } = &args[0].kind else { panic!("expected Call") };
+        assert_eq!(*name, sqrt_fn.name);
+    }
+
+    #[test]
+    fn a_from_import_naming_a_nonexistent_function_is_a_compile_error() {
+        let dir = scratch_dir("merge_from_missing_name");
+        fs::write(dir.join("geometry.kes"), "fn noop() {}").unwrap();
+        let entry = dir.join("main.kes");
+        fs::write(&entry, "use nope from geometry;\nfn main() { print(1); }").unwrap();
+        let discovered = discover_modules(&entry).unwrap();
+        let err = merge_modules(&entry, discovered).unwrap_err();
+        assert!(err.message.contains("not found in module"), "got: {}", err.message);
+    }
+
+    #[test]
+    fn a_from_import_colliding_with_a_local_declaration_is_a_compile_error() {
+        let dir = scratch_dir("merge_from_collides_local");
+        fs::write(dir.join("geometry.kes"), "fn helper() {}").unwrap();
+        let entry = dir.join("main.kes");
+        fs::write(&entry, "use helper from geometry;\nfn helper() {}\nfn main() { print(1); }").unwrap();
+        let discovered = discover_modules(&entry).unwrap();
+        let err = merge_modules(&entry, discovered).unwrap_err();
+        assert!(err.message.contains("collides"), "got: {}", err.message);
+    }
+
+    #[test]
+    fn two_from_imports_of_the_same_name_from_different_modules_is_a_compile_error() {
+        let dir = scratch_dir("merge_from_collides_two_imports");
+        fs::write(dir.join("a.kes"), "fn helper() {}").unwrap();
+        fs::write(dir.join("b.kes"), "fn helper() {}").unwrap();
+        let entry = dir.join("main.kes");
+        fs::write(&entry, "use helper from a;\nuse helper from b;\nfn main() { print(1); }").unwrap();
+        let discovered = discover_modules(&entry).unwrap();
+        let err = merge_modules(&entry, discovered).unwrap_err();
+        assert!(err.message.contains("imported from both"), "got: {}", err.message);
+    }
+
+    #[test]
+    fn same_named_functions_in_unrelated_modules_dont_collide_after_qualification() {
+        let dir = scratch_dir("merge_unrelated_same_name");
+        fs::write(dir.join("a.kes"), "fn helper() {}").unwrap();
+        fs::write(dir.join("b.kes"), "fn helper() {}").unwrap();
+        let entry = dir.join("main.kes");
+        fs::write(&entry, "use a;\nuse b;\nfn main() { print(1); }").unwrap();
+        let discovered = discover_modules(&entry).unwrap();
+        let merged = merge_modules(&entry, discovered).unwrap();
+        find_fn(&merged, "a$helper");
+        find_fn(&merged, "b$helper");
+        assert_eq!(merged.fns.len(), 3); // main, a$helper, b$helper
+    }
+
+    #[test]
+    fn a_struct_from_import_is_qualified_and_struct_lit_follows() {
+        let dir = scratch_dir("merge_struct_from_import");
+        fs::write(dir.join("shapes.kes"), "struct Point { x: i64, y: i64 }").unwrap();
+        let entry = dir.join("main.kes");
+        fs::write(&entry, "use Point from shapes;\nfn main() { let p = Point { x: 1, y: 2 }; print(p.x); }").unwrap();
+        let discovered = discover_modules(&entry).unwrap();
+        let merged = merge_modules(&entry, discovered).unwrap();
+
+        assert_eq!(merged.structs.len(), 1);
+        assert_eq!(merged.structs[0].name.resolve().as_ref(), "shapes$Point");
+        let main_fn = find_fn(&merged, "main");
+        let Stmt::Let { value, .. } = &main_fn.body[0] else { panic!("expected Let") };
+        let ExprKind::StructLit { name, .. } = &value.kind else { panic!("expected StructLit") };
+        assert_eq!(name.resolve().as_ref(), "shapes$Point");
     }
 }
