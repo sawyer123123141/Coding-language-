@@ -1,0 +1,23 @@
+pure collatz_len(start: i64) -> int {
+    var n = start
+    var steps = 0
+    while n != 1 {
+        if n % 2 == 0 { n = n / 2 } else { n = 3 * n + 1 }
+        steps += 1
+    }
+    steps
+}
+
+main() {
+    let limit: i64 = 1000000
+    var best = 0
+    var best_start: i64 = 0
+    for s from 1 to limit {
+        let len = collatz_len(s)
+        if len > best {
+            best = len
+            best_start = s
+        }
+    }
+    print(best_start, best)
+}

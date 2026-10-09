@@ -1,0 +1,24 @@
+main() {
+    let size = 2000
+    let max_iter = 200
+    var inside = 0
+    var total_iter: i64 = 0
+    for py from 0 to size {
+        for px from 0 to size {
+            let cx = float(px) / float(size) * 3.0 - 2.0
+            let cy = float(py) / float(size) * 3.0 - 1.5
+            var x = 0.0
+            var y = 0.0
+            var i = 0
+            while i < max_iter and x * x + y * y <= 4.0 {
+                let xt = x * x - y * y + cx
+                y = 2.0 * x * y + cy
+                x = xt
+                i += 1
+            }
+            total_iter += i
+            if i == max_iter { inside += 1 }
+        }
+    }
+    print(inside, total_iter)
+}

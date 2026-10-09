@@ -1,0 +1,8 @@
+main() {
+    let n: i64 = 200000000
+    var total: i64 = 0
+    for i from 0 to n {
+        total = (total + i * i) % 1000000007
+    }
+    print(total)
+}
