@@ -1,6 +1,6 @@
 /// A checked type. `Never` is the type of code that doesn't finish
 /// (`return`, `break`); `Error` suppresses follow-on errors.
-use crate::tables::StructId;
+use crate::tables::{EnumId, StructId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Ty {
@@ -15,6 +15,10 @@ pub enum Ty {
     Str,
     /// A user-defined struct; its name lives in `Tables::structs`.
     Struct(StructId),
+    Enum(EnumId),
+    /// A `match` binding: the fields of one variant of the matched value.
+    /// Only usable as `binding.field`.
+    Variant(EnumId, u32),
     Error,
 }
 
@@ -44,6 +48,8 @@ impl Ty {
             Ty::F64 => "f64",
             Ty::Str => "string",
             Ty::Struct(_) => "struct",
+            Ty::Enum(_) => "enum",
+            Ty::Variant(..) => "variant",
             Ty::Error => "{error}",
         }
     }

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use kestrel_check::{FnId, Res, StructId};
+use kestrel_check::{EnumId, FnId, Res, StructId};
 use kestrel_syntax::ast;
 
 use super::FnLowerer;
@@ -15,8 +15,17 @@ impl<'a> FnLowerer<'a> {
                 _ => None,
             },
             ast::ExprKind::Field { base, .. } => {
+                // `Enum.Variant` parses as a field access but isn't a place.
+                let field = *self.t.field_index.get(&e.id)?;
+                if let Some(Res::Local(l)) = self.t.res.get(&base.id) {
+                    if let Some((p, variant)) = self.bindings.get(l) {
+                        let mut p = p.clone();
+                        p.path.push(Proj::Variant(*variant, field));
+                        return Some(p);
+                    }
+                }
                 let mut p = self.place(base)?;
-                p.fields.push(self.t.field_index[&e.id]);
+                p.path.push(Proj::Field(field));
                 Some(p)
             }
             _ => None,
@@ -107,6 +116,32 @@ impl<'a> FnLowerer<'a> {
             });
         }
         (pre, ExprKind::StructLit(StructIdx(sid.0), fields))
+    }
+
+    /// `Block.Stone(...)`: the variant's fields in declaration order,
+    /// arguments evaluated in source order.
+    pub(crate) fn variant_construct(&mut self, e: &ast::Expr, id: EnumId, variant: u32, args: &[ast::Arg]) -> (Vec<Stmt>, ExprKind) {
+        let t = self.t;
+        let slots = &t.ctor_args[&e.id];
+        let bound: Vec<usize> = slots.iter().flatten().copied().collect();
+        let in_order = bound.windows(2).all(|w| w[0] < w[1]);
+        let mut pre = Vec::new();
+        let mut values: Vec<Option<Expr>> = (0..args.len()).map(|_| None).collect();
+        if !in_order {
+            for (ai, a) in args.iter().enumerate() {
+                let v = self.expr(&a.value);
+                values[ai] = Some(self.spill(v, &mut pre));
+            }
+        }
+        let mut fields = Vec::with_capacity(slots.len());
+        for slot in slots {
+            let ai = slot.expect("checker binds every variant field");
+            fields.push(match values[ai].take() {
+                Some(v) => v,
+                None => self.expr(&args[ai].value),
+            });
+        }
+        (pre, ExprKind::VariantLit(EnumIdx(id.0), variant, fields))
     }
 
     /// Wraps `kind` so `pre` runs first, if there is anything to run.

@@ -18,8 +18,9 @@ impl<'a> BodyChecker<'a> {
     /// Call after the expression has been checked.
     pub(crate) fn place_root(&self, e: &Expr) -> Option<LocalId> {
         match &e.kind {
+            // A `match` binding stands for the variable it was matched from.
             ExprKind::Ident(_) => match self.t.res.get(&e.id) {
-                Some(Res::Local(l)) => Some(*l),
+                Some(Res::Local(l)) => Some(self.t.local(*l).alias.unwrap_or(*l)),
                 _ => None,
             },
             ExprKind::Field { base, .. } => self.place_root(base),

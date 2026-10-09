@@ -11,11 +11,13 @@ pub enum KTy {
     F64,
     /// A struct, laid out by `Module::structs`. Lives in memory, never in a register.
     Struct(StructIdx),
+    /// An enum, laid out by `Module::enums`: a u8 tag, then the variant's fields.
+    Enum(EnumIdx),
 }
 
 impl KTy {
     pub fn is_aggregate(self) -> bool {
-        matches!(self, KTy::Struct(_))
+        matches!(self, KTy::Struct(_) | KTy::Enum(_))
     }
 
     pub fn is_float(self) -> bool {
@@ -40,16 +42,24 @@ pub struct LocalIdx(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct StructIdx(pub u32);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct EnumIdx(pub u32);
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Module {
     pub funcs: Vec<Func>,
     pub structs: Vec<StructLayout>,
+    pub enums: Vec<EnumLayout>,
     pub main: FuncIdx,
 }
 
 impl Module {
     pub fn layout(&self, s: StructIdx) -> &StructLayout {
         &self.structs[s.0 as usize]
+    }
+
+    pub fn enum_layout(&self, e: EnumIdx) -> &EnumLayout {
+        &self.enums[e.0 as usize]
     }
 
     /// Size and alignment in bytes.
@@ -62,8 +72,29 @@ impl Module {
                 let l = self.layout(s);
                 (l.size, l.align)
             }
+            KTy::Enum(e) => {
+                let l = self.enum_layout(e);
+                (l.size, l.align)
+            }
         }
     }
+}
+
+/// The tag (u8, offset 0) says which variant is stored; each variant's
+/// fields start at the same payload offset, so they share memory.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnumLayout {
+    pub name: String,
+    pub variants: Vec<VariantLayout>,
+    pub size: u32,
+    pub align: u32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct VariantLayout {
+    pub name: String,
+    /// Offsets are from the start of the enum value.
+    pub fields: Vec<FieldLayout>,
 }
 
 /// Fields in declaration order at natural alignment (like C).
@@ -82,17 +113,25 @@ pub struct FieldLayout {
     pub offset: u32,
 }
 
-/// A memory location: a local, or a field path inside one.
+/// A memory location: a local, or a path of fields inside one.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Place {
     pub root: LocalIdx,
-    /// Field indices from the root inward.
-    pub fields: Vec<u32>,
+    /// Steps from the root inward.
+    pub path: Vec<Proj>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Proj {
+    /// A struct field.
+    Field(u32),
+    /// Field `.1` of variant `.0` of an enum (valid while that variant is stored).
+    Variant(u32, u32),
 }
 
 impl Place {
     pub fn local(root: LocalIdx) -> Self {
-        Place { root, fields: Vec::new() }
+        Place { root, path: Vec::new() }
     }
 }
 
@@ -174,6 +213,10 @@ pub enum ExprKind {
     Call(FuncIdx, Vec<Arg>),
     /// A struct with every field given, in declaration order.
     StructLit(StructIdx, Vec<Expr>),
+    /// An enum value: the variant and its fields in declaration order.
+    VariantLit(EnumIdx, u32, Vec<Expr>),
+    /// The tag (variant number, as a u8) of the enum stored at a place.
+    Tag(Place),
     /// A field of a struct value that isn't a place (e.g. a call's result).
     FieldOf(Box<Expr>, u32),
     /// Runs the statements, then yields the value. Used to evaluate

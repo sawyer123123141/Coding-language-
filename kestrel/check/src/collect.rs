@@ -1,9 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
-use kestrel_syntax::ast::{FnDecl, Item, Program, StructDecl, TypeExpr, TypeKind};
+use kestrel_syntax::ast::{EnumDecl, FieldDecl, FnDecl, Item, Program, StructDecl, TypeExpr, TypeKind};
 use kestrel_syntax::{Diagnostic, Span};
 
-use crate::tables::{ConstInfo, FieldInfo, FnId, FnInfo, ParamSig, StructId, StructInfo, Tables};
+use crate::tables::{
+    ConstInfo, EnumId, EnumInfo, FieldInfo, FnId, FnInfo, ParamSig, StructId, StructInfo, Tables, VariantInfo,
+};
 use crate::ty::Ty;
 
 const BUILTINS: &[&str] = &["print", "int", "i64", "u8", "float", "f64", "bool", "string"];
@@ -13,10 +15,15 @@ pub(crate) fn resolve_type(ty: &TypeExpr, t: &Tables, diags: &mut Vec<Diagnostic
         TypeKind::Named { name, args } if args.is_empty() => match Ty::from_name(name) {
             Some(Ty::Str) => "string values aren't supported yet (only as `print` arguments)".to_string(),
             Some(found) => return found,
-            None => match t.struct_by_name.get(name) {
-                Some(&id) => return Ty::Struct(id),
-                None => format!("unknown type `{name}`"),
-            },
+            None => {
+                if let Some(&id) = t.struct_by_name.get(name) {
+                    return Ty::Struct(id);
+                }
+                if let Some(&id) = t.enum_by_name.get(name) {
+                    return Ty::Enum(id);
+                }
+                format!("unknown type `{name}`")
+            }
         },
         TypeKind::Named { name, .. } => format!("`{name}[...]` types aren't supported yet"),
         TypeKind::Array(_) => "array types aren't supported yet".to_string(),
@@ -26,19 +33,28 @@ pub(crate) fn resolve_type(ty: &TypeExpr, t: &Tables, diags: &mut Vec<Diagnostic
     Ty::Error
 }
 
-/// Records every struct, function signature and constant before bodies are
-/// checked. Struct names come first so any type can refer to any struct.
+/// Records every type, function signature and constant before bodies are
+/// checked. Type names come first so any type can refer to any other.
 pub(crate) fn collect(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
     check_names(program, diags);
     for (item_idx, item) in program.items.iter().enumerate() {
-        if let Item::Struct(s) = item {
-            let id = StructId(t.structs.len() as u32);
-            t.struct_by_name.entry(s.name.clone()).or_insert(id);
-            let info = StructInfo { name: s.name.clone(), item: item_idx, span: s.name_span, fields: Vec::new(), methods: HashMap::new() };
-            t.structs.push(info);
+        match item {
+            Item::Struct(s) => {
+                let id = StructId(t.structs.len() as u32);
+                t.struct_by_name.entry(s.name.clone()).or_insert(id);
+                let info = StructInfo { name: s.name.clone(), item: item_idx, span: s.name_span, fields: Vec::new(), methods: HashMap::new() };
+                t.structs.push(info);
+            }
+            Item::Enum(e) => {
+                let id = EnumId(t.enums.len() as u32);
+                t.enum_by_name.entry(e.name.clone()).or_insert(id);
+                let info = EnumInfo { name: e.name.clone(), item: item_idx, span: e.name_span, variants: Vec::new(), methods: HashMap::new() };
+                t.enums.push(info);
+            }
+            Item::Fn(_) | Item::Const(_) => {}
         }
     }
-    let mut struct_id = 0;
+    let (mut struct_id, mut enum_id) = (0, 0);
     for (item_idx, item) in program.items.iter().enumerate() {
         match item {
             Item::Fn(f) => {
@@ -58,6 +74,10 @@ pub(crate) fn collect(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnos
                 add_struct_members(s, item_idx, StructId(struct_id), t, diags);
                 struct_id += 1;
             }
+            Item::Enum(e) => {
+                add_enum_members(e, item_idx, EnumId(enum_id), t, diags);
+                enum_id += 1;
+            }
         }
     }
     check_self_containment(t, diags);
@@ -74,6 +94,7 @@ fn check_names(program: &Program, diags: &mut Vec<Diagnostic>) {
             Item::Fn(f) => (&f.name, f.name_span),
             Item::Const(c) => (&c.bind.name, c.bind.span),
             Item::Struct(s) => (&s.name, s.name_span),
+            Item::Enum(e) => (&e.name, e.name_span),
         };
         if BUILTINS.contains(&name.as_str()) {
             diags.push(Diagnostic::error(span, format!("`{name}` is a built-in name; pick another")));
@@ -83,36 +104,74 @@ fn check_names(program: &Program, diags: &mut Vec<Diagnostic>) {
     }
 }
 
-fn add_struct_members(s: &StructDecl, item_idx: usize, id: StructId, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
+/// Resolves field types; reports duplicate field names.
+fn fields_of(owner: &str, decls: &[FieldDecl], t: &Tables, diags: &mut Vec<Diagnostic>) -> Vec<FieldInfo> {
     let mut fields: Vec<FieldInfo> = Vec::new();
-    for f in &s.fields {
+    for f in decls {
         if fields.iter().any(|g| g.name == f.name) {
-            diags.push(Diagnostic::error(f.name_span, format!("`{}` has two fields named `{}`", s.name, f.name)));
+            diags.push(Diagnostic::error(f.name_span, format!("`{owner}` has two fields named `{}`", f.name)));
             continue;
         }
         let ty = resolve_type(&f.ty, t, diags);
         fields.push(FieldInfo { name: f.name.clone(), ty, span: f.name_span, has_default: f.default.is_some() });
     }
+    fields
+}
+
+/// Registers methods; `taken` names (fields or variants) can't be reused.
+fn methods_of(
+    owner: &str,
+    item_idx: usize,
+    decls: &[FnDecl],
+    taken: &[&str],
+    taken_noun: &str,
+    t: &mut Tables,
+    diags: &mut Vec<Diagnostic>,
+) -> HashMap<String, FnId> {
     let mut methods = HashMap::new();
-    for (mi, m) in s.methods.iter().enumerate() {
-        if fields.iter().any(|g| g.name == m.name) {
-            diags.push(Diagnostic::error(m.name_span, format!("`{}` already has a field named `{}`", s.name, m.name)));
+    for (mi, m) in decls.iter().enumerate() {
+        if taken.contains(&m.name.as_str()) {
+            diags.push(Diagnostic::error(m.name_span, format!("`{owner}` already has a {taken_noun} named `{}`", m.name)));
             continue;
         }
         if methods.contains_key(&m.name) {
-            diags.push(Diagnostic::error(m.name_span, format!("`{}` has two methods named `{}`", s.name, m.name)));
+            diags.push(Diagnostic::error(m.name_span, format!("`{owner}` has two methods named `{}`", m.name)));
             continue;
         }
-        let fid = add_fn(m, item_idx, Some((mi, id, &s.name)), t, diags);
+        let fid = add_fn(m, item_idx, Some((mi, owner)), t, diags);
         methods.insert(m.name.clone(), fid);
     }
+    methods
+}
+
+fn add_struct_members(s: &StructDecl, item_idx: usize, id: StructId, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
+    let fields = fields_of(&s.name, &s.fields, t, diags);
+    let names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
+    let methods = methods_of(&s.name, item_idx, &s.methods, &names, "field", t, diags);
     let info = &mut t.structs[id.0 as usize];
     info.fields = fields;
     info.methods = methods;
 }
 
-/// Registers a function's signature. `method` is (index in struct, struct, struct name).
-fn add_fn(f: &FnDecl, item_idx: usize, method: Option<(usize, StructId, &str)>, t: &mut Tables, diags: &mut Vec<Diagnostic>) -> FnId {
+fn add_enum_members(e: &EnumDecl, item_idx: usize, id: EnumId, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
+    let mut variants: Vec<VariantInfo> = Vec::new();
+    for v in &e.variants {
+        if variants.iter().any(|w| w.name == v.name) {
+            diags.push(Diagnostic::error(v.name_span, format!("`{}` has two variants named `{}`", e.name, v.name)));
+            continue;
+        }
+        let fields = fields_of(&v.name, &v.fields, t, diags);
+        variants.push(VariantInfo { name: v.name.clone(), span: v.name_span, fields });
+    }
+    let names: Vec<&str> = variants.iter().map(|v| v.name.as_str()).collect();
+    let methods = methods_of(&e.name, item_idx, &e.methods, &names, "variant", t, diags);
+    let info = &mut t.enums[id.0 as usize];
+    info.variants = variants;
+    info.methods = methods;
+}
+
+/// Registers a function's signature. `method` is (index in its type, type name).
+fn add_fn(f: &FnDecl, item_idx: usize, method: Option<(usize, &str)>, t: &mut Tables, diags: &mut Vec<Diagnostic>) -> FnId {
     let mut params = Vec::new();
     for p in &f.params {
         if f.is_pure && p.is_var {
@@ -124,14 +183,13 @@ fn add_fn(f: &FnDecl, item_idx: usize, method: Option<(usize, StructId, &str)>, 
     let ret = f.ret.as_ref().map_or(Ty::Unit, |r| resolve_type(r, t, diags));
     let id = FnId(t.fns.len() as u32);
     let name = match method {
-        Some((_, _, owner)) => format!("{owner}.{}", f.name),
+        Some((_, owner)) => format!("{owner}.{}", f.name),
         None => f.name.clone(),
     };
     t.fns.push(FnInfo {
         name,
         item: item_idx,
-        method: method.map(|(mi, _, _)| mi),
-        owner: method.map(|(_, sid, _)| sid),
+        method: method.map(|(mi, _)| mi),
         is_pure: f.is_pure,
         params,
         ret,
@@ -143,28 +201,41 @@ fn add_fn(f: &FnDecl, item_idx: usize, method: Option<(usize, StructId, &str)>, 
     id
 }
 
-/// A struct can't hold itself, directly or through other structs: it would be infinitely large.
+/// The types a value of `ty` holds directly inside it.
+fn contained(t: &Tables, ty: Ty) -> Vec<Ty> {
+    match ty {
+        Ty::Struct(s) => t.strukt(s).fields.iter().map(|f| f.ty).collect(),
+        Ty::Enum(e) => t.enm(e).variants.iter().flat_map(|v| v.fields.iter().map(|f| f.ty)).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// A type can't hold itself, directly or through others: it would be infinitely large.
 fn check_self_containment(t: &Tables, diags: &mut Vec<Diagnostic>) {
-    fn reaches(t: &Tables, from: StructId, target: StructId, seen: &mut Vec<StructId>) -> bool {
-        for f in &t.strukt(from).fields {
-            if let Ty::Struct(s) = f.ty {
-                if s == target {
+    fn reaches(t: &Tables, from: Ty, target: Ty, seen: &mut Vec<Ty>) -> bool {
+        for inner in contained(t, from) {
+            if inner == target {
+                return true;
+            }
+            if !seen.contains(&inner) {
+                seen.push(inner);
+                if reaches(t, inner, target, seen) {
                     return true;
-                }
-                if !seen.contains(&s) {
-                    seen.push(s);
-                    if reaches(t, s, target, seen) {
-                        return true;
-                    }
                 }
             }
         }
         false
     }
     for (i, s) in t.structs.iter().enumerate() {
-        let id = StructId(i as u32);
-        if reaches(t, id, id, &mut Vec::new()) {
+        let ty = Ty::Struct(StructId(i as u32));
+        if reaches(t, ty, ty, &mut Vec::new()) {
             diags.push(Diagnostic::error(s.span, format!("struct `{}` contains itself", s.name)));
+        }
+    }
+    for (i, e) in t.enums.iter().enumerate() {
+        let ty = Ty::Enum(EnumId(i as u32));
+        if reaches(t, ty, ty, &mut Vec::new()) {
+            diags.push(Diagnostic::error(e.span, format!("enum `{}` contains itself", e.name)));
         }
     }
 }

@@ -1,6 +1,6 @@
-use cranelift_codegen::ir::{InstBuilder, MemFlags, Value};
+use cranelift_codegen::ir::{types, InstBuilder, MemFlags, Value};
 use cranelift_module::Module;
-use kestrel_kir::{self as kir, KTy, Place};
+use kestrel_kir::{self as kir, KTy, Place, Proj};
 
 use super::{cl_type, FuncLowerer, Slot};
 
@@ -10,9 +10,12 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let kir = self.shared.kir;
         let mut ty = self.f.locals[p.root.0 as usize].ty;
         let mut offset = 0;
-        for &fi in &p.fields {
-            let KTy::Struct(s) = ty else { unreachable!("field path through a non-struct") };
-            let field = &kir.layout(s).fields[fi as usize];
+        for proj in &p.path {
+            let field = match (*proj, ty) {
+                (Proj::Field(fi), KTy::Struct(s)) => &kir.layout(s).fields[fi as usize],
+                (Proj::Variant(v, fi), KTy::Enum(e)) => &kir.enum_layout(e).variants[v as usize].fields[fi as usize],
+                _ => unreachable!("place path doesn't match the type"),
+            };
             offset += field.offset as i32;
             ty = field.ty;
         }
@@ -36,7 +39,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
 
     /// Loads the scalar stored at a place.
     pub(crate) fn load_place(&mut self, p: &Place) -> Value {
-        if let (Slot::Var(v), true) = (self.slots[p.root.0 as usize], p.fields.is_empty()) {
+        if let (Slot::Var(v), true) = (self.slots[p.root.0 as usize], p.path.is_empty()) {
             return self.b.use_var(v);
         }
         let (ty, _) = self.place_ty_offset(p);
@@ -45,7 +48,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     }
 
     pub(crate) fn store_place(&mut self, p: &Place, val: Value) {
-        if let (Slot::Var(v), true) = (self.slots[p.root.0 as usize], p.fields.is_empty()) {
+        if let (Slot::Var(v), true) = (self.slots[p.root.0 as usize], p.path.is_empty()) {
             self.b.def_var(v, val);
             return;
         }
@@ -53,22 +56,41 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         self.b.ins().store(MemFlags::trusted(), val, addr, 0);
     }
 
-    /// Copies a struct of type `ty` field by field from `src` to `dst`.
+    /// Copies a struct or enum of type `ty` from `src` to `dst`.
     pub(crate) fn copy_aggregate(&mut self, dst: Value, src: Value, ty: KTy) {
         self.copy_fields(dst, src, 0, ty);
     }
 
+    /// Structs field by field; enums as raw bytes (which variant's fields
+    /// are live is only known at run time).
     fn copy_fields(&mut self, dst: Value, src: Value, offset: i32, ty: KTy) {
         let kir = self.shared.kir;
-        let KTy::Struct(s) = ty else { unreachable!("copying a non-struct") };
-        for f in &kir.layout(s).fields {
-            let at = offset + f.offset as i32;
-            if f.ty.is_aggregate() {
-                self.copy_fields(dst, src, at, f.ty);
-            } else {
-                let v = self.b.ins().load(cl_type(f.ty), MemFlags::trusted(), src, at);
-                self.b.ins().store(MemFlags::trusted(), v, dst, at);
+        match ty {
+            KTy::Struct(s) => {
+                for f in &kir.layout(s).fields {
+                    let at = offset + f.offset as i32;
+                    if f.ty.is_aggregate() {
+                        self.copy_fields(dst, src, at, f.ty);
+                    } else {
+                        let v = self.b.ins().load(cl_type(f.ty), MemFlags::trusted(), src, at);
+                        self.b.ins().store(MemFlags::trusted(), v, dst, at);
+                    }
+                }
             }
+            KTy::Enum(_) => {
+                let (size, align) = kir.size_align(ty);
+                let (chunk, chunk_ty) = match align {
+                    8.. => (8, types::I64),
+                    4..=7 => (4, types::I32),
+                    2..=3 => (2, types::I16),
+                    _ => (1, types::I8),
+                };
+                for at in (0..size as i32).step_by(chunk) {
+                    let v = self.b.ins().load(chunk_ty, MemFlags::trusted(), src, offset + at);
+                    self.b.ins().store(MemFlags::trusted(), v, dst, offset + at);
+                }
+            }
+            _ => unreachable!("copying a non-aggregate"),
         }
     }
 

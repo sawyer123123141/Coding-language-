@@ -1,6 +1,7 @@
 mod call;
 mod expr;
 mod layout;
+mod matching;
 
 use std::collections::HashMap;
 
@@ -12,9 +13,9 @@ use crate::ir::*;
 
 /// Lowers a checked program. `t` must come from a `check` with no errors.
 pub fn lower(program: &Program, t: &Tables, lines: &LineIndex) -> Module {
-    let structs = layout::layouts(t);
+    let (structs, enums) = layout::layouts(t);
     let funcs = (0..t.fns.len()).map(|i| FnLowerer::new(program, t, lines, FnId(i as u32)).lower()).collect();
-    Module { funcs, structs, main: FuncIdx(t.main.expect("checked program has main").0) }
+    Module { funcs, structs, enums, main: FuncIdx(t.main.expect("checked program has main").0) }
 }
 
 pub(crate) fn kty(ty: Ty) -> KTy {
@@ -26,6 +27,7 @@ pub(crate) fn kty(ty: Ty) -> KTy {
         Ty::Float => KTy::F32,
         Ty::F64 => KTy::F64,
         Ty::Struct(s) => KTy::Struct(StructIdx(s.0)),
+        Ty::Enum(e) => KTy::Enum(EnumIdx(e.0)),
         other => panic!("type {other:?} has no runtime representation"),
     }
 }
@@ -38,11 +40,13 @@ pub(crate) struct FnLowerer<'a> {
     local_map: HashMap<LocalId, LocalIdx>,
     /// Grows during lowering as temporaries are added.
     locals: Vec<Local>,
+    /// `match` bindings: the matched place and the variant whose fields they name.
+    bindings: HashMap<LocalId, (Place, u32)>,
 }
 
 impl<'a> FnLowerer<'a> {
     fn new(program: &'a Program, t: &'a Tables, lines: &'a LineIndex, fn_id: FnId) -> Self {
-        FnLowerer { program, t, lines, fn_id, local_map: HashMap::new(), locals: Vec::new() }
+        FnLowerer { program, t, lines, fn_id, local_map: HashMap::new(), locals: Vec::new(), bindings: HashMap::new() }
     }
 
     fn lower(mut self) -> Func {
@@ -52,6 +56,10 @@ impl<'a> FnLowerer<'a> {
         let decl = info.decl(program);
         for &lid in &info.locals {
             let l = t.local(lid);
+            // `match` bindings aren't storage; they name fields of the matched place.
+            if let Ty::Variant(..) = l.ty {
+                continue;
+            }
             let ty = kty(l.ty);
             let kind = if l.is_param && (l.is_var_param || ty.is_aggregate()) {
                 LocalKind::RefParam
@@ -195,6 +203,7 @@ impl<'a> FnLowerer<'a> {
                 out.push(Stmt::If { cond, then_body, else_body });
                 return;
             }
+            ast::ExprKind::Match { .. } => return self.match_stmt(e, out),
             ast::ExprKind::Call { args, .. } => (None, args),
             ast::ExprKind::MethodCall { receiver, args, .. } => (Some(&**receiver), args),
             _ => unreachable!("checker rejects statements with no effect"),

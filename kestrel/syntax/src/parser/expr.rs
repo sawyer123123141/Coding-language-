@@ -1,5 +1,5 @@
 use super::{PResult, Parser};
-use crate::ast::{Arg, BinaryOp, Block, Expr, ExprKind, Stmt, UnaryOp};
+use crate::ast::{Arg, BinaryOp, Block, Expr, ExprKind, MatchArm, Pattern, Stmt, UnaryOp};
 use crate::span::Span;
 use crate::token::Tok;
 
@@ -143,6 +143,7 @@ impl<'t> Parser<'t> {
                 return Ok(self.expr_node(ExprKind::Ident("self".to_string()), span));
             }
             Tok::If => return self.if_expr(),
+            Tok::Match => return self.match_expr(),
             other => {
                 self.error_here(format!("expected an expression, found {}", other.describe()));
                 return Err(());
@@ -184,6 +185,45 @@ impl<'t> Parser<'t> {
         let is_var = self.eat(&Tok::Var);
         let value = self.expr()?;
         Ok(Arg { label, is_var, span: start.to(value.span), value })
+    }
+
+    /// `match value { Variant { ... } Variant name { ... } else { ... } }`
+    fn match_expr(&mut self) -> PResult<Expr> {
+        let start = self.expect(&Tok::Match, "`match`")?;
+        let scrutinee = self.expr()?;
+        self.expect(&Tok::LBrace, "`{`")?;
+        let mut arms = Vec::new();
+        loop {
+            self.skip_newlines();
+            if self.at(&Tok::RBrace) || self.at(&Tok::Eof) {
+                break;
+            }
+            match self.match_arm() {
+                Ok(arm) => arms.push(arm),
+                Err(()) => self.recover_stmt(),
+            }
+        }
+        let end = self.expect(&Tok::RBrace, "`}`")?;
+        Ok(self.expr_node(ExprKind::Match { scrutinee: Box::new(scrutinee), arms }, start.to(end)))
+    }
+
+    fn match_arm(&mut self) -> PResult<MatchArm> {
+        let start = self.span();
+        let pattern = if self.eat(&Tok::Else) {
+            Pattern::Else(start)
+        } else {
+            let (name, name_span) = self.expect_ident("a variant name or `else`")?;
+            let binding = match self.peek().clone() {
+                Tok::Ident(b) => {
+                    let span = self.bump().span;
+                    Some(self.binding(b, span))
+                }
+                _ => None,
+            };
+            Pattern::Variant { name, name_span, binding }
+        };
+        let body = self.block()?;
+        Ok(MatchArm { span: start.to(body.span), pattern, body })
     }
 
     pub(crate) fn if_expr(&mut self) -> PResult<Expr> {

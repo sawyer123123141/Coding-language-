@@ -17,6 +17,9 @@ pub struct ConstId(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct StructId(pub u32);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct EnumId(pub u32);
+
 /// What a name or call expression refers to.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Res {
@@ -27,6 +30,8 @@ pub enum Res {
     Convert(Ty),
     /// `Point(...)`: builds a struct.
     Construct(StructId),
+    /// `Block.Air` or `Block.Stone(...)`: builds an enum value.
+    Variant(EnumId, u32),
 }
 
 #[derive(Clone, Debug)]
@@ -40,6 +45,8 @@ pub struct LocalInfo {
     pub addressed: bool,
     pub owner: FnId,
     pub span: Span,
+    /// A `match` binding aliases the matched variable: changes go to it.
+    pub alias: Option<LocalId>,
 }
 
 #[derive(Clone, Debug)]
@@ -54,9 +61,8 @@ pub struct FnInfo {
     pub name: String,
     /// Index into `Program::items`.
     pub item: usize,
-    /// For a method: its index in the struct's `methods`, and the struct.
+    /// For a method: its index in its struct's or enum's `methods`.
     pub method: Option<usize>,
-    pub owner: Option<StructId>,
     pub is_pure: bool,
     pub params: Vec<ParamSig>,
     pub ret: Ty,
@@ -73,6 +79,7 @@ impl FnInfo {
         match (&program.items[self.item], self.method) {
             (Item::Fn(f), None) => f,
             (Item::Struct(s), Some(m)) => &s.methods[m],
+            (Item::Enum(e), Some(m)) => &e.methods[m],
             _ => unreachable!("FnInfo points at a function or a method"),
         }
     }
@@ -85,6 +92,22 @@ pub struct StructInfo {
     pub span: Span,
     pub fields: Vec<FieldInfo>,
     pub methods: HashMap<String, FnId>,
+}
+
+#[derive(Clone, Debug)]
+pub struct EnumInfo {
+    pub name: String,
+    pub item: usize,
+    pub span: Span,
+    pub variants: Vec<VariantInfo>,
+    pub methods: HashMap<String, FnId>,
+}
+
+#[derive(Clone, Debug)]
+pub struct VariantInfo {
+    pub name: String,
+    pub span: Span,
+    pub fields: Vec<FieldInfo>,
 }
 
 #[derive(Clone, Debug)]
@@ -117,9 +140,14 @@ pub struct Tables {
     pub consts: Vec<ConstInfo>,
     pub structs: Vec<StructInfo>,
     pub struct_by_name: HashMap<String, StructId>,
+    pub enums: Vec<EnumInfo>,
+    pub enum_by_name: HashMap<String, EnumId>,
+    /// For a `match`: per arm, the variant it matches, or `None` for `else`.
+    pub match_arms: HashMap<ExprId, Vec<Option<u32>>>,
     /// For a field access `a.b`: the index of `b` in its struct.
     pub field_index: HashMap<ExprId, u32>,
-    /// For a constructor call: per field, the argument index, or `None` for the default.
+    /// For a struct or variant constructor: per field, the argument index,
+    /// or `None` for the default.
     pub ctor_args: HashMap<ExprId, Vec<Option<usize>>>,
     pub fn_by_name: HashMap<String, FnId>,
     pub const_by_name: HashMap<String, ConstId>,
@@ -143,10 +171,16 @@ impl Tables {
         &self.structs[id.0 as usize]
     }
 
+    pub fn enm(&self, id: EnumId) -> &EnumInfo {
+        &self.enums[id.0 as usize]
+    }
+
     /// How a type reads in messages: struct types by name.
     pub fn ty_name(&self, ty: Ty) -> String {
         match ty {
             Ty::Struct(id) => self.strukt(id).name.clone(),
+            Ty::Enum(id) => self.enm(id).name.clone(),
+            Ty::Variant(id, v) => format!("{}.{}", self.enm(id).name, self.enm(id).variants[v as usize].name),
             other => other.name().to_string(),
         }
     }

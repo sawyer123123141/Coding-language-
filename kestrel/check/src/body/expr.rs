@@ -5,7 +5,7 @@ use super::{BodyChecker, Expect};
 use crate::tables::Res;
 use crate::ty::Ty;
 
-fn is_value_ty(t: Ty) -> bool {
+pub(super) fn is_value_ty(t: Ty) -> bool {
     !matches!(t, Ty::Unit | Ty::Never | Ty::Error)
 }
 
@@ -40,6 +40,7 @@ impl<'a> BodyChecker<'a> {
             ExprKind::If { .. } => self.check_if(e, Expect::Value(want)),
             ExprKind::Field { .. } => self.check_field(e),
             ExprKind::MethodCall { .. } => self.check_method_call(e),
+            ExprKind::Match { .. } => self.check_match(e, Expect::Value(want)),
         }
     }
 
@@ -68,7 +69,13 @@ impl<'a> BodyChecker<'a> {
     fn ident(&mut self, e: &Expr, name: &str) -> Ty {
         if let Some(local) = self.lookup_local(name) {
             self.t.res.insert(e.id, Res::Local(local));
-            return self.t.locals[local.0 as usize].ty;
+            let ty = self.t.locals[local.0 as usize].ty;
+            if let Ty::Variant(..) = ty {
+                let msg = format!("`{name}` stands for the fields of `{}`; use them as `{name}.field`", self.tn(ty));
+                self.error(e.span, msg);
+                return Ty::Error;
+            }
+            return ty;
         }
         if let Some(&c) = self.t.const_by_name.get(name) {
             self.t.res.insert(e.id, Res::Const(c));
@@ -78,6 +85,12 @@ impl<'a> BodyChecker<'a> {
             self.error(e.span, format!("`{name}` is a function; call it with `{name}(...)`"));
         } else if self.t.struct_by_name.contains_key(name) {
             self.error(e.span, format!("`{name}` is a struct; build one with `{name}(...)`"));
+        } else if let Some(&id) = self.t.enum_by_name.get(name) {
+            let example = match self.t.enm(id).variants.first() {
+                Some(v) => format!(", like `{name}.{}`", v.name),
+                None => String::new(),
+            };
+            self.error(e.span, format!("`{name}` is an enum; use one of its variants{example}"));
         } else {
             self.error(e.span, format!("unknown name `{name}`"));
         }

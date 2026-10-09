@@ -1,5 +1,5 @@
 use super::{PResult, Parser};
-use crate::ast::{ConstDecl, FieldDecl, FnDecl, Item, Param, StructDecl, TypeExpr, TypeKind};
+use crate::ast::{ConstDecl, EnumDecl, FieldDecl, FnDecl, Item, Param, StructDecl, TypeExpr, TypeKind, VariantDecl};
 use crate::span::Span;
 use crate::token::Tok;
 
@@ -44,10 +44,7 @@ impl<'t> Parser<'t> {
                 self.error_here("global variables aren't supported yet");
                 Err(())
             }
-            Tok::Enum => {
-                self.error_here("`enum` isn't supported yet");
-                Err(())
-            }
+            Tok::Enum => self.enum_decl(is_pub, start),
             Tok::Use => {
                 self.error_here("`use` isn't supported yet");
                 Err(())
@@ -130,6 +127,80 @@ impl<'t> Parser<'t> {
         }
         let end = self.expect(&Tok::RBrace, "`}`")?;
         Ok(Item::Struct(StructDecl { is_pub, name, name_span, fields, methods, span: start.to(end) }))
+    }
+
+    fn enum_decl(&mut self, is_pub: bool, start: Span) -> PResult<Item> {
+        self.bump();
+        let (name, name_span) = self.expect_ident("an enum name")?;
+        self.expect(&Tok::LBrace, "`{`")?;
+        let (mut variants, mut methods) = (Vec::new(), Vec::new());
+        self.skip_newlines();
+        while !self.at(&Tok::RBrace) && !self.at(&Tok::Eof) {
+            match self.enum_member(&name, &mut variants, &mut methods) {
+                Ok(()) => {
+                    let ended = self.at(&Tok::RBrace) || self.eat(&Tok::Newline) || self.eat(&Tok::Semi);
+                    if !ended {
+                        let found = self.peek().describe();
+                        self.error_here(format!("expected end of line, found {found}"));
+                        self.recover_stmt();
+                    }
+                }
+                Err(()) => self.recover_stmt(),
+            }
+            self.skip_newlines();
+        }
+        let end = self.expect(&Tok::RBrace, "`}`")?;
+        Ok(Item::Enum(EnumDecl { is_pub, name, name_span, variants, methods, span: start.to(end) }))
+    }
+
+    /// One variant (`Name` or `Name { field: Type, ... }`) or one method.
+    fn enum_member(&mut self, owner: &str, variants: &mut Vec<VariantDecl>, methods: &mut Vec<FnDecl>) -> PResult<()> {
+        let start = self.span();
+        let is_method = matches!(self.peek(), Tok::Pub | Tok::Pure) || self.peek_at(1) == &Tok::LParen;
+        if is_method {
+            let is_pub = self.eat(&Tok::Pub);
+            let is_pure = self.eat(&Tok::Pure);
+            let (name, name_span) = self.expect_ident("a method name")?;
+            methods.push(self.fn_rest(name, name_span, is_pub, is_pure, start, Some(owner))?);
+            return Ok(());
+        }
+        let (name, name_span) = self.expect_ident("a variant or method name")?;
+        let fields = if self.at(&Tok::LBrace) { self.variant_fields()? } else { Vec::new() };
+        variants.push(VariantDecl { name, name_span, fields });
+        Ok(())
+    }
+
+    /// `{ field: Type, ... }`, fields separated by commas or newlines.
+    fn variant_fields(&mut self) -> PResult<Vec<FieldDecl>> {
+        self.expect(&Tok::LBrace, "`{`")?;
+        let fields = self.variant_field_list();
+        if fields.is_err() {
+            // Resume after this variant's `}` so the rest of the enum still parses.
+            while !matches!(self.peek(), Tok::RBrace | Tok::Eof) {
+                self.bump();
+            }
+            self.eat(&Tok::RBrace);
+        }
+        fields
+    }
+
+    fn variant_field_list(&mut self) -> PResult<Vec<FieldDecl>> {
+        let mut fields = Vec::new();
+        loop {
+            self.skip_newlines();
+            if self.eat(&Tok::RBrace) {
+                return Ok(fields);
+            }
+            let (name, name_span) = self.expect_ident("a field name")?;
+            self.expect(&Tok::Colon, "`:` and a type")?;
+            let ty = self.type_expr()?;
+            fields.push(FieldDecl { name, name_span, ty, default: None });
+            if !self.eat(&Tok::Comma) && !self.at(&Tok::Newline) && !self.at(&Tok::RBrace) {
+                let found = self.peek().describe();
+                self.error_here(format!("expected `,` or `}}`, found {found}"));
+                return Err(());
+            }
+        }
     }
 
     /// One `field: Type [= default]` or one method inside a struct body.

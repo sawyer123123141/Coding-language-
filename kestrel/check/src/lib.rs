@@ -7,7 +7,8 @@ use kestrel_syntax::ast::Program;
 use kestrel_syntax::Diagnostic;
 
 pub use tables::{
-    ConstId, ConstInfo, FieldInfo, FnId, FnInfo, LocalId, LocalInfo, ParamSig, Res, StructId, StructInfo, Tables,
+    ConstId, ConstInfo, EnumId, EnumInfo, FieldInfo, FnId, FnInfo, LocalId, LocalInfo, ParamSig, Res, StructId,
+    StructInfo, Tables, VariantInfo,
 };
 pub use ty::Ty;
 

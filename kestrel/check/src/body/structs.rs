@@ -64,24 +64,31 @@ impl<'a> BodyChecker<'a> {
 
     pub(crate) fn check_field(&mut self, e: &Expr) -> Ty {
         let ExprKind::Field { base, name, name_span } = &e.kind else { unreachable!("check_field on non-field") };
-        let base_ty = self.check_expr(base, None);
-        let Ty::Struct(sid) = base_ty else {
-            if base_ty != Ty::Error {
-                let msg = format!("{} has no field `{name}`", self.tn(base_ty));
-                self.error(*name_span, msg);
+        if let Some(id) = self.enum_named(base) {
+            return self.variant_value(e, id, name, *name_span);
+        }
+        let base_ty = self.check_field_base(base);
+        let (owner, fields) = match base_ty {
+            Ty::Struct(sid) => {
+                let info = self.t.strukt(sid);
+                (info.name.clone(), &info.fields)
             }
-            return Ty::Error;
+            Ty::Variant(id, v) => (self.tn(base_ty), &self.t.enm(id).variants[v as usize].fields),
+            Ty::Error => return Ty::Error,
+            other => {
+                let msg = format!("{} has no field `{name}`", self.tn(other));
+                self.error(*name_span, msg);
+                return Ty::Error;
+            }
         };
-        let info = self.t.strukt(sid);
-        match info.fields.iter().position(|f| &f.name == name) {
+        match fields.iter().position(|f| &f.name == name) {
             Some(i) => {
-                let ty = info.fields[i].ty;
+                let ty = fields[i].ty;
                 self.t.field_index.insert(e.id, i as u32);
                 ty
             }
             None => {
-                let msg = format!("`{}` has no field `{name}`", info.name);
-                self.error(*name_span, msg);
+                self.error(*name_span, format!("`{owner}` has no field `{name}`"));
                 Ty::Error
             }
         }
@@ -89,10 +96,17 @@ impl<'a> BodyChecker<'a> {
 
     pub(crate) fn check_method_call(&mut self, e: &Expr) -> Ty {
         let ExprKind::MethodCall { receiver, name, name_span, args } = &e.kind else { unreachable!("not a method call") };
+        if let Some(id) = self.enum_named(receiver) {
+            return self.variant_construct(e, id, name, *name_span, args);
+        }
         let receiver_ty = self.check_expr(receiver, None);
         let found = match receiver_ty {
             Ty::Struct(sid) => {
                 let info = self.t.strukt(sid);
+                info.methods.get(name).copied().ok_or_else(|| Some(format!("`{}` has no method `{name}`", info.name)))
+            }
+            Ty::Enum(id) => {
+                let info = self.t.enm(id);
                 info.methods.get(name).copied().ok_or_else(|| Some(format!("`{}` has no method `{name}`", info.name)))
             }
             Ty::Error => Err(None),

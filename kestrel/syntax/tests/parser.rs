@@ -114,7 +114,7 @@ fn helpful_errors_and_recovery() {
     );
     assert_eq!(errs("main() { a < b < c }"), vec!["comparisons can't be chained; combine them with `and`"]);
     assert_eq!(errs("main() {\n for x in xs { }\n}"), vec!["for-in loops aren't supported yet"]);
-    assert_eq!(errs("enum A {}\nmain() {}"), vec!["`enum` isn't supported yet"]);
+    assert_eq!(errs("use foo\nmain() {}"), vec!["`use` isn't supported yet"]);
     assert_eq!(errs("main() { a b }"), vec!["expected end of line, found name `b`"]);
 }
 
@@ -171,4 +171,33 @@ fn struct_errors() {
         vec!["`self` is only allowed as the first parameter of a method"]
     );
     assert_eq!(errs("struct A {\n    x int\n}\nmain() {}"), vec!["expected `:` and a type, or `(` for a method, found name `int`"]);
+}
+
+#[test]
+fn enum_with_variants_and_methods() {
+    let p = ok("enum Block {\n    Air\n    Dirt\n    Stone { hardness: u8, depth: int }\n    Ore {\n        kind: int\n        value: int\n    }\n\n    pure solid(self) -> bool {\n        match self {\n            Air { false }\n            else { true }\n        }\n    }\n}\nmain() {}\n");
+    let Item::Enum(e) = &p.items[0] else { panic!("expected enum") };
+    assert_eq!(e.name, "Block");
+    let names: Vec<&str> = e.variants.iter().map(|v| v.name.as_str()).collect();
+    assert_eq!(names, ["Air", "Dirt", "Stone", "Ore"]);
+    assert_eq!(e.variants[2].fields.len(), 2);
+    assert_eq!(e.variants[3].fields.len(), 2);
+    assert_eq!(e.methods.len(), 1);
+    assert_eq!(e.methods[0].body.to_sexpr(), "{(match self [Air {false}] [else {true}])}");
+}
+
+#[test]
+fn match_arms_with_bindings() {
+    assert_eq!(
+        body("match e {\n    Zombie z { z.hp -= 1 }\n    Skeleton s { s.hp -= 2 }\n}"),
+        "{(match e [Zombie z {(-= (. z hp) 1)}] [Skeleton s {(-= (. s hp) 2)}])}"
+    );
+    assert_eq!(body("let n = match b { Air { 0 } else { 1 } }"), "{(let n (match b [Air {0}] [else {1}]))}");
+    assert_eq!(body("let b = Block.Stone(hardness: 3)"), "{(let b (.call Block Stone hardness: 3))}");
+}
+
+#[test]
+fn enum_errors() {
+    assert_eq!(errs("enum A {\n    X { a int }\n}\nmain() {}"), vec!["expected `:` and a type, found name `int`"]);
+    assert_eq!(errs("main() {\n match x { 1 { } }\n}"), vec!["expected a variant name or `else`, found number `1`"]);
 }

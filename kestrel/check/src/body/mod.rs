@@ -1,5 +1,7 @@
 mod call;
+mod enums;
 mod expr;
+mod matching;
 mod place;
 mod structs;
 
@@ -35,7 +37,7 @@ pub(crate) struct BodyChecker<'a> {
 pub(crate) fn check_consts(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
     let consts = program.items.iter().filter_map(|it| match it {
         Item::Const(c) => Some(c),
-        Item::Fn(_) | Item::Struct(_) => None,
+        Item::Fn(_) | Item::Struct(_) | Item::Enum(_) => None,
     });
     for (i, c) in consts.enumerate() {
         let mut bc = BodyChecker::new(t, diags, None, Ty::Unit, false);
@@ -60,7 +62,8 @@ pub(crate) fn is_const_expr(e: &Expr) -> bool {
         | ExprKind::Call { .. }
         | ExprKind::If { .. }
         | ExprKind::Field { .. }
-        | ExprKind::MethodCall { .. } => false,
+        | ExprKind::MethodCall { .. }
+        | ExprKind::Match { .. } => false,
     }
 }
 
@@ -109,7 +112,8 @@ impl<'a> BodyChecker<'a> {
         let taken = self.lookup_local(name).is_some()
             || self.t.const_by_name.contains_key(name)
             || self.t.fn_by_name.contains_key(name)
-            || self.t.struct_by_name.contains_key(name);
+            || self.t.struct_by_name.contains_key(name)
+            || self.t.enum_by_name.contains_key(name);
         if taken {
             self.error_help(
                 bind.span,
@@ -128,6 +132,7 @@ impl<'a> BodyChecker<'a> {
             addressed: false,
             owner,
             span: bind.span,
+            alias: None,
         });
         self.t.fns[owner.0 as usize].locals.push(id);
         self.t.bind_local.insert(bind.id, id);
@@ -288,6 +293,7 @@ impl<'a> BodyChecker<'a> {
     fn check_discarded(&mut self, e: &Expr) -> Ty {
         let ty = match &e.kind {
             ExprKind::If { .. } => self.check_if(e, Expect::Discard),
+            ExprKind::Match { .. } => self.check_match(e, Expect::Discard),
             ExprKind::Call { .. } | ExprKind::MethodCall { .. } => self.check_discarded_call(e),
             _ => {
                 let ty = self.check_expr(e, None);

@@ -27,7 +27,11 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 self.stmts(stmts)?;
                 self.expr(value)?
             }
-            ExprKind::StructLit(..) => unreachable!("struct literals are lowered into memory"),
+            ExprKind::Tag(p) => {
+                let addr = self.place_addr(p);
+                self.b.ins().load(types::I8, MemFlags::trusted(), addr, 0)
+            }
+            ExprKind::StructLit(..) | ExprKind::VariantLit(..) => unreachable!("struct and enum values are built in memory"),
             ExprKind::Unary(UnOp::Not, inner) => {
                 let v = self.expr(inner)?;
                 self.b.ins().bxor_imm(v, 1)

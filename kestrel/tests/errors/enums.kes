@@ -1,0 +1,15 @@
+// error 10: `match` on `E` doesn't handle `C`
+// error 14: `E` has no variant `D`
+enum E {
+    A
+    B { n: int }
+    C
+}
+
+main() {
+    let n = match E.A {
+        A { 1 }
+        B b { b.n }
+    }
+    let d = E.D
+}

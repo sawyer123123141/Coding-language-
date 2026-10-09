@@ -67,15 +67,23 @@ impl<'a> FnLowerer<'a> {
                 }
                 other => unreachable!("{other:?} used as a value"),
             },
-            ast::ExprKind::MethodCall { receiver, args, .. } => {
-                let Res::Fn(f) = self.t.res[&e.id] else { unreachable!("checker resolved the method") };
-                let (pre, fi, a) = self.call_parts(e, f, args, Some(receiver));
-                Self::with_pre(pre, ExprKind::Call(fi, a), ty, line)
-            }
-            ast::ExprKind::Field { base, .. } => match self.place(e) {
-                Some(place) => ExprKind::Load(place),
-                None => ExprKind::FieldOf(Box::new(self.expr(base)), self.t.field_index[&e.id]),
+            ast::ExprKind::MethodCall { receiver, args, .. } => match self.t.res[&e.id] {
+                Res::Fn(f) => {
+                    let (pre, fi, a) = self.call_parts(e, f, args, Some(receiver));
+                    Self::with_pre(pre, ExprKind::Call(fi, a), ty, line)
+                }
+                Res::Variant(id, v) => {
+                    let (pre, kind) = self.variant_construct(e, id, v, args);
+                    Self::with_pre(pre, kind, ty, line)
+                }
+                other => unreachable!("method call resolved to {other:?}"),
             },
+            ast::ExprKind::Field { base, .. } => match (self.t.res.get(&e.id), self.place(e)) {
+                (Some(Res::Variant(id, v)), _) => ExprKind::VariantLit(EnumIdx(id.0), *v, Vec::new()),
+                (_, Some(place)) => ExprKind::Load(place),
+                (_, None) => ExprKind::FieldOf(Box::new(self.expr(base)), self.t.field_index[&e.id]),
+            },
+            ast::ExprKind::Match { .. } => self.match_value(e),
             ast::ExprKind::If { cond, then_block, else_block } => {
                 let else_block = else_block.as_ref().expect("checker requires `else` for a value `if`");
                 let cond = Box::new(self.expr(cond));

@@ -1,4 +1,4 @@
-use cranelift_codegen::ir::{InstBuilder, MemFlags, TrapCode, Value};
+use cranelift_codegen::ir::{types, InstBuilder, MemFlags, TrapCode, Value};
 use cranelift_module::Module;
 use kestrel_kir::{self as kir, ExprKind, KTy};
 
@@ -15,6 +15,14 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             ExprKind::StructLit(s, fields) => {
                 let kir = self.shared.kir;
                 for (f, layout) in fields.iter().zip(&kir.layout(*s).fields) {
+                    self.store_at(f, dest, layout.offset as i32)?;
+                }
+            }
+            ExprKind::VariantLit(en, v, fields) => {
+                let kir = self.shared.kir;
+                let tag = self.b.ins().iconst(types::I8, *v as i64);
+                self.b.ins().store(MemFlags::trusted(), tag, dest, 0);
+                for (f, layout) in fields.iter().zip(&kir.enum_layout(*en).variants[*v as usize].fields) {
                     self.store_at(f, dest, layout.offset as i32)?;
                 }
             }

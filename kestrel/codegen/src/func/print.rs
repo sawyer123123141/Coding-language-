@@ -1,6 +1,7 @@
+use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::{types, InstBuilder, MemFlags, Value};
 use cranelift_module::{DataDescription, Module};
-use kestrel_kir::{self as kir, KTy, StructIdx};
+use kestrel_kir::{self as kir, FieldLayout, KTy};
 
 use super::{cl_type, FuncLowerer};
 
@@ -30,9 +31,10 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 kir::PrintArg::Str(s) => self.print_text(s)?,
                 kir::PrintArg::Value(e) => {
                     let v = val.expect("value arguments are evaluated above");
-                    match e.ty {
-                        KTy::Struct(s) => self.print_struct(v, 0, s)?,
-                        ty => self.print_scalar(v, ty),
+                    if e.ty.is_aggregate() {
+                        self.print_aggregate(v, 0, e.ty)?;
+                    } else {
+                        self.print_scalar(v, e.ty);
                     }
                 }
             }
@@ -56,27 +58,62 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             KTy::I64 => self.call_id(rt.print_i64, &[v]),
             KTy::F32 => self.call_id(rt.print_f32, &[v]),
             KTy::F64 => self.call_id(rt.print_f64, &[v]),
-            KTy::Struct(_) => unreachable!("structs are printed field by field"),
+            KTy::Struct(_) | KTy::Enum(_) => unreachable!("structs and enums are printed field by field"),
         };
     }
 
-    /// Prints `Name(field: value, ...)` for the struct at `addr + offset`.
-    fn print_struct(&mut self, addr: Value, offset: i32, s: StructIdx) -> Result<(), String> {
-        let layout = self.shared.kir.layout(s);
-        self.print_text(&format!("{}(", layout.name))?;
-        for (i, f) in layout.fields.iter().enumerate() {
+    /// Prints the struct or enum at `addr + offset`: `Point(x: 1, y: 2)`,
+    /// `Block.Air`, `Block.Stone(hardness: 3)`.
+    fn print_aggregate(&mut self, addr: Value, offset: i32, ty: KTy) -> Result<(), String> {
+        let kir = self.shared.kir;
+        match ty {
+            KTy::Struct(s) => {
+                let layout = kir.layout(s);
+                self.print_text(&format!("{}(", layout.name))?;
+                self.print_fields(addr, offset, &layout.fields)?;
+                self.print_text(")")
+            }
+            KTy::Enum(e) => {
+                let layout = kir.enum_layout(e);
+                let tag = self.b.ins().load(types::I8, MemFlags::trusted(), addr, offset);
+                let done = self.b.create_block();
+                for (vi, variant) in layout.variants.iter().enumerate() {
+                    let (yes, next) = (self.b.create_block(), self.b.create_block());
+                    let is = self.b.ins().icmp_imm(IntCC::Equal, tag, vi as i64);
+                    self.b.ins().brif(is, yes, &[], next, &[]);
+                    self.b.switch_to_block(yes);
+                    let name = format!("{}.{}", layout.name, variant.name);
+                    if variant.fields.is_empty() {
+                        self.print_text(&name)?;
+                    } else {
+                        self.print_text(&format!("{name}("))?;
+                        self.print_fields(addr, offset, &variant.fields)?;
+                        self.print_text(")")?;
+                    }
+                    self.b.ins().jump(done, &[]);
+                    self.b.switch_to_block(next);
+                }
+                self.b.ins().jump(done, &[]);
+                self.b.switch_to_block(done);
+                Ok(())
+            }
+            _ => unreachable!("not a struct or enum"),
+        }
+    }
+
+    fn print_fields(&mut self, addr: Value, offset: i32, fields: &[FieldLayout]) -> Result<(), String> {
+        for (i, f) in fields.iter().enumerate() {
             let label = if i == 0 { format!("{}: ", f.name) } else { format!(", {}: ", f.name) };
             self.print_text(&label)?;
             let at = offset + f.offset as i32;
-            match f.ty {
-                KTy::Struct(inner) => self.print_struct(addr, at, inner)?,
-                ty => {
-                    let v = self.b.ins().load(cl_type(ty), MemFlags::trusted(), addr, at);
-                    self.print_scalar(v, ty);
-                }
+            if f.ty.is_aggregate() {
+                self.print_aggregate(addr, at, f.ty)?;
+            } else {
+                let v = self.b.ins().load(cl_type(f.ty), MemFlags::trusted(), addr, at);
+                self.print_scalar(v, f.ty);
             }
         }
-        self.print_text(")")
+        Ok(())
     }
 
     fn print_text(&mut self, s: &str) -> Result<(), String> {

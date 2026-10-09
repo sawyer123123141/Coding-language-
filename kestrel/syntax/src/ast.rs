@@ -19,6 +19,25 @@ pub enum Item {
     Fn(FnDecl),
     Const(ConstDecl),
     Struct(StructDecl),
+    Enum(EnumDecl),
+}
+
+#[derive(Clone, Debug)]
+pub struct EnumDecl {
+    pub is_pub: bool,
+    pub name: String,
+    pub name_span: Span,
+    pub variants: Vec<VariantDecl>,
+    pub methods: Vec<FnDecl>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct VariantDecl {
+    pub name: String,
+    pub name_span: Span,
+    /// Named fields; empty for a unit variant. Fields never have defaults.
+    pub fields: Vec<FieldDecl>,
 }
 
 #[derive(Clone, Debug)]
@@ -140,6 +159,21 @@ pub enum ExprKind {
     Field { base: Box<Expr>, name: String, name_span: Span },
     /// `receiver.name(args)`
     MethodCall { receiver: Box<Expr>, name: String, name_span: Span, args: Vec<Arg> },
+    Match { scrutinee: Box<Expr>, arms: Vec<MatchArm> },
+}
+
+#[derive(Clone, Debug)]
+pub struct MatchArm {
+    pub pattern: Pattern,
+    pub body: Block,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub enum Pattern {
+    /// `Variant` or `Variant binding`.
+    Variant { name: String, name_span: Span, binding: Option<Binding> },
+    Else(Span),
 }
 
 #[derive(Clone, Debug)]
@@ -288,6 +322,19 @@ impl Expr {
             ExprKind::Field { base, name, .. } => format!("(. {} {name})", base.to_sexpr()),
             ExprKind::MethodCall { receiver, name, args, .. } => {
                 format!("(.call {} {name}{})", receiver.to_sexpr(), args_sexpr(args))
+            }
+            ExprKind::Match { scrutinee, arms } => {
+                let mut s = format!("(match {}", scrutinee.to_sexpr());
+                for arm in arms {
+                    let pat = match &arm.pattern {
+                        Pattern::Variant { name, binding: Some(b), .. } => format!("{name} {}", b.name),
+                        Pattern::Variant { name, binding: None, .. } => name.clone(),
+                        Pattern::Else(_) => "else".to_string(),
+                    };
+                    s.push_str(&format!(" [{pat} {}]", arm.body.to_sexpr()));
+                }
+                s.push(')');
+                s
             }
             ExprKind::If { cond, then_block, else_block } => match else_block {
                 Some(e) => format!("(if {} {} else {})", cond.to_sexpr(), then_block.to_sexpr(), e.to_sexpr()),
