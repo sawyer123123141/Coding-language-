@@ -114,6 +114,61 @@ fn helpful_errors_and_recovery() {
     );
     assert_eq!(errs("main() { a < b < c }"), vec!["comparisons can't be chained; combine them with `and`"]);
     assert_eq!(errs("main() {\n for x in xs { }\n}"), vec!["for-in loops aren't supported yet"]);
-    assert_eq!(errs("struct A {}\nmain() {}"), vec!["`struct` and `enum` aren't supported yet"]);
+    assert_eq!(errs("enum A {}\nmain() {}"), vec!["`enum` isn't supported yet"]);
     assert_eq!(errs("main() { a b }"), vec!["expected end of line, found name `b`"]);
+}
+
+fn struct_decl(p: &Program, i: usize) -> &StructDecl {
+    match &p.items[i] {
+        Item::Struct(s) => s,
+        other => panic!("expected struct, got {other:?}"),
+    }
+}
+
+#[test]
+fn struct_with_fields_defaults_and_methods() {
+    let p = ok("struct Chunk {\n    x: int\n    z: int = 0\n\n    pure area(self) -> int { self.x * self.z }\n    grow(var self, by: int) {\n        self.x += by\n    }\n}\nmain() {}\n");
+    let s = struct_decl(&p, 0);
+    assert_eq!(s.name, "Chunk");
+    assert_eq!(s.fields.len(), 2);
+    assert!(s.fields[0].default.is_none());
+    assert_eq!(s.fields[1].default.as_ref().unwrap().to_sexpr(), "0");
+    assert_eq!(s.methods.len(), 2);
+    let area = &s.methods[0];
+    assert!(area.is_pure);
+    assert!(area.params[0].is_self && !area.params[0].is_var);
+    assert_eq!(area.params[0].bind.name, "self");
+    assert!(matches!(&area.params[0].ty.kind, TypeKind::Named { name, .. } if name == "Chunk"));
+    assert_eq!(area.body.to_sexpr(), "{(* (. self x) (. self z))}");
+    let grow = &s.methods[1];
+    assert!(grow.params[0].is_self && grow.params[0].is_var);
+    assert_eq!(grow.body.to_sexpr(), "{(+= (. self x) by)}");
+}
+
+#[test]
+fn field_chains_and_method_calls() {
+    assert_eq!(body("a.b.c"), "{(. (. a b) c)}");
+    assert_eq!(body("p.move(1, dy: 2).x"), "{(. (.call p move 1 dy: 2) x)}");
+    assert_eq!(body("-p.x * 2"), "{(* (- (. p x)) 2)}");
+    assert_eq!(body("p.x += 1"), "{(+= (. p x) 1)}");
+    assert_eq!(body("Point(1, y: 2).x"), "{(. (call Point 1 y: 2) x)}");
+    assert_eq!(body("let n = list\n    .size"), "{(let n (. list size))}");
+}
+
+#[test]
+fn parenthesised_expressions_span_their_parens() {
+    let p = ok("main() {\n(1 + 2) * 3\n}\n");
+    let Stmt::Expr(e) = &fn_decl(&p, 0).body.stmts[0] else { panic!() };
+    let ExprKind::Binary { lhs, .. } = &e.kind else { panic!() };
+    assert_eq!((lhs.span.start, lhs.span.end), (9, 16));
+}
+
+#[test]
+fn struct_errors() {
+    assert_eq!(errs("f(self) {}\nmain() {}"), vec!["`self` is only allowed as the first parameter of a method"]);
+    assert_eq!(
+        errs("struct A {\n    x: int\n    f(a: int, self) {}\n}\nmain() {}"),
+        vec!["`self` is only allowed as the first parameter of a method"]
+    );
+    assert_eq!(errs("struct A {\n    x int\n}\nmain() {}"), vec!["expected `:` and a type, or `(` for a method, found name `int`"]);
 }

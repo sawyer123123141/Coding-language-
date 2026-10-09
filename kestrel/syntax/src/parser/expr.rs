@@ -90,12 +90,30 @@ impl<'t> Parser<'t> {
         let op = match self.peek() {
             Tok::Minus => UnaryOp::Neg,
             Tok::Not => UnaryOp::Not,
-            _ => return self.primary(),
+            _ => return self.postfix(),
         };
         self.bump();
         let inner = self.unary()?;
         let span = start.to(inner.span);
         Ok(self.expr_node(ExprKind::Unary { op, expr: Box::new(inner) }, span))
+    }
+
+    /// A primary expression followed by any `.field` / `.method(args)`.
+    fn postfix(&mut self) -> PResult<Expr> {
+        let mut e = self.primary()?;
+        while self.eat(&Tok::Dot) {
+            let (name, name_span) = self.expect_ident("a field or method name")?;
+            if self.at(&Tok::LParen) {
+                let (args, end) = self.call_args()?;
+                let span = e.span.to(end);
+                let kind = ExprKind::MethodCall { receiver: Box::new(e), name, name_span, args };
+                e = self.expr_node(kind, span);
+            } else {
+                let span = e.span.to(name_span);
+                e = self.expr_node(ExprKind::Field { base: Box::new(e), name, name_span }, span);
+            }
+        }
+        Ok(e)
     }
 
     fn primary(&mut self) -> PResult<Expr> {
@@ -115,9 +133,14 @@ impl<'t> Parser<'t> {
             }
             Tok::LParen => {
                 self.bump();
-                let inner = self.expr()?;
-                self.expect(&Tok::RParen, "`)`")?;
+                let mut inner = self.expr()?;
+                let end = self.expect(&Tok::RParen, "`)`")?;
+                inner.span = span.to(end);
                 return Ok(inner);
+            }
+            Tok::SelfKw => {
+                self.bump();
+                return Ok(self.expr_node(ExprKind::Ident("self".to_string()), span));
             }
             Tok::If => return self.if_expr(),
             other => {
@@ -130,6 +153,12 @@ impl<'t> Parser<'t> {
     }
 
     fn call(&mut self, name: String, name_span: Span) -> PResult<Expr> {
+        let (args, end) = self.call_args()?;
+        Ok(self.expr_node(ExprKind::Call { name, name_span, args }, name_span.to(end)))
+    }
+
+    /// `(arg, ...)`; returns the arguments and the span of the closing `)`.
+    fn call_args(&mut self) -> PResult<(Vec<Arg>, Span)> {
         self.expect(&Tok::LParen, "`(`")?;
         let mut args = Vec::new();
         while !self.at(&Tok::RParen) {
@@ -139,7 +168,7 @@ impl<'t> Parser<'t> {
             }
         }
         let end = self.expect(&Tok::RParen, "`)` or `,`")?;
-        Ok(self.expr_node(ExprKind::Call { name, name_span, args }, name_span.to(end)))
+        Ok((args, end))
     }
 
     fn arg(&mut self) -> PResult<Arg> {

@@ -1,5 +1,5 @@
 use super::{PResult, Parser};
-use crate::ast::{ConstDecl, FnDecl, Item, Param, TypeExpr, TypeKind};
+use crate::ast::{ConstDecl, FieldDecl, FnDecl, Item, Param, StructDecl, TypeExpr, TypeKind};
 use crate::span::Span;
 use crate::token::Tok;
 
@@ -34,6 +34,7 @@ impl<'t> Parser<'t> {
                 self.bump();
                 self.fn_decl(is_pub, true, start)
             }
+            Tok::Struct => self.struct_decl(is_pub, start),
             Tok::Ident(name) if name == "fn" => {
                 self.error_here("Kestrel functions don't use `fn`: write `name(params) { ... }`");
                 Err(())
@@ -43,8 +44,8 @@ impl<'t> Parser<'t> {
                 self.error_here("global variables aren't supported yet");
                 Err(())
             }
-            Tok::Struct | Tok::Enum => {
-                self.error_here("`struct` and `enum` aren't supported yet");
+            Tok::Enum => {
+                self.error_here("`enum` isn't supported yet");
                 Err(())
             }
             Tok::Use => {
@@ -60,10 +61,23 @@ impl<'t> Parser<'t> {
 
     fn fn_decl(&mut self, is_pub: bool, is_pure: bool, start: Span) -> PResult<Item> {
         let (name, name_span) = self.expect_ident("a function name")?;
+        Ok(Item::Fn(self.fn_rest(name, name_span, is_pub, is_pure, start, None)?))
+    }
+
+    /// Everything after a function's name. `owner` is the struct a method belongs to.
+    fn fn_rest(
+        &mut self,
+        name: String,
+        name_span: Span,
+        is_pub: bool,
+        is_pure: bool,
+        start: Span,
+        owner: Option<&str>,
+    ) -> PResult<FnDecl> {
         self.expect(&Tok::LParen, "`(`")?;
         let mut params = Vec::new();
         while !self.at(&Tok::RParen) {
-            params.push(self.param()?);
+            params.push(self.param(params.len(), owner)?);
             if !self.eat(&Tok::Comma) {
                 break;
             }
@@ -72,20 +86,75 @@ impl<'t> Parser<'t> {
         let ret = if self.eat(&Tok::Arrow) { Some(self.type_expr()?) } else { None };
         let body = self.block()?;
         let span = start.to(body.span);
-        Ok(Item::Fn(FnDecl { name, name_span, is_pure, is_pub, params, ret, body, span }))
+        Ok(FnDecl { name, name_span, is_pure, is_pub, params, ret, body, span })
     }
 
-    fn param(&mut self) -> PResult<Param> {
+    fn param(&mut self, index: usize, owner: Option<&str>) -> PResult<Param> {
         let is_var = self.eat(&Tok::Var);
         if self.at(&Tok::SelfKw) {
-            self.error_here("`self` parameters aren't supported yet");
-            return Err(());
+            let span = self.bump().span;
+            let Some(owner) = owner.filter(|_| index == 0) else {
+                self.error(span, "`self` is only allowed as the first parameter of a method");
+                return Err(());
+            };
+            let bind = self.binding("self".to_string(), span);
+            let ty = TypeExpr { kind: TypeKind::Named { name: owner.to_string(), args: Vec::new() }, span };
+            return Ok(Param { bind, is_var, is_self: true, ty });
         }
         let (name, span) = self.expect_ident("a parameter name")?;
         let bind = self.binding(name, span);
         self.expect(&Tok::Colon, "`:` and a type")?;
         let ty = self.type_expr()?;
-        Ok(Param { bind, is_var, ty })
+        Ok(Param { bind, is_var, is_self: false, ty })
+    }
+
+    fn struct_decl(&mut self, is_pub: bool, start: Span) -> PResult<Item> {
+        self.bump();
+        let (name, name_span) = self.expect_ident("a struct name")?;
+        self.expect(&Tok::LBrace, "`{`")?;
+        let (mut fields, mut methods) = (Vec::new(), Vec::new());
+        self.skip_newlines();
+        while !self.at(&Tok::RBrace) && !self.at(&Tok::Eof) {
+            match self.struct_member(&name, &mut fields, &mut methods) {
+                Ok(()) => {
+                    let ended = self.at(&Tok::RBrace) || self.eat(&Tok::Newline) || self.eat(&Tok::Semi);
+                    if !ended {
+                        let found = self.peek().describe();
+                        self.error_here(format!("expected end of line, found {found}"));
+                        self.recover_stmt();
+                    }
+                }
+                Err(()) => self.recover_stmt(),
+            }
+            self.skip_newlines();
+        }
+        let end = self.expect(&Tok::RBrace, "`}`")?;
+        Ok(Item::Struct(StructDecl { is_pub, name, name_span, fields, methods, span: start.to(end) }))
+    }
+
+    /// One `field: Type [= default]` or one method inside a struct body.
+    fn struct_member(&mut self, owner: &str, fields: &mut Vec<FieldDecl>, methods: &mut Vec<FnDecl>) -> PResult<()> {
+        let start = self.span();
+        let is_pub = self.eat(&Tok::Pub);
+        let is_pure = self.eat(&Tok::Pure);
+        let (name, name_span) = self.expect_ident("a field or method name")?;
+        if self.at(&Tok::LParen) {
+            methods.push(self.fn_rest(name, name_span, is_pub, is_pure, start, Some(owner))?);
+            return Ok(());
+        }
+        if is_pure {
+            self.error(start, "only methods can be `pure`");
+            return Err(());
+        }
+        if !self.eat(&Tok::Colon) {
+            let found = self.peek().describe();
+            self.error_here(format!("expected `:` and a type, or `(` for a method, found {found}"));
+            return Err(());
+        }
+        let ty = self.type_expr()?;
+        let default = if self.eat(&Tok::Assign) { Some(self.expr()?) } else { None };
+        fields.push(FieldDecl { name, name_span, ty, default });
+        Ok(())
     }
 
     fn const_decl(&mut self, is_pub: bool, start: Span) -> PResult<Item> {

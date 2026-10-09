@@ -63,6 +63,9 @@ impl<'a> FnLowerer<'a> {
                 }
                 other => unreachable!("{other:?} used as a value"),
             },
+            ast::ExprKind::Field { .. } | ast::ExprKind::MethodCall { .. } => {
+                unreachable!("checker rejects struct expressions")
+            }
             ast::ExprKind::If { cond, then_block, else_block } => {
                 let else_block = else_block.as_ref().expect("checker requires `else` for a value `if`");
                 let cond = Box::new(self.expr(cond));

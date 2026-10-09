@@ -18,6 +18,25 @@ pub struct Program {
 pub enum Item {
     Fn(FnDecl),
     Const(ConstDecl),
+    Struct(StructDecl),
+}
+
+#[derive(Clone, Debug)]
+pub struct StructDecl {
+    pub is_pub: bool,
+    pub name: String,
+    pub name_span: Span,
+    pub fields: Vec<FieldDecl>,
+    pub methods: Vec<FnDecl>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct FieldDecl {
+    pub name: String,
+    pub name_span: Span,
+    pub ty: TypeExpr,
+    pub default: Option<Expr>,
 }
 
 #[derive(Clone, Debug)]
@@ -36,6 +55,8 @@ pub struct FnDecl {
 pub struct Param {
     pub bind: Binding,
     pub is_var: bool,
+    /// `self` / `var self`: the type is the enclosing struct, filled in by the parser.
+    pub is_self: bool,
     pub ty: TypeExpr,
 }
 
@@ -115,6 +136,10 @@ pub enum ExprKind {
     Binary { op: BinaryOp, lhs: Box<Expr>, rhs: Box<Expr> },
     Call { name: String, name_span: Span, args: Vec<Arg> },
     If { cond: Box<Expr>, then_block: Block, else_block: Option<Block> },
+    /// `base.name`
+    Field { base: Box<Expr>, name: String, name_span: Span },
+    /// `receiver.name(args)`
+    MethodCall { receiver: Box<Expr>, name: String, name_span: Span, args: Vec<Arg> },
 }
 
 #[derive(Clone, Debug)]
@@ -259,20 +284,10 @@ impl Expr {
                 format!("({sym} {})", expr.to_sexpr())
             }
             ExprKind::Binary { op, lhs, rhs } => format!("({} {} {})", op.symbol(), lhs.to_sexpr(), rhs.to_sexpr()),
-            ExprKind::Call { name, args, .. } => {
-                let mut s = format!("(call {name}");
-                for a in args {
-                    s.push(' ');
-                    if let Some(l) = &a.label {
-                        s.push_str(&format!("{l}: "));
-                    }
-                    if a.is_var {
-                        s.push_str("var ");
-                    }
-                    s.push_str(&a.value.to_sexpr());
-                }
-                s.push(')');
-                s
+            ExprKind::Call { name, args, .. } => format!("(call {name}{})", args_sexpr(args)),
+            ExprKind::Field { base, name, .. } => format!("(. {} {name})", base.to_sexpr()),
+            ExprKind::MethodCall { receiver, name, args, .. } => {
+                format!("(.call {} {name}{})", receiver.to_sexpr(), args_sexpr(args))
             }
             ExprKind::If { cond, then_block, else_block } => match else_block {
                 Some(e) => format!("(if {} {} else {})", cond.to_sexpr(), then_block.to_sexpr(), e.to_sexpr()),
@@ -280,4 +295,19 @@ impl Expr {
             },
         }
     }
+}
+
+fn args_sexpr(args: &[Arg]) -> String {
+    let mut s = String::new();
+    for a in args {
+        s.push(' ');
+        if let Some(l) = &a.label {
+            s.push_str(&format!("{l}: "));
+        }
+        if a.is_var {
+            s.push_str("var ");
+        }
+        s.push_str(&a.value.to_sexpr());
+    }
+    s
 }

@@ -30,6 +30,10 @@ pub(crate) fn collect(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnos
         let (name, span) = match item {
             Item::Fn(f) => (&f.name, f.name_span),
             Item::Const(c) => (&c.bind.name, c.bind.span),
+            Item::Struct(s) => {
+                diags.push(Diagnostic::error(s.name_span, "structs aren't supported yet"));
+                continue;
+            }
         };
         if BUILTINS.contains(&name.as_str()) {
             diags.push(Diagnostic::error(span, format!("`{name}` is a built-in name; pick another")));
@@ -67,6 +71,7 @@ pub(crate) fn collect(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnos
                     mutates_params: false,
                 });
             }
+            Item::Struct(_) => {}
             Item::Const(c) => {
                 t.consts.push(ConstInfo { name: c.bind.name.clone(), ty: Ty::Error, item: item_idx });
             }

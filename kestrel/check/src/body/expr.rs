@@ -38,6 +38,10 @@ impl<'a> BodyChecker<'a> {
             ExprKind::Binary { op, lhs, rhs } => self.binary(e, *op, lhs, rhs, want),
             ExprKind::Call { .. } => self.check_call(e, want),
             ExprKind::If { .. } => self.check_if(e, Expect::Value(want)),
+            ExprKind::Field { .. } | ExprKind::MethodCall { .. } => {
+                self.error(e.span, "structs aren't supported yet");
+                Ty::Error
+            }
         }
     }
 

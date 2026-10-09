@@ -31,7 +31,7 @@ pub(crate) struct BodyChecker<'a> {
 pub(crate) fn check_consts(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
     let consts = program.items.iter().filter_map(|it| match it {
         Item::Const(c) => Some(c),
-        Item::Fn(_) => None,
+        Item::Fn(_) | Item::Struct(_) => None,
     });
     for (i, c) in consts.enumerate() {
         let mut bc = BodyChecker::new(t, diags, None, Ty::Unit, false);
@@ -52,7 +52,11 @@ fn is_const_expr(e: &Expr) -> bool {
         ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::Ident(_) => true,
         ExprKind::Unary { expr, .. } => is_const_expr(expr),
         ExprKind::Binary { lhs, rhs, .. } => is_const_expr(lhs) && is_const_expr(rhs),
-        ExprKind::Str(_) | ExprKind::Call { .. } | ExprKind::If { .. } => false,
+        ExprKind::Str(_)
+        | ExprKind::Call { .. }
+        | ExprKind::If { .. }
+        | ExprKind::Field { .. }
+        | ExprKind::MethodCall { .. } => false,
     }
 }
 
