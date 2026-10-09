@@ -15,6 +15,7 @@ use crate::ir::*;
 pub(crate) fn has_heap(ty: KTy, t: &Tables) -> bool {
     match ty {
         KTy::Array(_) | KTy::List(_) => true,
+        KTy::Optional(e) => has_heap(kty(t.elems[e.0 as usize]), t),
         KTy::Struct(s) => t.structs[s.0 as usize].fields.iter().any(|f| has_heap(kty(f.ty), t)),
         KTy::Enum(e) => t.enums[e.0 as usize].variants.iter().flat_map(|v| &v.fields).any(|f| has_heap(kty(f.ty), t)),
         _ => false,
@@ -27,9 +28,16 @@ pub(crate) fn owning(ty: KTy, t: &Tables) -> bool {
         KTy::Arena => true,
         KTy::Struct(s) => t.owning_structs[s.0 as usize],
         KTy::Enum(e) => t.owning_enums[e.0 as usize],
-        KTy::Array(e) | KTy::List(e) => t.is_owning(t.elems[e.0 as usize]),
+        KTy::Array(e) | KTy::List(e) | KTy::Optional(e) => t.is_owning(t.elems[e.0 as usize]),
         _ => false,
     }
+}
+
+/// `place`'s optional holds a value: its tag isn't 0.
+fn has_value(place: &Place) -> Expr {
+    let tag = expr(ExprKind::Tag(place.clone()), KTy::U8);
+    let zero = expr(ExprKind::Int(0), KTy::U8);
+    expr(ExprKind::Binary(BinOp::Ne, Box::new(tag), Box::new(zero)), KTy::Bool)
 }
 
 fn elem_of(ty: KTy, t: &Tables) -> KTy {
@@ -76,6 +84,12 @@ impl Helpers {
         let mut out = Vec::new();
         match ty {
             KTy::Array(_) | KTy::List(_) => out.push(Stmt::Call(self.copy_fn(ty, t), vec![Arg::Ref(place)])),
+            KTy::Optional(e) => {
+                let then_body = self.fixup(with(&place, Proj::Payload), kty(t.elems[e.0 as usize]), t);
+                if !then_body.is_empty() {
+                    out.push(Stmt::If { cond: has_value(&place), then_body, else_body: Vec::new() });
+                }
+            }
             KTy::Struct(s) => {
                 for (i, f) in t.structs[s.0 as usize].fields.iter().enumerate() {
                     if has_heap(kty(f.ty), t) {
@@ -108,6 +122,10 @@ impl Helpers {
         match ty {
             _ if !owning(ty, t) => {}
             KTy::Arena => out.push(Stmt::FreeArena(place)),
+            KTy::Optional(e) => {
+                let then_body = self.drop_stmts(with(&place, Proj::Payload), kty(t.elems[e.0 as usize]), t);
+                out.push(Stmt::If { cond: has_value(&place), then_body, else_body: Vec::new() });
+            }
             KTy::Array(_) | KTy::List(_) => out.push(Stmt::Call(self.drop_fn(ty, t), vec![Arg::Ref(place)])),
             KTy::Struct(s) => {
                 // Other fields' memory may live in the struct's own arenas, so those go last.
@@ -163,6 +181,7 @@ impl Helpers {
             KTy::Array(_) | KTy::List(_) => {
                 self.print_fn(ty, t);
             }
+            KTy::Optional(e) => self.ensure_print(kty(t.elems[e.0 as usize]), t),
             KTy::Struct(s) => {
                 for f in &t.structs[s.0 as usize].fields {
                     self.ensure_print(kty(f.ty), t);

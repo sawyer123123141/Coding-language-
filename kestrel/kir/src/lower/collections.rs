@@ -135,6 +135,26 @@ impl<'a> FnLowerer<'a> {
         }
     }
 
+    /// `let x = opt else { ... }`: the optional goes into a temporary; when
+    /// it's `none` the `else` block runs (and leaves), otherwise its value
+    /// moves out into `x` (the temporary is fresh, so nothing is shared).
+    pub(crate) fn let_else(&mut self, bind: &ast::Binding, value: &ast::Expr, otherwise: &ast::Block, out: &mut Vec<Stmt>) {
+        let line = self.line(value.span);
+        let v = self.value(value);
+        let opt = self.temp(v.ty);
+        out.push(Stmt::Let(opt, v));
+        let tag = Expr { kind: ExprKind::Tag(Place::local(opt)), ty: KTy::U8, line };
+        let zero = Expr { kind: ExprKind::Int(0), ty: KTy::U8, line };
+        let cond = Expr { kind: ExprKind::Binary(BinOp::Eq, Box::new(tag), Box::new(zero)), ty: KTy::Bool, line };
+        let then_body = self.block_stmts(otherwise);
+        out.push(Stmt::If { cond, then_body, else_body: Vec::new() });
+        let idx = self.bind_local(bind);
+        let ty = self.locals[idx.0 as usize].ty;
+        let payload = Place { root: opt, path: vec![Proj::Payload] };
+        out.push(Stmt::Let(idx, Expr { kind: ExprKind::Load(payload), ty, line }));
+        self.declared(idx);
+    }
+
     /// `e` lowered as a value about to be stored somewhere new.
     pub(crate) fn value(&mut self, e: &ast::Expr) -> Expr {
         let v = self.expr(e);

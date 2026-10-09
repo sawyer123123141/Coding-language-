@@ -69,7 +69,7 @@ pub(crate) fn check_consts(program: &Program, t: &mut Tables, diags: &mut Vec<Di
 
 pub(crate) fn is_const_expr(e: &Expr) -> bool {
     match &e.kind {
-        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::Str(_) | ExprKind::Ident(_) => true,
+        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::None | ExprKind::Str(_) | ExprKind::Ident(_) => true,
         ExprKind::Call { name, args, .. } if name == "Arena" => args.is_empty(),
         ExprKind::Unary { expr, .. } => is_const_expr(expr),
         ExprKind::Binary { lhs, rhs, .. } => is_const_expr(lhs) && is_const_expr(rhs),
@@ -219,6 +219,13 @@ impl<'a> BodyChecker<'a> {
             self.t.coerce.insert(e.id, to);
             return;
         }
+        // A `T` is a `T?` that has a value.
+        if let Ty::Optional(inner) = to {
+            if from.coerces_to(self.t.elem(inner)) {
+                self.t.coerce.insert(e.id, to);
+                return;
+            }
+        }
         let msg = format!("expected {}, found {}", self.tn(to), self.tn(from));
         if from.is_numeric() && to.is_numeric() {
             self.error_help(e.span, msg, format!("convert it explicitly: `{}(...)`", to.name()));
@@ -244,6 +251,10 @@ impl<'a> BodyChecker<'a> {
     /// Checks a statement; returns `Never` when control can't continue past it.
     fn check_stmt(&mut self, s: &Stmt) -> Ty {
         match s {
+            Stmt::Let { is_var, bind, ty, value, else_block: Some(otherwise), .. } => {
+                self.check_let_else(*is_var, bind, ty.as_ref(), value, otherwise);
+                Ty::Unit
+            }
             Stmt::Let { is_var, bind, ty, value, .. } => {
                 let ann = ty.as_ref().map(|t| resolve_type(t, self.t, self.diags));
                 let mut local_ty = self.check_value(value, ann);

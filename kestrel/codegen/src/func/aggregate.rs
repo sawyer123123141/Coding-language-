@@ -30,6 +30,17 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             ExprKind::ArrayLit(items) => self.array_lit(items, e.ty, e.line, dest)?,
             ExprKind::ListNew => self.list_new(dest),
             ExprKind::Move(p) => self.move_into(p, e.ty, dest)?,
+            ExprKind::Some(v) => {
+                let KTy::Optional(el) = e.ty else { unreachable!("`Some` builds an optional") };
+                let one = self.b.ins().iconst(types::I8, 1);
+                self.b.ins().store(MemFlags::trusted(), one, dest, 0);
+                let at = self.shared.kir.payload_offset(el) as i32;
+                self.store_at(v, dest, at)?;
+            }
+            ExprKind::NoneLit => {
+                let zero = self.b.ins().iconst(types::I8, 0);
+                self.b.ins().store(MemFlags::trusted(), zero, dest, 0);
+            }
             ExprKind::NewArena => {
                 let a = self.new_arena();
                 self.b.ins().store(MemFlags::trusted(), a, dest, 0);

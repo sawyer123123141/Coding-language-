@@ -42,6 +42,7 @@ pub(crate) fn kty(ty: Ty) -> KTy {
         Ty::Array(e) => KTy::Array(ElemIdx(e.0)),
         Ty::List(e) => KTy::List(ElemIdx(e.0)),
         Ty::Arena => KTy::Arena,
+        Ty::Optional(e) => KTy::Optional(ElemIdx(e.0)),
         other => panic!("type {other:?} has no runtime representation"),
     }
 }
@@ -153,6 +154,9 @@ impl<'a> FnLowerer<'a> {
 
     pub(crate) fn stmt(&mut self, s: &ast::Stmt, out: &mut Vec<Stmt>) {
         let lowered = match s {
+            ast::Stmt::Let { bind, value, else_block: Some(otherwise), .. } => {
+                return self.let_else(bind, value, otherwise, out);
+            }
             ast::Stmt::Let { bind, value, .. } => {
                 let idx = self.bind_local(bind);
                 let value = self.value(value);

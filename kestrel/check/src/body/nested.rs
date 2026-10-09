@@ -56,7 +56,7 @@ impl<'a> BodyChecker<'a> {
                     self.changed_in_block(&a.body, out);
                 }
             }
-            ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::Str(_) | ExprKind::Ident(_) => {}
+            ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::None | ExprKind::Str(_) | ExprKind::Ident(_) => {}
         }
     }
 
@@ -72,6 +72,10 @@ impl<'a> BodyChecker<'a> {
     fn changed_in_block(&self, b: &Block, out: &mut Vec<LocalId>) {
         for s in &b.stmts {
             match s {
+                Stmt::Let { value, else_block: Some(b), .. } => {
+                    self.changed_inside(value, out);
+                    self.changed_in_block(b, out);
+                }
                 Stmt::Let { value, .. } | Stmt::Expr(value) | Stmt::Return { value: Some(value), .. } => {
                     self.changed_inside(value, out)
                 }

@@ -8,7 +8,18 @@ impl<'a> FnLowerer<'a> {
     /// Lowers `e` and applies any implicit conversion the checker recorded.
     pub(crate) fn expr(&mut self, e: &ast::Expr) -> Expr {
         let Some(&to) = self.t.coerce.get(&e.id) else { return self.expr_raw(e) };
-        let to = kty(to);
+        // A `T` used as a `T?`: wrap it (converting it to the inner type first).
+        if let Ty::Optional(inner) = to {
+            let inner = kty(self.t.elem(inner));
+            let v = if kty(self.t.ty(e.id)) == inner { self.expr_raw(e) } else { self.converted(e, inner) };
+            let line = v.line;
+            return Expr { kind: ExprKind::Some(Box::new(v)), ty: kty(to), line };
+        }
+        self.converted(e, kty(to))
+    }
+
+    /// `e` converted to the type `to`.
+    fn converted(&mut self, e: &ast::Expr, to: KTy) -> Expr {
         // A literal converted to a float is emitted at the target type, read from the
         // source, so an f64 never inherits the rounding of an f32 literal.
         if to.is_float() {
@@ -33,6 +44,7 @@ impl<'a> FnLowerer<'a> {
             }
             ast::ExprKind::Float(f) => ExprKind::Float(*f),
             ast::ExprKind::Bool(b) => ExprKind::Bool(*b),
+            ast::ExprKind::None => ExprKind::NoneLit,
             ast::ExprKind::Str(s) => ExprKind::StrLit(s.clone()),
             ast::ExprKind::Interp(_) => unreachable!("checker allows interpolation only inside print"),
             ast::ExprKind::Ident(_) => match self.t.res[&e.id] {

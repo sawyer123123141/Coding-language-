@@ -1,0 +1,59 @@
+// expect: found 3
+// expect: none 7 none
+// expect: Slot(item: [1, 2], label: none)
+// expect: missing
+// expect: 2.5
+// expect: 9
+struct Slot {
+    item: [int]?
+    label: string? = none
+}
+
+struct Chunk {
+    x: int
+    mem: Arena = Arena()
+}
+
+pure find(xs: [int], want: int) -> int? {
+    for i, v in xs {
+        if v == want { return i }
+    }
+    none
+}
+
+pure half(x: int) -> float? {
+    if x % 2 == 0 { x / 2 } else { none }
+}
+
+take() -> int {
+    let c: Chunk? = Chunk(x: 9)
+    let chunk = c else { return -1 }
+    chunk.x
+}
+
+main() {
+    let xs = [5, 6, 7, 8]
+    let at = find(xs, 8) else { return }
+    print("found", at)
+    let nothing: int? = none
+    let seven: int? = 7
+    print(nothing, seven, find(xs, 1))
+    var s = Slot([1, 2])
+    print(s)
+    for want in [9] {
+        let i = find(xs, want) else {
+            print("missing")
+            continue
+        }
+        print(i)
+    }
+    let h = half(5) else {
+        let h2 = half(5 * 1) else {
+            print(2.5)
+            print(take())
+            return
+        }
+        return
+    }
+    print(h)
+}

@@ -109,6 +109,7 @@ impl<'a> BodyChecker<'a> {
             return 0;
         }
         match &e.kind {
+            ExprKind::None => 0,
             // An empty list still remembers the current arena, to grow in.
             ExprKind::ArrayLit(items) if items.is_empty() => {
                 if matches!(ty, Ty::List(_)) {

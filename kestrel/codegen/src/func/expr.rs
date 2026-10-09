@@ -39,6 +39,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             | ExprKind::ArrayLit(_)
             | ExprKind::ListNew
             | ExprKind::NewArena
+            | ExprKind::Some(_)
+            | ExprKind::NoneLit
             | ExprKind::Move(_) => unreachable!("aggregate values are built in memory"),
             ExprKind::Unary(UnOp::Not, inner) => {
                 let v = self.expr(inner)?;

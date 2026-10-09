@@ -31,7 +31,7 @@ pub(crate) fn cl_type(t: KTy) -> Type {
         KTy::I64 => types::I64,
         KTy::F32 => types::F32,
         KTy::F64 => types::F64,
-        KTy::Struct(_) | KTy::Enum(_) | KTy::Str | KTy::Array(_) | KTy::List(_) | KTy::Arena => {
+        KTy::Struct(_) | KTy::Enum(_) | KTy::Str | KTy::Array(_) | KTy::List(_) | KTy::Arena | KTy::Optional(_) => {
             unreachable!("aggregates live in memory, not registers")
         }
     }

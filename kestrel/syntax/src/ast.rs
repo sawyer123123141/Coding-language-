@@ -117,7 +117,9 @@ pub struct Block {
 
 #[derive(Clone, Debug)]
 pub enum Stmt {
-    Let { is_var: bool, bind: Binding, ty: Option<TypeExpr>, value: Expr, span: Span },
+    /// `let x = v`, or `let x = opt else { ... }`, which unwraps an optional
+    /// and runs the `else` block (which must leave) when it's `none`.
+    Let { is_var: bool, bind: Binding, ty: Option<TypeExpr>, value: Expr, else_block: Option<Block>, span: Span },
     Assign { target: Expr, op: AssignOp, value: Expr, span: Span },
     While { cond: Expr, body: Block, span: Span },
     ForRange { var: Binding, start: Expr, end: Expr, body: Block, span: Span },
@@ -155,6 +157,8 @@ pub enum ExprKind {
     Int(u64),
     Float(f64),
     Bool(bool),
+    /// `none`: an optional with no value.
+    None,
     Str(String),
     /// `"hp = {hp}"`: literal text and expressions, in order.
     Interp(Vec<InterpPart>),

@@ -29,6 +29,13 @@ impl<'a> BodyChecker<'a> {
                 }
             }
             ExprKind::Bool(_) => Ty::Bool,
+            ExprKind::None => match want {
+                Some(t @ Ty::Optional(_)) => t,
+                _ => {
+                    self.error_help(e.span, "can't tell what kind of `none` this is", "give it a type: `let x: int? = none`");
+                    Ty::Error
+                }
+            },
             ExprKind::Str(_) => Ty::Str,
             ExprKind::Interp(parts) => {
                 // Building a new string needs memory to put it in; that comes with arenas.

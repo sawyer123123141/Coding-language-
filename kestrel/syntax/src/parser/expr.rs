@@ -170,6 +170,7 @@ impl Parser {
             }
             Tok::True => ExprKind::Bool(true),
             Tok::False => ExprKind::Bool(false),
+            Tok::NoneKw => ExprKind::None,
             Tok::Ident(name) => {
                 self.bump();
                 if self.at(&Tok::LParen) {

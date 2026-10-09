@@ -81,7 +81,9 @@ impl Parser {
         let ty = if self.eat(&Tok::Colon) { Some(self.type_expr()?) } else { None };
         self.expect(&Tok::Assign, "`=`")?;
         let value = self.expr()?;
-        Ok(Stmt::Let { is_var, bind, ty, span: start.to(value.span), value })
+        let else_block = if self.eat(&Tok::Else) { Some(self.block()?) } else { None };
+        let end = else_block.as_ref().map_or(value.span, |b| b.span);
+        Ok(Stmt::Let { is_var, bind, ty, span: start.to(end), value, else_block })
     }
 
     fn for_stmt(&mut self) -> PResult<Stmt> {

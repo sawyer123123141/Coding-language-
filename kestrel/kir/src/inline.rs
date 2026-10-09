@@ -148,7 +148,7 @@ impl Inliner<'_> {
                 e.kind = if body.is_empty() { value.kind } else { ExprKind::Seq(body, Box::new(value)) };
             }
             ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::Move(p) => self.place(p, depth),
-            ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) => self.expr(x, depth),
+            ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) => self.expr(x, depth),
             ExprKind::Binary(_, a, b) | ExprKind::And(a, b) | ExprKind::Or(a, b) => {
                 self.expr(a, depth);
                 self.expr(b, depth);
@@ -171,7 +171,7 @@ impl Inliner<'_> {
                     self.expr(v, depth);
                 }
             }
-            ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::StrLit(_) | ExprKind::ListNew | ExprKind::NewArena => {}
+            ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::StrLit(_) | ExprKind::ListNew | ExprKind::NewArena | ExprKind::NoneLit => {}
         }
     }
 

@@ -23,11 +23,16 @@ pub enum KTy {
     List(ElemIdx),
     /// A pointer to a runtime arena (null until created).
     Arena,
+    /// `T?`: a u8 tag (0 = `none`) at offset 0, then the value.
+    Optional(ElemIdx),
 }
 
 impl KTy {
     pub fn is_aggregate(self) -> bool {
-        matches!(self, KTy::Struct(_) | KTy::Enum(_) | KTy::Str | KTy::Array(_) | KTy::List(_) | KTy::Arena)
+        matches!(
+            self,
+            KTy::Struct(_) | KTy::Enum(_) | KTy::Str | KTy::Array(_) | KTy::List(_) | KTy::Arena | KTy::Optional(_)
+        )
     }
 
     pub fn is_float(self) -> bool {
@@ -83,6 +88,22 @@ impl Module {
         self.elems[e.0 as usize]
     }
 
+    /// Where the value inside an optional of `T` starts.
+    pub fn payload_offset(&self, e: ElemIdx) -> u32 {
+        let (size, align) = self.size_align(self.elem(e));
+        optional_layout(size, align).0
+    }
+}
+
+/// An optional of a value with this size and alignment: the payload's
+/// offset, then the optional's size and alignment.
+pub fn optional_layout(size: u32, align: u32) -> (u32, u32, u32) {
+    let align = align.max(1);
+    (align, (align + size).next_multiple_of(align), align)
+}
+
+impl Module {
+
     /// Size and alignment in bytes.
     pub fn size_align(&self, ty: KTy) -> (u32, u32) {
         match ty {
@@ -91,6 +112,11 @@ impl Module {
             KTy::I64 | KTy::F64 | KTy::Arena => (8, 8),
             KTy::Str | KTy::Array(_) => (16, 8),
             KTy::List(_) => (32, 8),
+            KTy::Optional(e) => {
+                let (size, align) = self.size_align(self.elem(e));
+                let (_, size, align) = optional_layout(size, align);
+                (size, align)
+            }
             KTy::Struct(s) => {
                 let l = self.layout(s);
                 (l.size, l.align)
@@ -150,6 +176,8 @@ pub enum Proj {
     Field(u32),
     /// Field `.1` of variant `.0` of an enum (valid while that variant is stored).
     Variant(u32, u32),
+    /// The value inside an optional (valid while it isn't `none`).
+    Payload,
     /// An element of an array or list. The index is any integer type. It is
     /// bounds-checked unless the compiler proved it in bounds (a `for ... in`
     /// loop's own index, when the body can't move the elements).
@@ -260,6 +288,10 @@ pub enum ExprKind {
     Len(Place),
     /// `Arena()`: a new, empty arena.
     NewArena,
+    /// An optional holding this value.
+    Some(Box<Expr>),
+    /// `none`
+    NoneLit,
     /// The value at a place, which is then zeroed (an owning value moving
     /// out, so dropping the place later does nothing).
     Move(Place),

@@ -25,6 +25,8 @@ pub enum Ty {
     List(ElemId),
     /// A memory bucket. Values holding one are owning: they move, never copy.
     Arena,
+    /// `T?`: a `T` or `none`.
+    Optional(ElemId),
     Error,
 }
 
@@ -60,6 +62,7 @@ impl Ty {
             Ty::Array(_) => "array",
             Ty::List(_) => "list",
             Ty::Arena => "Arena",
+            Ty::Optional(_) => "optional",
             Ty::Error => "{error}",
         }
     }
@@ -78,7 +81,7 @@ impl Ty {
 
     /// Values that live in memory and are passed by pointer.
     pub fn is_aggregate(self) -> bool {
-        matches!(self, Ty::Struct(_) | Ty::Enum(_) | Ty::Str | Ty::Array(_) | Ty::List(_))
+        matches!(self, Ty::Struct(_) | Ty::Enum(_) | Ty::Str | Ty::Array(_) | Ty::List(_) | Ty::Arena | Ty::Optional(_))
     }
 
     /// Whether a value of `self` may be used where `to` is expected without

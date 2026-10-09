@@ -5,8 +5,12 @@ use crate::ast::*;
 impl Stmt {
     pub fn to_sexpr(&self) -> String {
         match self {
-            Stmt::Let { is_var, bind, value, .. } => {
-                format!("({} {} {})", if *is_var { "var" } else { "let" }, bind.name, value.to_sexpr())
+            Stmt::Let { is_var, bind, value, else_block, .. } => {
+                let kw = if *is_var { "var" } else { "let" };
+                match else_block {
+                    Some(b) => format!("({kw} {} {} else {})", bind.name, value.to_sexpr(), b.to_sexpr()),
+                    None => format!("({kw} {} {})", bind.name, value.to_sexpr()),
+                }
             }
             Stmt::Assign { target, op, value, .. } => {
                 format!("({} {} {})", op.symbol(), target.to_sexpr(), value.to_sexpr())
@@ -51,6 +55,7 @@ impl Expr {
             ExprKind::Int(n) => n.to_string(),
             ExprKind::Float(f) => f.to_string(),
             ExprKind::Bool(b) => b.to_string(),
+            ExprKind::None => "none".into(),
             ExprKind::Str(s) => format!("{s:?}"),
             ExprKind::Interp(parts) => {
                 let parts: Vec<String> = parts

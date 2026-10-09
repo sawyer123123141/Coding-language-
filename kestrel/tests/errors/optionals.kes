@@ -1,0 +1,12 @@
+// error 6: can't tell what kind of `none` this is
+// error 8: `+` needs numbers, found int? and int
+// error 9: `let ... else` unwraps an optional (`T?`), but this is int
+// error 11: the `else` block has to leave
+main() {
+    let a = none
+    let b: int? = 5
+    let c = b + 1
+    let d = 5 else { return }
+    let e: int? = 1
+    let f = e else { print(1) }
+}

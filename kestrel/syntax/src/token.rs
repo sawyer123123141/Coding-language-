@@ -10,7 +10,7 @@ pub enum Tok {
     StrParts(Vec<StrPart>),
     // keywords
     Pure, Let, Var, If, Else, While, For, From, To, In, Par, Match, Struct, Enum, Arena,
-    Return, Break, Continue, And, Or, Not, True, False, Use, Pub, SelfKw,
+    Return, Break, Continue, And, Or, Not, True, False, NoneKw, Use, Pub, SelfKw,
     // punctuation
     LParen, RParen, LBrace, RBrace, LBracket, RBracket, Comma, Colon, Dot, Arrow, Question,
     Semi, Newline,
@@ -58,6 +58,7 @@ pub fn keyword(s: &str) -> Option<Tok> {
         "not" => Tok::Not,
         "true" => Tok::True,
         "false" => Tok::False,
+        "none" => Tok::NoneKw,
         "use" => Tok::Use,
         "pub" => Tok::Pub,
         "self" => Tok::SelfKw,
@@ -98,7 +99,7 @@ impl Tok {
             While => "while", For => "for", From => "from", To => "to", In => "in",
             Par => "par", Match => "match", Struct => "struct", Enum => "enum",
             Arena => "arena", Return => "return", Break => "break", Continue => "continue",
-            And => "and", Or => "or", Not => "not", True => "true", False => "false",
+            And => "and", Or => "or", Not => "not", True => "true", False => "false", NoneKw => "none",
             Use => "use", Pub => "pub", SelfKw => "self",
             LParen => "(", RParen => ")", LBrace => "{", RBrace => "}", LBracket => "[",
             RBracket => "]", Comma => ",", Colon => ":", Dot => ".", Arrow => "->",

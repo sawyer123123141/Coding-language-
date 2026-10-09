@@ -220,6 +220,7 @@ impl Tables {
     pub fn has_heap(&self, ty: Ty) -> bool {
         match ty {
             Ty::Array(_) | Ty::List(_) => true,
+            Ty::Optional(e) => self.has_heap(self.elem(e)),
             Ty::Struct(s) => self.strukt(s).fields.iter().any(|f| self.has_heap(f.ty)),
             Ty::Enum(e) => self.enm(e).variants.iter().flat_map(|v| &v.fields).any(|f| self.has_heap(f.ty)),
             _ => false,
@@ -232,7 +233,7 @@ impl Tables {
             Ty::Arena => true,
             Ty::Struct(s) => self.owning_structs.get(s.0 as usize).copied().unwrap_or(false),
             Ty::Enum(e) => self.owning_enums.get(e.0 as usize).copied().unwrap_or(false),
-            Ty::Array(e) | Ty::List(e) => self.is_owning(self.elem(e)),
+            Ty::Array(e) | Ty::List(e) | Ty::Optional(e) => self.is_owning(self.elem(e)),
             _ => false,
         }
     }
@@ -280,6 +281,7 @@ impl Tables {
             Ty::Variant(id, v) => format!("{}.{}", self.enm(id).name, self.enm(id).variants[v as usize].name),
             Ty::Array(e) => format!("[{}]", self.ty_name(self.elem(e))),
             Ty::List(e) => format!("list[{}]", self.ty_name(self.elem(e))),
+            Ty::Optional(e) => format!("{}?", self.ty_name(self.elem(e))),
             other => other.name().to_string(),
         }
     }

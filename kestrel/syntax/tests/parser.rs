@@ -243,3 +243,12 @@ fn arena_and_in_blocks() {
 }"), "{(arena {(var t (make list[vec3]))})}");
     assert_eq!(body("in self.mem { self.h = [] }"), "{(in (. self mem) {(= (. self h) [])})}");
 }
+
+#[test]
+fn optionals() {
+    assert_eq!(body("let t = load(1) else { return }"), "{(let t (call load 1) else {return})}");
+    assert_eq!(body("var x: int? = none"), "{(var x none)}");
+    let p = ok("f(a: Chunk?) {}
+");
+    assert!(matches!(fn_decl(&p, 0).params[0].ty.kind, TypeKind::Optional(_)));
+}

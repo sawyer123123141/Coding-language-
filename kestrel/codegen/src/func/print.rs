@@ -67,7 +67,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             KTy::I64 => self.call_id(rt.print_i64, &[v]),
             KTy::F32 => self.call_id(rt.print_f32, &[v]),
             KTy::F64 => self.call_id(rt.print_f64, &[v]),
-            KTy::Struct(_) | KTy::Enum(_) | KTy::Str | KTy::Array(_) | KTy::List(_) | KTy::Arena => {
+            KTy::Struct(_) | KTy::Enum(_) | KTy::Str | KTy::Array(_) | KTy::List(_) | KTy::Arena | KTy::Optional(_) => {
                 unreachable!("aggregates are printed from memory")
             }
         };
@@ -80,6 +80,25 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let kir = self.shared.kir;
         match ty {
             KTy::Arena => self.print_text("Arena"),
+            KTy::Optional(el) => {
+                let tag = self.b.ins().load(types::I8, MemFlags::trusted(), addr, offset);
+                let (some, none, done) = (self.b.create_block(), self.b.create_block(), self.b.create_block());
+                self.b.ins().brif(tag, some, &[], none, &[]);
+                self.b.switch_to_block(none);
+                self.print_text("none")?;
+                self.b.ins().jump(done, &[]);
+                self.b.switch_to_block(some);
+                let (inner, at) = (kir.elem(el), offset + kir.payload_offset(el) as i32);
+                if inner.is_aggregate() {
+                    self.print_aggregate(addr, at, inner)?;
+                } else {
+                    let v = self.b.ins().load(cl_type(inner), MemFlags::trusted(), addr, at);
+                    self.print_scalar(v, inner)?;
+                }
+                self.b.ins().jump(done, &[]);
+                self.b.switch_to_block(done);
+                Ok(())
+            }
             KTy::Array(_) | KTy::List(_) => {
                 let at = self.offset(addr, offset);
                 let id = self.shared.funcs[kir.print_fns[&ty].0 as usize];

@@ -37,7 +37,10 @@ pub(crate) fn resolve_type(ty: &TypeExpr, t: &mut Tables, diags: &mut Vec<Diagno
             let elem = resolve_type(inner, t, diags);
             return if elem == Ty::Error { Ty::Error } else { Ty::Array(t.intern_elem(elem)) };
         }
-        TypeKind::Optional(_) => "optional types aren't supported yet".to_string(),
+        TypeKind::Optional(inner) => {
+            let elem = resolve_type(inner, t, diags);
+            return if elem == Ty::Error { Ty::Error } else { Ty::Optional(t.intern_elem(elem)) };
+        }
     };
     diags.push(Diagnostic::error(ty.span, msg));
     Ty::Error
