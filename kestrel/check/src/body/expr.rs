@@ -123,6 +123,15 @@ impl<'a> BodyChecker<'a> {
                 self.check_value(inner, Some(Ty::Bool));
                 Ty::Bool
             }
+            UnaryOp::BitNot => {
+                let ty = self.check_expr(inner, want.filter(|t| t.is_int()));
+                if !ty.is_int() && ty != Ty::Error {
+                    let msg = format!("`~` needs an integer, found {}", self.tn(ty));
+                    self.error(inner.span, msg);
+                    return Ty::Error;
+                }
+                ty
+            }
             UnaryOp::Neg => {
                 let ty = self.check_expr(inner, want.filter(|t| t.is_numeric()));
                 if self.t.vec_dims(ty).is_some() {
@@ -148,6 +157,21 @@ impl<'a> BodyChecker<'a> {
                 self.check_value(lhs, Some(Ty::Bool));
                 self.check_value(rhs, Some(Ty::Bool));
                 Ty::Bool
+            }
+            // A shift's result has the left side's type; the amount is any integer.
+            BinaryOp::Shl | BinaryOp::Shr => {
+                let lt = self.check_expr(lhs, want.filter(|t| t.is_int()));
+                let rt = self.check_expr(rhs, Some(lt).filter(|t| t.is_int()));
+                self.bit_operands(op, lhs, lt, rhs, rt);
+                if lt.is_int() { lt } else { Ty::Error }
+            }
+            _ if op.is_bitwise() => {
+                let lt = self.check_expr(lhs, want.filter(|t| t.is_int()));
+                let rt = self.check_expr(rhs, Some(lt).filter(|t| t.is_int()));
+                if !self.bit_operands(op, lhs, lt, rhs, rt) {
+                    return Ty::Error;
+                }
+                self.operands(e, op, lhs, lt, rhs, rt)
             }
             _ if op.is_comparison() => {
                 let lt = self.check_expr(lhs, None);
@@ -198,6 +222,18 @@ impl<'a> BodyChecker<'a> {
         }
         self.coerce(scalar, scalar_ty, Ty::Float);
         vec
+    }
+
+    /// Bit operators take integers. Returns whether both sides are.
+    fn bit_operands(&mut self, op: BinaryOp, lhs: &Expr, lt: Ty, rhs: &Expr, rt: Ty) -> bool {
+        for (e, t) in [(lhs, lt), (rhs, rt)] {
+            if !t.is_int() && t != Ty::Error {
+                let msg = format!("`{}` needs integers, found {}", op.symbol(), self.tn(t));
+                self.error(e.span, msg);
+                return false;
+            }
+        }
+        lt.is_int() && rt.is_int()
     }
 
     /// Both operands must be numbers that meet at a common type.

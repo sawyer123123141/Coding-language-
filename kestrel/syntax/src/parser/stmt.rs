@@ -124,6 +124,11 @@ impl Parser {
             Tok::StarEq => AssignOp::Mul,
             Tok::SlashEq => AssignOp::Div,
             Tok::PercentEq => AssignOp::Rem,
+            Tok::AmpEq => AssignOp::BitAnd,
+            Tok::PipeEq => AssignOp::BitOr,
+            Tok::CaretEq => AssignOp::BitXor,
+            Tok::ShlEq => AssignOp::Shl,
+            Tok::ShrEq => AssignOp::Shr,
             _ => return Ok(Stmt::Expr(target)),
         };
         self.bump();

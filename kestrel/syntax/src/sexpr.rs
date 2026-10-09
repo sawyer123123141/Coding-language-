@@ -72,6 +72,7 @@ impl Expr {
                 let sym = match op {
                     UnaryOp::Neg => "-",
                     UnaryOp::Not => "not",
+                    UnaryOp::BitNot => "~",
                 };
                 format!("({sym} {})", expr.to_sexpr())
             }

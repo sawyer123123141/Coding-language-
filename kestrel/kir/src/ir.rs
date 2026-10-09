@@ -336,6 +336,8 @@ pub enum Arg {
 pub enum UnOp {
     Neg,
     Not,
+    /// Every bit flipped (integers).
+    BitNot,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -351,6 +353,12 @@ pub enum BinOp {
     Gt,
     Le,
     Ge,
+    BitAnd,
+    BitOr,
+    BitXor,
+    /// Both operands have the result's type (lowering converts the amount).
+    Shl,
+    Shr,
 }
 
 impl BinOp {

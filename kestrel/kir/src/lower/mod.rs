@@ -183,6 +183,7 @@ impl<'a> FnLowerer<'a> {
                             rhs
                         };
                         let line = rhs.line;
+                        let rhs = shift_amount(binop(bop), rhs, ty);
                         let cur = Expr { kind: ExprKind::Load(place.clone()), ty, line };
                         let kind = if ty.is_aggregate() {
                             self.vec_combine(binop(bop), cur, rhs, ty, line)
@@ -267,6 +268,15 @@ impl<'a> FnLowerer<'a> {
     }
 }
 
+/// A shift's amount, converted to the shifted value's type if it differs.
+pub(crate) fn shift_amount(op: BinOp, amount: Expr, ty: KTy) -> Expr {
+    if !matches!(op, BinOp::Shl | BinOp::Shr) || amount.ty == ty {
+        return amount;
+    }
+    let line = amount.line;
+    Expr { kind: ExprKind::Cast(Box::new(amount)), ty, line }
+}
+
 pub(crate) fn binop(op: ast::BinaryOp) -> BinOp {
     match op {
         ast::BinaryOp::Add => BinOp::Add,
@@ -280,6 +290,11 @@ pub(crate) fn binop(op: ast::BinaryOp) -> BinOp {
         ast::BinaryOp::Gt => BinOp::Gt,
         ast::BinaryOp::Le => BinOp::Le,
         ast::BinaryOp::Ge => BinOp::Ge,
+        ast::BinaryOp::BitAnd => BinOp::BitAnd,
+        ast::BinaryOp::BitOr => BinOp::BitOr,
+        ast::BinaryOp::BitXor => BinOp::BitXor,
+        ast::BinaryOp::Shl => BinOp::Shl,
+        ast::BinaryOp::Shr => BinOp::Shr,
         ast::BinaryOp::And | ast::BinaryOp::Or => unreachable!("lowered to And/Or nodes"),
     }
 }

@@ -61,6 +61,7 @@ impl<'a> FnLowerer<'a> {
                 let op = match op {
                     ast::UnaryOp::Neg => UnOp::Neg,
                     ast::UnaryOp::Not => UnOp::Not,
+                    ast::UnaryOp::BitNot => UnOp::BitNot,
                 };
                 ExprKind::Unary(op, Box::new(self.expr(expr)))
             }
@@ -74,7 +75,11 @@ impl<'a> FnLowerer<'a> {
                 match op {
                     ast::BinaryOp::And => ExprKind::And(l, r),
                     ast::BinaryOp::Or => ExprKind::Or(l, r),
-                    other => ExprKind::Binary(binop(*other), l, r),
+                    other => {
+                        let op = binop(*other);
+                        let r = Box::new(super::shift_amount(op, *r, l.ty));
+                        ExprKind::Binary(op, l, r)
+                    }
                 }
             }
             ast::ExprKind::Call { args, .. } => match self.t.res[&e.id] {

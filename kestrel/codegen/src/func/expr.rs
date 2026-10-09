@@ -46,6 +46,10 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 let v = self.expr(inner)?;
                 self.b.ins().bxor_imm(v, 1)
             }
+            ExprKind::Unary(UnOp::BitNot, inner) => {
+                let v = self.expr(inner)?;
+                self.b.ins().bnot(v)
+            }
             ExprKind::Unary(UnOp::Neg, inner) => {
                 let v = self.expr(inner)?;
                 if e.ty.is_float() {

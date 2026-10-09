@@ -44,16 +44,44 @@ impl Parser {
     }
 
     fn cmp_expr(&mut self) -> PResult<Expr> {
-        let lhs = self.add_expr()?;
+        let lhs = self.bit_or()?;
         let Some(op) = cmp_op(self.peek()) else { return Ok(lhs) };
         self.bump();
-        let rhs = self.add_expr()?;
+        let rhs = self.bit_or()?;
         let e = self.binary(op, lhs, rhs);
         if cmp_op(self.peek()).is_some() {
             self.error_here("comparisons can't be chained; combine them with `and`");
             return Err(());
         }
         Ok(e)
+    }
+
+    /// `|`, then `^`, then `&`, then shifts, each binding tighter (as in GDScript).
+    fn bit_or(&mut self) -> PResult<Expr> {
+        self.left_assoc(&[(Tok::Pipe, BinaryOp::BitOr)], Self::bit_xor)
+    }
+
+    fn bit_xor(&mut self) -> PResult<Expr> {
+        self.left_assoc(&[(Tok::Caret, BinaryOp::BitXor)], Self::bit_and)
+    }
+
+    fn bit_and(&mut self) -> PResult<Expr> {
+        self.left_assoc(&[(Tok::Amp, BinaryOp::BitAnd)], Self::shift)
+    }
+
+    fn shift(&mut self) -> PResult<Expr> {
+        self.left_assoc(&[(Tok::Shl, BinaryOp::Shl), (Tok::Shr, BinaryOp::Shr)], Self::add_expr)
+    }
+
+    /// `operand (op operand)*` for the operators in `ops`.
+    fn left_assoc(&mut self, ops: &[(Tok, BinaryOp)], operand: fn(&mut Self) -> PResult<Expr>) -> PResult<Expr> {
+        let mut lhs = operand(self)?;
+        while let Some(&(_, op)) = ops.iter().find(|(t, _)| self.at(t)) {
+            self.bump();
+            let rhs = operand(self)?;
+            lhs = self.binary(op, lhs, rhs);
+        }
+        Ok(lhs)
     }
 
     fn add_expr(&mut self) -> PResult<Expr> {
@@ -90,6 +118,7 @@ impl Parser {
         let op = match self.peek() {
             Tok::Minus => UnaryOp::Neg,
             Tok::Not => UnaryOp::Not,
+            Tok::Tilde => UnaryOp::BitNot,
             _ => return self.postfix(),
         };
         self.bump();

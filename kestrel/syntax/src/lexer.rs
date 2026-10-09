@@ -205,6 +205,11 @@ impl<'a> Lexer<'a> {
 
     fn punct(&mut self) {
         let start = self.pos;
+        let three = [self.peek(0), self.peek(1), self.peek(2)];
+        if &three == b"<<=" || &three == b">>=" {
+            self.pos += 3;
+            return self.push(if three[0] == b'<' { Tok::ShlEq } else { Tok::ShrEq }, start);
+        }
         let two = [self.peek(0), self.peek(1)];
         let pair = match &two {
             b"->" => Some(Tok::Arrow),
@@ -217,6 +222,11 @@ impl<'a> Lexer<'a> {
             b"*=" => Some(Tok::StarEq),
             b"/=" => Some(Tok::SlashEq),
             b"%=" => Some(Tok::PercentEq),
+            b"<<" => Some(Tok::Shl),
+            b">>" => Some(Tok::Shr),
+            b"&=" => Some(Tok::AmpEq),
+            b"|=" => Some(Tok::PipeEq),
+            b"^=" => Some(Tok::CaretEq),
             _ => None,
         };
         if let Some(tok) = pair {
@@ -252,6 +262,10 @@ impl<'a> Lexer<'a> {
             '=' => Tok::Assign,
             '<' => Tok::Lt,
             '>' => Tok::Gt,
+            '&' => Tok::Amp,
+            '|' => Tok::Pipe,
+            '^' => Tok::Caret,
+            '~' => Tok::Tilde,
             '!' => return self.error(start, "Kestrel uses `not`, not `!`"),
             other => return self.error(start, format!("unexpected character `{other}`")),
         };

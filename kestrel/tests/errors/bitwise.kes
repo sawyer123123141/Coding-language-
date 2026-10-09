@@ -1,0 +1,10 @@
+// error 6: `&` needs integers, found float
+// error 7: `~` needs an integer, found bool
+// error 9: `<<=` needs an integer, found float
+main() {
+    let x = 1.5
+    let a = x & 1
+    let b = ~true
+    var f = 2.0
+    f <<= 1
+}

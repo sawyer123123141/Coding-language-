@@ -160,6 +160,11 @@ pub enum AssignOp {
     Mul,
     Div,
     Rem,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
 }
 
 #[derive(Clone, Debug)]
@@ -229,6 +234,8 @@ pub struct Arg {
 pub enum UnaryOp {
     Neg,
     Not,
+    /// `~x`: every bit flipped.
+    BitNot,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -246,6 +253,11 @@ pub enum BinaryOp {
     Ge,
     And,
     Or,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
 }
 
 impl BinaryOp {
@@ -264,11 +276,21 @@ impl BinaryOp {
             BinaryOp::Ge => ">=",
             BinaryOp::And => "and",
             BinaryOp::Or => "or",
+            BinaryOp::BitAnd => "&",
+            BinaryOp::BitOr => "|",
+            BinaryOp::BitXor => "^",
+            BinaryOp::Shl => "<<",
+            BinaryOp::Shr => ">>",
         }
     }
 
     pub fn is_comparison(self) -> bool {
         matches!(self, BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Gt | BinaryOp::Le | BinaryOp::Ge)
+    }
+
+    /// `& | ^ << >>`: integers only.
+    pub fn is_bitwise(self) -> bool {
+        matches!(self, BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor | BinaryOp::Shl | BinaryOp::Shr)
     }
 }
 
@@ -281,6 +303,11 @@ impl AssignOp {
             AssignOp::Mul => "*=",
             AssignOp::Div => "/=",
             AssignOp::Rem => "%=",
+            AssignOp::BitAnd => "&=",
+            AssignOp::BitOr => "|=",
+            AssignOp::BitXor => "^=",
+            AssignOp::Shl => "<<=",
+            AssignOp::Shr => ">>=",
         }
     }
 
@@ -293,6 +320,11 @@ impl AssignOp {
             AssignOp::Mul => Some(BinaryOp::Mul),
             AssignOp::Div => Some(BinaryOp::Div),
             AssignOp::Rem => Some(BinaryOp::Rem),
+            AssignOp::BitAnd => Some(BinaryOp::BitAnd),
+            AssignOp::BitOr => Some(BinaryOp::BitOr),
+            AssignOp::BitXor => Some(BinaryOp::BitXor),
+            AssignOp::Shl => Some(BinaryOp::Shl),
+            AssignOp::Shr => Some(BinaryOp::Shr),
         }
     }
 }

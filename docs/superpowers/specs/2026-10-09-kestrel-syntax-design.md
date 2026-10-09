@@ -214,7 +214,7 @@ use {
 | `ivec2 ivec3 ivec4` | int vectors (voxel coordinates) |
 | `[T]` | array of `T`, fixed length once created (fast, arena/SIMD friendly) |
 | `list[T]` | growable list |
-| `map[K, V]` | hash map |
+| `map[K, V]` | hash map: `m[k] = v`; `m[k]` is a `V?` (so `let v = m[k] else { ... }`); `m.has(k)`, `m.remove(k)`, `m.len`, `for k, v in m` (decided 2026-10-10) |
 | `T?` | a `T` or `none` |
 | `Arena` | a memory bucket |
 
@@ -232,10 +232,14 @@ use {
 
 ## Expressions
 
-- **Operators**, highest to lowest precedence: unary `-` and `not`;
-  `* / %`; `+ -`; `== != < > <= >=`; `and`; `or`. Comparisons don't
-  chain. Logic is words only: `&&`, `||` and `!` don't exist (`!=`
-  stays).
+- **Operators**, highest to lowest precedence: unary `-`, `not` and
+  `~`; `* / %`; `+ -`; `<< >>`; `&`; `^`; `|`; `== != < > <= >=`;
+  `and`; `or`. Comparisons don't chain. Logic is words only: `&&`,
+  `||` and `!` don't exist (`!=` stays). Bit operators are symbols, as
+  in GDScript, and work on integers (decided 2026-10-10): `& | ^` and
+  `~x`, shifts `<<` and `>>` (arithmetic for signed types). A shift by
+  a negative amount or by the type's width or more panics when checks
+  are on. Compound forms: `&= |= ^= <<= >>=`.
 - **Calls:** `f(a, b)`. Any argument may be labelled with its
   parameter name: `f(a, seed: 1337)`. Labelled arguments come after
   positional ones.
@@ -373,8 +377,8 @@ pattern   := IDENT IDENT? | 'else'
 ## Out of scope (later specs)
 
 User-defined generic types/functions, interfaces, closures/lambdas,
-string operations, error types beyond `?`, fixed-size arrays, bitwise
-operators, C FFI declarations, GPU/shader code.
+string operations, error types beyond `?`, fixed-size arrays,
+C FFI declarations, GPU/shader code.
 
 ## Resolved in review
 

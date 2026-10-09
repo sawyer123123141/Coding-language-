@@ -2,7 +2,7 @@ use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{types, InstBuilder, TrapCode, Value};
 use cranelift_module::Module;
 use kestrel_kir::{BinOp, KTy};
-use kestrel_runtime::{PANIC_NARROW_INT, PANIC_NARROW_U8, PANIC_OVERFLOW};
+use kestrel_runtime::{PANIC_NARROW_INT, PANIC_NARROW_U8, PANIC_OVERFLOW, PANIC_SHIFT};
 
 use super::{cl_type, FuncLowerer};
 
@@ -48,7 +48,27 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         match op {
             BinOp::Add | BinOp::Sub | BinOp::Mul => self.int_arith(op, a, b, t, line),
             BinOp::Div | BinOp::Rem => self.int_div(op, a, b, t, line, const_divisor),
+            BinOp::BitAnd => self.b.ins().band(a, b),
+            BinOp::BitOr => self.b.ins().bor(a, b),
+            BinOp::BitXor => self.b.ins().bxor(a, b),
+            BinOp::Shl | BinOp::Shr => self.shift(op, a, b, t, line),
             _ => unreachable!("comparisons handled above"),
+        }
+    }
+
+    /// `a << b` / `a >> b` (arithmetic for signed types). With checks on, an
+    /// amount that's negative or at least the width panics; otherwise the
+    /// machine masks it.
+    fn shift(&mut self, op: BinOp, a: Value, b: Value, t: KTy, line: u32) -> Value {
+        if self.shared.opts.checked_arith {
+            // Unsigned compare: a negative amount looks huge.
+            let bad = self.b.ins().icmp_imm(IntCC::UnsignedGreaterThanOrEqual, b, bits(t) as i64);
+            self.panic_if(bad, PANIC_SHIFT, line);
+        }
+        match (op, t.is_signed()) {
+            (BinOp::Shl, _) => self.b.ins().ishl(a, b),
+            (_, true) => self.b.ins().sshr(a, b),
+            _ => self.b.ins().ushr(a, b),
         }
     }
 

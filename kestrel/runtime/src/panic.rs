@@ -3,6 +3,8 @@ pub const PANIC_DIV_ZERO: i32 = 2;
 /// A narrowing conversion (`int(x)`, `u8(x)`) got a value the target can't hold.
 pub const PANIC_NARROW_INT: i32 = 3;
 pub const PANIC_NARROW_U8: i32 = 4;
+/// `x << n` / `x >> n` with `n` negative or at least the type's width.
+pub const PANIC_SHIFT: i32 = 5;
 
 /// Flushes output, reports `msg` and exits with code 101.
 pub(crate) fn fail(msg: &str) -> ! {
@@ -23,6 +25,7 @@ pub extern "C" fn kestrel_rt_panic(kind: i32, line: i32) -> ! {
         PANIC_DIV_ZERO => "division by zero",
         PANIC_NARROW_INT => "value doesn't fit in int",
         PANIC_NARROW_U8 => "value doesn't fit in u8",
+        PANIC_SHIFT => "shift amount out of range",
         _ => "runtime error",
     };
     fail(&format!("{what} on line {line}"));

@@ -152,3 +152,15 @@ fn interpolated_strings_keep_code_and_its_offset() {
         ]
     );
 }
+
+#[test]
+fn bit_operators() {
+    assert_eq!(
+        toks("& | ^ ~ << >> &= |= ^= <<= >>= < <="),
+        vec![
+            Tok::Amp, Tok::Pipe, Tok::Caret, Tok::Tilde, Tok::Shl, Tok::Shr, Tok::AmpEq, Tok::PipeEq,
+            Tok::CaretEq, Tok::ShlEq, Tok::ShrEq, Tok::Lt, Tok::Le, Tok::Eof,
+        ]
+    );
+    assert_eq!(errors("a && b"), vec!["Kestrel uses `and`, not `&&`"]);
+}

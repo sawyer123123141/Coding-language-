@@ -17,6 +17,7 @@ pub enum Tok {
     // operators
     Plus, Minus, Star, Slash, Percent, Assign, EqEq, NotEq, Lt, Gt, Le, Ge,
     PlusEq, MinusEq, StarEq, SlashEq, PercentEq,
+    Amp, Pipe, Caret, Tilde, Shl, Shr, AmpEq, PipeEq, CaretEq, ShlEq, ShrEq,
     Eof,
 }
 
@@ -74,7 +75,8 @@ impl Tok {
             self,
             Plus | Minus | Star | Slash | Percent | Assign | EqEq | NotEq | Lt | Gt | Le | Ge
                 | PlusEq | MinusEq | StarEq | SlashEq | PercentEq | And | Or | Comma | Arrow
-                | Dot | LBrace
+                | Dot | LBrace | Amp | Pipe | Caret | Tilde | Shl | Shr | AmpEq | PipeEq | CaretEq
+                | ShlEq | ShrEq
         )
     }
 
@@ -107,6 +109,8 @@ impl Tok {
             Slash => "/", Percent => "%", Assign => "=", EqEq => "==", NotEq => "!=",
             Lt => "<", Gt => ">", Le => "<=", Ge => ">=", PlusEq => "+=", MinusEq => "-=",
             StarEq => "*=", SlashEq => "/=", PercentEq => "%=",
+            Amp => "&", Pipe => "|", Caret => "^", Tilde => "~", Shl => "<<", Shr => ">>",
+            AmpEq => "&=", PipeEq => "|=", CaretEq => "^=", ShlEq => "<<=", ShrEq => ">>=",
             Ident(_) | Int(_) | Float(_) | Str(_) | StrParts(_) | Newline | Eof => "",
         }
     }
