@@ -1,0 +1,358 @@
+# Kestrel Syntax Redesign
+
+Date: 2026-10-09. Status: approved in brainstorm, awaiting spec review.
+
+Sub-project 1 of 5 in the Kestrel redesign. Defines what Kestrel source
+looks like. Semantics beyond what syntax needs (type checker, IR,
+codegen) belong to sub-project 2.
+
+## Context
+
+Decisions from the redesign brainstorm that shape this spec:
+
+- **Target:** games, especially voxel/simulation games with heavy
+  number crunching. The language thesis: purity proofs give safe,
+  automatic parallelism (`par for`) and SIMD.
+- **Memory model:** plain values + arenas. No garbage collector, no
+  borrow checker.
+- **No classes / no inheritance.** Structs and enums with methods,
+  `match` for per-kind behaviour. Interfaces may come later.
+- **One implementation.** `kestrel.js` and the separate
+  `jit_codegen.rs` are deleted in sub-project 2; one Rust compiler with
+  one Cranelift codegen serves JIT (dev) and AOT (exe).
+- **Feel:** distinct from Rust; readable by someone coming from
+  GDScript.
+
+Sub-project order: 1 syntax (this) -> 2 core rebuild -> 3 parallelism
+v2 (chunked `par for` + SIMD) -> 4 game shell (C FFI, window, input)
+-> 5 release speed (LLVM backend, precompiled runtime).
+
+## Example
+
+```
+use { noise2 from math }
+
+let SIZE = 32
+
+enum Block {
+    Air
+    Dirt
+    Stone { hardness: u8 }
+
+    pure is_solid(self) -> bool {
+        match self {
+            Air  { false }
+            else { true }
+        }
+    }
+}
+
+struct Chunk {
+    x: int
+    z: int
+    mem: Arena = Arena()
+    heights: [int] = []
+
+    generate(var self, seed: int) {
+        in self.mem {
+            self.heights = array[int](SIZE * SIZE)
+        }
+        for i from 0 to SIZE * SIZE {
+            let wx = self.x * SIZE + i % SIZE
+            let wz = self.z * SIZE + i / SIZE
+            self.heights[i] = height(wx, wz, seed)
+        }
+    }
+}
+
+pure height(x: int, z: int, seed: int) -> int {
+    let n = noise2(vec2(x, z) * 0.01, seed)
+    if n > 0.5 { int(n * 64) } else { int(n * 32) }
+}
+
+pure block_at(y: int, ground: int) -> Block {
+    if y > ground          { Block.Air }
+    else if y > ground - 3 { Block.Dirt }
+    else                   { Block.Stone(hardness: 3) }
+}
+
+main() {
+    var world = list[Chunk]()
+    for cx from 0 to 16 {
+        for cz from 0 to 16 {
+            world.add(Chunk(x: cx, z: cz))
+        }
+    }
+
+    par for chunk in world {
+        chunk.generate(seed: 1337)
+    }
+
+    arena {
+        var tris = list[vec3]()
+        for chunk in world { mesh(chunk, tris) }
+        print("triangles: {tris.len / 3}")
+    }
+}
+```
+
+## Lexical rules
+
+- **Comments:** `//` to end of line. No block comments.
+- **Statement ends:** a newline ends a statement. No semicolons
+  required; `;` is allowed as a separator between statements on one
+  line.
+- **Line continuation:** a newline does *not* end a statement when
+  inside an unclosed `(` or `[`, when the line ends with a binary
+  operator or `,`, or when the next line starts with `else` or `.`.
+- **Strings:** `"..."`, interpolation with `{expr}`, escapes `\n \t \"
+  \\ \{ \}`.
+- **Numbers:** `42`, `3.14`, `1_000_000`, `0xFF`. An integer literal is
+  `int` unless context needs another integer type; a literal with `.`
+  is `float` unless context needs `f64`.
+
+## Declarations
+
+### Functions
+
+```
+[pub] [pure] name(params) [-> Type] { body }
+```
+
+- No `fn` keyword. Only declarations appear at top level and in
+  struct/enum bodies, so a bare `name(` there is unambiguous.
+- `pure` marks a function the compiler verifies has no effects (no I/O,
+  no writes to anything but its own locals, calls only pure functions).
+- Parameters: `name: Type`. **Read-only by default.**
+- `var name: Type` parameter: the function may change the caller's
+  value, and the change is visible to the caller (by reference). A
+  `var` parameter has no other meaning — there are no "mutable local
+  copy" parameters.
+- Program entry point: `main()`.
+
+### Methods
+
+Declared inside a `struct` or `enum` body. First parameter is `self`
+(read-only) or `var self` (changes the original). Called with dot
+syntax: `chunk.generate(seed: 1337)`.
+
+### Structs
+
+```
+[pub] struct Name {
+    field: Type [= default]
+    ...
+    methods...
+}
+```
+
+Fields one per line, no commas. A field with a default may be omitted
+at construction.
+
+### Enums
+
+```
+[pub] enum Name {
+    Variant
+    Variant { field: Type, ... }
+    ...
+    methods...
+}
+```
+
+Variants without data, or with named fields. Construct with the type
+prefix: `Block.Air`, `Block.Stone(hardness: 3)`.
+
+### Variables and constants
+
+- `let x = value` — cannot change after creation.
+- `var x = value` — can change.
+- Optional type: `let x: float = 1`.
+- **Block scoped:** visible from declaration to the end of the
+  enclosing `{ }`.
+- **No shadowing:** declaring a name already visible in an enclosing
+  scope is an error.
+- Top-level `let` is a module constant. Top-level `var` is a global;
+  touching it is an effect, so `pure` functions can't.
+
+### Imports and visibility
+
+Unchanged from the existing modules/visibility designs:
+`use { a, b from module }`, `use module` (then `module.f()`), `pub`
+marks a function/struct/enum importable.
+
+## Types
+
+| Spelling | Meaning |
+|---|---|
+| `int` | 32-bit signed integer |
+| `float` | 32-bit float |
+| `bool` | `true` / `false` |
+| `i8 i16 i64 u8 u16 u32 u64` | sized integers |
+| `f64` | 64-bit float |
+| `string` | text |
+| `vec2 vec3 vec4` | float vectors, SIMD-backed |
+| `ivec2 ivec3 ivec4` | int vectors (voxel coordinates) |
+| `[T]` | array of `T` (length known at runtime) |
+| `list[T]` | growable list |
+| `map[K, V]` | hash map |
+| `T?` | a `T` or `none` |
+| `Arena` | a memory bucket |
+
+- **Type parameters use square brackets:** `list[vec3]`, `map[string,
+  int]`.
+- **Creating generic values:** `list[vec3]()`, `array[int](n)`, or
+  annotate and use a literal: `var tris: list[vec3] = []`.
+- **Vectors:** `vec3(1, 2, 3)`, operators `+ - * /` component-wise and
+  with scalars, swizzles `v.xz`, `v.zyx`.
+- **Conversions:** integer -> float and narrower -> wider integer are
+  implicit. Float -> integer and wider -> narrower require an explicit
+  call: `int(x)`, `u8(n)`.
+- **Overflow:** debug builds trap on integer overflow; release builds
+  wrap.
+
+## Expressions
+
+- **Operators**, highest to lowest precedence: unary `- !`; `* / %`;
+  `+ -`; `== != < > <= >=`; `&&`; `||`. Comparisons don't chain.
+- **Calls:** `f(a, b)`. Any argument may be labelled with its
+  parameter name: `f(a, seed: 1337)`. Labelled arguments come after
+  positional ones.
+- **Construction:** `Chunk(x: 1, z: 2)` or positional in field order
+  `vec3(1, 2, 3)`. Labels are required once any field is skipped.
+- **Blocks are expressions:** the last expression in a block is its
+  value. `return` is only for early exit.
+- **`if` is an expression:** `let n = if a { 1 } else { 2 }`.
+- **Indexing:** `a[i]`. **Field access:** `p.x`.
+- **Array literal:** `[1, 2, 3]`. Empty: `[]`.
+- **Interpolation:** `"hp = {hp}"`.
+
+## Statements
+
+- Assignment: `x = v`, `p.x = v`, `a[i] = v`, compound `+= -= *= /=
+  %=`. Target must be a `var`, a `var` parameter, or reached through
+  `var self`.
+- `print(...)` is an ordinary (effectful) function, usable anywhere.
+
+## Control flow
+
+```
+if cond { ... } else if cond { ... } else { ... }
+while cond { ... }
+for i from 0 to n { ... }      // n exclusive, step +1
+for v in xs { ... }            // each element
+par for v in xs { ... }        // parallel, see below
+break
+continue
+return [value]
+```
+
+No parentheses around conditions.
+
+### `match`
+
+```
+match value {
+    Variant          { ... }
+    Variant binding  { ... }   // binding names the variant's fields: binding.hp
+    else             { ... }   // catch-all
+}
+```
+
+- `match` is an expression.
+- Every variant must be handled or `else` present — adding a variant
+  makes the compiler list every `match` that misses it.
+- Inside `match`, variants are written bare (`Air`), since the type is
+  known.
+- A binding refers to the payload in place; it is changeable when the
+  matched value is (`var self`, a `var`).
+
+### `par for`
+
+```
+par for chunk in world {
+    chunk.generate(seed: 1337)
+}
+```
+
+Runs iterations in parallel across CPU cores. The body may only:
+
+- call `pure` functions,
+- call `var self` methods on the loop's own item, when those methods
+  change nothing but that item,
+- change the loop's own item and its own locals.
+
+Anything else is a compile error naming the offending line, e.g.
+"line 3 writes to `world.score`, which is shared." Work splitting
+(chunking) and SIMD are sub-project 3.
+
+## Memory
+
+```
+arena {                      // temporary
+    var tris = list[vec3]()
+    ...
+}                            // everything made inside is freed here
+
+in chunk.mem {               // owned: lives as long as chunk.mem
+    chunk.voxels = array[u8](32768)
+}
+```
+
+- Allocations go to the **current arena**: the innermost `arena { }`
+  or `in x { }` block, including inside functions called from it.
+- Outside any block, allocations go to the **program arena**, freed at
+  exit.
+- **Escape check:** a value allocated in an arena may not be stored
+  anywhere that outlives that arena. Error names both lifetimes and
+  suggests a copy: `chunk.mesh = tris.copy_to(chunk.mem)`.
+
+## Optional values
+
+```
+let tex = load("grass.png") else { return }
+```
+
+- `T?` holds a `T` or `none`.
+- `let x = expr else { ... }` unwraps; the `else` block must exit
+  (`return`, `break`, `continue`).
+- Using a `T?` as a `T` without unwrapping is a compile error.
+
+## Grammar sketch
+
+```
+file      := (use | decl)*
+decl      := 'pub'? (func | struct | enum | 'let' binding | 'var' binding)
+func      := 'pure'? IDENT '(' params? ')' ('->' type)? block
+params    := param (',' param)*
+param     := 'var'? (IDENT ':' type | 'self')
+struct    := 'struct' IDENT '{' (field | func)* '}'
+field     := IDENT ':' type ('=' expr)?
+enum      := 'enum' IDENT '{' (variant | func)* '}'
+variant   := IDENT ('{' IDENT ':' type (',' IDENT ':' type)* '}')?
+type      := IDENT ('[' type (',' type)* ']')? '?'? | '[' type ']' '?'?
+block     := '{' stmt* '}'
+stmt      := 'let' binding | 'var' binding | assign | if | while | for
+           | 'par' for | match | arena | in | 'break' | 'continue'
+           | 'return' expr? | expr
+binding   := IDENT (':' type)? '=' expr ('else' block)?
+for       := 'for' IDENT ('from' expr 'to' expr | 'in' expr) block
+arena     := 'arena' block
+in        := 'in' expr block
+match     := 'match' expr '{' (pattern block)* '}'
+pattern   := IDENT IDENT? | 'else'
+```
+
+## Out of scope (later specs)
+
+User-defined generic types/functions, interfaces, closures/lambdas,
+string operations, error types beyond `?`, fixed-size arrays, bitwise
+operators, C FFI declarations, GPU/shader code.
+
+## Open questions (defaults chosen, revisit if they feel wrong)
+
+1. **Call-site marker for `var` arguments.** Default: none —
+   `mesh(chunk, tris)`. Alternative: `mesh(chunk, var tris)` so readers
+   see what changes.
+2. **`&& || !` vs `and or not`.** Default: symbols, as today.
+3. **Index + value loop:** `for i, v in xs`. Default: not included yet.
