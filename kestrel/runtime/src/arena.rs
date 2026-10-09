@@ -93,6 +93,11 @@ pub extern "C" fn kestrel_rt_current_arena() -> *mut Arena {
     })
 }
 
+/// The program arena, which lives until the program ends.
+fn program_arena() -> *mut Arena {
+    STACK.with_borrow_mut(|s| &mut **s.program.get_or_insert_with(Box::default) as *mut Arena)
+}
+
 /// A new, empty arena (`Arena()`). It allocates nothing until first used.
 #[no_mangle]
 pub extern "C" fn kestrel_rt_arena_new() -> *mut Arena {
@@ -162,7 +167,8 @@ pub struct List {
     pub ptr: *mut u8,
     pub len: i64,
     pub cap: i64,
-    /// Where the list grows; null (a zero-filled list) means the current arena.
+    /// Where the list grows. Null (a zero-filled list) means the program
+    /// arena: nothing says how long the list lives, and that one outlives all.
     pub arena: *mut Arena,
 }
 
@@ -176,7 +182,7 @@ pub unsafe extern "C" fn kestrel_rt_list_grow(list: *mut List, elem_size: i64, a
     // SAFETY: the caller guarantees `list`.
     let l = unsafe { &mut *list };
     if l.arena.is_null() {
-        l.arena = kestrel_rt_current_arena();
+        l.arena = program_arena();
     }
     let cap = (l.cap * 2).max(4);
     let size = cap.checked_mul(elem_size).and_then(|s| usize::try_from(s).ok()).unwrap_or_else(|| too_large());
@@ -228,9 +234,14 @@ mod tests {
         let mut l = List { ptr: std::ptr::null_mut(), len: 0, cap: 0, arena: std::ptr::null_mut() };
         // SAFETY: `l` is a valid list of i32s throughout.
         unsafe {
+            // Growing inside a temporary arena still uses the program arena.
+            let temp = kestrel_rt_arena_new();
+            kestrel_rt_arena_push(temp);
             kestrel_rt_list_grow(&mut l, 4, 4);
+            kestrel_rt_arena_pop();
+            kestrel_rt_arena_free(temp);
             assert_eq!(l.cap, 4);
-            assert!(!l.arena.is_null());
+            assert_eq!(l.arena, program_arena());
             for i in 0..4 {
                 *(l.ptr as *mut i32).add(i) = i as i32 * 10;
             }

@@ -134,7 +134,8 @@ impl<'a> BodyChecker<'a> {
         let Some(root) = self.place_root(target) else { return };
         let path = self.path_key(target);
         let info = self.t.local(root);
-        let name = info.name.clone();
+        // Name the variable as written (a loop element, not its collection).
+        let name = path.as_ref().map_or(info.name.clone(), |p| self.t.local(p.root).name.clone());
         // Parameters outlive the function, so `None`.
         let decl = if info.is_param { None } else { self.local_ctx.get(&root).map(|&(c, _)| c) };
         for i in (0..self.ctxs.len()).filter(|&i| r & bit(i) != 0) {

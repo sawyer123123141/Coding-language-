@@ -28,7 +28,7 @@
   - `xs[i]` is a place, so it can be assigned, passed as `var`, used as a receiver, and projected (`xs[i].hp -= 1`).
 - **`.len`** is `int`. Lengths are stored as i64, and reading one that exceeds `int` panics (narrowing check).
   - Ruling: `int` is used, not `i64` — `for i from 0 to xs.len` then `xs[i] = i` must work without conversions — cost if wrong: a later `len64`.
-- **`.add(v)`** works only on lists, and the receiver must be changeable (like `var self`). `v` is evaluated (and copied if needed) before the list grows. Growth doubles the capacity (minimum 4) in the list's own arena; a null arena (a zero-filled list) means the current arena.
+- **`.add(v)`** works only on lists, and the receiver must be changeable (like `var self`). `v` is evaluated (and copied if needed) before the list grows. Growth doubles the capacity (minimum 4) in the list's own arena; a null arena (a zero-filled list) means the program arena (changed in 2c-ii: the current one could be a temporary that dies first).
 - **`for i, v in xs`:**
   - `i: int`. `v` aliases `xs[i]` (`LocalInfo::alias` to the root), and can be changed when the root can.
   - A non-place `xs` is stored in a temporary first.
