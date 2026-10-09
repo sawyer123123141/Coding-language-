@@ -36,26 +36,22 @@ impl<'a> BodyChecker<'a> {
         let names: Vec<&str> = info.fields.iter().map(|f| f.name.as_str()).collect();
         let (slots, bound) = self.bind_args(&info.name, &names, args, "field");
         let mut ok = bound;
-        for (fi, slot) in slots.iter().enumerate() {
-            match *slot {
-                Some(ai) => {
-                    let a = &args[ai];
-                    if a.is_var {
-                        self.error(a.span, "constructor arguments can't be `var`");
-                    }
-                    self.check_value(&a.value, Some(info.fields[fi].ty));
-                    self.consume(&a.value);
-                }
-                None if bound && !info.fields[fi].has_default => {
-                    self.error(e.span, format!("missing field `{}` for `{}`", info.fields[fi].name, info.name));
-                    ok = false;
-                }
-                None => {}
-            }
-        }
+        // In source order, the order they run in: a move must come after every read.
         for (ai, a) in args.iter().enumerate() {
-            if !slots.contains(&Some(ai)) {
+            let Some(fi) = slots.iter().position(|s| *s == Some(ai)) else {
                 self.check_expr(&a.value, None);
+                continue;
+            };
+            if a.is_var {
+                self.error(a.span, "constructor arguments can't be `var`");
+            }
+            self.check_value(&a.value, Some(info.fields[fi].ty));
+            self.consume(&a.value);
+        }
+        for (fi, slot) in slots.iter().enumerate() {
+            if slot.is_none() && bound && !info.fields[fi].has_default {
+                self.error(e.span, format!("missing field `{}` for `{}`", info.fields[fi].name, info.name));
+                ok = false;
             }
         }
         if ok {
@@ -141,12 +137,18 @@ impl<'a> BodyChecker<'a> {
         self.t.res.insert(e.id, Res::Fn(fid));
         self.check_callee_purity(*name_span, fid);
         let mut var_roots = Vec::new();
+        let by_pointer = self.t.func(fid).params[0].is_var || receiver_ty.is_aggregate();
         if self.t.func(fid).params[0].is_var {
             if let Some(root) = self.receiver_root(receiver, name) {
                 var_roots.push((root, None));
             }
         }
-        self.check_args(e, fid, args, 1, var_roots)
+        let ret = self.check_args(e, fid, args, 1, var_roots);
+        if by_pointer {
+            let later: Vec<&Expr> = args.iter().map(|a| &a.value).collect();
+            self.check_changed_later(&[receiver], &later);
+        }
+        ret
     }
 
     /// `v.xz`, `v.zyx`: 2 or 3 components of a vector, as a new vector.
@@ -169,6 +171,7 @@ impl<'a> BodyChecker<'a> {
             self.error(receiver.span, msg);
             return None;
         };
+        self.check_not_matched(receiver);
         let name = self.t.local(root).name.clone();
         let msg = match self.immutable(root) {
             None => {

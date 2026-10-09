@@ -1,0 +1,95 @@
+// expect: 42 43
+// expect: 100
+// expect: 4
+// expect: ["", ""]
+// expect: [1, 2, 3] [100, 2, 3]
+// expect: [10, 21, 30, 40] 1
+// expect: eval 1
+// expect: eval 2
+// expect: [0, 2, 0]
+// expect: eval 5
+// expect: eval 0
+// Regressions from the 2b-2c review: each line is one fixed bug.
+struct Chunk {
+    x: int = 0
+    mem: Arena = Arena()
+    heights: [int] = []
+}
+
+struct World {
+    mem: Arena = Arena()
+    kids: list[Chunk] = []
+}
+
+struct Bag {
+    items: [int]
+}
+
+// Returning a field of an owning local copies it out before the local's arena is freed.
+make() -> [int] {
+    var c = Chunk()
+    in c.mem { c.heights = array[int](2) }
+    c.heights[0] = 42
+    c.heights[1] = 43
+    return c.heights
+}
+
+// An `Arena` local or `var` parameter works with `in`.
+fill(var a: Arena) -> int {
+    var n = 0
+    in a {
+        let xs = array[int](4)
+        n = xs.len
+    }
+    n
+}
+
+noisy(n: int) -> int {
+    print("eval", n)
+    n
+}
+
+next(var i: int) -> int {
+    i += 1
+    i
+}
+
+set_rev(y: int, var x: int) {
+    x = y
+}
+
+main() {
+    let h = make()
+    arena {
+        var junk = array[int](4)
+        junk[0] = 1
+    }
+    print(h[0], h[1])
+    // A struct's own arena is dropped after the fields living in it.
+    var w = World()
+    in w.mem { w.kids = list[Chunk]() }
+    for i from 0 to 100 { w.kids.add(Chunk(x: i)) }
+    print(w.kids.len)
+    var a = Arena()
+    print(fill(var a))
+    print(array[string](2))
+    // A field of an `if` copies like any other read.
+    var b1 = Bag([1, 2, 3])
+    var b2 = Bag([4, 5, 6])
+    let c = true
+    var y = (if c { b1 } else { b2 }).items
+    y[0] = 100
+    print(b1.items, y)
+    // A compound assignment runs its index once.
+    var i = 0
+    var xs = [10, 20, 30, 40]
+    xs[next(var i)] += 1
+    print(xs, i)
+    // Labelled arguments run in source order, `var` places included.
+    var zs = [0, 0, 0]
+    set_rev(x: var zs[noisy(1)], y: noisy(2))
+    print(zs)
+    // Assignments compute the value, then the place.
+    var cs = [Chunk(x: 0), Chunk(x: 1)]
+    cs[noisy(0)] = Chunk(x: noisy(5))
+}

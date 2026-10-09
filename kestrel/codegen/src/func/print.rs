@@ -55,7 +55,6 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     fn print_scalar(&mut self, v: Value, ty: KTy) -> Result<(), String> {
         let rt = self.shared.rt;
         match ty {
-            KTy::Arena => return self.print_text("Arena"),
             KTy::Bool => self.call_id(rt.print_bool, &[v]),
             KTy::U8 => {
                 let w = self.b.ins().uextend(types::I64, v);
@@ -68,7 +67,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             KTy::I64 => self.call_id(rt.print_i64, &[v]),
             KTy::F32 => self.call_id(rt.print_f32, &[v]),
             KTy::F64 => self.call_id(rt.print_f64, &[v]),
-            KTy::Struct(_) | KTy::Enum(_) | KTy::Str | KTy::Array(_) | KTy::List(_) => {
+            KTy::Struct(_) | KTy::Enum(_) | KTy::Str | KTy::Array(_) | KTy::List(_) | KTy::Arena => {
                 unreachable!("aggregates are printed from memory")
             }
         };
@@ -80,6 +79,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     fn print_aggregate(&mut self, addr: Value, offset: i32, ty: KTy) -> Result<(), String> {
         let kir = self.shared.kir;
         match ty {
+            KTy::Arena => self.print_text("Arena"),
             KTy::Array(_) | KTy::List(_) => {
                 let at = self.offset(addr, offset);
                 let id = self.shared.funcs[kir.print_fns[&ty].0 as usize];

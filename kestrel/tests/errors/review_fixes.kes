@@ -1,0 +1,91 @@
+// error 39: this memory is freed at the end of the `arena { }` block, but `kept` lives longer
+// error 44: this memory is freed at the end of the `arena { }` block, but `outer` lives longer
+// error 48: this memory is in the caller's current arena, which may not live as long as `b`
+// error 55: this memory is freed at the end of the `arena { }` block, but `h` lives longer
+// error 62: can't change `e` here: this `match` arm's `a` reads from it
+// error 71: `c` was moved earlier, so it can't be used here
+// error 75: `x` is passed here, but a later argument changes it
+// error 78: this line has no effect; did you mean to continue the line above?
+// error 80: only variables, fields and elements can be assigned to
+// error 82: `Z` needs at least one variant
+// error 86: `in` allocates into this arena, so `c` must be changeable
+struct Chunk {
+    x: int = 0
+    mem: Arena = Arena()
+    heights: [int] = [1, 2, 3]
+}
+struct Bag {
+    items: list[int] = []
+}
+struct Holder {
+    items: [Chunk] = []
+    mem: Arena = Arena()
+}
+struct Wrapper {
+    a: int
+    b: Chunk
+}
+enum E {
+    A { xs: [int] }
+    B { p: i64 }
+}
+bump(var c: Chunk) -> int {
+    c.x += 1
+    c.x
+}
+show(c: Chunk, k: int) -> int { c.x + k }
+defaults() {
+    var kept = Chunk()
+    arena { kept = Chunk(x: 1) }
+}
+lists() {
+    var outer: list[int] = []
+    arena {
+        outer = []
+    }
+}
+reset(var b: Bag) {
+    b = Bag()
+}
+elements() {
+    var h = Holder()
+    arena {
+        var c = Chunk(x: 1)
+        in h.mem {
+            h.items = [c]
+        }
+    }
+}
+confuse(var e: E) -> int {
+    match e {
+        A a {
+            e = E.B(p: 16)
+            return a.xs[0]
+        }
+        else { }
+    }
+    0
+}
+order() {
+    let c = Chunk()
+    let w = Wrapper(b: c, a: c.x)
+}
+later() {
+    var x = Chunk()
+    let n = show(x, bump(var x))
+}
+discard() {
+    E.B(p: 1)
+    var xs = [1]
+    xs.len = 5
+}
+enum Z {
+}
+pure peek(c: Chunk) -> int {
+    var n = 0
+    in c.mem {
+        n = 1
+    }
+    n
+}
+main() {}

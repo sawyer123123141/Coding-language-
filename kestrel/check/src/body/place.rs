@@ -25,6 +25,8 @@ impl<'a> BodyChecker<'a> {
             },
             // A swizzle (`v.xz`) builds a new vector; it isn't a place.
             ExprKind::Field { .. } if self.t.swizzles.contains_key(&e.id) => None,
+            // `xs.len` is computed, not stored.
+            ExprKind::Field { base, .. } if matches!(self.t.ty(base.id), Ty::Array(_) | Ty::List(_)) => None,
             ExprKind::Field { base, .. } | ExprKind::Index { base, .. } => self.place_root(base),
             _ => None,
         }
@@ -68,6 +70,7 @@ impl<'a> BodyChecker<'a> {
             self.check_expr(value, None);
             return;
         };
+        self.check_not_matched(target);
         let name = self.t.local(root).name.clone();
         match self.immutable(root) {
             Some(Immutable::Let) => {

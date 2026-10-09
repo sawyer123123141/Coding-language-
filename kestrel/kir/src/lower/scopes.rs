@@ -133,9 +133,9 @@ impl<'a> FnLowerer<'a> {
     /// `target = value` where the target holds an `Arena`: the old value is
     /// dropped after the new one is computed (it may read the old one).
     pub(crate) fn assign_owning(&mut self, target: &ast::Expr, value: &ast::Expr, out: &mut Vec<Stmt>) {
-        let place = self.place_or_temp(target, out, true);
         let v = self.value(value);
         let v = self.spill(v, out);
+        let place = self.place_or_temp(target, out, true);
         let ty = v.ty;
         out.extend(self.helpers.drop_stmts(place.clone(), ty, self.t));
         out.push(Stmt::Assign(place, v));

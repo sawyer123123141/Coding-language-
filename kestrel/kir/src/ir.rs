@@ -27,7 +27,7 @@ pub enum KTy {
 
 impl KTy {
     pub fn is_aggregate(self) -> bool {
-        matches!(self, KTy::Struct(_) | KTy::Enum(_) | KTy::Str | KTy::Array(_) | KTy::List(_))
+        matches!(self, KTy::Struct(_) | KTy::Enum(_) | KTy::Str | KTy::Array(_) | KTy::List(_) | KTy::Arena)
     }
 
     pub fn is_float(self) -> bool {

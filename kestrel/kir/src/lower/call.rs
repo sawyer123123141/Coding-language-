@@ -67,7 +67,11 @@ impl<'a> FnLowerer<'a> {
         let mut lowered = Vec::with_capacity(params.len());
         if let Some(r) = receiver {
             if params[0].is_var {
-                lowered.push(Arg::Ref(self.place(r).expect("checker requires a place for a `var self` call")));
+                let mut p = self.place(r).expect("checker requires a place for a `var self` call");
+                if !in_order {
+                    self.stabilize(&mut p, &mut pre);
+                }
+                lowered.push(Arg::Ref(p));
             } else {
                 let v = self.expr(r);
                 let v = if in_order { v } else { self.spill(v, &mut pre) };
@@ -75,10 +79,15 @@ impl<'a> FnLowerer<'a> {
             }
         }
         let mut temps: HashMap<usize, Expr> = HashMap::new();
+        let mut refs: HashMap<usize, Place> = HashMap::new();
         if !in_order {
             for (ai, a) in args.iter().enumerate() {
                 let pi = order.iter().position(|&x| x == ai).expect("every argument is bound");
-                if !params[skip + pi].is_var {
+                if params[skip + pi].is_var {
+                    let mut p = self.place(&a.value).expect("checker requires a place for a `var` argument");
+                    self.stabilize(&mut p, &mut pre);
+                    refs.insert(ai, p);
+                } else {
                     let v = self.expr(&a.value);
                     temps.insert(ai, self.spill(v, &mut pre));
                 }
@@ -86,7 +95,9 @@ impl<'a> FnLowerer<'a> {
         }
         for (pi, &ai) in order.iter().enumerate() {
             let value = &args[ai].value;
-            lowered.push(if params[skip + pi].is_var {
+            lowered.push(if let Some(p) = refs.remove(&ai) {
+                Arg::Ref(p)
+            } else if params[skip + pi].is_var {
                 Arg::Ref(self.place(value).expect("checker requires a place for a `var` argument"))
             } else if let Some(v) = temps.remove(&ai) {
                 Arg::Value(v)

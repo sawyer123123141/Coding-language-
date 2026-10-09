@@ -73,14 +73,6 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         Ok(())
     }
 
-    /// Moves a scalar owning value (an `Arena`) out of `place`, nulling it.
-    pub(crate) fn move_scalar(&mut self, place: &Place) -> Result<Value, String> {
-        let v = self.load_place(place)?;
-        let null = self.b.ins().iconst(self.ptr, 0);
-        self.store_place(place, null)?;
-        Ok(v)
-    }
-
     pub(crate) fn arena_stmt(&mut self, s: &kir::Stmt) -> Result<(), String> {
         match s {
             kir::Stmt::PushArena(p) => self.push_arena(p.as_ref())?,

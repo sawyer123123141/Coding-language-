@@ -131,6 +131,8 @@ pub struct FieldInfo {
     pub ty: Ty,
     pub span: Span,
     pub has_default: bool,
+    /// The default allocates (`[1, 2]`, `array[T](n)`, a list).
+    pub default_allocates: bool,
 }
 
 #[derive(Clone, Debug)]

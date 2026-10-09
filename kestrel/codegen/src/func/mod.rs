@@ -28,11 +28,10 @@ pub(crate) fn cl_type(t: KTy) -> Type {
     match t {
         KTy::Bool | KTy::U8 => types::I8,
         KTy::I32 => types::I32,
-        // Pointers are 64-bit on every target Kestrel supports.
-        KTy::I64 | KTy::Arena => types::I64,
+        KTy::I64 => types::I64,
         KTy::F32 => types::F32,
         KTy::F64 => types::F64,
-        KTy::Struct(_) | KTy::Enum(_) | KTy::Str | KTy::Array(_) | KTy::List(_) => {
+        KTy::Struct(_) | KTy::Enum(_) | KTy::Str | KTy::Array(_) | KTy::List(_) | KTy::Arena => {
             unreachable!("aggregates live in memory, not registers")
         }
     }

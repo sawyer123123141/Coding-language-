@@ -3,7 +3,8 @@
 
 use kestrel_syntax::ast;
 
-use super::helpers::has_heap;
+use super::helpers::{has_heap, owning};
+use crate::rename::{rename_stmts, Subst};
 use super::FnLowerer;
 use crate::ir::*;
 
@@ -19,15 +20,21 @@ impl<'a> FnLowerer<'a> {
             return Place::local(tmp);
         };
         if stable {
-            for proj in &mut p.path {
-                if let Proj::Index { at, .. } = proj {
-                    if !matches!(at.kind, ExprKind::Int(_)) {
-                        *at = self.spill(at.clone(), pre);
-                    }
+            self.stabilize(&mut p, pre);
+        }
+        p
+    }
+
+    /// Evaluates `p`'s index expressions now, into temporaries, so using
+    /// `p` again doesn't run them again.
+    pub(crate) fn stabilize(&mut self, p: &mut Place, pre: &mut Vec<Stmt>) {
+        for proj in &mut p.path {
+            if let Proj::Index { at, .. } = proj {
+                if !matches!(at.kind, ExprKind::Int(_)) {
+                    *at = self.spill(at.clone(), pre);
                 }
             }
         }
-        p
     }
 
     /// `base[index]` read as a value.
@@ -83,8 +90,11 @@ impl<'a> FnLowerer<'a> {
         let mut stmts = vec![Stmt::Bind(ptr, known)];
         stmts.extend(self.loop_block(body));
         if self.may_move(&stmts, &list) {
-            self.elems.insert(var, elem);
-            stmts = self.loop_block(body);
+            // Re-index on every use instead: point every use of the pointer at `xs[i]`.
+            stmts.remove(0);
+            let mut subst: Vec<Subst> = (0..self.locals.len() as u32).map(|l| Subst::Local(LocalIdx(l))).collect();
+            subst[ptr.0 as usize] = Subst::Place(elem);
+            rename_stmts(&mut stmts, &subst);
         }
         let len = Expr { kind: ExprKind::Len(list), ty: KTy::I64, line };
         let end = Expr { kind: ExprKind::Cast(Box::new(len)), ty: KTy::I32, line };
@@ -141,10 +151,18 @@ impl<'a> FnLowerer<'a> {
         }
         let Expr { kind, ty, line } = v;
         let kind = match kind {
-            ExprKind::Load(p) if moving && self.locals[p.root.0 as usize].kind != LocalKind::RefParam => ExprKind::Load(p),
-            ExprKind::Load(p) => {
+            // A local that owns an arena may hold memory from it, and is dropped on the way out.
+            ExprKind::Load(p)
+                if moving
+                    && self.locals[p.root.0 as usize].kind != LocalKind::RefParam
+                    && !owning(self.locals[p.root.0 as usize].ty, self.t) =>
+            {
+                ExprKind::Load(p)
+            }
+            // A place, or a field of an `if` / `match` that yields places.
+            kind @ (ExprKind::Load(_) | ExprKind::FieldOf(..)) if !Self::fresh(&kind) => {
                 let tmp = self.temp(ty);
-                let mut stmts = vec![Stmt::Let(tmp, Expr { kind: ExprKind::Load(p), ty, line })];
+                let mut stmts = vec![Stmt::Let(tmp, Expr { kind, ty, line })];
                 stmts.extend(self.helpers.fixup(Place::local(tmp), ty, self.t));
                 ExprKind::Seq(stmts, Box::new(Expr { kind: ExprKind::Load(Place::local(tmp)), ty, line }))
             }
@@ -160,5 +178,14 @@ impl<'a> FnLowerer<'a> {
             other => other,
         };
         Expr { kind, ty, line }
+    }
+
+    /// Whether `kind` builds a new value rather than reading an existing one.
+    fn fresh(kind: &ExprKind) -> bool {
+        match kind {
+            ExprKind::Load(_) => false,
+            ExprKind::FieldOf(base, _) => matches!(base.kind, ExprKind::Call(..) | ExprKind::StructLit(..) | ExprKind::VariantLit(..)),
+            _ => true,
+        }
     }
 }

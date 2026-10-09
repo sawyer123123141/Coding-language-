@@ -173,6 +173,7 @@ Every variable owns its data. `var b = a` copies.
   the value doesn't fit, except under `--release`, which truncates.
 - **`while true` with no `break`** never finishes, so it can end a
   value-returning function.
+- **Assignment order:** the value is computed first, then the place, once.
 
 ### Non-copyable types and drops
 
@@ -225,6 +226,10 @@ Run in order; each collects all its errors before the next starts
    before the call, so `p.add(p.x)` and `bump(var n, n)` are fine. Rooted
    at the variable: `f(var p.x, p)` conflicts. Call-site `var` must match
    the parameter. (Refined 2026-10-10 from "never passed twice".)
+   Arguments run in source order, so one passed by pointer must not be
+   changed by a call or assignment nested in a later argument; and while a
+   `match` arm's binding reads from a place, nothing may change that place
+   except through the binding. (Added 2026-10-10 after review.)
 6. **Arena escape (milestone rules, deliberately conservative):**
    regions are `Program`, `Scoped(block)`, `Owned(path)`, and `Caller`
    (inside a function, the caller's current arena). An allocated value

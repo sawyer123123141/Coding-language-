@@ -48,6 +48,10 @@ pub extern "C" fn kestrel_rt_print_bool(v: i8) {
 /// `ptr` must point to `len` readable bytes (compiled code passes string data).
 #[no_mangle]
 pub unsafe extern "C" fn kestrel_rt_print_str(ptr: *const u8, len: i64) {
+    // A zero-filled string (from `array[string](n)`) is null with length 0.
+    if ptr.is_null() || len <= 0 {
+        return;
+    }
     write_bytes(std::slice::from_raw_parts(ptr, len as usize));
 }
 

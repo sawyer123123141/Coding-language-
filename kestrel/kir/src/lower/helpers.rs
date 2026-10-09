@@ -110,14 +110,19 @@ impl Helpers {
             KTy::Arena => out.push(Stmt::FreeArena(place)),
             KTy::Array(_) | KTy::List(_) => out.push(Stmt::Call(self.drop_fn(ty, t), vec![Arg::Ref(place)])),
             KTy::Struct(s) => {
-                for (i, f) in t.structs[s.0 as usize].fields.iter().enumerate() {
+                // Other fields' memory may live in the struct's own arenas, so those go last.
+                let fields = &t.structs[s.0 as usize].fields;
+                let order = fields.iter().enumerate().filter(|(_, f)| kty(f.ty) != KTy::Arena);
+                for (i, f) in order.chain(fields.iter().enumerate().filter(|(_, f)| kty(f.ty) == KTy::Arena)) {
                     out.extend(self.drop_stmts(with(&place, Proj::Field(i as u32)), kty(f.ty), t));
                 }
             }
             KTy::Enum(e) => {
                 for (v, variant) in t.enums[e.0 as usize].variants.iter().enumerate() {
                     let mut then_body = Vec::new();
-                    for (i, f) in variant.fields.iter().enumerate() {
+                    let fields = variant.fields.iter().enumerate();
+                    let order = fields.clone().filter(|(_, f)| kty(f.ty) != KTy::Arena);
+                    for (i, f) in order.chain(fields.filter(|(_, f)| kty(f.ty) == KTy::Arena)) {
                         then_body.extend(self.drop_stmts(with(&place, Proj::Variant(v as u32, i as u32)), kty(f.ty), t));
                     }
                     if !then_body.is_empty() {

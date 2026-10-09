@@ -163,12 +163,21 @@ impl<'a> FnLowerer<'a> {
                 return self.assign_owning(target, value, out);
             }
             ast::Stmt::Assign { target, op, value, .. } => {
-                let place = self.place(target).expect("checker requires an assignable place");
+                let mut place = self.place(target).expect("checker requires an assignable place");
                 let ty = kty(self.t.ty(target.id));
                 let rhs = self.expr(value);
                 let value = match op.binary() {
                     None => self.owned(rhs, false),
                     Some(bop) => {
+                        // The value first, then the place (read and written), once.
+                        let indexed = place.path.iter().any(|p| matches!(p, Proj::Index { at, .. } if !matches!(at.kind, ExprKind::Int(_))));
+                        let rhs = if indexed {
+                            let rhs = self.spill(rhs, out);
+                            self.stabilize(&mut place, out);
+                            rhs
+                        } else {
+                            rhs
+                        };
                         let line = rhs.line;
                         let cur = Expr { kind: ExprKind::Load(place.clone()), ty, line };
                         let kind = if ty.is_aggregate() {

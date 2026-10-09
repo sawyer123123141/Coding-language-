@@ -37,6 +37,14 @@ impl PathKey {
     }
 }
 
+/// A `match` arm with a binding: the matched place and the binding.
+#[derive(Clone)]
+pub(crate) struct MatchGuard {
+    pub(crate) root: LocalId,
+    pub(crate) path: Option<PathKey>,
+    pub(crate) binding: LocalId,
+}
+
 /// A set of contexts, by index into `BodyChecker::ctxs`.
 fn bit(i: usize) -> u64 {
     1 << i.min(63)
@@ -92,17 +100,31 @@ impl<'a> BodyChecker<'a> {
 
     /// The contexts whose memory the value of `e` points into. A copy of a
     /// place goes to the current arena. With `moving` (a returned value),
-    /// reads of locals aren't copied, so they keep their local's context.
+    /// reads of locals aren't copied, so they keep their local's context,
+    /// unless the local owns an arena: its memory may live in that arena,
+    /// which is dropped on the way out, so it's copied.
     fn region(&self, e: &Expr, moving: bool) -> u64 {
-        if !self.t.has_heap(self.t.ty(e.id)) {
+        let ty = self.t.ty(e.id);
+        if !self.t.has_heap(ty) {
             return 0;
         }
         match &e.kind {
-            ExprKind::ArrayLit(items) if items.is_empty() => 0,
+            // An empty list still remembers the current arena, to grow in.
+            ExprKind::ArrayLit(items) if items.is_empty() => {
+                if matches!(ty, Ty::List(_)) {
+                    self.current()
+                } else {
+                    0
+                }
+            }
+            // Moved elements bring their memory along.
+            ExprKind::ArrayLit(items) => items.iter().fold(self.current(), |r, i| r | self.region(i, moving)),
             ExprKind::Field { .. } if matches!(self.t.res.get(&e.id), Some(Res::Variant(..))) => 0,
             ExprKind::Ident(_) | ExprKind::Field { .. } | ExprKind::Index { .. } => {
-                let local = match (moving || self.t.moves.contains(&e.id), self.place_root(e)) {
-                    (true, Some(root)) if !self.t.local(root).is_param => self.local_ctx.get(&root).map(|&(c, _)| bit(c)),
+                let ctx = |root: LocalId| self.local_ctx.get(&root).map(|&(c, _)| bit(c));
+                let local = match self.place_root(e) {
+                    Some(root) if self.t.moves.contains(&e.id) => ctx(root),
+                    Some(root) if moving && !self.t.local(root).is_param && !self.t.is_owning(self.t.local(root).ty) => ctx(root),
                     _ => None,
                 };
                 // A view (a loop element) may be copied or not; assume either.
@@ -116,7 +138,17 @@ impl<'a> BodyChecker<'a> {
             ExprKind::Call { args, .. } | ExprKind::MethodCall { args, .. }
                 if matches!(self.t.res.get(&e.id), Some(Res::Construct(_) | Res::Variant(..))) =>
             {
-                args.iter().fold(0, |r, a| r | self.region(&a.value, moving))
+                // Defaults like `[1, 2]` or `list[T]()` allocate here too.
+                let defaults = match self.t.res.get(&e.id) {
+                    Some(Res::Construct(sid)) => {
+                        let fields = &self.t.strukt(*sid).fields;
+                        let slots = self.t.ctor_args.get(&e.id);
+                        slots.is_some_and(|s| s.iter().zip(fields).any(|(slot, f)| slot.is_none() && f.default_allocates))
+                    }
+                    _ => false,
+                };
+                let start = if defaults { self.current() } else { 0 };
+                args.iter().fold(start, |r, a| r | self.region(&a.value, moving))
             }
             ExprKind::If { then_block, else_block, .. } => {
                 let blocks = std::iter::once(then_block).chain(else_block.as_ref());
@@ -173,7 +205,10 @@ impl<'a> BodyChecker<'a> {
             _ => self.path_key(arena),
         };
         let ctx = match (ty, owner) {
-            (Ty::Arena, Some(p)) => Some(Ctx::Owned(p)),
+            (Ty::Arena, Some(p)) => {
+                self.check_changeable_arena(arena);
+                Some(Ctx::Owned(p))
+            }
             (Ty::Arena, None) => {
                 self.error(arena.span, "`in` needs an arena stored in a variable or field");
                 None
@@ -195,6 +230,46 @@ impl<'a> BodyChecker<'a> {
             Ty::Never
         } else {
             Ty::Unit
+        }
+    }
+
+    /// Allocating into an arena changes it, so its owner must be changeable.
+    fn check_changeable_arena(&mut self, arena: &Expr) {
+        let Some(root) = self.place_root(arena) else { return };
+        let name = self.t.local(root).name.clone();
+        let help = match self.immutable(root) {
+            None => return self.mark_changed(root),
+            Some(super::place::Immutable::Let) => format!("declare `{name}` with `var`"),
+            Some(_) => format!("take `{name}` as a `var` parameter"),
+        };
+        self.error_help(arena.span, format!("`in` allocates into this arena, so `{name}` must be changeable"), help);
+    }
+
+    /// While a `match` arm's binding reads from a place, nothing may change
+    /// that place (or anything holding it) except through the binding:
+    /// the binding would then read a different variant's fields.
+    pub(crate) fn check_not_matched(&mut self, target: &Expr) {
+        let Some(root) = self.place_root(target) else { return };
+        let Some(path) = self.path_key(target) else { return };
+        for g in self.match_guards.clone() {
+            if path.root == g.binding || root != g.root {
+                continue;
+            }
+            let overlaps = match &g.path {
+                Some(s) if s.root == path.root => {
+                    path.steps.len() <= s.steps.len()
+                        && path.steps.iter().zip(&s.steps).all(|(a, b)| a.is_none() || b.is_none() || a == b)
+                }
+                _ => true,
+            };
+            if overlaps {
+                let (name, binding) = (self.t.local(root).name.clone(), self.t.local(g.binding).name.clone());
+                return self.error_help(
+                    target.span,
+                    format!("can't change `{name}` here: this `match` arm's `{binding}` reads from it"),
+                    format!("change it after the `match`, or copy what you need out of `{binding}` first"),
+                );
+            }
         }
     }
 

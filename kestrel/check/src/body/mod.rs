@@ -3,6 +3,7 @@ mod collections;
 mod enums;
 mod expr;
 mod matching;
+mod nested;
 mod place;
 mod regions;
 mod structs;
@@ -43,6 +44,8 @@ pub(crate) struct BodyChecker<'a> {
     views: HashSet<LocalId>,
     /// Owning locals that were moved and can't be used again.
     moved: HashSet<LocalId>,
+    /// `match` arms whose bindings are reading a place right now.
+    match_guards: Vec<regions::MatchGuard>,
 }
 
 pub(crate) fn check_consts(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
@@ -109,7 +112,8 @@ impl<'a> BodyChecker<'a> {
     fn new(t: &'a mut Tables, diags: &'a mut Vec<Diagnostic>, fn_id: Option<FnId>, ret: Ty, is_pure: bool) -> Self {
         let ctxs = vec![regions::Ctx::Function];
         let (local_ctx, views, moved) = (HashMap::new(), HashSet::new(), HashSet::new());
-        BodyChecker { t, diags, fn_id, scopes: Vec::new(), loop_breaks: Vec::new(), ret, is_pure, ctxs, local_ctx, views, moved }
+        let (scopes, loop_breaks, match_guards) = (Vec::new(), Vec::new(), Vec::new());
+        BodyChecker { t, diags, fn_id, scopes, loop_breaks, ret, is_pure, ctxs, local_ctx, views, moved, match_guards }
     }
 
     /// A type as it reads in messages.

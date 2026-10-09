@@ -56,7 +56,7 @@ impl<'a> BodyChecker<'a> {
                 let name = self.t.fns[f.0 as usize].name.clone();
                 self.error(e.span, format!("the result of pure function `{name}` is unused, so this line does nothing"));
             }
-            Some(Res::Convert(_) | Res::Construct(_) | Res::NewArena) => {
+            Some(Res::Convert(_) | Res::Construct(_) | Res::Variant(..) | Res::NewArena) => {
                 self.error(e.span, "this line has no effect; did you mean to continue the line above?");
             }
             _ => {}
@@ -174,6 +174,14 @@ impl<'a> BodyChecker<'a> {
             }
         }
         self.check_exclusive(args, &var_roots);
+        // Arguments run in source order; one passed by pointer earlier must
+        // not be changed by a later one.
+        for (i, a) in args.iter().enumerate() {
+            if a.is_var || self.t.ty(a.value.id).is_aggregate() {
+                let later: Vec<&Expr> = args[i + 1..].iter().map(|a| &a.value).collect();
+                self.check_changed_later(&[&a.value], &later);
+            }
+        }
         if ok {
             let order = slots.into_iter().map(|s| s.expect("all bound")).collect();
             self.t.call_args.insert(e.id, order);
@@ -245,6 +253,7 @@ impl<'a> BodyChecker<'a> {
             }
             return None;
         };
+        self.check_not_matched(&a.value);
         let name = self.t.local(root).name.clone();
         let problem = match self.immutable(root) {
             None => None,

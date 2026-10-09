@@ -20,8 +20,6 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             ExprKind::Bool(v) => self.b.ins().iconst(types::I8, *v as i64),
             ExprKind::Load(p) => self.load_place(p)?,
             ExprKind::Len(p) => self.len(p)?,
-            ExprKind::NewArena => self.new_arena(),
-            ExprKind::Move(p) => self.move_scalar(p)?,
             ExprKind::FieldOf(base, i) => {
                 let addr = self.field_addr(base, *i)?;
                 self.b.ins().load(ty, MemFlags::trusted(), addr, 0)
@@ -39,7 +37,9 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             | ExprKind::StrLit(_)
             | ExprKind::ArrayNew(_)
             | ExprKind::ArrayLit(_)
-            | ExprKind::ListNew => unreachable!("aggregate values are built in memory"),
+            | ExprKind::ListNew
+            | ExprKind::NewArena
+            | ExprKind::Move(_) => unreachable!("aggregate values are built in memory"),
             ExprKind::Unary(UnOp::Not, inner) => {
                 let v = self.expr(inner)?;
                 self.b.ins().bxor_imm(v, 1)

@@ -30,6 +30,10 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             ExprKind::ArrayLit(items) => self.array_lit(items, e.ty, e.line, dest)?,
             ExprKind::ListNew => self.list_new(dest),
             ExprKind::Move(p) => self.move_into(p, e.ty, dest)?,
+            ExprKind::NewArena => {
+                let a = self.new_arena();
+                self.b.ins().store(MemFlags::trusted(), a, dest, 0);
+            }
             ExprKind::StrLit(s) => {
                 let (p, n) = self.string(s)?;
                 self.b.ins().store(MemFlags::trusted(), p, dest, 0);

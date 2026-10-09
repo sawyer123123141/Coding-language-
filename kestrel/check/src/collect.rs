@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use kestrel_syntax::ast::{EnumDecl, FieldDecl, FnDecl, Item, Program, StructDecl, TypeExpr, TypeKind};
+use kestrel_syntax::ast::{EnumDecl, ExprKind, FieldDecl, FnDecl, Item, Program, StructDecl, TypeExpr, TypeKind};
 use kestrel_syntax::{Diagnostic, Span};
 
 use crate::tables::{
@@ -104,7 +104,7 @@ fn add_builtin_vectors(t: &mut Tables) {
         t.struct_by_name.insert(name.to_string(), id);
         let fields = comps
             .iter()
-            .map(|c| FieldInfo { name: c.to_string(), ty: Ty::Float, span: Span::default(), has_default: false })
+            .map(|c| FieldInfo { name: c.to_string(), ty: Ty::Float, span: Span::default(), has_default: false, default_allocates: false })
             .collect();
         t.structs.push(StructInfo { name: name.to_string(), item: usize::MAX, span: Span::default(), fields, methods: HashMap::new() });
     }
@@ -137,7 +137,12 @@ fn fields_of(owner: &str, decls: &[FieldDecl], t: &mut Tables, diags: &mut Vec<D
             continue;
         }
         let ty = resolve_type(&f.ty, t, diags);
-        fields.push(FieldInfo { name: f.name.clone(), ty, span: f.name_span, has_default: f.default.is_some() });
+        let default_allocates = match f.default.as_ref().map(|d| &d.kind) {
+            Some(ExprKind::ArrayLit(items)) => !items.is_empty() || matches!(ty, Ty::List(_)),
+            Some(ExprKind::TypeCall { .. }) => true,
+            _ => false,
+        };
+        fields.push(FieldInfo { name: f.name.clone(), ty, span: f.name_span, has_default: f.default.is_some(), default_allocates });
     }
     fields
 }
@@ -187,6 +192,9 @@ fn add_enum_members(e: &EnumDecl, item_idx: usize, id: EnumId, t: &mut Tables, d
         let fields = fields_of(&v.name, &v.fields, t, diags);
         variants.push(VariantInfo { name: v.name.clone(), span: v.name_span, fields });
     }
+    if e.variants.is_empty() {
+        diags.push(Diagnostic::error(e.name_span, format!("`{}` needs at least one variant", e.name)));
+    }
     let names: Vec<&str> = variants.iter().map(|v| v.name.as_str()).collect();
     let methods = methods_of(&e.name, item_idx, &e.methods, &names, "variant", t, diags);
     let info = &mut t.enums[id.0 as usize];
@@ -202,9 +210,6 @@ fn add_fn(f: &FnDecl, item_idx: usize, method: Option<(usize, &str)>, t: &mut Ta
             diags.push(Diagnostic::error(p.bind.span, "pure functions can't take `var` parameters"));
         }
         let ty = resolve_type(&p.ty, t, diags);
-        if p.is_var && ty == Ty::Arena {
-            diags.push(Diagnostic::error(p.bind.span, "an `Arena` can't be a `var` parameter: arenas can't be replaced"));
-        }
         params.push(ParamSig { name: p.bind.name.clone(), ty, is_var: p.is_var });
     }
     let ret = f.ret.as_ref().map_or(Ty::Unit, |r| resolve_type(r, t, diags));

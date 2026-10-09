@@ -63,3 +63,29 @@
 4. **KIR:** arena statements, moves, drops (helpers), and the scope stack with exit cleanups. KIR tests.
 5. **Codegen:** the new statements and expressions, `KTy::Arena`, runtime declarations. JIT tests.
 6. **End to end:** program tests (temporary arena in a loop with `break`, `in self.mem`, a list of owning chunks, moves) and error tests.
+
+## Review fixes (2026-10-10)
+
+A Sonnet review found 18 bugs with repros: 5 memory-safety, 5 wrong-result, 5 crash and 3 minor. All 18 are fixed. Regression tests are `kestrel/tests/programs/review_fixes.kes` and `kestrel/tests/errors/review_fixes.kes`.
+
+Rule changes that came out of it:
+- **Returning a field of an owning local copies it** (`return c.heights`). The owner's arena is freed on the way out.
+- **Regions:**
+  - An empty *list* literal and `list[T]()` live in the current context, because they remember the arena they'll grow in.
+  - A literal's elements bring their own regions.
+  - Constructor defaults that allocate (`[1, 2]`, `array[T](n)`, list defaults) count as allocating at the construction site.
+- **A struct's own `Arena` fields are dropped last**, after the fields whose memory may live in them.
+- **While a `match` arm's binding reads from a place, nothing may change that place** (or anything containing it) except through the binding. The error is "can't change `e` here: this `match` arm's `a` reads from it".
+- **Calls are checked across arguments.** An argument passed by pointer (`var`, or a read-only aggregate, including a receiver) must not be changed by a call or assignment inside a *later* argument. The error is "`x` is passed here, but a later argument changes it".
+- **Constructor arguments are checked in source order**, the order they run in, so a move must come after every read of the same variable.
+- **Evaluation order:**
+  - An assignment computes its value first, then its place, once (plain, compound and owning assignments alike).
+  - With labels reordering a call, every argument runs in source order, including `var` places and the receiver.
+- **`in x { }` needs `x`'s owner to be changeable** (allocating changes the arena). `var` `Arena` parameters are therefore allowed again. Arenas still can't be assigned, so they can't be replaced through one.
+- **An `Arena` value lives in memory** like an aggregate, so `Arena` locals and parameters work with `in`.
+- **Smaller fixes:**
+  - An enum needs at least one variant.
+  - `xs.len` isn't assignable.
+  - A discarded variant constructor is a "no effect" error.
+  - A zero-filled string prints as empty.
+  - A `for ... in` loop whose body may move the elements is rewritten to re-index by renaming, instead of being lowered twice. Lowering twice made nested loops exponential.

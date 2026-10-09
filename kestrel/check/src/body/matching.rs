@@ -23,6 +23,7 @@ impl<'a> BodyChecker<'a> {
         };
         // Bindings alias the matched variable, so they can change it when it can change.
         let root = self.place_root(scrutinee);
+        let path = self.path_key(scrutinee);
         let changeable = root.is_some_and(|r| self.immutable(r).is_none());
         let (enum_name, variants): (String, Vec<(String, usize)>) = match enum_id {
             Some(id) => {
@@ -45,6 +46,7 @@ impl<'a> BodyChecker<'a> {
             }
             self.scopes.push(HashMap::new());
             let mut variant = None;
+            let mut guarded = false;
             match &arm.pattern {
                 Pattern::Else(_) => has_else = true,
                 Pattern::Variant { name, name_span, binding } => match (enum_id, variants.iter().position(|(n, _)| n == name)) {
@@ -62,6 +64,10 @@ impl<'a> BodyChecker<'a> {
                             }
                             let l = self.declare(b, Ty::Variant(id, v as u32), changeable, false, false);
                             self.t.locals[l.0 as usize].alias = root;
+                            if let Some(root) = root {
+                                self.match_guards.push(super::regions::MatchGuard { root, path: path.clone(), binding: l });
+                                guarded = true;
+                            }
                         }
                     }
                 },
@@ -81,6 +87,9 @@ impl<'a> BodyChecker<'a> {
                 }
             }
             tys.push(ty);
+            if guarded {
+                self.match_guards.pop();
+            }
             self.scopes.pop();
         }
         let missing: Vec<String> =

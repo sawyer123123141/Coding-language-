@@ -54,26 +54,22 @@ impl<'a> BodyChecker<'a> {
         let names: Vec<&str> = variant.fields.iter().map(|f| f.name.as_str()).collect();
         let (slots, bound) = self.bind_args(name, &names, args, "field");
         let mut ok = bound;
-        for (fi, slot) in slots.iter().enumerate() {
-            match *slot {
-                Some(ai) => {
-                    let a = &args[ai];
-                    if a.is_var {
-                        self.error(a.span, "constructor arguments can't be `var`");
-                    }
-                    self.check_value(&a.value, Some(variant.fields[fi].ty));
-                    self.consume(&a.value);
-                }
-                None if bound => {
-                    self.error(e.span, format!("missing field `{}` for `{name}`", variant.fields[fi].name));
-                    ok = false;
-                }
-                None => {}
-            }
-        }
+        // In source order, the order they run in: a move must come after every read.
         for (ai, a) in args.iter().enumerate() {
-            if !slots.contains(&Some(ai)) {
+            let Some(fi) = slots.iter().position(|s| *s == Some(ai)) else {
                 self.check_expr(&a.value, None);
+                continue;
+            };
+            if a.is_var {
+                self.error(a.span, "constructor arguments can't be `var`");
+            }
+            self.check_value(&a.value, Some(variant.fields[fi].ty));
+            self.consume(&a.value);
+        }
+        for (fi, slot) in slots.iter().enumerate() {
+            if slot.is_none() && bound {
+                self.error(e.span, format!("missing field `{}` for `{name}`", variant.fields[fi].name));
+                ok = false;
             }
         }
         if ok {

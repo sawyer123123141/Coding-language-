@@ -90,7 +90,6 @@ fn ownership_and_escape_errors() {
             "main() {\n var c = Chunk(x: 1)\n c.mem = Arena()\n}\n",
             "an `Arena` can't be replaced: values that point into it would be left dangling",
         ),
-        ("f(var a: Arena) {}\nmain() {}\n", "an `Arena` can't be a `var` parameter: arenas can't be replaced"),
         (
             "main() {\n var xs = [1]\n arena {\n  xs = [2, 3]\n }\n}\n",
             "this memory is freed at the end of the `arena { }` block, but `xs` lives longer",
