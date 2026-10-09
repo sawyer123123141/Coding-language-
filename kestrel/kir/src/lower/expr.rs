@@ -7,11 +7,17 @@ use crate::ir::*;
 impl<'a> FnLowerer<'a> {
     /// Lowers `e` and applies any implicit conversion the checker recorded.
     pub(crate) fn expr(&mut self, e: &ast::Expr) -> Expr {
-        let raw = self.expr_raw(e);
-        match self.t.coerce.get(&e.id) {
-            Some(&to) => Expr { ty: kty(to), line: raw.line, kind: ExprKind::Cast(Box::new(raw)) },
-            None => raw,
+        let Some(&to) = self.t.coerce.get(&e.id) else { return self.expr_raw(e) };
+        let to = kty(to);
+        // A literal converted to a float is emitted at the target type, read from the
+        // source, so an f64 never inherits the rounding of an f32 literal.
+        if to.is_float() {
+            if let Some(v) = literal_as(e, to) {
+                return Expr { kind: ExprKind::Float(v), ty: to, line: self.line(e.span) };
+            }
         }
+        let raw = self.expr_raw(e);
+        Expr { ty: to, line: raw.line, kind: ExprKind::Cast(Box::new(raw)) }
     }
 
     fn expr_raw(&mut self, e: &ast::Expr) -> Expr {
@@ -103,5 +109,17 @@ impl<'a> FnLowerer<'a> {
             })
             .collect();
         (FuncIdx(f.0), lowered)
+    }
+}
+
+/// The value of a numeric literal (possibly negated) as float type `to`,
+/// or `None` if `e` is anything else.
+fn literal_as(e: &ast::Expr, to: KTy) -> Option<f64> {
+    match &e.kind {
+        ast::ExprKind::Int(n) if to == KTy::F32 => Some(*n as f32 as f64),
+        ast::ExprKind::Int(n) => Some(*n as f64),
+        ast::ExprKind::Float(f) => Some(*f),
+        ast::ExprKind::Unary { op: ast::UnaryOp::Neg, expr } => literal_as(expr, to).map(|v| -v),
+        _ => None,
     }
 }

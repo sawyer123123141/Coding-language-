@@ -108,3 +108,16 @@ fn diverging_tail_adds_no_return() {
     let m = lower_src("f(x: int) -> int {\n if x > 0 { return 1 } else { return 2 }\n}\nmain() {}\n");
     assert!(matches!(&func(&m, "f").body[..], [Stmt::If { .. }]));
 }
+
+#[test]
+fn widened_float_literals_are_f64_literals_not_casts() {
+    let m = lower_src("main() {\n let x: f64 = 0.1\n let a = 0.1 * x\n let b = -0.1 * x\n let c = 3 * x\n}\n");
+    let main = func(&m, "main");
+    let lhs = |i: usize| match &main.body[i] {
+        Stmt::Let(_, Expr { kind: ExprKind::Binary(BinOp::Mul, l, _), .. }) => (**l).clone(),
+        other => panic!("{other:?}"),
+    };
+    assert!(matches!(lhs(1).kind, ExprKind::Float(v) if v == 0.1) && lhs(1).ty == KTy::F64);
+    assert!(matches!(lhs(2).kind, ExprKind::Float(v) if v == -0.1) && lhs(2).ty == KTy::F64);
+    assert!(matches!(lhs(3).kind, ExprKind::Float(v) if v == 3.0) && lhs(3).ty == KTy::F64);
+}
