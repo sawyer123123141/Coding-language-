@@ -10,5 +10,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "kestrel-kir"
+version = "0.1.0"
+dependencies = [
+ "kestrel-check",
+ "kestrel-syntax",
+]
+
+[[package]]
 name = "kestrel-syntax"
 version = "0.1.0"

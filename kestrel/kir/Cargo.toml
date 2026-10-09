@@ -1,0 +1,8 @@
+[package]
+name = "kestrel-kir"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+kestrel-syntax.workspace = true
+kestrel-check.workspace = true
