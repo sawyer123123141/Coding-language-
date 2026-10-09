@@ -28,3 +28,20 @@ Kestrel `--release` ÷ Rust release: fib 2.3x, loop 1.2x, collatz 5.2x, mandelbr
 cd kestrel; cargo build --release -p kestrel-cli; cd bench\2a; .\run.ps1
 ```
 Needs `rustc` and `gcc` on PATH.
+
+## After plan 2b-i (structs), 2026-10-10
+
+Same suite plus `particles`: one struct of four floats updated by a `var self` method, 100M steps. This run was about 15% noisier across the board (Rust's own fib went from 98 to 111 ms), so compare ratios rather than raw times.
+
+| Workload | Kestrel exe (checked) | Kestrel exe (`--release`) | `kestrel run` | Rust -O3 (checks on) | Rust -O3 | C gcc -O2 |
+|---|---:|---:|---:|---:|---:|---:|
+| fib | 290 ms | 265 ms | 287 ms | 192 ms | 111 ms | 84 ms |
+| loop | 744 ms | 750 ms | 754 ms | 599 ms | 608 ms | 580 ms |
+| collatz | 304 ms | 289 ms | 363 ms | 188 ms | 121 ms | 133 ms |
+| mandelbrot | 501 ms | 492 ms | 524 ms | 400 ms | 377 ms | 378 ms |
+| particles | 459 ms | 453 ms | 484 ms | 366 ms | 359 ms | 143 ms |
+
+Kestrel `--release` ÷ Rust release: fib 2.4x, loop 1.2x, collatz 2.4x, mandelbrot 1.3x, **particles 1.26x**.
+
+- Structs cost little: the method call passes a pointer and the fields are loaded and stored in memory, and it lands within 1.3x of Rust (which inlines `step` and keeps the fields in registers).
+- C is far ahead on particles (143 ms); GCC keeps the particle in registers across the whole loop. Inlining small methods and promoting struct fields to registers (KIR scalar replacement) would close most of the gap; both are candidates for sub-project 5.

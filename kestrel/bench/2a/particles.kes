@@ -1,0 +1,30 @@
+struct Particle {
+    x: float
+    y: float
+    vx: float
+    vy: float
+
+    step(var self, dt: float) {
+        self.vy -= 9.8 * dt
+        self.x += self.vx * dt
+        self.y += self.vy * dt
+        if self.y < 0.0 {
+            self.y = -self.y
+            self.vy = -self.vy * 0.9
+        }
+    }
+}
+
+main() {
+    var p = Particle(0.0, 10.0, 1.0, 0.0)
+    let dt = 0.001
+    var bounces = 0
+    for i from 0 to 100000000 {
+        let before = p.vy
+        p.step(dt)
+        if before < 0.0 and p.vy > 0.0 {
+            bounces += 1
+        }
+    }
+    print(int(p.x * 1000.0), int(p.y * 1000.0), bounces)
+}
