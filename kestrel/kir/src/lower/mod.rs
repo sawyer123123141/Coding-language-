@@ -1,4 +1,6 @@
+mod call;
 mod expr;
+mod layout;
 
 use std::collections::HashMap;
 
@@ -10,10 +12,9 @@ use crate::ir::*;
 
 /// Lowers a checked program. `t` must come from a `check` with no errors.
 pub fn lower(program: &Program, t: &Tables, lines: &LineIndex) -> Module {
-    let funcs = (0..t.fns.len())
-        .map(|i| FnLowerer { program, t, lines, fn_id: FnId(i as u32), local_map: HashMap::new() }.lower())
-        .collect();
-    Module { funcs, main: FuncIdx(t.main.expect("checked program has main").0) }
+    let structs = layout::layouts(t);
+    let funcs = (0..t.fns.len()).map(|i| FnLowerer::new(program, t, lines, FnId(i as u32)).lower()).collect();
+    Module { funcs, structs, main: FuncIdx(t.main.expect("checked program has main").0) }
 }
 
 pub(crate) fn kty(ty: Ty) -> KTy {
@@ -24,6 +25,7 @@ pub(crate) fn kty(ty: Ty) -> KTy {
         Ty::I64 => KTy::I64,
         Ty::Float => KTy::F32,
         Ty::F64 => KTy::F64,
+        Ty::Struct(s) => KTy::Struct(StructIdx(s.0)),
         other => panic!("type {other:?} has no runtime representation"),
     }
 }
@@ -34,26 +36,32 @@ pub(crate) struct FnLowerer<'a> {
     lines: &'a LineIndex,
     fn_id: FnId,
     local_map: HashMap<LocalId, LocalIdx>,
+    /// Grows during lowering as temporaries are added.
+    locals: Vec<Local>,
 }
 
 impl<'a> FnLowerer<'a> {
+    fn new(program: &'a Program, t: &'a Tables, lines: &'a LineIndex, fn_id: FnId) -> Self {
+        FnLowerer { program, t, lines, fn_id, local_map: HashMap::new(), locals: Vec::new() }
+    }
+
     fn lower(mut self) -> Func {
         // Copy the shared references out so borrows of them don't hold `self`.
         let (t, program) = (self.t, self.program);
         let info = t.func(self.fn_id);
-        let ast::Item::Fn(decl) = &program.items[info.item] else { unreachable!("FnInfo points at a fn") };
-        let mut locals = Vec::new();
-        for (i, &lid) in info.locals.iter().enumerate() {
+        let decl = info.decl(program);
+        for &lid in &info.locals {
             let l = t.local(lid);
-            let kind = if l.is_var_param {
+            let ty = kty(l.ty);
+            let kind = if l.is_param && (l.is_var_param || ty.is_aggregate()) {
                 LocalKind::RefParam
-            } else if l.addressed {
+            } else if l.addressed || ty.is_aggregate() {
                 LocalKind::Addressed
             } else {
                 LocalKind::Value
             };
-            self.local_map.insert(lid, LocalIdx(i as u32));
-            locals.push(Local { name: l.name.clone(), ty: kty(l.ty), kind });
+            self.local_map.insert(lid, LocalIdx(self.locals.len() as u32));
+            self.locals.push(Local { name: l.name.clone(), ty, kind });
         }
         let params = (0..info.params.len()).map(|i| LocalIdx(i as u32)).collect();
         let ret = if info.ret == Ty::Unit { None } else { Some(kty(info.ret)) };
@@ -70,12 +78,20 @@ impl<'a> FnLowerer<'a> {
             name: info.name.clone(),
             params,
             ret,
-            locals,
+            locals: self.locals,
             body,
             is_pure: info.is_pure,
             io: info.io,
             mutates_params: info.mutates_params,
         }
+    }
+
+    /// A fresh local holding an intermediate value.
+    pub(crate) fn temp(&mut self, ty: KTy) -> LocalIdx {
+        let idx = LocalIdx(self.locals.len() as u32);
+        let kind = if ty.is_aggregate() { LocalKind::Addressed } else { LocalKind::Value };
+        self.locals.push(Local { name: format!("tmp{}", idx.0), ty, kind });
+        idx
     }
 
     pub(crate) fn line(&self, span: Span) -> u32 {
@@ -87,21 +103,28 @@ impl<'a> FnLowerer<'a> {
     }
 
     pub(crate) fn block_stmts(&mut self, block: &ast::Block) -> Vec<Stmt> {
-        block.stmts.iter().map(|s| self.stmt(s)).collect()
+        let mut out = Vec::new();
+        for s in &block.stmts {
+            self.stmt(s, &mut out);
+        }
+        out
     }
 
     /// A block used as a value: its statements and its tail value, which is
     /// `None` when the block can't finish normally.
     pub(crate) fn block_value(&mut self, block: &ast::Block) -> (Vec<Stmt>, Option<Expr>) {
         let Some((last, init)) = block.stmts.split_last() else { return (Vec::new(), None) };
-        let mut stmts: Vec<Stmt> = init.iter().map(|s| self.stmt(s)).collect();
+        let mut stmts = Vec::new();
+        for s in init {
+            self.stmt(s, &mut stmts);
+        }
         match last {
             ast::Stmt::Expr(e) if !self.leaves_early(e) => {
                 let v = self.expr(e);
                 (stmts, Some(v))
             }
             other => {
-                stmts.push(self.stmt(other));
+                self.stmt(other, &mut stmts);
                 (stmts, None)
             }
         }
@@ -124,27 +147,25 @@ impl<'a> FnLowerer<'a> {
         }
     }
 
-    fn stmt(&mut self, s: &ast::Stmt) -> Stmt {
-        match s {
+    fn stmt(&mut self, s: &ast::Stmt, out: &mut Vec<Stmt>) {
+        let lowered = match s {
             ast::Stmt::Let { bind, value, .. } => {
                 let idx = self.bind_local(bind);
                 Stmt::Let(idx, self.expr(value))
             }
             ast::Stmt::Assign { target, op, value, .. } => {
-                let Some(Res::Local(lid)) = self.t.res.get(&target.id).copied() else {
-                    unreachable!("checker resolved the assignment target")
-                };
-                let idx = self.local_map[&lid];
+                let place = self.place(target).expect("checker requires an assignable place");
+                let ty = kty(self.t.ty(target.id));
                 let rhs = self.expr(value);
                 let value = match op.binary() {
                     None => rhs,
                     Some(bop) => {
-                        let (ty, line) = (rhs.ty, rhs.line);
-                        let cur = Expr { kind: ExprKind::Local(idx), ty, line };
+                        let line = rhs.line;
+                        let cur = Expr { kind: ExprKind::Load(place.clone()), ty, line };
                         Expr { kind: ExprKind::Binary(binop(bop), Box::new(cur), Box::new(rhs)), ty, line }
                     }
                 };
-                Stmt::Assign(idx, value)
+                Stmt::Assign(place, value)
             }
             ast::Stmt::While { cond, body, .. } => Stmt::While { cond: self.expr(cond), body: self.block_stmts(body) },
             ast::Stmt::ForRange { var, start, end, body, .. } => Stmt::ForRange {
@@ -156,13 +177,14 @@ impl<'a> FnLowerer<'a> {
             ast::Stmt::Break(_) => Stmt::Break,
             ast::Stmt::Continue(_) => Stmt::Continue,
             ast::Stmt::Return { value, .. } => Stmt::Return(value.as_ref().map(|v| self.expr(v))),
-            ast::Stmt::Expr(e) => self.expr_stmt(e),
-        }
+            ast::Stmt::Expr(e) => return self.expr_stmt(e, out),
+        };
+        out.push(lowered);
     }
 
     /// An expression whose value is discarded.
-    fn expr_stmt(&mut self, e: &ast::Expr) -> Stmt {
-        match &e.kind {
+    fn expr_stmt(&mut self, e: &ast::Expr, out: &mut Vec<Stmt>) {
+        let (receiver, args) = match &e.kind {
             ast::ExprKind::If { cond, then_block, else_block } => {
                 let cond = self.expr(cond);
                 let then_body = self.block_stmts(then_block);
@@ -170,17 +192,21 @@ impl<'a> FnLowerer<'a> {
                     Some(b) => self.block_stmts(b),
                     None => Vec::new(),
                 };
-                Stmt::If { cond, then_body, else_body }
+                out.push(Stmt::If { cond, then_body, else_body });
+                return;
             }
-            ast::ExprKind::Call { args, .. } => match self.t.res[&e.id] {
-                Res::Print => Stmt::Print(args.iter().map(|a| self.print_arg(&a.value)).collect()),
-                Res::Fn(f) => {
-                    let (fi, args) = self.call_parts(e, f, args);
-                    Stmt::Call(fi, args)
-                }
-                other => unreachable!("checker rejects a discarded {other:?}"),
-            },
+            ast::ExprKind::Call { args, .. } => (None, args),
+            ast::ExprKind::MethodCall { receiver, args, .. } => (Some(&**receiver), args),
             _ => unreachable!("checker rejects statements with no effect"),
+        };
+        match self.t.res[&e.id] {
+            Res::Print => out.push(Stmt::Print(args.iter().map(|a| self.print_arg(&a.value)).collect())),
+            Res::Fn(f) => {
+                let (pre, fi, args) = self.call_parts(e, f, args, receiver);
+                out.extend(pre);
+                out.push(Stmt::Call(fi, args));
+            }
+            other => unreachable!("checker rejects a discarded {other:?}"),
         }
     }
 

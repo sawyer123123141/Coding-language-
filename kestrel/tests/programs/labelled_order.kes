@@ -1,0 +1,15 @@
+// expect: eval 1
+// expect: eval 2
+// expect: 1
+noisy(n: int) -> int {
+    print("eval", n)
+    n
+}
+
+sub(a: int, b: int) -> int {
+    a - b
+}
+
+main() {
+    print(sub(b: noisy(1), a: noisy(2)))
+}

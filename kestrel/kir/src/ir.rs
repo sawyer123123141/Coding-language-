@@ -9,9 +9,15 @@ pub enum KTy {
     I64,
     F32,
     F64,
+    /// A struct, laid out by `Module::structs`. Lives in memory, never in a register.
+    Struct(StructIdx),
 }
 
 impl KTy {
+    pub fn is_aggregate(self) -> bool {
+        matches!(self, KTy::Struct(_))
+    }
+
     pub fn is_float(self) -> bool {
         matches!(self, KTy::F32 | KTy::F64)
     }
@@ -31,10 +37,63 @@ pub struct FuncIdx(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct LocalIdx(pub u32);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct StructIdx(pub u32);
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Module {
     pub funcs: Vec<Func>,
+    pub structs: Vec<StructLayout>,
     pub main: FuncIdx,
+}
+
+impl Module {
+    pub fn layout(&self, s: StructIdx) -> &StructLayout {
+        &self.structs[s.0 as usize]
+    }
+
+    /// Size and alignment in bytes.
+    pub fn size_align(&self, ty: KTy) -> (u32, u32) {
+        match ty {
+            KTy::Bool | KTy::U8 => (1, 1),
+            KTy::I32 | KTy::F32 => (4, 4),
+            KTy::I64 | KTy::F64 => (8, 8),
+            KTy::Struct(s) => {
+                let l = self.layout(s);
+                (l.size, l.align)
+            }
+        }
+    }
+}
+
+/// Fields in declaration order at natural alignment (like C).
+#[derive(Clone, Debug, PartialEq)]
+pub struct StructLayout {
+    pub name: String,
+    pub fields: Vec<FieldLayout>,
+    pub size: u32,
+    pub align: u32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FieldLayout {
+    pub name: String,
+    pub ty: KTy,
+    pub offset: u32,
+}
+
+/// A memory location: a local, or a field path inside one.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Place {
+    pub root: LocalIdx,
+    /// Field indices from the root inward.
+    pub fields: Vec<u32>,
+}
+
+impl Place {
+    pub fn local(root: LocalIdx) -> Self {
+        Place { root, fields: Vec::new() }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -60,16 +119,17 @@ pub struct Local {
 pub enum LocalKind {
     /// Lives in a register.
     Value,
-    /// Passed as a `var` argument somewhere, so it needs a memory slot.
+    /// Needs a memory slot: passed as a `var` argument somewhere, or a struct.
     Addressed,
-    /// A `var` parameter: holds a pointer to the caller's value.
+    /// Holds a pointer to the caller's value: a `var` parameter, or any
+    /// struct parameter (read-only ones are passed by pointer too).
     RefParam,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Stmt {
     Let(LocalIdx, Expr),
-    Assign(LocalIdx, Expr),
+    Assign(Place, Expr),
     If { cond: Expr, then_body: Vec<Stmt>, else_body: Vec<Stmt> },
     While { cond: Expr, body: Vec<Stmt> },
     /// `for var from start to end`: `end` exclusive, step +1, both
@@ -102,7 +162,8 @@ pub enum ExprKind {
     Int(i64),
     Float(f64),
     Bool(bool),
-    Local(LocalIdx),
+    /// The value stored at a place (a scalar, or a whole struct).
+    Load(Place),
     Unary(UnOp, Box<Expr>),
     Binary(BinOp, Box<Expr>, Box<Expr>),
     /// Short-circuiting.
@@ -111,6 +172,13 @@ pub enum ExprKind {
     /// Convert the operand to this expression's `ty`.
     Cast(Box<Expr>),
     Call(FuncIdx, Vec<Arg>),
+    /// A struct with every field given, in declaration order.
+    StructLit(StructIdx, Vec<Expr>),
+    /// A field of a struct value that isn't a place (e.g. a call's result).
+    FieldOf(Box<Expr>, u32),
+    /// Runs the statements, then yields the value. Used to evaluate
+    /// labelled arguments in source order.
+    Seq(Vec<Stmt>, Box<Expr>),
     If {
         cond: Box<Expr>,
         then_body: Vec<Stmt>,
@@ -123,8 +191,8 @@ pub enum ExprKind {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Arg {
     Value(Expr),
-    /// Pass a pointer to this local (for a `var` parameter).
-    Ref(LocalIdx),
+    /// Pass a pointer to this place (for a `var` parameter).
+    Ref(Place),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

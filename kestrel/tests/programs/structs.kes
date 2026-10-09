@@ -1,0 +1,35 @@
+// expect: Point(x: 3, y: 0)
+// expect: Point(x: 2, y: 1) 5
+// expect: Line(a: Point(x: 4, y: 14), b: Point(x: 5, y: 1))
+// expect: 11
+struct Point {
+    x: int
+    y: int = 0
+
+    pure len2(self) -> int { self.x * self.x + self.y * self.y }
+    shift(var self, dx: int) {
+        self.x += dx
+    }
+}
+
+struct Line {
+    a: Point
+    b: Point
+}
+
+pure mid(l: Line) -> Point {
+    Point((l.a.x + l.b.x) / 2, y: (l.a.y + l.b.y) / 2)
+}
+
+main() {
+    var p = Point(3)
+    print(p)
+    let q = Point(y: 1, x: 2)
+    print(q, q.len2())
+    p.shift(1)
+    var line = Line(p, Point(5, 1))
+    line.a.y += 14
+    print(line)
+    let m = mid(line)
+    print(m.x + m.y)
+}

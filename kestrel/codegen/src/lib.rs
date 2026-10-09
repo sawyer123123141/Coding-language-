@@ -41,7 +41,7 @@ pub(crate) fn define_module<M: Module>(module: &mut M, m: &kir::Module, opts: Op
         let id = module.declare_function(&symbol(&f.name), Linkage::Local, &sig).map_err(|e| e.to_string())?;
         ids.push(id);
     }
-    let shared = func::Shared { funcs: &ids, rt: &rt, opts };
+    let shared = func::Shared { funcs: &ids, rt: &rt, opts, kir: m };
     let mut strings = func::Strings::default();
     let mut ctx = module.make_context();
     let mut fb_ctx = FunctionBuilderContext::new();

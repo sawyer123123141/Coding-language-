@@ -1,28 +1,9 @@
 use kestrel_codegen::{JitProgram, Options};
 use kestrel_syntax::{parse, LineIndex};
 
-fn jit_with(src: &str, opts: Options) -> JitProgram {
-    let (p, d) = parse(src);
-    assert!(d.is_empty(), "parse: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
-    let (t, d) = kestrel_check::check(&p);
-    assert!(d.is_empty(), "check: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
-    let m = kestrel_kir::lower(&p, &t.unwrap(), &LineIndex::new(src));
-    JitProgram::compile(&m, opts).expect("codegen")
-}
+mod common;
 
-fn jit(src: &str) -> JitProgram {
-    jit_with(&format!("{src}\nmain() {{}}\n"), Options::default())
-}
-
-fn call0<R>(p: &JitProgram, name: &str) -> R {
-    let f: extern "C" fn() -> R = unsafe { std::mem::transmute(p.fn_ptr(name).expect(name)) };
-    f()
-}
-
-fn call1(p: &JitProgram, name: &str, x: i32) -> i32 {
-    let f: extern "C" fn(i32) -> i32 = unsafe { std::mem::transmute(p.fn_ptr(name).expect(name)) };
-    f(x)
-}
+use common::{call0, call1, jit, jit_with};
 
 #[test]
 fn recursion() {
@@ -238,6 +219,10 @@ const CHILD_CASES: &[(&str, &str)] = &[
         "labelled_arg_order",
         "noisy(n: int) -> int {\n print(\"eval\", n)\n n\n}\nsub(a: int, b: int) -> int {\n a - b\n}\nmain() {\n let r = sub(b: noisy(1), a: noisy(2))\n print(r)\n}\n",
     ),
+    (
+        "print_struct",
+        "struct P {\n x: int\n f: float\n ok: bool\n}\nstruct L {\n a: P\n n: i64\n}\nmain() {\n print(L(P(1, 2.5, true), -3), 7)\n}\n",
+    ),
 ];
 
 /// Entry point for the child process; does nothing in a normal test run.
@@ -317,11 +302,16 @@ fn emits_an_object_file() {
     assert!(bytes.len() > 100);
 }
 
-// TODO(2b): labelled args must evaluate in source order
 #[test]
-#[ignore = "labelled arguments are evaluated in parameter order until plan 2b"]
 fn labelled_arguments_evaluate_in_source_order() {
     let (code, stdout, _) = run_child("labelled_arg_order");
     assert_eq!(code, Some(0), "stdout: {stdout}");
     assert!(stdout.contains("eval 1\neval 2\n"), "stdout: {stdout}");
+}
+
+#[test]
+fn structs_print_with_field_names() {
+    let (code, stdout, stderr) = run_child("print_struct");
+    assert_eq!(code, Some(0), "stderr: {stderr}");
+    assert!(stdout.contains("L(a: P(x: 1, f: 2.5, ok: true), n: -3) 7\n"), "stdout: {stdout}");
 }

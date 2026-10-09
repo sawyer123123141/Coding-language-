@@ -11,6 +11,7 @@ fn bits(t: KTy) -> u32 {
         KTy::Bool | KTy::U8 => 8,
         KTy::I32 | KTy::F32 => 32,
         KTy::I64 | KTy::F64 => 64,
+        KTy::Struct(_) => unreachable!("structs aren't numbers"),
     }
 }
 

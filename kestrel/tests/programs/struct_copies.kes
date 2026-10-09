@@ -1,0 +1,20 @@
+// expect: 1 100
+// expect: 5 0
+struct P {
+    v: int
+}
+
+keep(p: P) -> P {
+    p
+}
+
+main() {
+    var a = P(1)
+    var b = a
+    b.v = 100
+    print(a.v, b.v)
+    var c = P(5)
+    let d = keep(c)
+    c.v = 0
+    print(d.v, c.v)
+}

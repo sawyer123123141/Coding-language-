@@ -1,10 +1,11 @@
-use cranelift_codegen::ir::{types, InstBuilder, TrapCode, Value};
+use cranelift_codegen::ir::{types, InstBuilder, MemFlags, TrapCode, Value};
 use cranelift_module::Module;
 use kestrel_kir::{self as kir, ExprKind, KTy, UnOp};
 
 use super::{cl_type, FuncLowerer};
 
 impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
+    /// Lowers a scalar-valued expression. Struct values go through `lower_into`.
     pub(crate) fn expr(&mut self, e: &kir::Expr) -> Result<Value, String> {
         let ty = cl_type(e.ty);
         Ok(match &e.kind {
@@ -17,7 +18,16 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 }
             }
             ExprKind::Bool(v) => self.b.ins().iconst(types::I8, *v as i64),
-            ExprKind::Local(l) => self.load_local(*l),
+            ExprKind::Load(p) => self.load_place(p),
+            ExprKind::FieldOf(base, i) => {
+                let addr = self.field_addr(base, *i)?;
+                self.b.ins().load(ty, MemFlags::trusted(), addr, 0)
+            }
+            ExprKind::Seq(stmts, value) => {
+                self.stmts(stmts)?;
+                self.expr(value)?
+            }
+            ExprKind::StructLit(..) => unreachable!("struct literals are lowered into memory"),
             ExprKind::Unary(UnOp::Not, inner) => {
                 let v = self.expr(inner)?;
                 self.b.ins().bxor_imm(v, 1)
@@ -43,7 +53,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 let v = self.expr(inner)?;
                 self.cast(v, inner.ty, e.ty)
             }
-            ExprKind::Call(fi, args) => self.call(*fi, args)?.expect("value-returning call"),
+            ExprKind::Call(fi, args) => self.call(*fi, args, None)?.expect("value-returning call"),
             ExprKind::If { cond, then_body, then_val, else_body, else_val } => {
                 let c = self.expr(cond)?;
                 let (then_b, else_b, merge) = (self.b.create_block(), self.b.create_block(), self.b.create_block());

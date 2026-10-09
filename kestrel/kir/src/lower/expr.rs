@@ -1,4 +1,4 @@
-use kestrel_check::{ConstId, FnId, Res};
+use kestrel_check::{ConstId, Res};
 use kestrel_syntax::ast;
 
 use super::{binop, kty, FnLowerer};
@@ -35,7 +35,7 @@ impl<'a> FnLowerer<'a> {
             ast::ExprKind::Bool(b) => ExprKind::Bool(*b),
             ast::ExprKind::Str(_) => unreachable!("strings only appear as print arguments"),
             ast::ExprKind::Ident(_) => match self.t.res[&e.id] {
-                Res::Local(l) => ExprKind::Local(self.local_map[&l]),
+                Res::Local(l) => ExprKind::Load(Place::local(self.local_map[&l])),
                 Res::Const(c) => return self.const_value(c),
                 other => unreachable!("name resolved to {other:?}"),
             },
@@ -58,14 +58,24 @@ impl<'a> FnLowerer<'a> {
             ast::ExprKind::Call { args, .. } => match self.t.res[&e.id] {
                 Res::Convert(_) => ExprKind::Cast(Box::new(self.expr(&args[0].value))),
                 Res::Fn(f) => {
-                    let (fi, a) = self.call_parts(e, f, args);
-                    ExprKind::Call(fi, a)
+                    let (pre, fi, a) = self.call_parts(e, f, args, None);
+                    Self::with_pre(pre, ExprKind::Call(fi, a), ty, line)
+                }
+                Res::Construct(sid) => {
+                    let (pre, kind) = self.construct(e, sid, args);
+                    Self::with_pre(pre, kind, ty, line)
                 }
                 other => unreachable!("{other:?} used as a value"),
             },
-            ast::ExprKind::Field { .. } | ast::ExprKind::MethodCall { .. } => {
-                unreachable!("checker rejects struct expressions")
+            ast::ExprKind::MethodCall { receiver, args, .. } => {
+                let Res::Fn(f) = self.t.res[&e.id] else { unreachable!("checker resolved the method") };
+                let (pre, fi, a) = self.call_parts(e, f, args, Some(receiver));
+                Self::with_pre(pre, ExprKind::Call(fi, a), ty, line)
             }
+            ast::ExprKind::Field { base, .. } => match self.place(e) {
+                Some(place) => ExprKind::Load(place),
+                None => ExprKind::FieldOf(Box::new(self.expr(base)), self.t.field_index[&e.id]),
+            },
             ast::ExprKind::If { cond, then_block, else_block } => {
                 let else_block = else_block.as_ref().expect("checker requires `else` for a value `if`");
                 let cond = Box::new(self.expr(cond));
@@ -89,29 +99,6 @@ impl<'a> FnLowerer<'a> {
         let item = t.consts[c.0 as usize].item;
         let ast::Item::Const(decl) = &program.items[item] else { unreachable!("ConstInfo points at a const") };
         self.expr(&decl.value)
-    }
-
-    /// Arguments in parameter order; `var` parameters get a reference.
-    pub(crate) fn call_parts(&mut self, e: &ast::Expr, f: FnId, args: &[ast::Arg]) -> (FuncIdx, Vec<Arg>) {
-        let t = self.t;
-        let order = &t.call_args[&e.id];
-        let params = &t.func(f).params;
-        let lowered = order
-            .iter()
-            .zip(params)
-            .map(|(&ai, p)| {
-                let v = &args[ai].value;
-                if p.is_var {
-                    let Some(Res::Local(l)) = t.res.get(&v.id).copied() else {
-                        unreachable!("checker requires a variable for a `var` argument")
-                    };
-                    Arg::Ref(self.local_map[&l])
-                } else {
-                    Arg::Value(self.expr(v))
-                }
-            })
-            .collect();
-        (FuncIdx(f.0), lowered)
     }
 }
 
