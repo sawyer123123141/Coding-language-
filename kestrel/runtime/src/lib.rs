@@ -5,4 +5,4 @@ pub mod panic;
 pub mod print;
 pub mod start;
 
-pub use panic::{PANIC_DIV_ZERO, PANIC_OVERFLOW};
+pub use panic::{PANIC_DIV_ZERO, PANIC_NARROW_INT, PANIC_NARROW_U8, PANIC_OVERFLOW};

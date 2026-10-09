@@ -1,0 +1,7 @@
+// expect-exit: 101
+// expect-stderr: value doesn't fit in int on line 6
+main() {
+    var big: i64 = 2147483647
+    big += 1
+    print(int(big))
+}

@@ -169,6 +169,10 @@ Every variable owns its data. `var b = a` copies.
   overflow-checking add/sub/mul.
 - **Division by zero** traps in every mode.
 - **Float → int** (`int(x)`) saturates; NaN becomes 0.
+- **Narrowing int conversions** (`u8(x)`, `int(x)` from i64) trap when
+  the value doesn't fit, except under `--release`, which truncates.
+- **`while true` with no `break`** never finishes, so it can end a
+  value-returning function.
 
 ### Non-copyable types and drops
 

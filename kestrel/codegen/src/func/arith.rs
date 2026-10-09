@@ -2,7 +2,7 @@ use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{types, InstBuilder, TrapCode, Value};
 use cranelift_module::Module;
 use kestrel_kir::{BinOp, KTy};
-use kestrel_runtime::PANIC_OVERFLOW;
+use kestrel_runtime::{PANIC_NARROW_INT, PANIC_NARROW_U8, PANIC_OVERFLOW};
 
 use super::{cl_type, FuncLowerer};
 
@@ -121,8 +121,9 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     }
 
     /// Converts `v` from `from` to `to`: int widening/narrowing (narrowing
-    /// truncates), int<->float, float->int saturating (NaN -> 0).
-    pub(crate) fn cast(&mut self, v: Value, from: KTy, to: KTy) -> Value {
+    /// panics on a value that doesn't fit when `checked_arith` is on, and
+    /// truncates otherwise), int<->float, float->int saturating (NaN -> 0).
+    pub(crate) fn cast(&mut self, v: Value, from: KTy, to: KTy, line: u32) -> Value {
         if from == to {
             return v;
         }
@@ -137,7 +138,19 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                         self.b.ins().uextend(to_ty, v)
                     }
                 } else if tb < fb {
-                    self.b.ins().ireduce(to_ty, v)
+                    let r = self.b.ins().ireduce(to_ty, v);
+                    if self.shared.opts.checked_arith {
+                        // It fit if widening it back gives the original value.
+                        let back = if to.is_signed() {
+                            self.b.ins().sextend(cl_type(from), r)
+                        } else {
+                            self.b.ins().uextend(cl_type(from), r)
+                        };
+                        let bad = self.b.ins().icmp(IntCC::NotEqual, back, v);
+                        let kind = if to == KTy::U8 { PANIC_NARROW_U8 } else { PANIC_NARROW_INT };
+                        self.panic_if(bad, kind, line);
+                    }
+                    r
                 } else {
                     v
                 }

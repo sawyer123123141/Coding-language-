@@ -57,7 +57,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             ExprKind::Or(l, r) => self.short_circuit(l, r, false)?,
             ExprKind::Cast(inner) => {
                 let v = self.expr(inner)?;
-                self.cast(v, inner.ty, e.ty)
+                self.cast(v, inner.ty, e.ty, e.line)
             }
             ExprKind::Call(fi, args) => self.call(*fi, args, None)?.expect("value-returning call"),
             ExprKind::If { cond, then_body, then_val, else_body, else_val } => {

@@ -1,0 +1,12 @@
+// expect: 255 200 -5
+// expect: before
+// expect-exit: 101
+// expect-stderr: value doesn't fit in u8 on line 11
+main() {
+    var n = 255
+    let big: i64 = 200
+    print(u8(n), u8(big), int(i64(-5)))
+    n += 1
+    print("before")
+    print(u8(n))
+}

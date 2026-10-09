@@ -1,0 +1,12 @@
+// expect: 5
+first_square_over(limit: int) -> int {
+    var i = 0
+    while true {
+        if i * i > limit { return i }
+        i += 1
+    }
+}
+
+main() {
+    print(first_square_over(20))
+}

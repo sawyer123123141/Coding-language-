@@ -1,5 +1,8 @@
 pub const PANIC_OVERFLOW: i32 = 1;
 pub const PANIC_DIV_ZERO: i32 = 2;
+/// A narrowing conversion (`int(x)`, `u8(x)`) got a value the target can't hold.
+pub const PANIC_NARROW_INT: i32 = 3;
+pub const PANIC_NARROW_U8: i32 = 4;
 
 #[no_mangle]
 pub extern "C" fn kestrel_rt_panic(kind: i32, line: i32) -> ! {
@@ -7,6 +10,8 @@ pub extern "C" fn kestrel_rt_panic(kind: i32, line: i32) -> ! {
     let what = match kind {
         PANIC_OVERFLOW => "integer overflow",
         PANIC_DIV_ZERO => "division by zero",
+        PANIC_NARROW_INT => "value doesn't fit in int",
+        PANIC_NARROW_U8 => "value doesn't fit in u8",
         _ => "runtime error",
     };
     eprintln!("kestrel: {what} on line {line}");

@@ -29,7 +29,8 @@ pub(crate) struct BodyChecker<'a> {
     /// `None` while checking a constant initializer.
     fn_id: Option<FnId>,
     scopes: Vec<HashMap<String, LocalId>>,
-    loop_depth: u32,
+    /// One entry per enclosing loop: whether a `break` targets it.
+    loop_breaks: Vec<bool>,
     ret: Ty,
     is_pure: bool,
 }
@@ -87,7 +88,7 @@ pub(crate) fn check_fn(program: &Program, fn_id: FnId, t: &mut Tables, diags: &m
 
 impl<'a> BodyChecker<'a> {
     fn new(t: &'a mut Tables, diags: &'a mut Vec<Diagnostic>, fn_id: Option<FnId>, ret: Ty, is_pure: bool) -> Self {
-        BodyChecker { t, diags, fn_id, scopes: Vec::new(), loop_depth: 0, ret, is_pure }
+        BodyChecker { t, diags, fn_id, scopes: Vec::new(), loop_breaks: Vec::new(), ret, is_pure }
     }
 
     /// A type as it reads in messages.
@@ -230,10 +231,15 @@ impl<'a> BodyChecker<'a> {
             }
             Stmt::While { cond, body, .. } => {
                 self.check_value(cond, Some(Ty::Bool));
-                self.loop_depth += 1;
+                self.loop_breaks.push(false);
                 self.check_block(body, Expect::Discard);
-                self.loop_depth -= 1;
-                Ty::Unit
+                let broke = self.loop_breaks.pop().expect("pushed above");
+                // `while true` with no `break` can only be left by `return`.
+                if matches!(cond.kind, ExprKind::Bool(true)) && !broke {
+                    Ty::Never
+                } else {
+                    Ty::Unit
+                }
             }
             Stmt::ForRange { var, start, end, body, .. } => {
                 let st = self.check_expr(start, None);
@@ -255,16 +261,20 @@ impl<'a> BodyChecker<'a> {
                 };
                 self.scopes.push(HashMap::new());
                 self.declare(var, var_ty, false, false, false);
-                self.loop_depth += 1;
+                self.loop_breaks.push(false);
                 self.check_block(body, Expect::Discard);
-                self.loop_depth -= 1;
+                self.loop_breaks.pop();
                 self.scopes.pop();
                 Ty::Unit
             }
             Stmt::Break(span) | Stmt::Continue(span) => {
-                if self.loop_depth == 0 {
-                    let word = if matches!(s, Stmt::Break(_)) { "break" } else { "continue" };
-                    self.error(*span, format!("`{word}` outside a loop"));
+                let is_break = matches!(s, Stmt::Break(_));
+                match self.loop_breaks.last_mut() {
+                    Some(broke) => *broke |= is_break,
+                    None => {
+                        let word = if is_break { "break" } else { "continue" };
+                        self.error(*span, format!("`{word}` outside a loop"));
+                    }
                 }
                 Ty::Never
             }

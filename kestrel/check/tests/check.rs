@@ -108,6 +108,16 @@ fn always_leaving_if_has_no_value_outside_a_tail() {
 }
 
 #[test]
+fn while_true_without_break_never_finishes() {
+    ok("f(n: int) -> int {\n var i = 0\n while true {\n  if i * i > n { return i }\n  i += 1\n }\n}\nmain() {}\n");
+    // A `break` in an inner loop leaves only that loop.
+    ok("f() -> int {\n while true {\n  for i from 0 to 3 { break }\n  return 1\n }\n}\nmain() {}\n");
+    let must = "`f` must return int, but its body can finish without a value";
+    assert_eq!(errors("f() -> int {\n while true { break }\n}\nmain() {}\n"), vec![must]);
+    assert_eq!(errors("f(c: bool) -> int {\n while c { return 1 }\n}\nmain() {}\n"), vec![must]);
+}
+
+#[test]
 fn partly_leaving_if_is_still_a_value() {
     ok("f(x: int) -> int {\n let y = if x > 0 { x * 2 } else { return -1 }\n y\n}\nmain() {}\n");
     ok("f(x: int) -> int {\n let y: int = if x > 0 { if x > 5 { return 1 } else { return 2 } } else { 3 }\n y\n}\nmain() {}\n");

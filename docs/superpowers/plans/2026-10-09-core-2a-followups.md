@@ -3,10 +3,10 @@
 Carried forward from plan 2a's task reviews and final whole-branch review.
 Input for writing plans 2b and 2c.
 
-## Open language decisions (need the user)
+## Language decisions (resolved 2026-10-10)
 
-- **Narrowing integer conversions.** `u8(300)` currently gives 44 and `u8(-1)` gives 255 (truncation, like Rust `as`). The alternatives are a runtime panic when checks are on, or saturation (as float→int already does).
-- **`while true { ... return ... }` as a function's last statement** is rejected ("body can finish without a value"), because the checker doesn't treat an infinite loop as never finishing.
+- **Narrowing integer conversions** (`u8(x)`, `int(x)` from a wider type) panic when the value doesn't fit and checks are on; `--release` truncates. A literal that doesn't fit is a compile error. Float->int still saturates.
+- **`while true` with no `break`** counts as never finishing, so it can end a value-returning function.
 
 ## Do before or at the start of 2b
 
