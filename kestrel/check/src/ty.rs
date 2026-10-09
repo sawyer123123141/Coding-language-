@@ -1,5 +1,7 @@
 /// A checked type. `Never` is the type of code that doesn't finish
 /// (`return`, `break`); `Error` suppresses follow-on errors.
+use crate::tables::StructId;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Ty {
     Unit,
@@ -11,6 +13,8 @@ pub enum Ty {
     Float,
     F64,
     Str,
+    /// A user-defined struct; its name lives in `Tables::structs`.
+    Struct(StructId),
     Error,
 }
 
@@ -39,6 +43,7 @@ impl Ty {
             Ty::Float => "float",
             Ty::F64 => "f64",
             Ty::Str => "string",
+            Ty::Struct(_) => "struct",
             Ty::Error => "{error}",
         }
     }

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use kestrel_syntax::ast::{BindId, ExprId};
+use kestrel_syntax::ast::{BindId, ExprId, FnDecl, Item, Program};
 use kestrel_syntax::Span;
 
 use crate::ty::Ty;
@@ -14,6 +14,9 @@ pub struct FnId(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ConstId(pub u32);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct StructId(pub u32);
+
 /// What a name or call expression refers to.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Res {
@@ -22,6 +25,8 @@ pub enum Res {
     Fn(FnId),
     Print,
     Convert(Ty),
+    /// `Point(...)`: builds a struct.
+    Construct(StructId),
 }
 
 #[derive(Clone, Debug)]
@@ -49,6 +54,9 @@ pub struct FnInfo {
     pub name: String,
     /// Index into `Program::items`.
     pub item: usize,
+    /// For a method: its index in the struct's `methods`, and the struct.
+    pub method: Option<usize>,
+    pub owner: Option<StructId>,
     pub is_pure: bool,
     pub params: Vec<ParamSig>,
     pub ret: Ty,
@@ -57,6 +65,34 @@ pub struct FnInfo {
     pub locals: Vec<LocalId>,
     pub io: bool,
     pub mutates_params: bool,
+}
+
+impl FnInfo {
+    /// The function's (or method's) declaration in the AST.
+    pub fn decl<'p>(&self, program: &'p Program) -> &'p FnDecl {
+        match (&program.items[self.item], self.method) {
+            (Item::Fn(f), None) => f,
+            (Item::Struct(s), Some(m)) => &s.methods[m],
+            _ => unreachable!("FnInfo points at a function or a method"),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct StructInfo {
+    pub name: String,
+    pub item: usize,
+    pub span: Span,
+    pub fields: Vec<FieldInfo>,
+    pub methods: HashMap<String, FnId>,
+}
+
+#[derive(Clone, Debug)]
+pub struct FieldInfo {
+    pub name: String,
+    pub ty: Ty,
+    pub span: Span,
+    pub has_default: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -79,6 +115,12 @@ pub struct Tables {
     pub locals: Vec<LocalInfo>,
     pub fns: Vec<FnInfo>,
     pub consts: Vec<ConstInfo>,
+    pub structs: Vec<StructInfo>,
+    pub struct_by_name: HashMap<String, StructId>,
+    /// For a field access `a.b`: the index of `b` in its struct.
+    pub field_index: HashMap<ExprId, u32>,
+    /// For a constructor call: per field, the argument index, or `None` for the default.
+    pub ctor_args: HashMap<ExprId, Vec<Option<usize>>>,
     pub fn_by_name: HashMap<String, FnId>,
     pub const_by_name: HashMap<String, ConstId>,
     pub main: Option<FnId>,
@@ -95,5 +137,17 @@ impl Tables {
 
     pub fn func(&self, id: FnId) -> &FnInfo {
         &self.fns[id.0 as usize]
+    }
+
+    pub fn strukt(&self, id: StructId) -> &StructInfo {
+        &self.structs[id.0 as usize]
+    }
+
+    /// How a type reads in messages: struct types by name.
+    pub fn ty_name(&self, ty: Ty) -> String {
+        match ty {
+            Ty::Struct(id) => self.strukt(id).name.clone(),
+            other => other.name().to_string(),
+        }
     }
 }

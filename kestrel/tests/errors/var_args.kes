@@ -1,14 +1,15 @@
-// error 11: parameter `x` of `bump` is `var`, so the call must say so
-// error 12: `a` is passed as `var` and also used in another argument of the same call
-// error 13: parameter `y` of `bump` isn't `var`
+// error 12: parameter `x` of `bump` is `var`, so the call must say so
 // error 13: `a` is passed as `var` and also used in another argument of the same call
+// error 14: parameter `y` of `bump` isn't `var`
 bump(var x: int, y: int) {
     x += y
 }
 
+two(var x: int, var y: int) {}
+
 main() {
     var a = 1
     bump(a, 1)
-    bump(var a, a)
+    two(var a, var a)
     bump(var a, var a)
 }

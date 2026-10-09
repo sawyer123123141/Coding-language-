@@ -38,10 +38,8 @@ impl<'a> BodyChecker<'a> {
             ExprKind::Binary { op, lhs, rhs } => self.binary(e, *op, lhs, rhs, want),
             ExprKind::Call { .. } => self.check_call(e, want),
             ExprKind::If { .. } => self.check_if(e, Expect::Value(want)),
-            ExprKind::Field { .. } | ExprKind::MethodCall { .. } => {
-                self.error(e.span, "structs aren't supported yet");
-                Ty::Error
-            }
+            ExprKind::Field { .. } => self.check_field(e),
+            ExprKind::MethodCall { .. } => self.check_method_call(e),
         }
     }
 
@@ -57,7 +55,7 @@ impl<'a> BodyChecker<'a> {
             _ => return ty,
         };
         if n > max {
-            let mut d = Diagnostic::error(e.span, format!("`{n}` doesn't fit in {}", ty.name()));
+            let mut d = Diagnostic::error(e.span, format!("`{n}` doesn't fit in {}", self.tn(ty)));
             if ty == Ty::Int {
                 d = d.with_help("annotate it as i64: `let x: i64 = ...`");
             }
@@ -78,6 +76,8 @@ impl<'a> BodyChecker<'a> {
         }
         if self.t.fn_by_name.contains_key(name) {
             self.error(e.span, format!("`{name}` is a function; call it with `{name}(...)`"));
+        } else if self.t.struct_by_name.contains_key(name) {
+            self.error(e.span, format!("`{name}` is a struct; build one with `{name}(...)`"));
         } else {
             self.error(e.span, format!("unknown name `{name}`"));
         }
@@ -97,7 +97,8 @@ impl<'a> BodyChecker<'a> {
                     return Ty::Error;
                 }
                 if !ty.is_numeric() && ty != Ty::Error {
-                    self.error(inner.span, format!("`-` needs a number, found {}", ty.name()));
+                    let msg = format!("`-` needs a number, found {}", self.tn(ty));
+                    self.error(inner.span, msg);
                     return Ty::Error;
                 }
                 ty
@@ -137,7 +138,8 @@ impl<'a> BodyChecker<'a> {
         }
         let sym = op.symbol();
         if !lt.is_numeric() || !rt.is_numeric() {
-            self.error(e.span, format!("`{sym}` needs numbers, found {} and {}", lt.name(), rt.name()));
+            let msg = format!("`{sym}` needs numbers, found {} and {}", self.tn(lt), self.tn(rt));
+            self.error(e.span, msg);
             return Ty::Error;
         }
         match Ty::common(lt, rt) {
@@ -147,7 +149,7 @@ impl<'a> BodyChecker<'a> {
                 c
             }
             None => {
-                let msg = format!("`{sym}` can't mix {} and {}", lt.name(), rt.name());
+                let msg = format!("`{sym}` can't mix {} and {}", self.tn(lt), self.tn(rt));
                 self.error_help(e.span, msg, "convert one side explicitly, e.g. `int(x)` or `u8(x)`");
                 Ty::Error
             }

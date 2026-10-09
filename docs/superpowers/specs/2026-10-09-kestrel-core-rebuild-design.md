@@ -214,9 +214,13 @@ Run in order; each collects all its errors before the next starts
    not an effect.
 4. **Moves:** last-use analysis per local; use-after-move is an error;
    copying an owning type is an error; large-copy warning.
-5. **Exclusivity:** an argument passed as `var` may not also be passed
-   (as `var` or read-only) in the same call; call-site `var` must match
-   the parameter.
+5. **Exclusivity:** a variable changed by a call (a `var` argument, or the
+   receiver of a `var self` method) may not also be passed as another
+   `var` argument, or as a read-only argument of aggregate type (passed by
+   pointer, so it would see the change). Number arguments are copied
+   before the call, so `p.add(p.x)` and `bump(var n, n)` are fine. Rooted
+   at the variable: `f(var p.x, p)` conflicts. Call-site `var` must match
+   the parameter. (Refined 2026-10-10 from "never passed twice".)
 6. **Arena escape (milestone rules, deliberately conservative):**
    regions are `Program`, `Scoped(block)`, `Owned(path)`, and `Caller`
    (inside a function, the caller's current arena). An allocated value

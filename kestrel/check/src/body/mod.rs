@@ -1,13 +1,17 @@
 mod call;
 mod expr;
+mod place;
+mod structs;
+
+pub(crate) use structs::check_field_defaults;
 
 use std::collections::HashMap;
 
-use kestrel_syntax::ast::{AssignOp, Binding, Block, Expr, ExprKind, Item, Program, Stmt};
+use kestrel_syntax::ast::{Binding, Block, Expr, ExprKind, Item, Program, Stmt};
 use kestrel_syntax::{Diagnostic, Span};
 
 use crate::collect::resolve_type;
-use crate::tables::{ConstId, FnId, LocalId, LocalInfo, Res, Tables};
+use crate::tables::{ConstId, FnId, LocalId, LocalInfo, Tables};
 use crate::ty::Ty;
 
 /// What the surrounding code does with a block's or expression's value.
@@ -35,7 +39,7 @@ pub(crate) fn check_consts(program: &Program, t: &mut Tables, diags: &mut Vec<Di
     });
     for (i, c) in consts.enumerate() {
         let mut bc = BodyChecker::new(t, diags, None, Ty::Unit, false);
-        let want = c.ty.as_ref().map(|ty| resolve_type(ty, bc.diags));
+        let want = c.ty.as_ref().map(|ty| resolve_type(ty, bc.t, bc.diags));
         let ty = if is_const_expr(&c.value) {
             bc.check_value(&c.value, want)
         } else {
@@ -47,7 +51,7 @@ pub(crate) fn check_consts(program: &Program, t: &mut Tables, diags: &mut Vec<Di
     }
 }
 
-fn is_const_expr(e: &Expr) -> bool {
+pub(crate) fn is_const_expr(e: &Expr) -> bool {
     match &e.kind {
         ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::Ident(_) => true,
         ExprKind::Unary { expr, .. } => is_const_expr(expr),
@@ -62,7 +66,7 @@ fn is_const_expr(e: &Expr) -> bool {
 
 pub(crate) fn check_fn(program: &Program, fn_id: FnId, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
     let info = &t.fns[fn_id.0 as usize];
-    let Item::Fn(decl) = &program.items[info.item] else { unreachable!("FnInfo points at a fn item") };
+    let decl = info.decl(program);
     let (ret, is_pure, params) = (info.ret, info.is_pure, info.params.clone());
     let mut bc = BodyChecker::new(t, diags, Some(fn_id), ret, is_pure);
     bc.scopes.push(HashMap::new());
@@ -73,7 +77,7 @@ pub(crate) fn check_fn(program: &Program, fn_id: FnId, t: &mut Tables, diags: &m
     let body = bc.check_block(&decl.body, expect);
     // An unresolved return type was already reported; don't pile on.
     if !matches!(ret, Ty::Unit | Ty::Error) && body == Ty::Unit {
-        let msg = format!("`{}` must return {}, but its body can finish without a value", decl.name, ret.name());
+        let msg = format!("`{}` must return {}, but its body can finish without a value", decl.name, bc.tn(ret));
         bc.diags.push(Diagnostic::error(decl.name_span, msg).with_help("end the body with a value or a `return`"));
     }
 }
@@ -81,6 +85,11 @@ pub(crate) fn check_fn(program: &Program, fn_id: FnId, t: &mut Tables, diags: &m
 impl<'a> BodyChecker<'a> {
     fn new(t: &'a mut Tables, diags: &'a mut Vec<Diagnostic>, fn_id: Option<FnId>, ret: Ty, is_pure: bool) -> Self {
         BodyChecker { t, diags, fn_id, scopes: Vec::new(), loop_depth: 0, ret, is_pure }
+    }
+
+    /// A type as it reads in messages.
+    fn tn(&self, ty: Ty) -> String {
+        self.t.ty_name(ty)
     }
 
     fn error(&mut self, span: Span, msg: impl Into<String>) {
@@ -99,7 +108,8 @@ impl<'a> BodyChecker<'a> {
         let name = &bind.name;
         let taken = self.lookup_local(name).is_some()
             || self.t.const_by_name.contains_key(name)
-            || self.t.fn_by_name.contains_key(name);
+            || self.t.fn_by_name.contains_key(name)
+            || self.t.struct_by_name.contains_key(name);
         if taken {
             self.error_help(
                 bind.span,
@@ -174,7 +184,7 @@ impl<'a> BodyChecker<'a> {
             self.t.coerce.insert(e.id, to);
             return;
         }
-        let msg = format!("expected {}, found {}", to.name(), from.name());
+        let msg = format!("expected {}, found {}", self.tn(to), self.tn(from));
         if from.is_numeric() && to.is_numeric() {
             self.error_help(e.span, msg, format!("convert it explicitly: `{}(...)`", to.name()));
         } else {
@@ -200,7 +210,7 @@ impl<'a> BodyChecker<'a> {
     fn check_stmt(&mut self, s: &Stmt) -> Ty {
         match s {
             Stmt::Let { is_var, bind, ty, value, .. } => {
-                let ann = ty.as_ref().map(|t| resolve_type(t, self.diags));
+                let ann = ty.as_ref().map(|t| resolve_type(t, self.t, self.diags));
                 let mut local_ty = self.check_value(value, ann);
                 if matches!(local_ty, Ty::Unit | Ty::Never) {
                     self.error(value.span, "this expression has no value to store");
@@ -233,7 +243,7 @@ impl<'a> BodyChecker<'a> {
                         t
                     }
                     _ => {
-                        let msg = format!("`for ... from ... to` needs integers, found {} and {}", st.name(), et.name());
+                        let msg = format!("`for ... from ... to` needs integers, found {} and {}", self.tn(st), self.tn(et));
                         self.error(start.span.to(end.span), msg);
                         Ty::Error
                     }
@@ -263,7 +273,10 @@ impl<'a> BodyChecker<'a> {
                         self.check_value(v, Some(r));
                     }
                     (None, Ty::Unit | Ty::Error) => {}
-                    (None, r) => self.error(*span, format!("this function must return {}", r.name())),
+                    (None, r) => {
+                        let msg = format!("this function must return {}", self.tn(r));
+                        self.error(*span, msg);
+                    }
                 }
                 Ty::Never
             }
@@ -271,49 +284,11 @@ impl<'a> BodyChecker<'a> {
         }
     }
 
-    fn check_assign(&mut self, target: &Expr, op: AssignOp, value: &Expr) {
-        let ExprKind::Ident(name) = &target.kind else {
-            self.error(target.span, "only variables can be assigned to");
-            self.check_expr(value, None);
-            return;
-        };
-        let Some(local) = self.lookup_local(name) else {
-            if self.t.const_by_name.contains_key(name) {
-                self.error(target.span, format!("can't change constant `{name}`"));
-            } else {
-                self.error(target.span, format!("unknown name `{name}`"));
-            }
-            self.check_expr(value, None);
-            return;
-        };
-        let info = self.t.locals[local.0 as usize].clone();
-        self.t.res.insert(target.id, Res::Local(local));
-        self.t.expr_ty[target.id.0 as usize] = info.ty;
-        if !info.mutable {
-            if info.is_param {
-                self.error_help(
-                    target.span,
-                    format!("can't change parameter `{name}`"),
-                    format!("declare it as `var {name}` to change the caller's value"),
-                );
-            } else {
-                self.error_help(target.span, format!("can't change `{name}`: it was declared with `let`"), "declare it with `var`");
-            }
-        } else if info.is_var_param {
-            let f = self.fn_id.expect("inside a function");
-            self.t.fns[f.0 as usize].mutates_params = true;
-        }
-        if op != AssignOp::Set && !info.ty.is_numeric() && info.ty != Ty::Error {
-            self.error(target.span, format!("`{}` needs a number, found {}", op.symbol(), info.ty.name()));
-        }
-        self.check_value(value, Some(info.ty));
-    }
-
     /// An expression whose value nobody uses.
     fn check_discarded(&mut self, e: &Expr) -> Ty {
         let ty = match &e.kind {
             ExprKind::If { .. } => self.check_if(e, Expect::Discard),
-            ExprKind::Call { .. } => self.check_discarded_call(e),
+            ExprKind::Call { .. } | ExprKind::MethodCall { .. } => self.check_discarded_call(e),
             _ => {
                 let ty = self.check_expr(e, None);
                 if ty != Ty::Error {
