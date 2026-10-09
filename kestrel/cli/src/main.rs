@@ -1,11 +1,13 @@
 mod driver;
+mod link;
 
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use driver::DiagStyle;
-use kestrel_codegen::{JitProgram, Options};
+use kestrel_codegen::{emit_object, JitProgram, Options};
 
-const USAGE: &str = "usage: kestrel <run|check> <file.kes> [--diagnostics=short]";
+const USAGE: &str = "usage: kestrel <run|check|build> <file.kes> [-o <exe>] [--release] [--diagnostics=short]";
 
 /// Turns any Rust panic in the compiler into exit 3, keeping 101 for Kestrel runtime panics.
 fn install_panic_hook() {
@@ -15,45 +17,109 @@ fn install_panic_hook() {
     }));
 }
 
+struct Args {
+    cmd: String,
+    path: String,
+    out: Option<String>,
+    release: bool,
+    style: DiagStyle,
+}
+
+fn parse_args(raw: Vec<String>) -> Option<Args> {
+    let mut it = raw.into_iter();
+    let (mut positional, mut out, mut release, mut style) = (Vec::new(), None, false, DiagStyle::Full);
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "-o" => out = Some(it.next()?),
+            "--release" => release = true,
+            "--diagnostics=short" => style = DiagStyle::Short,
+            s if s.starts_with('-') => return None,
+            _ => positional.push(a),
+        }
+    }
+    let [cmd, path]: [String; 2] = positional.try_into().ok()?;
+    matches!(cmd.as_str(), "run" | "check" | "build").then_some(Args { cmd, path, out, release, style })
+}
+
 fn main() -> ExitCode {
     install_panic_hook();
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let style = if args.iter().any(|a| a == "--diagnostics=short") { DiagStyle::Short } else { DiagStyle::Full };
-    let positional: Vec<&str> = args.iter().filter(|a| !a.starts_with("--")).map(String::as_str).collect();
-    let [cmd, path] = positional[..] else {
+    let Some(args) = parse_args(std::env::args().skip(1).collect()) else {
         eprintln!("{USAGE}");
         return ExitCode::from(2);
     };
-    let src = match std::fs::read_to_string(path) {
+    let src = match std::fs::read_to_string(&args.path) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("kestrel: can't read {path}: {e}");
+            eprintln!("kestrel: can't read {}: {e}", args.path);
             return ExitCode::from(2);
         }
     };
-    match cmd {
-        "check" | "run" => {}
-        _ => {
-            eprintln!("{USAGE}");
-            return ExitCode::from(2);
-        }
-    }
-    let Some(module) = driver::compile(path, &src, style) else { return ExitCode::from(1) };
-    if cmd == "check" {
-        return ExitCode::SUCCESS;
-    }
-    match JitProgram::compile(&module, Options::default()) {
-        Ok(program) => ExitCode::from(program.run_main() as u8),
+    let Some(module) = driver::compile(&args.path, &src, args.style) else { return ExitCode::from(1) };
+    let opts = Options { checked_arith: !args.release };
+    let result = match args.cmd.as_str() {
+        "check" => return ExitCode::SUCCESS,
+        "run" => JitProgram::compile(&module, opts).map_err(internal_error).map(|p| p.run_main()),
+        _ => build(&module, opts, &args).map(|()| 0),
+    };
+    match result {
+        Ok(code) => ExitCode::from(code as u8),
         Err(e) => {
-            eprintln!("kestrel: internal compiler error: {e}");
+            eprintln!("kestrel: {e}");
             ExitCode::from(3)
         }
     }
 }
 
+fn internal_error(e: String) -> String {
+    format!("internal compiler error: {e}")
+}
+
+/// Output path: `-o`, else `<source stem><EXE_SUFFIX>` in the current directory.
+fn output_path(args: &Args) -> Result<PathBuf, String> {
+    if let Some(o) = &args.out {
+        return Ok(PathBuf::from(o));
+    }
+    let stem = Path::new(&args.path).file_stem().ok_or("source path has no file name")?;
+    Ok(PathBuf::from(format!("{}{}", stem.to_string_lossy(), std::env::consts::EXE_SUFFIX)))
+}
+
+fn build(module: &kestrel_kir::Module, opts: Options, args: &Args) -> Result<(), String> {
+    let exe = output_path(args)?;
+    let bytes = emit_object(module, opts).map_err(internal_error)?;
+    let obj = std::env::temp_dir().join(format!("kestrel-{}.o", std::process::id()));
+    std::fs::write(&obj, bytes).map_err(|e| format!("can't write {}: {e}", obj.display()))?;
+    let linked = link::link(&obj, &exe);
+    let _ = std::fs::remove_file(&obj);
+    linked
+}
+
 #[cfg(test)]
 mod tests {
     use std::process::Command;
+
+    use super::{output_path, parse_args};
+
+    fn args(list: &[&str]) -> Option<super::Args> {
+        parse_args(list.iter().map(|s| s.to_string()).collect())
+    }
+
+    #[test]
+    fn default_output_is_the_stem_plus_exe_suffix() {
+        let a = args(&["build", "dir/my.prog.kes"]).unwrap();
+        let expected = format!("my.prog{}", std::env::consts::EXE_SUFFIX);
+        assert_eq!(output_path(&a).unwrap().to_str().unwrap(), expected);
+        let a = args(&["build", "x.kes", "-o", "out/y"]).unwrap();
+        assert_eq!(output_path(&a).unwrap().to_str().unwrap(), "out/y");
+    }
+
+    #[test]
+    fn bad_command_lines_are_rejected() {
+        assert!(args(&["build", "x.kes", "--bogus"]).is_none());
+        assert!(args(&["build", "x.kes", "-o"]).is_none());
+        assert!(args(&["frob", "x.kes"]).is_none());
+        assert!(args(&["build"]).is_none());
+        assert!(args(&["build", "x.kes", "extra"]).is_none());
+    }
 
     const CHILD_ENV: &str = "KESTREL_PANIC_HOOK_CHILD";
 

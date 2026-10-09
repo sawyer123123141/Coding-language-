@@ -1,6 +1,7 @@
 mod func;
 mod isa;
 pub mod jit;
+pub mod object;
 mod rt;
 
 use cranelift_codegen::ir::Function;
@@ -9,6 +10,7 @@ use cranelift_module::{FuncId, Linkage, Module};
 use kestrel_kir as kir;
 
 pub use jit::JitProgram;
+pub use object::emit_object;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Options {

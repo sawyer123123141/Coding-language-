@@ -92,3 +92,42 @@ fn unknown_expect_directive_panics() {
 fn bad_expect_exit_number_panics() {
     expectations("typo.kes", "// expect-exit: one\nmain() {}\n");
 }
+
+fn build(path: &Path, exe: &Path, extra: &[&str]) -> Output {
+    let mut args = vec!["build", path.to_str().unwrap(), "-o", exe.to_str().unwrap()];
+    args.extend_from_slice(extra);
+    kestrel(&args)
+}
+
+#[test]
+fn programs_run_as_executables() {
+    let out_dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("programs");
+    fs::create_dir_all(&out_dir).unwrap();
+    let mut failures = Vec::new();
+    for path in programs() {
+        let src = fs::read_to_string(&path).unwrap();
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        let exe = out_dir.join(path.file_stem().unwrap()).with_extension(std::env::consts::EXE_EXTENSION);
+        let built = build(&path, &exe, &[]);
+        if !built.status.success() {
+            failures.push(format!("{name} [build]: {}", String::from_utf8_lossy(&built.stderr)));
+            continue;
+        }
+        let out = Command::new(&exe).output().expect("run built exe");
+        failures.extend(compare(&name, "exe", &out, &expectations(&name, &src)));
+    }
+    assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+}
+
+#[test]
+fn release_builds_wrap_on_overflow() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/programs/overflow.kes");
+    let exe = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("overflow_release")
+        .with_extension(std::env::consts::EXE_EXTENSION);
+    let built = build(&path, &exe, &["--release"]);
+    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+    let out = Command::new(&exe).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n"), "before\nafter\n");
+}

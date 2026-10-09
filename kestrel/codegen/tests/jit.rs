@@ -178,3 +178,13 @@ fn print_arguments_evaluate_left_to_right() {
     assert_eq!(code, Some(0), "stdout: {stdout}");
     assert!(stdout.contains("1 11 2\n"), "stdout: {stdout}");
 }
+
+#[test]
+fn emits_an_object_file() {
+    let src = "main() {\n print(1)\n}\n";
+    let (p, _) = parse(src);
+    let (t, _) = kestrel_check::check(&p);
+    let m = kestrel_kir::lower(&p, &t.unwrap(), &LineIndex::new(src));
+    let bytes = kestrel_codegen::emit_object(&m, Options::default()).expect("object");
+    assert!(bytes.len() > 100);
+}
