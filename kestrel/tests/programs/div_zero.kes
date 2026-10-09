@@ -1,0 +1,6 @@
+// expect-exit: 101
+// expect-stderr: division by zero on line 5
+main() {
+    var d = 0
+    print(10 / d)
+}

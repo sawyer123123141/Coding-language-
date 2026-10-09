@@ -1,0 +1,25 @@
+// expect: 3.5
+// expect: 35
+// expect: 3000000000
+// expect: 255
+// expect: -3 -1
+// expect: 1024
+// expect: 0.1
+let SIZE = 32
+
+area(width: int, height: int) -> int {
+    width * height
+}
+
+main() {
+    let x: float = 7
+    print(x / 2.0)
+    print(int(x / 2.0 * 10.0))
+    let big: i64 = 3
+    print(big * 1000000000)
+    let a: u8 = 200
+    print(a + 55)
+    print(-7 / 2, -7 % 2)
+    print(area(height: SIZE, width: SIZE))
+    print(0.1)
+}

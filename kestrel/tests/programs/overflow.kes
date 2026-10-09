@@ -1,0 +1,9 @@
+// expect: before
+// expect-exit: 101
+// expect-stderr: integer overflow on line 7
+main() {
+    print("before")
+    var x = 2147483647
+    x += 1
+    print("after")
+}

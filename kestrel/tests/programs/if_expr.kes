@@ -1,0 +1,15 @@
+// expect: big
+// expect: 11 -1
+classify(n: int) -> int {
+    if n > 100 { 2 } else if n > 10 { 1 } else { 0 }
+}
+
+pick(x: int) -> int {
+    let y = if x > 0 { x * 2 } else { return -1 }
+    y + 1
+}
+
+main() {
+    if classify(500) == 2 { print("big") } else { print("small") }
+    print(pick(5), pick(-3))
+}

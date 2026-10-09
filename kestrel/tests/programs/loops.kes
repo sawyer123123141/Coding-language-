@@ -1,0 +1,26 @@
+// expect: 4950
+// expect: 25
+// expect: 36
+main() {
+    var total = 0
+    for i from 0 to 100 { total += i }
+    print(total)
+
+    var odd = 0
+    var i = 0
+    while true {
+        i += 1
+        if i > 10 { break }
+        if i % 2 == 0 { continue }
+        odd += i
+    }
+    print(odd)
+
+    var cells = 0
+    for x from 0 to 6 {
+        for y from 0 to 6 {
+            cells += 1
+        }
+    }
+    print(cells)
+}

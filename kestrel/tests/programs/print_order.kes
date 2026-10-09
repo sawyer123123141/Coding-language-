@@ -1,0 +1,10 @@
+// expect: in noisy
+// expect: result 5
+noisy() -> int {
+    print("in noisy")
+    5
+}
+
+main() {
+    print("result", noisy())
+}

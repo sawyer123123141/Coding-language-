@@ -1,0 +1,14 @@
+[package]
+name = "kestrel-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "kestrel"
+path = "src/main.rs"
+
+[dependencies]
+kestrel-syntax.workspace = true
+kestrel-check.workspace = true
+kestrel-kir.workspace = true
+kestrel-codegen.workspace = true

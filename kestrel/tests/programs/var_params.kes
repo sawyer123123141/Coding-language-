@@ -1,0 +1,22 @@
+// expect: 10
+// expect: 2 1
+bump(var x: int, by: int) {
+    x += by
+}
+
+swap(var a: int, var b: int) {
+    let t = a
+    a = b
+    b = t
+}
+
+main() {
+    var n = 5
+    bump(var n, by: 3)
+    bump(var n, 2)
+    print(n)
+    var p = 1
+    var q = 2
+    swap(var p, var q)
+    print(p, q)
+}

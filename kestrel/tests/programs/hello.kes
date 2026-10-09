@@ -1,0 +1,6 @@
+// expect: hello world
+// expect: 1 2.5 true
+main() {
+    print("hello world")
+    print(1, 2.5, true)
+}
