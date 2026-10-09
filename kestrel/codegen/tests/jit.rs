@@ -133,6 +133,10 @@ const CHILD_CASES: &[(&str, &str)] = &[
         "print_left_to_right",
         "tick(var n: int) -> int {\n n += 1\n n\n}\nmain() {\n var a = 0\n var b = 10\n print(tick(var a), tick(var b), tick(var a))\n}\n",
     ),
+    (
+        "labelled_arg_order",
+        "noisy(n: int) -> int {\n print(\"eval\", n)\n n\n}\nsub(a: int, b: int) -> int {\n a - b\n}\nmain() {\n let r = sub(b: noisy(1), a: noisy(2))\n print(r)\n}\n",
+    ),
 ];
 
 /// Entry point for the child process; does nothing in a normal test run.
@@ -187,4 +191,13 @@ fn emits_an_object_file() {
     let m = kestrel_kir::lower(&p, &t.unwrap(), &LineIndex::new(src));
     let bytes = kestrel_codegen::emit_object(&m, Options::default()).expect("object");
     assert!(bytes.len() > 100);
+}
+
+// TODO(2b): labelled args must evaluate in source order
+#[test]
+#[ignore = "labelled arguments are evaluated in parameter order until plan 2b"]
+fn labelled_arguments_evaluate_in_source_order() {
+    let (code, stdout, _) = run_child("labelled_arg_order");
+    assert_eq!(code, Some(0), "stdout: {stdout}");
+    assert!(stdout.contains("eval 1\neval 2\n"), "stdout: {stdout}");
 }
