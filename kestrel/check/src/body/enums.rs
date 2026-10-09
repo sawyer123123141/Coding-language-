@@ -62,6 +62,7 @@ impl<'a> BodyChecker<'a> {
                         self.error(a.span, "constructor arguments can't be `var`");
                     }
                     self.check_value(&a.value, Some(variant.fields[fi].ty));
+                    self.consume(&a.value);
                 }
                 None if bound => {
                     self.error(e.span, format!("missing field `{}` for `{name}`", variant.fields[fi].name));

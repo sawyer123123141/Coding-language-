@@ -20,6 +20,16 @@ impl<'a> BodyChecker<'a> {
         if name == "print" {
             return self.check_print(e, args);
         }
+        if name == "Arena" {
+            self.t.res.insert(e.id, Res::NewArena);
+            if !args.is_empty() {
+                self.error(e.span, "`Arena()` takes no arguments");
+                for a in args {
+                    self.check_expr(&a.value, None);
+                }
+            }
+            return Ty::Arena;
+        }
         if let Some(&(_, to)) = CONVERSIONS.iter().find(|(n, _)| n == name) {
             return self.check_convert(e, to, args);
         }
@@ -46,7 +56,7 @@ impl<'a> BodyChecker<'a> {
                 let name = self.t.fns[f.0 as usize].name.clone();
                 self.error(e.span, format!("the result of pure function `{name}` is unused, so this line does nothing"));
             }
-            Some(Res::Convert(_) | Res::Construct(_)) => {
+            Some(Res::Convert(_) | Res::Construct(_) | Res::NewArena) => {
                 self.error(e.span, "this line has no effect; did you mean to continue the line above?");
             }
             _ => {}

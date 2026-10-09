@@ -93,6 +93,40 @@ pub extern "C" fn kestrel_rt_current_arena() -> *mut Arena {
     })
 }
 
+/// A new, empty arena (`Arena()`). It allocates nothing until first used.
+#[no_mangle]
+pub extern "C" fn kestrel_rt_arena_new() -> *mut Arena {
+    Box::into_raw(Box::default())
+}
+
+/// Frees an arena and everything allocated in it. Null does nothing.
+///
+/// # Safety
+/// `a` must be null or come from `kestrel_rt_arena_new`, not yet freed.
+#[no_mangle]
+pub unsafe extern "C" fn kestrel_rt_arena_free(a: *mut Arena) {
+    if a.is_null() {
+        return;
+    }
+    if STACK.with_borrow(|s| s.pushed.contains(&a)) {
+        crate::panic::fail("an arena was freed while allocating into it (its owner was replaced inside `in`)");
+    }
+    // SAFETY: the caller guarantees `a` is a live arena from `kestrel_rt_arena_new`.
+    drop(unsafe { Box::from_raw(a) });
+}
+
+/// Makes `a` the current arena (`arena { }` / `in x { }`).
+#[no_mangle]
+pub extern "C" fn kestrel_rt_arena_push(a: *mut Arena) {
+    STACK.with_borrow_mut(|s| s.pushed.push(a));
+}
+
+/// Undoes the latest push and returns that arena.
+#[no_mangle]
+pub extern "C" fn kestrel_rt_arena_pop() -> *mut Arena {
+    STACK.with_borrow_mut(|s| s.pushed.pop().expect("pops match pushes"))
+}
+
 /// Room for `count` zeroed elements of `elem_size` bytes in the current arena.
 #[no_mangle]
 pub extern "C" fn kestrel_rt_alloc(count: i64, elem_size: i64, align: i64, line: i32) -> *mut u8 {
@@ -204,6 +238,24 @@ mod tests {
             kestrel_rt_list_grow(&mut l, 4, 4);
             assert_eq!(l.cap, 8);
             assert_eq!(std::slice::from_raw_parts(l.ptr as *const i32, 4), &[0, 10, 20, 30]);
+        }
+    }
+
+    #[test]
+    fn pushed_arenas_take_allocations_until_popped() {
+        let program = kestrel_rt_current_arena();
+        let a = kestrel_rt_arena_new();
+        kestrel_rt_arena_push(a);
+        assert_eq!(kestrel_rt_current_arena(), a);
+        let p = kestrel_rt_alloc(4, 8, 8, 0);
+        // SAFETY: `a` is live and was just used.
+        assert!(unsafe { (*a).blocks.iter().any(|(b, l)| (*b as usize..*b as usize + l.size()).contains(&(p as usize))) });
+        assert_eq!(kestrel_rt_arena_pop(), a);
+        assert_eq!(kestrel_rt_current_arena(), program);
+        // SAFETY: `a` came from `kestrel_rt_arena_new` and is no longer pushed.
+        unsafe {
+            kestrel_rt_arena_free(a);
+            kestrel_rt_arena_free(std::ptr::null_mut());
         }
     }
 

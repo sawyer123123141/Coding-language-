@@ -10,7 +10,7 @@ use crate::tables::{
 use crate::ty::Ty;
 
 pub(crate) const BUILTINS: &[&str] =
-    &["print", "int", "i64", "u8", "float", "f64", "bool", "string", "vec2", "vec3", "array", "list", "map"];
+    &["print", "int", "i64", "u8", "float", "f64", "bool", "string", "vec2", "vec3", "array", "list", "map", "Arena"];
 
 pub(crate) fn resolve_type(ty: &TypeExpr, t: &mut Tables, diags: &mut Vec<Diagnostic>) -> Ty {
     let msg = match &ty.kind {
@@ -202,6 +202,9 @@ fn add_fn(f: &FnDecl, item_idx: usize, method: Option<(usize, &str)>, t: &mut Ta
             diags.push(Diagnostic::error(p.bind.span, "pure functions can't take `var` parameters"));
         }
         let ty = resolve_type(&p.ty, t, diags);
+        if p.is_var && ty == Ty::Arena {
+            diags.push(Diagnostic::error(p.bind.span, "an `Arena` can't be a `var` parameter: arenas can't be replaced"));
+        }
         params.push(ParamSig { name: p.bind.name.clone(), ty, is_var: p.is_var });
     }
     let ret = f.ret.as_ref().map_or(Ty::Unit, |r| resolve_type(r, t, diags));

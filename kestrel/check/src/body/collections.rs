@@ -51,6 +51,7 @@ impl<'a> BodyChecker<'a> {
             self.error(item.span, "this has no value to store");
             return Ty::Error;
         }
+        self.consume(item);
         ty
     }
 
@@ -156,6 +157,7 @@ impl<'a> BodyChecker<'a> {
         match args {
             [a] if a.label.is_none() && !a.is_var => {
                 self.check_element(&a.value, Some(elem));
+                self.check_store(receiver, &a.value);
             }
             _ => {
                 self.error(e.span, "`add` takes one value");
@@ -188,6 +190,7 @@ impl<'a> BodyChecker<'a> {
         }
         let v = self.declare(var, elem, changeable, false, false);
         self.t.locals[v.0 as usize].alias = root;
+        self.views.insert(v);
         self.loop_breaks.push(false);
         self.check_block(body, Expect::Discard);
         self.loop_breaks.pop();

@@ -21,6 +21,17 @@ pub(crate) fn has_heap(ty: KTy, t: &Tables) -> bool {
     }
 }
 
+/// Whether `ty` holds an `Arena`, so values of it move and get dropped.
+pub(crate) fn owning(ty: KTy, t: &Tables) -> bool {
+    match ty {
+        KTy::Arena => true,
+        KTy::Struct(s) => t.owning_structs[s.0 as usize],
+        KTy::Enum(e) => t.owning_enums[e.0 as usize],
+        KTy::Array(e) | KTy::List(e) => t.is_owning(t.elems[e.0 as usize]),
+        _ => false,
+    }
+}
+
 fn elem_of(ty: KTy, t: &Tables) -> KTy {
     match ty {
         KTy::Array(e) | KTy::List(e) => kty(t.elems[e.0 as usize]),
@@ -30,6 +41,13 @@ fn elem_of(ty: KTy, t: &Tables) -> KTy {
 
 fn expr(kind: ExprKind, ty: KTy) -> Expr {
     Expr { kind, ty, line: 0 }
+}
+
+/// `tag(place) == variant`
+fn tag_is(place: &Place, variant: u32) -> Expr {
+    let tag = expr(ExprKind::Tag(place.clone()), KTy::U8);
+    let v = expr(ExprKind::Int(variant as i64), KTy::U8);
+    expr(ExprKind::Binary(BinOp::Eq, Box::new(tag), Box::new(v)), KTy::Bool)
 }
 
 fn with(place: &Place, proj: Proj) -> Place {
@@ -43,12 +61,13 @@ pub(crate) struct Helpers {
     base: u32,
     pub(crate) funcs: Vec<Func>,
     copy: HashMap<KTy, FuncIdx>,
+    drop: HashMap<KTy, FuncIdx>,
     pub(crate) print: HashMap<KTy, FuncIdx>,
 }
 
 impl Helpers {
     pub(crate) fn new(base: u32) -> Self {
-        Helpers { base, funcs: Vec::new(), copy: HashMap::new(), print: HashMap::new() }
+        Helpers { base, funcs: Vec::new(), copy: HashMap::new(), drop: HashMap::new(), print: HashMap::new() }
     }
 
     /// Statements that give the value at `place`, just copied byte for
@@ -74,16 +93,63 @@ impl Helpers {
                         }
                     }
                     if !then_body.is_empty() {
-                        let tag = expr(ExprKind::Tag(place.clone()), KTy::U8);
-                        let v = expr(ExprKind::Int(v as i64), KTy::U8);
-                        let cond = expr(ExprKind::Binary(BinOp::Eq, Box::new(tag), Box::new(v)), KTy::Bool);
-                        out.push(Stmt::If { cond, then_body, else_body: Vec::new() });
+                        out.push(Stmt::If { cond: tag_is(&place, v as u32), then_body, else_body: Vec::new() });
                     }
                 }
             }
             _ => {}
         }
         out
+    }
+
+    /// Statements that free every arena inside the value at `place`.
+    pub(crate) fn drop_stmts(&mut self, place: Place, ty: KTy, t: &Tables) -> Vec<Stmt> {
+        let mut out = Vec::new();
+        match ty {
+            _ if !owning(ty, t) => {}
+            KTy::Arena => out.push(Stmt::FreeArena(place)),
+            KTy::Array(_) | KTy::List(_) => out.push(Stmt::Call(self.drop_fn(ty, t), vec![Arg::Ref(place)])),
+            KTy::Struct(s) => {
+                for (i, f) in t.structs[s.0 as usize].fields.iter().enumerate() {
+                    out.extend(self.drop_stmts(with(&place, Proj::Field(i as u32)), kty(f.ty), t));
+                }
+            }
+            KTy::Enum(e) => {
+                for (v, variant) in t.enums[e.0 as usize].variants.iter().enumerate() {
+                    let mut then_body = Vec::new();
+                    for (i, f) in variant.fields.iter().enumerate() {
+                        then_body.extend(self.drop_stmts(with(&place, Proj::Variant(v as u32, i as u32)), kty(f.ty), t));
+                    }
+                    if !then_body.is_empty() {
+                        out.push(Stmt::If { cond: tag_is(&place, v as u32), then_body, else_body: Vec::new() });
+                    }
+                }
+            }
+            _ => {}
+        }
+        out
+    }
+
+    /// `drop(var xs)`: drops each element.
+    fn drop_fn(&mut self, ty: KTy, t: &Tables) -> FuncIdx {
+        if let Some(&f) = self.drop.get(&ty) {
+            return f;
+        }
+        let idx = self.reserve();
+        self.drop.insert(ty, idx);
+        let elem = elem_of(ty, t);
+        let body = vec![Self::each(|at| self.drop_stmts(at, elem, t))];
+        self.funcs[(idx.0 - self.base) as usize] = Func {
+            name: format!("__kestrel_drop_{}", idx.0),
+            params: vec![LocalIdx(0)],
+            ret: None,
+            locals: Self::locals(ty),
+            body,
+            is_pure: true,
+            io: false,
+            mutates_params: true,
+        };
+        idx
     }
 
     /// Makes sure every array or list type inside `ty` has a printer.

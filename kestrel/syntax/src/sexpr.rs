@@ -26,6 +26,8 @@ impl Stmt {
                 };
                 format!("(for-in {names} {} {})", iter.to_sexpr(), body.to_sexpr())
             }
+            Stmt::Arena { body, .. } => format!("(arena {})", body.to_sexpr()),
+            Stmt::In { arena, body, .. } => format!("(in {} {})", arena.to_sexpr(), body.to_sexpr()),
             Stmt::Break(_) => "break".into(),
             Stmt::Continue(_) => "continue".into(),
             Stmt::Return { value: None, .. } => "return".into(),

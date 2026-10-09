@@ -36,6 +36,7 @@ impl<'a> FnLowerer<'a> {
             ast::ExprKind::Str(s) => ExprKind::StrLit(s.clone()),
             ast::ExprKind::Interp(_) => unreachable!("checker allows interpolation only inside print"),
             ast::ExprKind::Ident(_) => match self.t.res[&e.id] {
+                Res::Local(_) if self.t.moves.contains(&e.id) => ExprKind::Move(self.place(e).expect("a local is a place")),
                 Res::Local(_) => ExprKind::Load(self.place(e).expect("a local is a place")),
                 Res::Const(c) => return self.const_value(c),
                 other => unreachable!("name resolved to {other:?}"),
@@ -66,6 +67,7 @@ impl<'a> FnLowerer<'a> {
             }
             ast::ExprKind::Call { args, .. } => match self.t.res[&e.id] {
                 Res::Convert(_) => ExprKind::Cast(Box::new(self.expr(&args[0].value))),
+                Res::NewArena => ExprKind::NewArena,
                 Res::Fn(f) => {
                     let (pre, fi, a) = self.call_parts(e, f, args, None);
                     Self::with_pre(pre, ExprKind::Call(fi, a), ty, line)

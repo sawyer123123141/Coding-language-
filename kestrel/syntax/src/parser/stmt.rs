@@ -42,6 +42,17 @@ impl Parser {
                 self.error_here("`par for` isn't supported yet");
                 Err(())
             }
+            Tok::Arena => {
+                self.bump();
+                let body = self.block()?;
+                Ok(Stmt::Arena { span: start.to(body.span), body })
+            }
+            Tok::In => {
+                self.bump();
+                let arena = self.expr()?;
+                let body = self.block()?;
+                Ok(Stmt::In { span: start.to(body.span), arena, body })
+            }
             Tok::Break => {
                 self.bump();
                 Ok(Stmt::Break(start))

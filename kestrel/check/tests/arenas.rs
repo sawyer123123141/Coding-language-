@@ -1,0 +1,139 @@
+use kestrel_check::{check, Tables, Ty};
+use kestrel_syntax::parse;
+
+fn run(src: &str) -> (Option<Tables>, Vec<String>) {
+    let (p, d) = parse(src);
+    assert!(d.is_empty(), "parse errors: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
+    let (t, d) = check(&p);
+    (t, d.into_iter().map(|d| d.message).collect())
+}
+
+const CHUNK: &str = "let SIZE = 4
+struct Chunk {
+    x: int
+    mem: Arena = Arena()
+    heights: [int] = []
+
+    generate(var self) {
+        in self.mem {
+            self.heights = array[int](SIZE * SIZE)
+        }
+        for i from 0 to SIZE * SIZE { self.heights[i] = self.x + i }
+    }
+}
+struct Pair {
+    c: Chunk
+}
+pure squares(n: int) -> [int] {
+    var out = array[int](n)
+    for i from 0 to n { out[i] = i * i }
+    out
+}
+";
+
+#[test]
+fn arenas_moves_and_ownership_check() {
+    let src = format!(
+        "{CHUNK}main() {{
+    var world = list[Chunk]()
+    for cx from 0 to 3 {{
+        world.add(Chunk(x: cx))
+    }}
+    for chunk in world {{
+        chunk.generate()
+        in chunk.mem {{
+            chunk.heights = squares(4)
+        }}
+    }}
+    let c = Chunk(x: 9)
+    world.add(c)
+    var total = 0
+    arena {{
+        var tmp = list[int]()
+        for chunk in world {{ tmp.add(chunk.heights.len) }}
+        let sq = squares(3)
+        var copy = sq
+        for v in tmp {{ total += v }}
+        total += copy.len
+    }}
+    print(total)
+}}
+"
+    );
+    let (t, errs) = run(&src);
+    assert!(errs.is_empty(), "{errs:?}");
+    let t = t.unwrap();
+    let chunk = t.locals.iter().find(|l| l.name == "c").unwrap().ty;
+    assert!(t.is_owning(chunk));
+    assert!(t.is_owning(t.locals.iter().find(|l| l.name == "world").unwrap().ty));
+    assert!(!t.is_owning(Ty::Int));
+    assert_eq!(t.moves.len(), 1, "only `world.add(c)` moves");
+}
+
+#[test]
+fn ownership_and_escape_errors() {
+    let cases: &[(&str, &str)] = &[
+        ("main() {\n let a = Chunk(x: 1)\n let b = a\n let c = a\n}\n", "`a` was moved earlier, so it can't be used here"),
+        (
+            "main() {\n let a = Chunk(x: 1)\n var w = list[Chunk]()\n for i from 0 to 2 { w.add(a) }\n}\n",
+            "`a` is moved inside a loop, so the next time around it would already be gone",
+        ),
+        (
+            "main() {\n let p = Pair(Chunk(x: 1))\n let c = p.c\n}\n",
+            "can't move this out: it holds an `Arena`, so it can't be copied, and only whole variables move",
+        ),
+        (
+            "f(c: Chunk) -> Chunk {\n c\n}\nmain() {}\n",
+            "can't move parameter `c`: it belongs to the caller, and it holds an `Arena`, so it can't be copied",
+        ),
+        (
+            "main() {\n var c = Chunk(x: 1)\n c.mem = Arena()\n}\n",
+            "an `Arena` can't be replaced: values that point into it would be left dangling",
+        ),
+        ("f(var a: Arena) {}\nmain() {}\n", "an `Arena` can't be a `var` parameter: arenas can't be replaced"),
+        (
+            "main() {\n var xs = [1]\n arena {\n  xs = [2, 3]\n }\n}\n",
+            "this memory is freed at the end of the `arena { }` block, but `xs` lives longer",
+        ),
+        (
+            "main() {\n var l = list[[int]]()\n arena {\n  l.add([1])\n }\n}\n",
+            "this memory is freed at the end of the `arena { }` block, but `l` lives longer",
+        ),
+        (
+            "f() -> [int] {\n arena {\n  return [1]\n }\n [2]\n}\nmain() {}\n",
+            "can't return memory from an `arena { }` block: it's freed at the block's end",
+        ),
+        (
+            "fill(var c: Chunk) {\n c.heights = [1, 2]\n}\nmain() {}\n",
+            "this memory is in the caller's current arena, which may not live as long as `c`",
+        ),
+        (
+            "main() {\n var c = Chunk(x: 1)\n var other = [0]\n in c.mem {\n  other = [1, 2]\n }\n}\n",
+            "this memory belongs to `c`, but `other` isn't part of `c`",
+        ),
+        ("main() {\n let x = 5\n in x { }\n}\n", "`in` needs an `Arena`, like `in self.mem { }`; found int"),
+        ("main() {\n in Arena() { }\n}\n", "`in` needs an arena stored in a variable or field"),
+        ("main() {\n let a = Chunk(x: 1)\n let arr = [a, a]\n}\n", "`a` was moved earlier, so it can't be used here"),
+        ("main() {\n let a = Arena(1)\n}\n", "`Arena()` takes no arguments"),
+        ("struct Arena {\n x: int\n}\nmain() {}\n", "`Arena` is a built-in name; pick another"),
+    ];
+    for (body, expected) in cases {
+        let src = format!("{CHUNK}{body}");
+        let errs = run(&src).1;
+        assert_eq!(errs, vec![expected.to_string()], "source:\n{body}");
+    }
+}
+
+#[test]
+fn values_made_and_kept_inside_a_block_are_fine() {
+    let ok = [
+        "main() {\n arena {\n  let t = [1]\n  var u = t\n  u[0] = 2\n }\n}\n",
+        "main() {\n var xs = [1]\n arena {\n  xs[0] = 5\n }\n}\n",
+        "mk() -> [int] {\n let a = [1, 2]\n a\n}\nmain() {\n let b = mk()\n}\n",
+        "main() {\n var c = Chunk(x: 1)\n in c.mem {\n  let local = [1, 2]\n  c.heights = local\n }\n}\n",
+    ];
+    for body in ok {
+        let errs = run(&format!("{CHUNK}{body}")).1;
+        assert!(errs.is_empty(), "{errs:?}\n{body}");
+    }
+}

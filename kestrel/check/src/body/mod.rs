@@ -4,11 +4,12 @@ mod enums;
 mod expr;
 mod matching;
 mod place;
+mod regions;
 mod structs;
 
 pub(crate) use structs::check_field_defaults;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use kestrel_syntax::ast::{Binding, Block, Expr, ExprKind, Item, Program, Stmt};
 use kestrel_syntax::{Diagnostic, Span};
@@ -34,6 +35,14 @@ pub(crate) struct BodyChecker<'a> {
     loop_breaks: Vec<bool>,
     ret: Ty,
     is_pure: bool,
+    /// Allocation contexts, outermost (the function's own) first.
+    ctxs: Vec<regions::Ctx>,
+    /// Per local: the context and loop depth it was declared in.
+    local_ctx: HashMap<LocalId, (usize, usize)>,
+    /// `for ... in` elements: views into a collection, not storage.
+    views: HashSet<LocalId>,
+    /// Owning locals that were moved and can't be used again.
+    moved: HashSet<LocalId>,
 }
 
 pub(crate) fn check_consts(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
@@ -58,6 +67,7 @@ pub(crate) fn check_consts(program: &Program, t: &mut Tables, diags: &mut Vec<Di
 pub(crate) fn is_const_expr(e: &Expr) -> bool {
     match &e.kind {
         ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::Str(_) | ExprKind::Ident(_) => true,
+        ExprKind::Call { name, args, .. } if name == "Arena" => args.is_empty(),
         ExprKind::Unary { expr, .. } => is_const_expr(expr),
         ExprKind::Binary { lhs, rhs, .. } => is_const_expr(lhs) && is_const_expr(rhs),
         // Each use builds a fresh array, like any other value.
@@ -84,6 +94,10 @@ pub(crate) fn check_fn(program: &Program, fn_id: FnId, t: &mut Tables, diags: &m
     }
     let expect = if ret == Ty::Unit { Expect::Discard } else { Expect::Value(Some(ret)) };
     let body = bc.check_block(&decl.body, expect);
+    if let (Some(Stmt::Expr(tail)), false) = (decl.body.stmts.last(), ret == Ty::Unit) {
+        bc.consume(tail);
+        bc.check_return_region(tail);
+    }
     // An unresolved return type was already reported; don't pile on.
     if !matches!(ret, Ty::Unit | Ty::Error) && body == Ty::Unit {
         let msg = format!("`{}` must return {}, but its body can finish without a value", decl.name, bc.tn(ret));
@@ -93,7 +107,9 @@ pub(crate) fn check_fn(program: &Program, fn_id: FnId, t: &mut Tables, diags: &m
 
 impl<'a> BodyChecker<'a> {
     fn new(t: &'a mut Tables, diags: &'a mut Vec<Diagnostic>, fn_id: Option<FnId>, ret: Ty, is_pure: bool) -> Self {
-        BodyChecker { t, diags, fn_id, scopes: Vec::new(), loop_breaks: Vec::new(), ret, is_pure }
+        let ctxs = vec![regions::Ctx::Function];
+        let (local_ctx, views, moved) = (HashMap::new(), HashSet::new(), HashSet::new());
+        BodyChecker { t, diags, fn_id, scopes: Vec::new(), loop_breaks: Vec::new(), ret, is_pure, ctxs, local_ctx, views, moved }
     }
 
     /// A type as it reads in messages.
@@ -145,6 +161,7 @@ impl<'a> BodyChecker<'a> {
         });
         self.t.fns[owner.0 as usize].locals.push(id);
         self.t.bind_local.insert(bind.id, id);
+        self.local_ctx.insert(id, (self.ctxs.len() - 1, self.loop_breaks.len()));
         self.scopes.last_mut().expect("a scope is open").insert(name.clone(), id);
         id
     }
@@ -230,6 +247,7 @@ impl<'a> BodyChecker<'a> {
                     self.error(value.span, "this expression has no value to store");
                     local_ty = Ty::Error;
                 }
+                self.consume(value);
                 self.declare(bind, local_ty, *is_var, false, false);
                 Ty::Unit
             }
@@ -279,6 +297,14 @@ impl<'a> BodyChecker<'a> {
                 self.check_for_in(index.as_ref(), var, iter, body);
                 Ty::Unit
             }
+            // A block that always leaves (say, ends in `return`) never finishes.
+            Stmt::Arena { body, .. } => {
+                self.ctxs.push(regions::Ctx::Scoped);
+                let ty = self.check_block(body, Expect::Discard);
+                self.ctxs.pop();
+                if ty == Ty::Never { Ty::Never } else { Ty::Unit }
+            }
+            Stmt::In { arena, body, .. } => self.check_in(arena, body),
             Stmt::Break(span) | Stmt::Continue(span) => {
                 let is_break = matches!(s, Stmt::Break(_));
                 match self.loop_breaks.last_mut() {
@@ -298,6 +324,8 @@ impl<'a> BodyChecker<'a> {
                     }
                     (Some(v), r) => {
                         self.check_value(v, Some(r));
+                        self.consume(v);
+                        self.check_return_region(v);
                     }
                     (None, Ty::Unit | Ty::Error) => {}
                     (None, r) => {

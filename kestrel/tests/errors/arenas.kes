@@ -1,0 +1,21 @@
+// error 12: `a` was moved earlier, so it can't be used here
+// error 15: this memory is freed at the end of the `arena { }` block, but `xs` lives longer
+// error 17: an `Arena` can't be replaced: values that point into it would be left dangling
+// error 20: this memory is in the caller's current arena, which may not live as long as `c`
+struct Chunk {
+    mem: Arena = Arena()
+    heights: [int] = []
+}
+main() {
+    let a = Chunk()
+    var w = list[Chunk](); w.add(a)
+    print(a)
+    var xs = [1]
+    arena {
+        xs = [2, 3]
+    }
+    w[0].mem = Arena()
+}
+fill(var c: Chunk) {
+    c.heights = [1, 2]
+}

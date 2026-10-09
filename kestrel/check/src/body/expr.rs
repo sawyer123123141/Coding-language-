@@ -79,6 +79,9 @@ impl<'a> BodyChecker<'a> {
     fn ident(&mut self, e: &Expr, name: &str) -> Ty {
         if let Some(local) = self.lookup_local(name) {
             self.t.res.insert(e.id, Res::Local(local));
+            if self.moved.contains(&local) {
+                self.error(e.span, format!("`{name}` was moved earlier, so it can't be used here"));
+            }
             let ty = self.t.locals[local.0 as usize].ty;
             if let Ty::Variant(..) = ty {
                 let msg = format!("`{name}` stands for the fields of `{}`; use them as `{name}.field`", self.tn(ty));

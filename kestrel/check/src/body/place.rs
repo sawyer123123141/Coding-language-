@@ -90,6 +90,13 @@ impl<'a> BodyChecker<'a> {
             }
             None => {}
         }
+        if target_ty == Ty::Arena {
+            self.error_help(
+                target.span,
+                "an `Arena` can't be replaced: values that point into it would be left dangling",
+                "replace the whole value that owns it",
+            );
+        }
         if op != AssignOp::Set && self.t.vec_dims(target_ty).is_some() {
             return self.check_vec_compound(target_ty, op, value);
         }
@@ -98,6 +105,8 @@ impl<'a> BodyChecker<'a> {
             self.error(target.span, msg);
         }
         self.check_value(value, Some(target_ty));
+        self.consume(value);
+        self.check_store(target, value);
     }
 
     /// `v += w`, `v *= 2.0`: the value is a vector of the same size, or a number.

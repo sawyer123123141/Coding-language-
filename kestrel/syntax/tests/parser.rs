@@ -235,3 +235,11 @@ fn collection_errors() {
     assert_eq!(errs("main() {\n let a = array[int]\n}"), vec!["expected `(` to create the array, like `array[...]()`"]);
     assert_eq!(errs("main() {\n let a = [1, 2\n}"), vec!["expected `]` or `,`, found `}`"]);
 }
+
+#[test]
+fn arena_and_in_blocks() {
+    assert_eq!(body("arena {
+ var t = list[vec3]()
+}"), "{(arena {(var t (make list[vec3]))})}");
+    assert_eq!(body("in self.mem { self.h = [] }"), "{(in (. self mem) {(= (. self h) [])})}");
+}

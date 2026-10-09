@@ -4,6 +4,7 @@ mod expr;
 mod helpers;
 mod layout;
 mod matching;
+mod scopes;
 mod vector;
 
 use std::collections::HashMap;
@@ -40,6 +41,7 @@ pub(crate) fn kty(ty: Ty) -> KTy {
         Ty::Enum(e) => KTy::Enum(EnumIdx(e.0)),
         Ty::Array(e) => KTy::Array(ElemIdx(e.0)),
         Ty::List(e) => KTy::List(ElemIdx(e.0)),
+        Ty::Arena => KTy::Arena,
         other => panic!("type {other:?} has no runtime representation"),
     }
 }
@@ -58,13 +60,16 @@ pub(crate) struct FnLowerer<'a> {
     elems: HashMap<LocalId, Place>,
     /// Element pointers made by `for ... in`: the place each points at.
     origins: HashMap<LocalIdx, Place>,
+    /// Enclosing blocks, innermost last, with what leaving each must do.
+    scopes: Vec<scopes::Scope>,
     helpers: &'a mut Helpers,
 }
 
 impl<'a> FnLowerer<'a> {
     fn new(program: &'a Program, t: &'a Tables, lines: &'a LineIndex, fn_id: FnId, helpers: &'a mut Helpers) -> Self {
         let (local_map, locals, bindings, elems) = (HashMap::new(), Vec::new(), HashMap::new(), HashMap::new());
-        FnLowerer { program, t, lines, fn_id, local_map, locals, bindings, elems, origins: HashMap::new(), helpers }
+        let (origins, scopes) = (HashMap::new(), Vec::new());
+        FnLowerer { program, t, lines, fn_id, local_map, locals, bindings, elems, origins, scopes, helpers }
     }
 
     fn lower(mut self) -> Func {
@@ -129,37 +134,9 @@ impl<'a> FnLowerer<'a> {
         self.local_map[&self.t.bind_local[&bind.id]]
     }
 
-    pub(crate) fn block_stmts(&mut self, block: &ast::Block) -> Vec<Stmt> {
-        let mut out = Vec::new();
-        for s in &block.stmts {
-            self.stmt(s, &mut out);
-        }
-        out
-    }
-
-    /// A block used as a value: its statements and its tail value, which is
-    /// `None` when the block can't finish normally.
-    pub(crate) fn block_value(&mut self, block: &ast::Block) -> (Vec<Stmt>, Option<Expr>) {
-        let Some((last, init)) = block.stmts.split_last() else { return (Vec::new(), None) };
-        let mut stmts = Vec::new();
-        for s in init {
-            self.stmt(s, &mut stmts);
-        }
-        match last {
-            ast::Stmt::Expr(e) if !self.leaves_early(e) => {
-                let v = self.expr(e);
-                (stmts, Some(v))
-            }
-            other => {
-                self.stmt(other, &mut stmts);
-                (stmts, None)
-            }
-        }
-    }
-
     /// Whether `e` as a block's last expression can never yield a value: it
     /// is typed `Never`, or an `if` whose branches all end that way.
-    fn leaves_early(&self, e: &ast::Expr) -> bool {
+    pub(crate) fn leaves_early(&self, e: &ast::Expr) -> bool {
         if self.t.ty(e.id) == Ty::Never {
             return true;
         }
@@ -174,11 +151,16 @@ impl<'a> FnLowerer<'a> {
         }
     }
 
-    fn stmt(&mut self, s: &ast::Stmt, out: &mut Vec<Stmt>) {
+    pub(crate) fn stmt(&mut self, s: &ast::Stmt, out: &mut Vec<Stmt>) {
         let lowered = match s {
             ast::Stmt::Let { bind, value, .. } => {
                 let idx = self.bind_local(bind);
-                Stmt::Let(idx, self.value(value))
+                let value = self.value(value);
+                out.push(Stmt::Let(idx, value));
+                return self.declared(idx);
+            }
+            ast::Stmt::Assign { target, value, .. } if helpers::owning(kty(self.t.ty(target.id)), self.t) => {
+                return self.assign_owning(target, value, out);
             }
             ast::Stmt::Assign { target, op, value, .. } => {
                 let place = self.place(target).expect("checker requires an assignable place");
@@ -199,20 +181,19 @@ impl<'a> FnLowerer<'a> {
                 };
                 Stmt::Assign(place, value)
             }
-            ast::Stmt::While { cond, body, .. } => Stmt::While { cond: self.expr(cond), body: self.block_stmts(body) },
+            ast::Stmt::While { cond, body, .. } => Stmt::While { cond: self.expr(cond), body: self.loop_block(body) },
             ast::Stmt::ForRange { var, start, end, body, .. } => Stmt::ForRange {
                 var: self.bind_local(var),
                 start: self.expr(start),
                 end: self.expr(end),
-                body: self.block_stmts(body),
+                body: self.loop_block(body),
             },
             ast::Stmt::ForIn { index, var, iter, body, .. } => return self.for_in(index.as_ref(), var, iter, body, out),
-            ast::Stmt::Break(_) => Stmt::Break,
-            ast::Stmt::Continue(_) => Stmt::Continue,
-            ast::Stmt::Return { value, .. } => Stmt::Return(value.as_ref().map(|v| {
-                let v = self.expr(v);
-                self.owned(v, true)
-            })),
+            ast::Stmt::Arena { body, .. } => return self.arena_block(None, body, out),
+            ast::Stmt::In { arena, body, .. } => return self.arena_block(Some(arena), body, out),
+            ast::Stmt::Break(_) => return self.jump(Stmt::Break, out),
+            ast::Stmt::Continue(_) => return self.jump(Stmt::Continue, out),
+            ast::Stmt::Return { value, .. } => return self.return_stmt(value.as_ref(), out),
             ast::Stmt::Expr(e) => return self.expr_stmt(e, out),
         };
         out.push(lowered);

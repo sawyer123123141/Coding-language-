@@ -1,0 +1,72 @@
+// expect: 3 3
+// expect: 136
+// expect: 4
+// expect: 100
+// expect: 3
+// expect: 1000
+// expect: Chunk(x: 5, mem: Arena, heights: [])
+let SIZE = 4
+
+struct Chunk {
+    x: int
+    mem: Arena = Arena()
+    heights: [int] = []
+
+    generate(var self) {
+        in self.mem {
+            self.heights = array[int](SIZE * SIZE)
+        }
+        for i from 0 to SIZE * SIZE { self.heights[i] = self.x + i }
+    }
+}
+
+pure total(xs: [int]) -> int {
+    var s = 0
+    for v in xs { s += v }
+    s
+}
+
+count_big(xs: list[Chunk]) -> int {
+    arena {
+        var n = 0
+        for c in xs {
+            if c.x > 1 { n += 1 }
+        }
+        return n
+    }
+}
+
+main() {
+    var world = list[Chunk]()
+    for cx from 0 to 3 { world.add(Chunk(x: cx)) }
+    for chunk in world { chunk.generate() }
+    print(world[1].heights[2], world.len)
+    var found = 0
+    for round from 0 to 10 {
+        arena {
+            var tmp = list[int]()
+            for chunk in world { tmp.add(total(chunk.heights)) }
+            if round == 2 {
+                found = tmp[1]
+                break
+            }
+        }
+    }
+    print(found)
+    let c = Chunk(x: 7)
+    world.add(c)
+    print(world.len)
+    world[0] = Chunk(x: 100)
+    world[0].generate()
+    print(world[0].heights[0])
+    print(count_big(world))
+    var acc = 0
+    for i from 0 to 1000 {
+        arena {
+            let big = array[int](10000)
+            acc += big.len / 10000
+        }
+    }
+    print(acc)
+    print(Chunk(x: 5))
+}

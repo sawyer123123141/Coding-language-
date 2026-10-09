@@ -23,6 +23,8 @@ pub enum Ty {
     Array(ElemId),
     /// `list[T]`: growable.
     List(ElemId),
+    /// A memory bucket. Values holding one are owning: they move, never copy.
+    Arena,
     Error,
 }
 
@@ -36,6 +38,7 @@ impl Ty {
             "f64" => Ty::F64,
             "bool" => Ty::Bool,
             "string" => Ty::Str,
+            "Arena" => Ty::Arena,
             _ => return None,
         })
     }
@@ -56,6 +59,7 @@ impl Ty {
             Ty::Variant(..) => "variant",
             Ty::Array(_) => "array",
             Ty::List(_) => "list",
+            Ty::Arena => "Arena",
             Ty::Error => "{error}",
         }
     }

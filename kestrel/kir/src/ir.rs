@@ -21,6 +21,8 @@ pub enum KTy {
     Array(ElemIdx),
     /// `list[T]`: pointer, length, capacity (i64s), then the arena it grows in.
     List(ElemIdx),
+    /// A pointer to a runtime arena (null until created).
+    Arena,
 }
 
 impl KTy {
@@ -86,7 +88,7 @@ impl Module {
         match ty {
             KTy::Bool | KTy::U8 => (1, 1),
             KTy::I32 | KTy::F32 => (4, 4),
-            KTy::I64 | KTy::F64 => (8, 8),
+            KTy::I64 | KTy::F64 | KTy::Arena => (8, 8),
             KTy::Str | KTy::Array(_) => (16, 8),
             KTy::List(_) => (32, 8),
             KTy::Struct(s) => {
@@ -213,6 +215,13 @@ pub enum Stmt {
     /// Points a reference local at a place (a `for ... in` element, found
     /// once per iteration).
     Bind(LocalIdx, Place),
+    /// Makes an arena current: a fresh one (`arena { }`), or the one at a
+    /// place (`in x { }`, creating it there if it's still null).
+    PushArena(Option<Place>),
+    /// Undoes the latest `PushArena`, freeing the arena for `arena { }`.
+    PopArena { free: bool },
+    /// Frees the arena at a place (dropping it) and nulls the place.
+    FreeArena(Place),
     /// Gives the array or list at a place its own copy of its elements, in
     /// the current arena (a list's capacity becomes its length).
     Dup(Place),
@@ -249,6 +258,11 @@ pub enum ExprKind {
     ListNew,
     /// The length (i64) of the array or list at a place.
     Len(Place),
+    /// `Arena()`: a new, empty arena.
+    NewArena,
+    /// The value at a place, which is then zeroed (an owning value moving
+    /// out, so dropping the place later does nothing).
+    Move(Place),
     /// The value stored at a place (a scalar, or a whole struct).
     Load(Place),
     Unary(UnOp, Box<Expr>),

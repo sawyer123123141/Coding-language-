@@ -20,6 +20,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             ExprKind::Bool(v) => self.b.ins().iconst(types::I8, *v as i64),
             ExprKind::Load(p) => self.load_place(p)?,
             ExprKind::Len(p) => self.len(p)?,
+            ExprKind::NewArena => self.new_arena(),
+            ExprKind::Move(p) => self.move_scalar(p)?,
             ExprKind::FieldOf(base, i) => {
                 let addr = self.field_addr(base, *i)?;
                 self.b.ins().load(ty, MemFlags::trusted(), addr, 0)

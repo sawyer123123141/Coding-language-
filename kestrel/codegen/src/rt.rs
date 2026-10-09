@@ -18,6 +18,10 @@ pub(crate) struct RtFuncs {
     pub list_grow: FuncId,
     pub current_arena: FuncId,
     pub panic_index: FuncId,
+    pub arena_new: FuncId,
+    pub arena_free: FuncId,
+    pub arena_push: FuncId,
+    pub arena_pop: FuncId,
 }
 
 impl RtFuncs {
@@ -54,6 +58,10 @@ impl RtFuncs {
             list_grow: decl("kestrel_rt_list_grow", &[ptr, I64, I64], None)?,
             current_arena: decl("kestrel_rt_current_arena", &[], Some(ptr))?,
             panic_index: decl("kestrel_rt_panic_index", &[I64, I64, I32], None)?,
+            arena_new: decl("kestrel_rt_arena_new", &[], Some(ptr))?,
+            arena_free: decl("kestrel_rt_arena_free", &[ptr], None)?,
+            arena_push: decl("kestrel_rt_arena_push", &[ptr], None)?,
+            arena_pop: decl("kestrel_rt_arena_pop", &[], Some(ptr))?,
         })
     }
 }
@@ -78,6 +86,10 @@ pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
         ("kestrel_rt_list_grow", arena::kestrel_rt_list_grow as *const u8),
         ("kestrel_rt_current_arena", arena::kestrel_rt_current_arena as *const u8),
         ("kestrel_rt_panic_index", panic::kestrel_rt_panic_index as *const u8),
+        ("kestrel_rt_arena_new", arena::kestrel_rt_arena_new as *const u8),
+        ("kestrel_rt_arena_free", arena::kestrel_rt_arena_free as *const u8),
+        ("kestrel_rt_arena_push", arena::kestrel_rt_arena_push as *const u8),
+        ("kestrel_rt_arena_pop", arena::kestrel_rt_arena_pop as *const u8),
     ]
 }
 

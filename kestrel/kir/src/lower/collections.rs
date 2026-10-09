@@ -81,10 +81,10 @@ impl<'a> FnLowerer<'a> {
         let mut known = list.clone();
         known.path.push(Proj::Index { at, checked: false });
         let mut stmts = vec![Stmt::Bind(ptr, known)];
-        stmts.extend(self.block_stmts(body));
+        stmts.extend(self.loop_block(body));
         if self.may_move(&stmts, &list) {
             self.elems.insert(var, elem);
-            stmts = self.block_stmts(body);
+            stmts = self.loop_block(body);
         }
         let len = Expr { kind: ExprKind::Len(list), ty: KTy::I64, line };
         let end = Expr { kind: ExprKind::Cast(Box::new(len)), ty: KTy::I32, line };

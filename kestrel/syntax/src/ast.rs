@@ -123,6 +123,10 @@ pub enum Stmt {
     ForRange { var: Binding, start: Expr, end: Expr, body: Block, span: Span },
     /// `for v in xs` / `for i, v in xs`
     ForIn { index: Option<Binding>, var: Binding, iter: Expr, body: Block, span: Span },
+    /// `arena { ... }`: everything allocated inside is freed at `}`.
+    Arena { body: Block, span: Span },
+    /// `in x.mem { ... }`: allocations inside go to the arena at `x.mem`.
+    In { arena: Expr, body: Block, span: Span },
     Break(Span),
     Continue(Span),
     Return { value: Option<Expr>, span: Span },
@@ -280,6 +284,8 @@ impl Stmt {
             | Stmt::While { span, .. }
             | Stmt::ForRange { span, .. }
             | Stmt::ForIn { span, .. }
+            | Stmt::Arena { span, .. }
+            | Stmt::In { span, .. }
             | Stmt::Return { span, .. } => *span,
             Stmt::Break(span) | Stmt::Continue(span) => *span,
             Stmt::Expr(e) => e.span,

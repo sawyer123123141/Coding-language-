@@ -19,7 +19,9 @@ fn stmt(s: &Stmt, f: &mut impl FnMut(&Place, bool)) {
             place(p, true, f);
         }
         Stmt::Bind(_, p) => place(p, false, f),
-        Stmt::Dup(p) => place(p, true, f),
+        Stmt::Dup(p) | Stmt::FreeArena(p) => place(p, true, f),
+        Stmt::PushArena(Some(p)) => place(p, true, f),
+        Stmt::PushArena(None) | Stmt::PopArena { .. } => {}
         Stmt::If { cond, then_body, else_body } => {
             expr(cond, f);
             places(then_body, f);
@@ -70,7 +72,8 @@ fn print_args(parts: &[PrintArg], f: &mut impl FnMut(&Place, bool)) {
 
 fn expr(e: &Expr, f: &mut impl FnMut(&Place, bool)) {
     match &e.kind {
-        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::StrLit(_) | ExprKind::ListNew => {}
+        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::StrLit(_) | ExprKind::ListNew | ExprKind::NewArena => {}
+        ExprKind::Move(p) => place(p, true, f),
         ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) => place(p, false, f),
         ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) => expr(x, f),
         ExprKind::Binary(_, a, b) | ExprKind::And(a, b) | ExprKind::Or(a, b) => {

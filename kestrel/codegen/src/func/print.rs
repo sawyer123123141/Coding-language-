@@ -41,7 +41,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             }
             match (a, val) {
                 (kir::PrintArg::Value(e), Some(v)) if e.ty.is_aggregate() => self.print_aggregate(v, 0, e.ty)?,
-                (kir::PrintArg::Value(e), Some(v)) => self.print_scalar(v, e.ty),
+                (kir::PrintArg::Value(e), Some(v)) => self.print_scalar(v, e.ty)?,
                 (kir::PrintArg::Str(s), _) => self.print_text(s)?,
                 _ => unreachable!("value pieces are evaluated above"),
             }
@@ -52,9 +52,10 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         Ok(())
     }
 
-    fn print_scalar(&mut self, v: Value, ty: KTy) {
+    fn print_scalar(&mut self, v: Value, ty: KTy) -> Result<(), String> {
         let rt = self.shared.rt;
         match ty {
+            KTy::Arena => return self.print_text("Arena"),
             KTy::Bool => self.call_id(rt.print_bool, &[v]),
             KTy::U8 => {
                 let w = self.b.ins().uextend(types::I64, v);
@@ -71,6 +72,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 unreachable!("aggregates are printed from memory")
             }
         };
+        Ok(())
     }
 
     /// Prints the value at `addr + offset`: `Point(x: 1, y: 2)`, `Block.Air`,
@@ -138,7 +140,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 self.print_aggregate(addr, at, f.ty)?;
             } else {
                 let v = self.b.ins().load(cl_type(f.ty), MemFlags::trusted(), addr, at);
-                self.print_scalar(v, f.ty);
+                self.print_scalar(v, f.ty)?;
             }
         }
         Ok(())

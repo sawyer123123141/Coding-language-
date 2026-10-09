@@ -44,6 +44,7 @@ impl<'a> BodyChecker<'a> {
                         self.error(a.span, "constructor arguments can't be `var`");
                     }
                     self.check_value(&a.value, Some(info.fields[fi].ty));
+                    self.consume(&a.value);
                 }
                 None if bound && !info.fields[fi].has_default => {
                     self.error(e.span, format!("missing field `{}` for `{}`", info.fields[fi].name, info.name));

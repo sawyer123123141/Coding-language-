@@ -1,4 +1,5 @@
 mod aggregate;
+mod arenas;
 mod arith;
 mod call;
 mod collections;
@@ -27,7 +28,8 @@ pub(crate) fn cl_type(t: KTy) -> Type {
     match t {
         KTy::Bool | KTy::U8 => types::I8,
         KTy::I32 => types::I32,
-        KTy::I64 => types::I64,
+        // Pointers are 64-bit on every target Kestrel supports.
+        KTy::I64 | KTy::Arena => types::I64,
         KTy::F32 => types::F32,
         KTy::F64 => types::F64,
         KTy::Struct(_) | KTy::Enum(_) | KTy::Str | KTy::Array(_) | KTy::List(_) => {
@@ -225,6 +227,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             kir::Stmt::Write(args) => self.print(args, false)?,
             kir::Stmt::ListAdd(list, value) => self.list_add(list, value)?,
             kir::Stmt::Dup(p) => self.dup(p)?,
+            kir::Stmt::PushArena(_) | kir::Stmt::PopArena { .. } | kir::Stmt::FreeArena(_) => self.arena_stmt(s)?,
             kir::Stmt::Bind(l, p) => {
                 let addr = self.place_addr(p)?;
                 let Slot::Ptr(v) = self.slots[l.0 as usize] else { unreachable!("binds a reference local") };

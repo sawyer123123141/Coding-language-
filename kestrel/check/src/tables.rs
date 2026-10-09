@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use kestrel_syntax::ast::{BindId, ExprId, FnDecl, Item, Program};
 use kestrel_syntax::Span;
@@ -43,6 +43,8 @@ pub enum Res {
     Variant(EnumId, u32),
     /// `xs.add(v)` on a list.
     ListAdd,
+    /// `Arena()`
+    NewArena,
 }
 
 #[derive(Clone, Debug)]
@@ -164,6 +166,11 @@ pub struct Tables {
     pub ctor_args: HashMap<ExprId, Vec<Option<usize>>>,
     /// For a swizzle like `v.xz`: the components it picks, in order.
     pub swizzles: HashMap<ExprId, Vec<u32>>,
+    /// Reads of owning variables that move them (they can't be copied).
+    pub moves: HashSet<ExprId>,
+    /// Per struct and enum: whether it holds an `Arena` somewhere inside.
+    pub owning_structs: Vec<bool>,
+    pub owning_enums: Vec<bool>,
     /// Element types of arrays and lists, indexed by `ElemId`.
     pub elems: Vec<Ty>,
     pub elem_ids: HashMap<Ty, ElemId>,
@@ -204,6 +211,53 @@ impl Tables {
 
     pub fn elem(&self, id: ElemId) -> Ty {
         self.elems[id.0 as usize]
+    }
+
+    /// Whether a value of `ty` points at arena memory: arrays and lists,
+    /// directly or in fields. (An `Arena` itself doesn't.)
+    pub fn has_heap(&self, ty: Ty) -> bool {
+        match ty {
+            Ty::Array(_) | Ty::List(_) => true,
+            Ty::Struct(s) => self.strukt(s).fields.iter().any(|f| self.has_heap(f.ty)),
+            Ty::Enum(e) => self.enm(e).variants.iter().flat_map(|v| &v.fields).any(|f| self.has_heap(f.ty)),
+            _ => false,
+        }
+    }
+
+    /// Whether `ty` holds an `Arena` (in fields, payloads or elements).
+    pub fn is_owning(&self, ty: Ty) -> bool {
+        match ty {
+            Ty::Arena => true,
+            Ty::Struct(s) => self.owning_structs.get(s.0 as usize).copied().unwrap_or(false),
+            Ty::Enum(e) => self.owning_enums.get(e.0 as usize).copied().unwrap_or(false),
+            Ty::Array(e) | Ty::List(e) => self.is_owning(self.elem(e)),
+            _ => false,
+        }
+    }
+
+    /// Fills `owning_structs` / `owning_enums`, growing from `false` until
+    /// nothing changes, so types that contain themselves terminate.
+    pub(crate) fn compute_owning(&mut self) {
+        self.owning_structs = vec![false; self.structs.len()];
+        self.owning_enums = vec![false; self.enums.len()];
+        loop {
+            let mut changed = false;
+            for s in 0..self.structs.len() {
+                if !self.owning_structs[s] && self.structs[s].fields.iter().any(|f| self.is_owning(f.ty)) {
+                    self.owning_structs[s] = true;
+                    changed = true;
+                }
+            }
+            for e in 0..self.enums.len() {
+                if !self.owning_enums[e] && self.enums[e].variants.iter().flat_map(|v| &v.fields).any(|f| self.is_owning(f.ty)) {
+                    self.owning_enums[e] = true;
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
     }
 
     pub fn intern_elem(&mut self, ty: Ty) -> ElemId {
