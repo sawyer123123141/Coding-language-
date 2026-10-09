@@ -3,5 +3,12 @@
 version = 4
 
 [[package]]
+name = "kestrel-check"
+version = "0.1.0"
+dependencies = [
+ "kestrel-syntax",
+]
+
+[[package]]
 name = "kestrel-syntax"
 version = "0.1.0"

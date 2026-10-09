@@ -1,0 +1,7 @@
+[package]
+name = "kestrel-check"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+kestrel-syntax.workspace = true

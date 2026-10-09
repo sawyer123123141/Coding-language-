@@ -1,0 +1,81 @@
+/// A checked type. `Never` is the type of code that doesn't finish
+/// (`return`, `break`); `Error` suppresses follow-on errors.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Ty {
+    Unit,
+    Never,
+    Bool,
+    Int,
+    I64,
+    U8,
+    Float,
+    F64,
+    Str,
+    Error,
+}
+
+impl Ty {
+    pub fn from_name(name: &str) -> Option<Ty> {
+        Some(match name {
+            "int" => Ty::Int,
+            "i64" => Ty::I64,
+            "u8" => Ty::U8,
+            "float" => Ty::Float,
+            "f64" => Ty::F64,
+            "bool" => Ty::Bool,
+            "string" => Ty::Str,
+            _ => return None,
+        })
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Ty::Unit => "nothing",
+            Ty::Never => "never",
+            Ty::Bool => "bool",
+            Ty::Int => "int",
+            Ty::I64 => "i64",
+            Ty::U8 => "u8",
+            Ty::Float => "float",
+            Ty::F64 => "f64",
+            Ty::Str => "string",
+            Ty::Error => "{error}",
+        }
+    }
+
+    pub fn is_int(self) -> bool {
+        matches!(self, Ty::Int | Ty::I64 | Ty::U8)
+    }
+
+    pub fn is_float(self) -> bool {
+        matches!(self, Ty::Float | Ty::F64)
+    }
+
+    pub fn is_numeric(self) -> bool {
+        self.is_int() || self.is_float()
+    }
+
+    /// Whether a value of `self` may be used where `to` is expected without
+    /// an explicit conversion: int→float, narrower→wider int, float→f64.
+    pub fn coerces_to(self, to: Ty) -> bool {
+        use Ty::*;
+        self == to
+            || matches!(self, Never | Error)
+            || to == Error
+            || matches!(
+                (self, to),
+                (U8, Int) | (U8, I64) | (Int, I64) | (U8 | Int | I64, Float | F64) | (Float, F64)
+            )
+    }
+
+    /// The type two operands meet at, if one converts to the other.
+    pub fn common(a: Ty, b: Ty) -> Option<Ty> {
+        if a.coerces_to(b) {
+            Some(b)
+        } else if b.coerces_to(a) {
+            Some(a)
+        } else {
+            None
+        }
+    }
+}

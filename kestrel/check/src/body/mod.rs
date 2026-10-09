@@ -1,0 +1,295 @@
+mod call;
+mod expr;
+
+use std::collections::HashMap;
+
+use kestrel_syntax::ast::{AssignOp, Binding, Block, Expr, ExprKind, Item, Program, Stmt};
+use kestrel_syntax::{Diagnostic, Span};
+
+use crate::collect::resolve_type;
+use crate::tables::{ConstId, FnId, LocalId, LocalInfo, Res, Tables};
+use crate::ty::Ty;
+
+/// What the surrounding code does with a block's or expression's value.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) enum Expect {
+    Discard,
+    Value(Option<Ty>),
+}
+
+pub(crate) struct BodyChecker<'a> {
+    t: &'a mut Tables,
+    diags: &'a mut Vec<Diagnostic>,
+    /// `None` while checking a constant initializer.
+    fn_id: Option<FnId>,
+    scopes: Vec<HashMap<String, LocalId>>,
+    loop_depth: u32,
+    ret: Ty,
+    is_pure: bool,
+}
+
+pub(crate) fn check_consts(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
+    let consts = program.items.iter().filter_map(|it| match it {
+        Item::Const(c) => Some(c),
+        Item::Fn(_) => None,
+    });
+    for (i, c) in consts.enumerate() {
+        let mut bc = BodyChecker::new(t, diags, None, Ty::Unit, false);
+        let want = c.ty.as_ref().map(|ty| resolve_type(ty, bc.diags));
+        let ty = if is_const_expr(&c.value) {
+            bc.check_value(&c.value, want)
+        } else {
+            bc.error(c.value.span, "constants can only use literals, operators and earlier constants");
+            Ty::Error
+        };
+        t.consts[i].ty = ty;
+        t.const_by_name.insert(c.bind.name.clone(), ConstId(i as u32));
+    }
+}
+
+fn is_const_expr(e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::Ident(_) => true,
+        ExprKind::Unary { expr, .. } => is_const_expr(expr),
+        ExprKind::Binary { lhs, rhs, .. } => is_const_expr(lhs) && is_const_expr(rhs),
+        ExprKind::Str(_) | ExprKind::Call { .. } | ExprKind::If { .. } => false,
+    }
+}
+
+pub(crate) fn check_fn(program: &Program, fn_id: FnId, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
+    let info = &t.fns[fn_id.0 as usize];
+    let Item::Fn(decl) = &program.items[info.item] else { unreachable!("FnInfo points at a fn item") };
+    let (ret, is_pure, params) = (info.ret, info.is_pure, info.params.clone());
+    let mut bc = BodyChecker::new(t, diags, Some(fn_id), ret, is_pure);
+    bc.scopes.push(HashMap::new());
+    for (p, sig) in decl.params.iter().zip(&params) {
+        bc.declare(&p.bind, sig.ty, p.is_var, true, p.is_var);
+    }
+    let expect = if ret == Ty::Unit { Expect::Discard } else { Expect::Value(Some(ret)) };
+    let body = bc.check_block(&decl.body, expect);
+    if ret != Ty::Unit && body == Ty::Unit {
+        let msg = format!("`{}` must return {}, but its body can finish without a value", decl.name, ret.name());
+        bc.diags.push(Diagnostic::error(decl.name_span, msg).with_help("end the body with a value or a `return`"));
+    }
+}
+
+impl<'a> BodyChecker<'a> {
+    fn new(t: &'a mut Tables, diags: &'a mut Vec<Diagnostic>, fn_id: Option<FnId>, ret: Ty, is_pure: bool) -> Self {
+        BodyChecker { t, diags, fn_id, scopes: Vec::new(), loop_depth: 0, ret, is_pure }
+    }
+
+    fn error(&mut self, span: Span, msg: impl Into<String>) {
+        self.diags.push(Diagnostic::error(span, msg));
+    }
+
+    fn error_help(&mut self, span: Span, msg: impl Into<String>, help: impl Into<String>) {
+        self.diags.push(Diagnostic::error(span, msg).with_help(help));
+    }
+
+    fn lookup_local(&self, name: &str) -> Option<LocalId> {
+        self.scopes.iter().rev().find_map(|s| s.get(name).copied())
+    }
+
+    fn declare(&mut self, bind: &Binding, ty: Ty, mutable: bool, is_param: bool, is_var_param: bool) -> LocalId {
+        let name = &bind.name;
+        let taken = self.lookup_local(name).is_some()
+            || self.t.const_by_name.contains_key(name)
+            || self.t.fn_by_name.contains_key(name);
+        if taken {
+            self.error_help(
+                bind.span,
+                format!("`{name}` is already defined; Kestrel doesn't allow shadowing"),
+                "pick a different name",
+            );
+        }
+        let owner = self.fn_id.expect("locals only exist inside functions");
+        let id = LocalId(self.t.locals.len() as u32);
+        self.t.locals.push(LocalInfo {
+            name: name.clone(),
+            ty,
+            mutable,
+            is_param,
+            is_var_param,
+            addressed: false,
+            owner,
+            span: bind.span,
+        });
+        self.t.fns[owner.0 as usize].locals.push(id);
+        self.t.bind_local.insert(bind.id, id);
+        self.scopes.last_mut().expect("a scope is open").insert(name.clone(), id);
+        id
+    }
+
+    /// Checks `e` against an expected type, recording a conversion or an error.
+    pub(crate) fn check_value(&mut self, e: &Expr, want: Option<Ty>) -> Ty {
+        let found = self.check_expr(e, want);
+        match want {
+            Some(w) => {
+                self.coerce(e, found, w);
+                w
+            }
+            None => found,
+        }
+    }
+
+    pub(crate) fn coerce(&mut self, e: &Expr, from: Ty, to: Ty) {
+        if from == to || matches!(from, Ty::Never | Ty::Error) || to == Ty::Error {
+            return;
+        }
+        if from.coerces_to(to) {
+            self.t.coerce.insert(e.id, to);
+            return;
+        }
+        let msg = format!("expected {}, found {}", to.name(), from.name());
+        if from.is_numeric() && to.is_numeric() {
+            self.error_help(e.span, msg, format!("convert it explicitly: `{}(...)`", to.name()));
+        } else {
+            self.error(e.span, msg);
+        }
+    }
+
+    pub(crate) fn check_block(&mut self, block: &Block, expect: Expect) -> Ty {
+        self.scopes.push(HashMap::new());
+        let mut ty = Ty::Unit;
+        let last = block.stmts.len().saturating_sub(1);
+        for (i, stmt) in block.stmts.iter().enumerate() {
+            ty = match (stmt, expect) {
+                (Stmt::Expr(e), Expect::Value(want)) if i == last => self.check_value(e, want),
+                _ => self.check_stmt(stmt),
+            };
+        }
+        self.scopes.pop();
+        ty
+    }
+
+    /// Checks a statement; returns `Never` when control can't continue past it.
+    fn check_stmt(&mut self, s: &Stmt) -> Ty {
+        match s {
+            Stmt::Let { is_var, bind, ty, value, .. } => {
+                let ann = ty.as_ref().map(|t| resolve_type(t, self.diags));
+                let mut local_ty = self.check_value(value, ann);
+                if matches!(local_ty, Ty::Unit | Ty::Never) {
+                    self.error(value.span, "this expression has no value to store");
+                    local_ty = Ty::Error;
+                }
+                self.declare(bind, local_ty, *is_var, false, false);
+                Ty::Unit
+            }
+            Stmt::Assign { target, op, value, .. } => {
+                self.check_assign(target, *op, value);
+                Ty::Unit
+            }
+            Stmt::While { cond, body, .. } => {
+                self.check_value(cond, Some(Ty::Bool));
+                self.loop_depth += 1;
+                self.check_block(body, Expect::Discard);
+                self.loop_depth -= 1;
+                Ty::Unit
+            }
+            Stmt::ForRange { var, start, end, body, .. } => {
+                let st = self.check_expr(start, None);
+                let et = self.check_expr(end, if st.is_int() { Some(st) } else { None });
+                let var_ty = match Ty::common(st, et) {
+                    _ if st == Ty::Error || et == Ty::Error => Ty::Error,
+                    Some(t) if t.is_int() => {
+                        self.coerce(start, st, t);
+                        self.coerce(end, et, t);
+                        t
+                    }
+                    _ => {
+                        let msg = format!("`for ... from ... to` needs integers, found {} and {}", st.name(), et.name());
+                        self.error(start.span.to(end.span), msg);
+                        Ty::Error
+                    }
+                };
+                self.scopes.push(HashMap::new());
+                self.declare(var, var_ty, false, false, false);
+                self.loop_depth += 1;
+                self.check_block(body, Expect::Discard);
+                self.loop_depth -= 1;
+                self.scopes.pop();
+                Ty::Unit
+            }
+            Stmt::Break(span) | Stmt::Continue(span) => {
+                if self.loop_depth == 0 {
+                    let word = if matches!(s, Stmt::Break(_)) { "break" } else { "continue" };
+                    self.error(*span, format!("`{word}` outside a loop"));
+                }
+                Ty::Never
+            }
+            Stmt::Return { value, span } => {
+                match (value, self.ret) {
+                    (Some(v), Ty::Unit) => {
+                        self.check_expr(v, None);
+                        self.error(v.span, "this function doesn't return a value");
+                    }
+                    (Some(v), r) => {
+                        self.check_value(v, Some(r));
+                    }
+                    (None, Ty::Unit) => {}
+                    (None, r) => self.error(*span, format!("this function must return {}", r.name())),
+                }
+                Ty::Never
+            }
+            Stmt::Expr(e) => self.check_discarded(e),
+        }
+    }
+
+    fn check_assign(&mut self, target: &Expr, op: AssignOp, value: &Expr) {
+        let ExprKind::Ident(name) = &target.kind else {
+            self.error(target.span, "only variables can be assigned to");
+            self.check_expr(value, None);
+            return;
+        };
+        let Some(local) = self.lookup_local(name) else {
+            if self.t.const_by_name.contains_key(name) {
+                self.error(target.span, format!("can't change constant `{name}`"));
+            } else {
+                self.error(target.span, format!("unknown name `{name}`"));
+            }
+            self.check_expr(value, None);
+            return;
+        };
+        let info = self.t.locals[local.0 as usize].clone();
+        self.t.res.insert(target.id, Res::Local(local));
+        self.t.expr_ty[target.id.0 as usize] = info.ty;
+        if !info.mutable {
+            if info.is_param {
+                self.error_help(
+                    target.span,
+                    format!("can't change parameter `{name}`"),
+                    format!("declare it as `var {name}` to change the caller's value"),
+                );
+            } else {
+                self.error_help(target.span, format!("can't change `{name}`: it was declared with `let`"), "declare it with `var`");
+            }
+        } else if info.is_var_param {
+            let f = self.fn_id.expect("inside a function");
+            self.t.fns[f.0 as usize].mutates_params = true;
+        }
+        if op != AssignOp::Set && !info.ty.is_numeric() && info.ty != Ty::Error {
+            self.error(target.span, format!("`{}` needs a number, found {}", op.symbol(), info.ty.name()));
+        }
+        self.check_value(value, Some(info.ty));
+    }
+
+    /// An expression whose value nobody uses.
+    fn check_discarded(&mut self, e: &Expr) -> Ty {
+        let ty = match &e.kind {
+            ExprKind::If { .. } => self.check_if(e, Expect::Discard),
+            ExprKind::Call { .. } => self.check_discarded_call(e),
+            _ => {
+                let ty = self.check_expr(e, None);
+                if ty != Ty::Error {
+                    self.error(e.span, "this line has no effect; did you mean to continue the line above?");
+                }
+                ty
+            }
+        };
+        if ty == Ty::Never {
+            Ty::Never
+        } else {
+            Ty::Unit
+        }
+    }
+}
