@@ -1,0 +1,28 @@
+// expect: 6 3
+// expect: Node(value: 1, kids: [Node(value: 2, kids: []), Node(value: 3, kids: [])])
+// expect: 1 100
+struct Node {
+    value: int
+    kids: [Node] = []
+}
+
+pure sum(n: Node) -> int {
+    var s = n.value
+    for k in n.kids { s += sum(k) }
+    s
+}
+
+pure count(n: Node) -> int {
+    var c = 1
+    for k in n.kids { c += count(k) }
+    c
+}
+
+main() {
+    var root = Node(1, [Node(2), Node(3)])
+    print(sum(root), count(root))
+    print(root)
+    var copy = root
+    copy.kids[0].value = 100
+    print(root.kids[0].value - 1, copy.kids[0].value)
+}

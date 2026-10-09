@@ -1,6 +1,7 @@
 mod aggregate;
 mod arith;
 mod call;
+mod collections;
 mod divide;
 mod expr;
 mod place;
@@ -29,7 +30,9 @@ pub(crate) fn cl_type(t: KTy) -> Type {
         KTy::I64 => types::I64,
         KTy::F32 => types::F32,
         KTy::F64 => types::F64,
-        KTy::Struct(_) | KTy::Enum(_) | KTy::Str => unreachable!("aggregates live in memory, not registers"),
+        KTy::Struct(_) | KTy::Enum(_) | KTy::Str | KTy::Array(_) | KTy::List(_) => {
+            unreachable!("aggregates live in memory, not registers")
+        }
     }
 }
 
@@ -177,11 +180,11 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         match s {
             kir::Stmt::Let(l, e) => {
                 if e.ty.is_aggregate() {
-                    let dest = self.place_addr(&Place::local(*l));
+                    let dest = self.place_addr(&Place::local(*l))?;
                     self.lower_into(e, dest)?;
                 } else {
                     let v = self.expr(e)?;
-                    self.store_place(&Place::local(*l), v);
+                    self.store_place(&Place::local(*l), v)?;
                 }
             }
             kir::Stmt::Assign(p, e) => self.assign(p, e)?,
@@ -218,7 +221,10 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             kir::Stmt::Call(fi, args) => {
                 self.call(*fi, args, None)?;
             }
-            kir::Stmt::Print(args) => self.print(args)?,
+            kir::Stmt::Print(args) => self.print(args, true)?,
+            kir::Stmt::Write(args) => self.print(args, false)?,
+            kir::Stmt::ListAdd(list, value) => self.list_add(list, value)?,
+            kir::Stmt::Dup(p) => self.dup(p)?,
         }
         Ok(true)
     }
@@ -266,14 +272,14 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let start_v = self.expr(start)?;
         let end_v = self.expr(end)?;
         let place = Place::local(var);
-        self.store_place(&place, start_v);
+        self.store_place(&place, start_v)?;
         let ty = self.local_ty(var);
         let (header, body_b, step, exit) =
             (self.b.create_block(), self.b.create_block(), self.b.create_block(), self.b.create_block());
         self.b.ins().jump(header, &[]);
 
         self.b.switch_to_block(header);
-        let i = self.load_place(&place);
+        let i = self.load_place(&place)?;
         let cc = if ty.is_signed() { IntCC::SignedLessThan } else { IntCC::UnsignedLessThan };
         let more = self.b.ins().icmp(cc, i, end_v);
         self.b.ins().brif(more, body_b, &[], exit, &[]);
@@ -288,9 +294,9 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
 
         // `i < end` held, so `i + 1` can't overflow.
         self.b.switch_to_block(step);
-        let i = self.load_place(&place);
+        let i = self.load_place(&place)?;
         let next = self.b.ins().iadd_imm(i, 1);
-        self.store_place(&place, next);
+        self.store_place(&place, next)?;
         self.b.ins().jump(header, &[]);
 
         self.b.switch_to_block(exit);

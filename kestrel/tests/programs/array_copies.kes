@@ -1,0 +1,39 @@
+// expect: [5, 2] [100, 2]
+// expect: [1] [1, 2]
+// expect: Bag(items: [7, 8]) Bag(items: [9, 8])
+// expect: [[1], [2]] [[50], [2]]
+// expect: [3, 4] [30, 4]
+struct Bag {
+    items: [int]
+}
+
+pure same(xs: [int]) -> [int] {
+    xs
+}
+
+grow(var l: list[int]) {
+    l.add(2)
+}
+
+main() {
+    var a = [5, 2]
+    var b = a
+    b[0] = 100
+    print(a, b)
+    var l: list[int] = [1]
+    var m = l
+    grow(var m)
+    print(l, m)
+    let bag = Bag([7, 8])
+    var other = bag
+    other.items[0] = 9
+    print(bag, other)
+    var outer = [[1], [2]]
+    var copy = outer
+    copy[0][0] = 50
+    print(outer, copy)
+    let orig = [3, 4]
+    var back = same(orig)
+    back[0] = 30
+    print(orig, back)
+}

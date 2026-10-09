@@ -9,9 +9,10 @@ use crate::tables::{
 };
 use crate::ty::Ty;
 
-const BUILTINS: &[&str] = &["print", "int", "i64", "u8", "float", "f64", "bool", "string", "vec2", "vec3"];
+pub(crate) const BUILTINS: &[&str] =
+    &["print", "int", "i64", "u8", "float", "f64", "bool", "string", "vec2", "vec3", "array", "list", "map"];
 
-pub(crate) fn resolve_type(ty: &TypeExpr, t: &Tables, diags: &mut Vec<Diagnostic>) -> Ty {
+pub(crate) fn resolve_type(ty: &TypeExpr, t: &mut Tables, diags: &mut Vec<Diagnostic>) -> Ty {
     let msg = match &ty.kind {
         TypeKind::Named { name, args } if args.is_empty() => match Ty::from_name(name) {
             Some(found) => return found,
@@ -25,8 +26,17 @@ pub(crate) fn resolve_type(ty: &TypeExpr, t: &Tables, diags: &mut Vec<Diagnostic
                 format!("unknown type `{name}`")
             }
         },
+        TypeKind::Named { name, args } if name == "list" && args.len() == 1 => {
+            let elem = resolve_type(&args[0], t, diags);
+            return if elem == Ty::Error { Ty::Error } else { Ty::List(t.intern_elem(elem)) };
+        }
+        TypeKind::Named { name, .. } if name == "list" => "`list[...]` takes one element type".to_string(),
+        TypeKind::Named { name, .. } if name == "array" => "write array types as `[T]`".to_string(),
         TypeKind::Named { name, .. } => format!("`{name}[...]` types aren't supported yet"),
-        TypeKind::Array(_) => "array types aren't supported yet".to_string(),
+        TypeKind::Array(inner) => {
+            let elem = resolve_type(inner, t, diags);
+            return if elem == Ty::Error { Ty::Error } else { Ty::Array(t.intern_elem(elem)) };
+        }
         TypeKind::Optional(_) => "optional types aren't supported yet".to_string(),
     };
     diags.push(Diagnostic::error(ty.span, msg));
@@ -119,7 +129,7 @@ fn check_names(program: &Program, diags: &mut Vec<Diagnostic>) {
 }
 
 /// Resolves field types; reports duplicate field names.
-fn fields_of(owner: &str, decls: &[FieldDecl], t: &Tables, diags: &mut Vec<Diagnostic>) -> Vec<FieldInfo> {
+fn fields_of(owner: &str, decls: &[FieldDecl], t: &mut Tables, diags: &mut Vec<Diagnostic>) -> Vec<FieldInfo> {
     let mut fields: Vec<FieldInfo> = Vec::new();
     for f in decls {
         if fields.iter().any(|g| g.name == f.name) {

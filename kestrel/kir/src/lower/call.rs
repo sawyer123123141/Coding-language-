@@ -7,13 +7,21 @@ use super::FnLowerer;
 use crate::ir::*;
 
 impl<'a> FnLowerer<'a> {
-    /// The place an expression names (`x`, `x.f.g`), if it is one.
-    pub(crate) fn place(&self, e: &ast::Expr) -> Option<Place> {
+    /// The place an expression names (`x`, `x.f.g`, `xs[i]`), if it is one.
+    pub(crate) fn place(&mut self, e: &ast::Expr) -> Option<Place> {
         match &e.kind {
             ast::ExprKind::Ident(_) => match self.t.res.get(&e.id) {
-                Some(Res::Local(l)) => Some(Place::local(self.local_map[l])),
+                Some(Res::Local(l)) => Some(match self.elems.get(l) {
+                    Some(p) => p.clone(),
+                    None => Place::local(self.local_map[l]),
+                }),
                 _ => None,
             },
+            ast::ExprKind::Index { base, index } => {
+                let mut p = self.place(base)?;
+                p.path.push(Proj::Index(self.expr(index)));
+                Some(p)
+            }
             ast::ExprKind::Field { base, .. } => {
                 // `Enum.Variant` parses as a field access but isn't a place.
                 let field = *self.t.field_index.get(&e.id)?;
@@ -100,7 +108,7 @@ impl<'a> FnLowerer<'a> {
         let mut temps: HashMap<usize, Expr> = HashMap::new();
         if !in_order {
             for (ai, a) in args.iter().enumerate() {
-                let v = self.expr(&a.value);
+                let v = self.value(&a.value);
                 temps.insert(ai, self.spill(v, &mut pre));
             }
         }
@@ -109,12 +117,12 @@ impl<'a> FnLowerer<'a> {
             fields.push(match slot {
                 Some(ai) => match temps.remove(ai) {
                     Some(v) => v,
-                    None => self.expr(&args[*ai].value),
+                    None => self.value(&args[*ai].value),
                 },
                 None => {
                     // Only user structs have defaults; built-in ones have no declaration.
                     let ast::Item::Struct(decl) = &program.items[t.strukt(sid).item] else { unreachable!("a struct with defaults") };
-                    self.expr(decl.fields[fi].default.as_ref().expect("checker requires a default for a missing field"))
+                    self.value(decl.fields[fi].default.as_ref().expect("checker requires a default for a missing field"))
                 }
             });
         }
@@ -132,7 +140,7 @@ impl<'a> FnLowerer<'a> {
         let mut values: Vec<Option<Expr>> = (0..args.len()).map(|_| None).collect();
         if !in_order {
             for (ai, a) in args.iter().enumerate() {
-                let v = self.expr(&a.value);
+                let v = self.value(&a.value);
                 values[ai] = Some(self.spill(v, &mut pre));
             }
         }
@@ -141,7 +149,7 @@ impl<'a> FnLowerer<'a> {
             let ai = slot.expect("checker binds every variant field");
             fields.push(match values[ai].take() {
                 Some(v) => v,
-                None => self.expr(&args[ai].value),
+                None => self.value(&args[ai].value),
             });
         }
         (pre, ExprKind::VariantLit(EnumIdx(id.0), variant, fields))

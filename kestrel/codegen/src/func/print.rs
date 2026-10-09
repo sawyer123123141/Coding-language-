@@ -6,13 +6,16 @@ use kestrel_kir::{self as kir, FieldLayout, KTy};
 use super::{cl_type, FuncLowerer};
 
 impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
-    pub(crate) fn print(&mut self, args: &[kir::PrintArg]) -> Result<(), String> {
+    /// `print(...)` (`line`: spaces between arguments, then a newline), or
+    /// a generated printer's `Write` (neither).
+    pub(crate) fn print(&mut self, args: &[kir::PrintArg], line: bool) -> Result<(), String> {
         // Arguments are separated by spaces; an interpolated string's parts aren't.
         let mut pieces = Vec::with_capacity(args.len());
         for (i, a) in args.iter().enumerate() {
+            let space = line && i > 0;
             match a {
-                kir::PrintArg::Interp(parts) => pieces.extend(parts.iter().enumerate().map(|(j, p)| (p, i > 0 && j == 0))),
-                _ => pieces.push((a, i > 0)),
+                kir::PrintArg::Interp(parts) => pieces.extend(parts.iter().enumerate().map(|(j, p)| (p, space && j == 0))),
+                _ => pieces.push((a, space)),
             }
         }
         // Evaluate everything before writing anything, so output (or a panic)
@@ -43,7 +46,9 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 _ => unreachable!("value pieces are evaluated above"),
             }
         }
-        self.call_id(rt.print_newline, &[]);
+        if line {
+            self.call_id(rt.print_newline, &[]);
+        }
         Ok(())
     }
 
@@ -62,7 +67,9 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             KTy::I64 => self.call_id(rt.print_i64, &[v]),
             KTy::F32 => self.call_id(rt.print_f32, &[v]),
             KTy::F64 => self.call_id(rt.print_f64, &[v]),
-            KTy::Struct(_) | KTy::Enum(_) | KTy::Str => unreachable!("aggregates are printed from memory"),
+            KTy::Struct(_) | KTy::Enum(_) | KTy::Str | KTy::Array(_) | KTy::List(_) => {
+                unreachable!("aggregates are printed from memory")
+            }
         };
     }
 
@@ -71,6 +78,12 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     fn print_aggregate(&mut self, addr: Value, offset: i32, ty: KTy) -> Result<(), String> {
         let kir = self.shared.kir;
         match ty {
+            KTy::Array(_) | KTy::List(_) => {
+                let at = self.offset(addr, offset);
+                let id = self.shared.funcs[kir.print_fns[&ty].0 as usize];
+                self.call_id(id, &[at]);
+                Ok(())
+            }
             KTy::Str => {
                 let p = self.b.ins().load(self.ptr, MemFlags::trusted(), addr, offset);
                 let n = self.b.ins().load(types::I64, MemFlags::trusted(), addr, offset + 8);

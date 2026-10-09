@@ -212,10 +212,10 @@ impl<'a> BodyChecker<'a> {
         (slots, ok)
     }
 
-    /// Checks an argument for a `var` parameter: a changeable variable or field
+    /// Checks an argument for a `var` parameter: a changeable variable, field or element
     /// of exactly the parameter's type. Returns the variable it is rooted at.
     fn check_var_arg(&mut self, a: &Arg, p: &ParamSig, fname: &str) -> Option<LocalId> {
-        if !matches!(a.value.kind, ExprKind::Ident(_) | ExprKind::Field { .. }) {
+        if !matches!(a.value.kind, ExprKind::Ident(_) | ExprKind::Field { .. } | ExprKind::Index { .. }) {
             self.error(a.value.span, "only a variable can be passed as `var`");
             self.check_expr(&a.value, None);
             return None;
@@ -263,7 +263,7 @@ impl<'a> BodyChecker<'a> {
     }
 
     /// While a call changes a variable, nothing else in the call may refer to
-    /// it by reference: no second `var` use, and no struct argument (structs
+    /// it by reference: no second `var` use, and no aggregate argument (those
     /// are passed by pointer, so they would see the change). Number
     /// arguments are copied before the call, so they're fine.
     fn check_exclusive(&mut self, args: &[Arg], var_roots: &[(LocalId, Option<usize>)]) {
@@ -275,7 +275,7 @@ impl<'a> BodyChecker<'a> {
             }
         }
         for (bi, b) in args.iter().enumerate() {
-            if var_roots.iter().any(|&(_, ai)| ai == Some(bi)) || !matches!(self.t.ty(b.value.id), Ty::Struct(_)) {
+            if var_roots.iter().any(|&(_, ai)| ai == Some(bi)) || !self.t.ty(b.value.id).is_aggregate() {
                 continue;
             }
             let Some(root) = self.place_root(&b.value) else { continue };

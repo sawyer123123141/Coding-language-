@@ -1,0 +1,114 @@
+//! Arrays and lists: indexing, `.len`, `for ... in`, and the copies value
+//! semantics needs when a value is stored somewhere new.
+
+use kestrel_syntax::ast;
+
+use super::helpers::has_heap;
+use super::FnLowerer;
+use crate::ir::*;
+
+impl<'a> FnLowerer<'a> {
+    /// `e` as a place: itself when it names one, else a temporary holding
+    /// its value. With `stable`, index expressions in the place are
+    /// evaluated once, here, so the place can be used more than once.
+    pub(crate) fn place_or_temp(&mut self, e: &ast::Expr, pre: &mut Vec<Stmt>, stable: bool) -> Place {
+        let Some(mut p) = self.place(e) else {
+            let v = self.expr(e);
+            let tmp = self.temp(v.ty);
+            pre.push(Stmt::Let(tmp, v));
+            return Place::local(tmp);
+        };
+        if stable {
+            for proj in &mut p.path {
+                if let Proj::Index(i) = proj {
+                    if !matches!(i.kind, ExprKind::Int(_)) {
+                        *i = self.spill(i.clone(), pre);
+                    }
+                }
+            }
+        }
+        p
+    }
+
+    /// `base[index]` read as a value.
+    pub(crate) fn index_value(&mut self, e: &ast::Expr, base: &ast::Expr, index: &ast::Expr, ty: KTy, line: u32) -> ExprKind {
+        if let Some(p) = self.place(e) {
+            return ExprKind::Load(p);
+        }
+        let mut pre = Vec::new();
+        let mut p = self.place_or_temp(base, &mut pre, false);
+        p.path.push(Proj::Index(self.expr(index)));
+        Self::with_pre(pre, ExprKind::Load(p), ty, line)
+    }
+
+    /// `xs.len`: stored as an i64, read as an `int` (checked when it doesn't fit).
+    pub(crate) fn len_value(&mut self, base: &ast::Expr, line: u32) -> ExprKind {
+        let mut pre = Vec::new();
+        let p = self.place_or_temp(base, &mut pre, false);
+        let len = Expr { kind: ExprKind::Len(p), ty: KTy::I64, line };
+        Self::with_pre(pre, ExprKind::Cast(Box::new(len)), KTy::I32, line)
+    }
+
+    /// `for i, v in xs`: a counted loop where `v` stands for `xs[i]`. The
+    /// length is read once, before the first iteration.
+    pub(crate) fn for_in(
+        &mut self,
+        index: Option<&ast::Binding>,
+        var: &ast::Binding,
+        iter: &ast::Expr,
+        body: &ast::Block,
+        out: &mut Vec<Stmt>,
+    ) {
+        let line = self.line(iter.span);
+        let list = self.place_or_temp(iter, out, true);
+        let i = match index {
+            Some(b) => self.bind_local(b),
+            None => self.temp(KTy::I32),
+        };
+        let mut elem = list.clone();
+        elem.path.push(Proj::Index(Expr { kind: ExprKind::Load(Place::local(i)), ty: KTy::I32, line }));
+        self.elems.insert(self.t.bind_local[&var.id], elem);
+        let len = Expr { kind: ExprKind::Len(list), ty: KTy::I64, line };
+        let end = Expr { kind: ExprKind::Cast(Box::new(len)), ty: KTy::I32, line };
+        let start = Expr { kind: ExprKind::Int(0), ty: KTy::I32, line };
+        let body = self.block_stmts(body);
+        out.push(Stmt::ForRange { var: i, start, end, body });
+    }
+
+    /// `e` lowered as a value about to be stored somewhere new.
+    pub(crate) fn value(&mut self, e: &ast::Expr) -> Expr {
+        let v = self.expr(e);
+        self.owned(v, false)
+    }
+
+    /// Makes `v` safe to store. Every variable owns its data, so reading a
+    /// place whose value holds arrays or lists copies them. With `moving`
+    /// (a returned value), reads of locals aren't copied: they're about to
+    /// die. Parameters belong to the caller, so they're copied regardless.
+    pub(crate) fn owned(&mut self, v: Expr, moving: bool) -> Expr {
+        if !has_heap(v.ty, self.t) {
+            return v;
+        }
+        let Expr { kind, ty, line } = v;
+        let kind = match kind {
+            ExprKind::Load(p) if moving && self.locals[p.root.0 as usize].kind != LocalKind::RefParam => ExprKind::Load(p),
+            ExprKind::Load(p) => {
+                let tmp = self.temp(ty);
+                let mut stmts = vec![Stmt::Let(tmp, Expr { kind: ExprKind::Load(p), ty, line })];
+                stmts.extend(self.helpers.fixup(Place::local(tmp), ty, self.t));
+                ExprKind::Seq(stmts, Box::new(Expr { kind: ExprKind::Load(Place::local(tmp)), ty, line }))
+            }
+            ExprKind::Seq(stmts, inner) => ExprKind::Seq(stmts, Box::new(self.owned(*inner, moving))),
+            ExprKind::If { cond, then_body, then_val, else_body, else_val } => ExprKind::If {
+                cond,
+                then_body,
+                then_val: then_val.map(|v| Box::new(self.owned(*v, moving))),
+                else_body,
+                else_val: else_val.map(|v| Box::new(self.owned(*v, moving))),
+            },
+            // Everything else builds a fresh value.
+            other => other,
+        };
+        Expr { kind, ty, line }
+    }
+}

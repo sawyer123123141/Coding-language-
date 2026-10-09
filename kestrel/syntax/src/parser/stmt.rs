@@ -1,5 +1,6 @@
 use super::{PResult, Parser};
-use crate::ast::{AssignOp, Block, Stmt};
+use crate::ast::{AssignOp, Binding, Block, Stmt};
+use crate::span::Span;
 use crate::token::Tok;
 
 impl Parser {
@@ -76,17 +77,29 @@ impl Parser {
         let start = self.span();
         self.bump();
         let (name, name_span) = self.expect_ident("a loop variable name")?;
-        if self.at(&Tok::In) || self.at(&Tok::Comma) {
-            self.error_here("for-in loops aren't supported yet");
-            return Err(());
+        let first = self.binding(name, name_span);
+        if self.eat(&Tok::Comma) {
+            let (name, name_span) = self.expect_ident("a loop variable name")?;
+            let var = self.binding(name, name_span);
+            return self.for_in(start, Some(first), var);
         }
-        let var = self.binding(name, name_span);
+        if self.at(&Tok::In) {
+            return self.for_in(start, None, first);
+        }
+        let var = first;
         self.expect(&Tok::From, "`from`")?;
         let lo = self.expr()?;
         self.expect(&Tok::To, "`to`")?;
         let hi = self.expr()?;
         let body = self.block()?;
         Ok(Stmt::ForRange { var, start: lo, end: hi, span: start.to(body.span), body })
+    }
+
+    fn for_in(&mut self, start: Span, index: Option<Binding>, var: Binding) -> PResult<Stmt> {
+        self.expect(&Tok::In, "`in`")?;
+        let iter = self.expr()?;
+        let body = self.block()?;
+        Ok(Stmt::ForIn { index, var, iter, span: start.to(body.span), body })
     }
 
     fn expr_or_assign(&mut self) -> PResult<Stmt> {

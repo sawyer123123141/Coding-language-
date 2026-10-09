@@ -123,10 +123,20 @@ impl Parser {
         result
     }
 
-    /// A primary expression followed by any `.field` / `.method(args)`.
+    /// A primary expression followed by any `.field` / `.method(args)` / `[index]`.
     fn postfix(&mut self) -> PResult<Expr> {
         let mut e = self.primary()?;
-        while self.eat(&Tok::Dot) {
+        loop {
+            if self.eat(&Tok::LBracket) {
+                let index = self.expr()?;
+                let end = self.expect(&Tok::RBracket, "`]`")?;
+                let span = e.span.to(end);
+                e = self.expr_node(ExprKind::Index { base: Box::new(e), index: Box::new(index) }, span);
+                continue;
+            }
+            if !self.eat(&Tok::Dot) {
+                break;
+            }
             let (name, name_span) = self.expect_ident("a field or method name")?;
             if self.at(&Tok::LParen) {
                 let (args, end) = self.call_args()?;
@@ -165,6 +175,9 @@ impl Parser {
                 if self.at(&Tok::LParen) {
                     return self.call(name, span);
                 }
+                if matches!(name.as_str(), "array" | "list" | "map") && self.at(&Tok::LBracket) {
+                    return self.type_call(name, span);
+                }
                 return Ok(self.expr_node(ExprKind::Ident(name), span));
             }
             Tok::LParen => {
@@ -173,6 +186,18 @@ impl Parser {
                 let end = self.expect(&Tok::RParen, "`)`")?;
                 inner.span = span.to(end);
                 return Ok(inner);
+            }
+            Tok::LBracket => {
+                self.bump();
+                let mut items = Vec::new();
+                while !self.at(&Tok::RBracket) {
+                    items.push(self.expr()?);
+                    if !self.eat(&Tok::Comma) {
+                        break;
+                    }
+                }
+                let end = self.expect(&Tok::RBracket, "`]` or `,`")?;
+                return Ok(self.expr_node(ExprKind::ArrayLit(items), span.to(end)));
             }
             Tok::SelfKw => {
                 self.bump();
@@ -192,6 +217,25 @@ impl Parser {
     fn call(&mut self, name: String, name_span: Span) -> PResult<Expr> {
         let (args, end) = self.call_args()?;
         Ok(self.expr_node(ExprKind::Call { name, name_span, args }, name_span.to(end)))
+    }
+
+    /// `array[int](n)`: type arguments in brackets, then call arguments.
+    fn type_call(&mut self, name: String, name_span: Span) -> PResult<Expr> {
+        self.expect(&Tok::LBracket, "`[`")?;
+        let mut type_args = Vec::new();
+        loop {
+            type_args.push(self.type_expr()?);
+            if !self.eat(&Tok::Comma) {
+                break;
+            }
+        }
+        self.expect(&Tok::RBracket, "`]`")?;
+        if !self.at(&Tok::LParen) {
+            self.error_here(format!("expected `(` to create the {name}, like `{name}[...]()`"));
+            return Err(());
+        }
+        let (args, end) = self.call_args()?;
+        Ok(self.expr_node(ExprKind::TypeCall { name, name_span, type_args, args }, name_span.to(end)))
     }
 
     /// `(arg, ...)`; returns the arguments and the span of the closing `)`.

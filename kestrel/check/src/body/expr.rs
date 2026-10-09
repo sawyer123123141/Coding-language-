@@ -48,6 +48,9 @@ impl<'a> BodyChecker<'a> {
             ExprKind::Field { .. } => self.check_field(e),
             ExprKind::MethodCall { .. } => self.check_method_call(e),
             ExprKind::Match { .. } => self.check_match(e, Expect::Value(want)),
+            ExprKind::Index { .. } => self.check_index(e),
+            ExprKind::ArrayLit(items) => self.check_array_lit(e, items, want),
+            ExprKind::TypeCall { .. } => self.check_type_call(e),
         }
     }
 

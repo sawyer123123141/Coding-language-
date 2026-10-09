@@ -18,7 +18,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 }
             }
             ExprKind::Bool(v) => self.b.ins().iconst(types::I8, *v as i64),
-            ExprKind::Load(p) => self.load_place(p),
+            ExprKind::Load(p) => self.load_place(p)?,
+            ExprKind::Len(p) => self.len(p)?,
             ExprKind::FieldOf(base, i) => {
                 let addr = self.field_addr(base, *i)?;
                 self.b.ins().load(ty, MemFlags::trusted(), addr, 0)
@@ -28,12 +29,15 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 self.expr(value)?
             }
             ExprKind::Tag(p) => {
-                let addr = self.place_addr(p);
+                let addr = self.place_addr(p)?;
                 self.b.ins().load(types::I8, MemFlags::trusted(), addr, 0)
             }
-            ExprKind::StructLit(..) | ExprKind::VariantLit(..) | ExprKind::StrLit(_) => {
-                unreachable!("struct, enum and string values are built in memory")
-            }
+            ExprKind::StructLit(..)
+            | ExprKind::VariantLit(..)
+            | ExprKind::StrLit(_)
+            | ExprKind::ArrayNew(_)
+            | ExprKind::ArrayLit(_)
+            | ExprKind::ListNew => unreachable!("aggregate values are built in memory"),
             ExprKind::Unary(UnOp::Not, inner) => {
                 let v = self.expr(inner)?;
                 self.b.ins().bxor_imm(v, 1)

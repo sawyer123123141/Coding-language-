@@ -1,0 +1,33 @@
+// expect: 5 44 Chunk(x: 0, heights: [0, 0, 9])
+// expect: [vec3(x: 1, y: 2, z: 3)]
+// expect: 1000 499500
+// expect: [1, 2, 3, 1, 2, 3]
+struct Chunk {
+    x: int
+    heights: [int] = []
+}
+
+main() {
+    var world = list[Chunk]()
+    for i from 0 to 5 {
+        world.add(Chunk(x: i))
+    }
+    world[0].heights = array[int](3)
+    world[0].heights[2] = 9
+    for i, c in world {
+        c.x += i * 10
+    }
+    print(world.len, world[4].x, world[0])
+    var tris: list[vec3] = []
+    tris.add(vec3(1, 2, 3))
+    print(tris)
+    var nums = list[int]()
+    var sum = 0
+    for i from 0 to 1000 { nums.add(i) }
+    for n in nums { sum += n }
+    print(nums.len, sum)
+    // Adding while looping is safe: the length is read once.
+    var xs: list[int] = [1, 2, 3]
+    for x in xs { xs.add(x) }
+    print(xs)
+}

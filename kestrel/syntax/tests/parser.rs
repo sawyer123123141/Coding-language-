@@ -113,7 +113,6 @@ fn helpful_errors_and_recovery() {
         vec!["expected a variable name, found `=`", "expected an expression, found `}`"]
     );
     assert_eq!(errs("main() { a < b < c }"), vec!["comparisons can't be chained; combine them with `and`"]);
-    assert_eq!(errs("main() {\n for x in xs { }\n}"), vec!["for-in loops aren't supported yet"]);
     assert_eq!(errs("use foo\nmain() {}"), vec!["`use` isn't supported yet"]);
     assert_eq!(errs("main() { a b }"), vec!["expected end of line, found name `b`"]);
 }
@@ -210,4 +209,29 @@ fn interpolated_strings() {
     let (_, d) = parse("main() {\n print(\"x {1 +}\")\n}");
     assert_eq!(d.iter().map(|d| d.message.as_str()).collect::<Vec<_>>(), ["expected an expression, found `}`"]);
     assert_eq!(d[0].span.start, 23, "points at the closing brace");
+}
+
+#[test]
+fn arrays_lists_and_indexing() {
+    assert_eq!(body("let a = [1, 2,\n 3]"), "{(let a [1 2 3])}");
+    assert_eq!(body("let e: [int] = []"), "{(let e [])}");
+    assert_eq!(body("xs[i + 1].hp -= 1"), "{(-= (. (index xs (+ i 1)) hp) 1)}");
+    assert_eq!(body("let g = grid[y][x]"), "{(let g (index (index grid y) x))}");
+    assert_eq!(body("let h = array[int](n * 2)"), "{(let h (make array[int] (* n 2)))}");
+    assert_eq!(body("var w = list[Chunk]()"), "{(var w (make list[Chunk]))}");
+    assert_eq!(body("let m = map[string, [int]]()"), "{(let m (make map[string, [int]]))}");
+    assert_eq!(body("world.add(Chunk(x: 1))"), "{(.call world add (call Chunk x: 1))}");
+}
+
+#[test]
+fn for_in_loops() {
+    assert_eq!(body("for v in xs { print(v) }"), "{(for-in v xs {(call print v)})}");
+    assert_eq!(body("for i, v in xs { }"), "{(for-in i v xs {})}");
+    assert_eq!(body("for i from 0 to 3 { }"), "{(for i 0 3 {})}");
+}
+
+#[test]
+fn collection_errors() {
+    assert_eq!(errs("main() {\n let a = array[int]\n}"), vec!["expected `(` to create the array, like `array[...]()`"]);
+    assert_eq!(errs("main() {\n let a = [1, 2\n}"), vec!["expected `]` or `,`, found `}`"]);
 }

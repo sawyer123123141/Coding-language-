@@ -1,7 +1,9 @@
 //! Kestrel's typed, structured middle layer. Loops stay loops; no
 //! Cranelift (or any backend) types appear here.
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+use std::collections::HashMap;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum KTy {
     Bool,
     U8,
@@ -15,11 +17,15 @@ pub enum KTy {
     Enum(EnumIdx),
     /// A string: a pointer to UTF-8 bytes at offset 0, its length (i64) at 8.
     Str,
+    /// `[T]`: a pointer to the elements at 0, the length (i64) at 8.
+    Array(ElemIdx),
+    /// `list[T]`: pointer, length, capacity (i64s), then the arena it grows in.
+    List(ElemIdx),
 }
 
 impl KTy {
     pub fn is_aggregate(self) -> bool {
-        matches!(self, KTy::Struct(_) | KTy::Enum(_) | KTy::Str)
+        matches!(self, KTy::Struct(_) | KTy::Enum(_) | KTy::Str | KTy::Array(_) | KTy::List(_))
     }
 
     pub fn is_float(self) -> bool {
@@ -47,11 +53,18 @@ pub struct StructIdx(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct EnumIdx(pub u32);
 
+/// An element type of arrays and lists, in `Module::elems`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ElemIdx(pub u32);
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Module {
     pub funcs: Vec<Func>,
     pub structs: Vec<StructLayout>,
     pub enums: Vec<EnumLayout>,
+    pub elems: Vec<KTy>,
+    /// The generated function that prints each array or list type printed.
+    pub print_fns: HashMap<KTy, FuncIdx>,
     pub main: FuncIdx,
 }
 
@@ -64,13 +77,18 @@ impl Module {
         &self.enums[e.0 as usize]
     }
 
+    pub fn elem(&self, e: ElemIdx) -> KTy {
+        self.elems[e.0 as usize]
+    }
+
     /// Size and alignment in bytes.
     pub fn size_align(&self, ty: KTy) -> (u32, u32) {
         match ty {
             KTy::Bool | KTy::U8 => (1, 1),
             KTy::I32 | KTy::F32 => (4, 4),
             KTy::I64 | KTy::F64 => (8, 8),
-            KTy::Str => (16, 8),
+            KTy::Str | KTy::Array(_) => (16, 8),
+            KTy::List(_) => (32, 8),
             KTy::Struct(s) => {
                 let l = self.layout(s);
                 (l.size, l.align)
@@ -116,7 +134,7 @@ pub struct FieldLayout {
     pub offset: u32,
 }
 
-/// A memory location: a local, or a path of fields inside one.
+/// A memory location: a local, or a path of fields and elements inside one.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Place {
     pub root: LocalIdx,
@@ -124,12 +142,14 @@ pub struct Place {
     pub path: Vec<Proj>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Proj {
     /// A struct field.
     Field(u32),
     /// Field `.1` of variant `.0` of an enum (valid while that variant is stored).
     Variant(u32, u32),
+    /// An element of an array or list, bounds-checked. The index is any integer type.
+    Index(Expr),
 }
 
 impl Place {
@@ -183,6 +203,13 @@ pub enum Stmt {
     /// A call whose result (if any) is discarded.
     Call(FuncIdx, Vec<Arg>),
     Print(Vec<PrintArg>),
+    /// Prints with no separators and no newline (used by generated printers).
+    Write(Vec<PrintArg>),
+    /// Appends a value to the list at a place, growing it if it's full.
+    ListAdd(Place, Expr),
+    /// Gives the array or list at a place its own copy of its elements, in
+    /// the current arena (a list's capacity becomes its length).
+    Dup(Place),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -208,6 +235,14 @@ pub enum ExprKind {
     Bool(bool),
     /// A string literal; the bytes live in read-only data.
     StrLit(String),
+    /// `array[T](n)`: `n` zeroed elements in the current arena.
+    ArrayNew(Box<Expr>),
+    /// `[a, b]`: an array, or a list when `ty` is a list.
+    ArrayLit(Vec<Expr>),
+    /// `list[T]()`: empty, growing in the current arena.
+    ListNew,
+    /// The length (i64) of the array or list at a place.
+    Len(Place),
     /// The value stored at a place (a scalar, or a whole struct).
     Load(Place),
     Unary(UnOp, Box<Expr>),

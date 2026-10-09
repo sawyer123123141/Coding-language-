@@ -1,0 +1,6 @@
+// expect-exit: 101
+// expect-stderr: index -1 out of bounds for length 2 on line 5
+main() {
+    var xs = list[int]()
+    xs.add(1); xs.add(2); xs[0 - 1] = 5
+}

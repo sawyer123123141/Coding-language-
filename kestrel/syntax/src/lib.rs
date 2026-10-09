@@ -3,6 +3,7 @@ pub mod diag;
 pub mod lexer;
 mod newlines;
 pub mod parser;
+mod sexpr;
 pub mod span;
 pub mod token;
 

@@ -25,6 +25,10 @@ pub const BUILTIN_STRUCTS: u32 = 2;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EnumId(pub u32);
 
+/// An interned element type of an array or list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ElemId(pub u32);
+
 /// What a name or call expression refers to.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Res {
@@ -37,6 +41,8 @@ pub enum Res {
     Construct(StructId),
     /// `Block.Air` or `Block.Stone(...)`: builds an enum value.
     Variant(EnumId, u32),
+    /// `xs.add(v)` on a list.
+    ListAdd,
 }
 
 #[derive(Clone, Debug)]
@@ -50,7 +56,8 @@ pub struct LocalInfo {
     pub addressed: bool,
     pub owner: FnId,
     pub span: Span,
-    /// A `match` binding aliases the matched variable: changes go to it.
+    /// A `match` or `for ... in` binding aliases the variable it reads
+    /// from: changes go to it.
     pub alias: Option<LocalId>,
 }
 
@@ -157,6 +164,9 @@ pub struct Tables {
     pub ctor_args: HashMap<ExprId, Vec<Option<usize>>>,
     /// For a swizzle like `v.xz`: the components it picks, in order.
     pub swizzles: HashMap<ExprId, Vec<u32>>,
+    /// Element types of arrays and lists, indexed by `ElemId`.
+    pub elems: Vec<Ty>,
+    pub elem_ids: HashMap<Ty, ElemId>,
     pub fn_by_name: HashMap<String, FnId>,
     pub const_by_name: HashMap<String, ConstId>,
     pub main: Option<FnId>,
@@ -192,12 +202,28 @@ impl Tables {
         &self.enums[id.0 as usize]
     }
 
+    pub fn elem(&self, id: ElemId) -> Ty {
+        self.elems[id.0 as usize]
+    }
+
+    pub fn intern_elem(&mut self, ty: Ty) -> ElemId {
+        if let Some(&id) = self.elem_ids.get(&ty) {
+            return id;
+        }
+        let id = ElemId(self.elems.len() as u32);
+        self.elems.push(ty);
+        self.elem_ids.insert(ty, id);
+        id
+    }
+
     /// How a type reads in messages: struct types by name.
     pub fn ty_name(&self, ty: Ty) -> String {
         match ty {
             Ty::Struct(id) => self.strukt(id).name.clone(),
             Ty::Enum(id) => self.enm(id).name.clone(),
             Ty::Variant(id, v) => format!("{}.{}", self.enm(id).name, self.enm(id).variants[v as usize].name),
+            Ty::Array(e) => format!("[{}]", self.ty_name(self.elem(e))),
+            Ty::List(e) => format!("list[{}]", self.ty_name(self.elem(e))),
             other => other.name().to_string(),
         }
     }

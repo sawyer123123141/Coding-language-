@@ -4,9 +4,20 @@ pub const PANIC_DIV_ZERO: i32 = 2;
 pub const PANIC_NARROW_INT: i32 = 3;
 pub const PANIC_NARROW_U8: i32 = 4;
 
+/// Flushes output, reports `msg` and exits with code 101.
+pub(crate) fn fail(msg: &str) -> ! {
+    crate::print::flush();
+    eprintln!("kestrel: {msg}");
+    std::process::exit(101);
+}
+
+#[no_mangle]
+pub extern "C" fn kestrel_rt_panic_index(index: i64, len: i64, line: i32) -> ! {
+    fail(&format!("index {index} out of bounds for length {len} on line {line}"));
+}
+
 #[no_mangle]
 pub extern "C" fn kestrel_rt_panic(kind: i32, line: i32) -> ! {
-    crate::print::flush();
     let what = match kind {
         PANIC_OVERFLOW => "integer overflow",
         PANIC_DIV_ZERO => "division by zero",
@@ -14,8 +25,7 @@ pub extern "C" fn kestrel_rt_panic(kind: i32, line: i32) -> ! {
         PANIC_NARROW_U8 => "value doesn't fit in u8",
         _ => "runtime error",
     };
-    eprintln!("kestrel: {what} on line {line}");
-    std::process::exit(101);
+    fail(&format!("{what} on line {line}"));
 }
 
 #[no_mangle]

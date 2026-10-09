@@ -31,7 +31,8 @@ impl Layouts<'_> {
             KTy::Bool | KTy::U8 => (1, 1),
             KTy::I32 | KTy::F32 => (4, 4),
             KTy::I64 | KTy::F64 => (8, 8),
-            KTy::Str => (16, 8),
+            KTy::Str | KTy::Array(_) => (16, 8),
+            KTy::List(_) => (32, 8),
             KTy::Struct(s) => {
                 let i = s.0 as usize;
                 if self.structs[i].is_none() {

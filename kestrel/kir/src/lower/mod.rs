@@ -1,5 +1,7 @@
 mod call;
+mod collections;
 mod expr;
+mod helpers;
 mod layout;
 mod matching;
 mod vector;
@@ -11,12 +13,18 @@ use kestrel_syntax::ast::{self, Program};
 use kestrel_syntax::{LineIndex, Span};
 
 use crate::ir::*;
+use helpers::Helpers;
 
 /// Lowers a checked program. `t` must come from a `check` with no errors.
 pub fn lower(program: &Program, t: &Tables, lines: &LineIndex) -> Module {
     let (structs, enums) = layout::layouts(t);
-    let funcs = (0..t.fns.len()).map(|i| FnLowerer::new(program, t, lines, FnId(i as u32)).lower()).collect();
-    Module { funcs, structs, enums, main: FuncIdx(t.main.expect("checked program has main").0) }
+    let mut helpers = Helpers::new(t.fns.len() as u32);
+    let mut funcs: Vec<Func> =
+        (0..t.fns.len()).map(|i| FnLowerer::new(program, t, lines, FnId(i as u32), &mut helpers).lower()).collect();
+    funcs.append(&mut helpers.funcs);
+    let elems = t.elems.iter().map(|&e| kty(e)).collect();
+    let main = FuncIdx(t.main.expect("checked program has main").0);
+    Module { funcs, structs, enums, elems, print_fns: helpers.print, main }
 }
 
 pub(crate) fn kty(ty: Ty) -> KTy {
@@ -30,6 +38,8 @@ pub(crate) fn kty(ty: Ty) -> KTy {
         Ty::Str => KTy::Str,
         Ty::Struct(s) => KTy::Struct(StructIdx(s.0)),
         Ty::Enum(e) => KTy::Enum(EnumIdx(e.0)),
+        Ty::Array(e) => KTy::Array(ElemIdx(e.0)),
+        Ty::List(e) => KTy::List(ElemIdx(e.0)),
         other => panic!("type {other:?} has no runtime representation"),
     }
 }
@@ -44,11 +54,15 @@ pub(crate) struct FnLowerer<'a> {
     locals: Vec<Local>,
     /// `match` bindings: the matched place and the variant whose fields they name.
     bindings: HashMap<LocalId, (Place, u32)>,
+    /// `for ... in` bindings: the element place they stand for.
+    elems: HashMap<LocalId, Place>,
+    helpers: &'a mut Helpers,
 }
 
 impl<'a> FnLowerer<'a> {
-    fn new(program: &'a Program, t: &'a Tables, lines: &'a LineIndex, fn_id: FnId) -> Self {
-        FnLowerer { program, t, lines, fn_id, local_map: HashMap::new(), locals: Vec::new(), bindings: HashMap::new() }
+    fn new(program: &'a Program, t: &'a Tables, lines: &'a LineIndex, fn_id: FnId, helpers: &'a mut Helpers) -> Self {
+        let (local_map, locals, bindings, elems) = (HashMap::new(), Vec::new(), HashMap::new(), HashMap::new());
+        FnLowerer { program, t, lines, fn_id, local_map, locals, bindings, elems, helpers }
     }
 
     fn lower(mut self) -> Func {
@@ -78,6 +92,7 @@ impl<'a> FnLowerer<'a> {
         let body = if ret.is_some() {
             let (mut stmts, tail) = self.block_value(&decl.body);
             if let Some(v) = tail {
+                let v = self.owned(v, true);
                 stmts.push(Stmt::Return(Some(v)));
             }
             stmts
@@ -161,14 +176,14 @@ impl<'a> FnLowerer<'a> {
         let lowered = match s {
             ast::Stmt::Let { bind, value, .. } => {
                 let idx = self.bind_local(bind);
-                Stmt::Let(idx, self.expr(value))
+                Stmt::Let(idx, self.value(value))
             }
             ast::Stmt::Assign { target, op, value, .. } => {
                 let place = self.place(target).expect("checker requires an assignable place");
                 let ty = kty(self.t.ty(target.id));
                 let rhs = self.expr(value);
                 let value = match op.binary() {
-                    None => rhs,
+                    None => self.owned(rhs, false),
                     Some(bop) => {
                         let line = rhs.line;
                         let cur = Expr { kind: ExprKind::Load(place.clone()), ty, line };
@@ -189,9 +204,13 @@ impl<'a> FnLowerer<'a> {
                 end: self.expr(end),
                 body: self.block_stmts(body),
             },
+            ast::Stmt::ForIn { index, var, iter, body, .. } => return self.for_in(index.as_ref(), var, iter, body, out),
             ast::Stmt::Break(_) => Stmt::Break,
             ast::Stmt::Continue(_) => Stmt::Continue,
-            ast::Stmt::Return { value, .. } => Stmt::Return(value.as_ref().map(|v| self.expr(v))),
+            ast::Stmt::Return { value, .. } => Stmt::Return(value.as_ref().map(|v| {
+                let v = self.expr(v);
+                self.owned(v, true)
+            })),
             ast::Stmt::Expr(e) => return self.expr_stmt(e, out),
         };
         out.push(lowered);
@@ -217,6 +236,11 @@ impl<'a> FnLowerer<'a> {
         };
         match self.t.res[&e.id] {
             Res::Print => out.push(Stmt::Print(args.iter().map(|a| self.print_arg(&a.value)).collect())),
+            Res::ListAdd => {
+                let v = self.value(&args[0].value);
+                let list = self.place(receiver.expect("`add` is a method")).expect("checker requires a place for `add`");
+                out.push(Stmt::ListAdd(list, v));
+            }
             Res::Fn(f) => {
                 let (pre, fi, args) = self.call_parts(e, f, args, receiver);
                 out.extend(pre);
@@ -238,7 +262,11 @@ impl<'a> FnLowerer<'a> {
                     })
                     .collect(),
             ),
-            _ => PrintArg::Value(self.expr(e)),
+            _ => {
+                let v = self.expr(e);
+                self.helpers.ensure_print(v.ty, self.t);
+                PrintArg::Value(v)
+            }
         }
     }
 }

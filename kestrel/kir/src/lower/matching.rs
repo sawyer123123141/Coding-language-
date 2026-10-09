@@ -10,13 +10,7 @@ impl<'a> FnLowerer<'a> {
     /// The place being matched: the scrutinee itself when it is one,
     /// otherwise a temporary holding its value.
     fn scrutinee(&mut self, e: &ast::Expr, pre: &mut Vec<Stmt>) -> Place {
-        if let Some(p) = self.place(e) {
-            return p;
-        }
-        let v = self.expr(e);
-        let tmp = self.temp(v.ty);
-        pre.push(Stmt::Let(tmp, v));
-        Place::local(tmp)
+        self.place_or_temp(e, pre, true)
     }
 
     /// Registers each arm's binding as a view of `place`, then lowers its body.

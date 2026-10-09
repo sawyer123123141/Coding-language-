@@ -1,4 +1,5 @@
 mod call;
+mod collections;
 mod enums;
 mod expr;
 mod matching;
@@ -59,7 +60,11 @@ pub(crate) fn is_const_expr(e: &Expr) -> bool {
         ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::Str(_) | ExprKind::Ident(_) => true,
         ExprKind::Unary { expr, .. } => is_const_expr(expr),
         ExprKind::Binary { lhs, rhs, .. } => is_const_expr(lhs) && is_const_expr(rhs),
+        // Each use builds a fresh array, like any other value.
+        ExprKind::ArrayLit(items) => items.iter().all(is_const_expr),
+        ExprKind::TypeCall { args, .. } => args.iter().all(|a| is_const_expr(&a.value)),
         ExprKind::Interp(_)
+        | ExprKind::Index { .. }
         | ExprKind::Call { .. }
         | ExprKind::If { .. }
         | ExprKind::Field { .. }
@@ -110,6 +115,9 @@ impl<'a> BodyChecker<'a> {
 
     fn declare(&mut self, bind: &Binding, ty: Ty, mutable: bool, is_param: bool, is_var_param: bool) -> LocalId {
         let name = &bind.name;
+        if crate::collect::BUILTINS.contains(&name.as_str()) {
+            self.error(bind.span, format!("`{name}` is a built-in name; pick another"));
+        }
         let taken = self.lookup_local(name).is_some()
             || self.t.const_by_name.contains_key(name)
             || self.t.fn_by_name.contains_key(name)
@@ -265,6 +273,10 @@ impl<'a> BodyChecker<'a> {
                 self.check_block(body, Expect::Discard);
                 self.loop_breaks.pop();
                 self.scopes.pop();
+                Ty::Unit
+            }
+            Stmt::ForIn { index, var, iter, body, .. } => {
+                self.check_for_in(index.as_ref(), var, iter, body);
                 Ty::Unit
             }
             Stmt::Break(span) | Stmt::Continue(span) => {

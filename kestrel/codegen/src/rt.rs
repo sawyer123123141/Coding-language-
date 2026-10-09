@@ -13,6 +13,11 @@ pub(crate) struct RtFuncs {
     pub panic: FuncId,
     pub fmod_f32: FuncId,
     pub fmod_f64: FuncId,
+    pub alloc: FuncId,
+    pub dup: FuncId,
+    pub list_grow: FuncId,
+    pub current_arena: FuncId,
+    pub panic_index: FuncId,
 }
 
 impl RtFuncs {
@@ -44,13 +49,18 @@ impl RtFuncs {
             panic: decl("kestrel_rt_panic", &[I32, I32], None)?,
             fmod_f32: decl("kestrel_rt_fmod_f32", &[F32, F32], Some(F32))?,
             fmod_f64: decl("kestrel_rt_fmod_f64", &[F64, F64], Some(F64))?,
+            alloc: decl("kestrel_rt_alloc", &[I64, I64, I64, I32], Some(ptr))?,
+            dup: decl("kestrel_rt_dup", &[ptr, I64, I64], Some(ptr))?,
+            list_grow: decl("kestrel_rt_list_grow", &[ptr, I64, I64], None)?,
+            current_arena: decl("kestrel_rt_current_arena", &[], Some(ptr))?,
+            panic_index: decl("kestrel_rt_panic_index", &[I64, I64, I32], None)?,
         })
     }
 }
 
 /// Addresses of every runtime export, for registering with the JIT.
 pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
-    use kestrel_runtime::{panic, print, start};
+    use kestrel_runtime::{arena, panic, print, start};
     vec![
         ("kestrel_rt_print_i64", print::kestrel_rt_print_i64 as *const u8),
         ("kestrel_rt_print_f32", print::kestrel_rt_print_f32 as *const u8),
@@ -63,6 +73,11 @@ pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
         ("kestrel_rt_fmod_f32", panic::kestrel_rt_fmod_f32 as *const u8),
         ("kestrel_rt_fmod_f64", panic::kestrel_rt_fmod_f64 as *const u8),
         ("kestrel_rt_start", start::kestrel_rt_start as *const u8),
+        ("kestrel_rt_alloc", arena::kestrel_rt_alloc as *const u8),
+        ("kestrel_rt_dup", arena::kestrel_rt_dup as *const u8),
+        ("kestrel_rt_list_grow", arena::kestrel_rt_list_grow as *const u8),
+        ("kestrel_rt_current_arena", arena::kestrel_rt_current_arena as *const u8),
+        ("kestrel_rt_panic_index", panic::kestrel_rt_panic_index as *const u8),
     ]
 }
 

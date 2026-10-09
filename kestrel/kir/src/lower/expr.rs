@@ -1,4 +1,4 @@
-use kestrel_check::{ConstId, Res};
+use kestrel_check::{ConstId, Res, Ty};
 use kestrel_syntax::ast;
 
 use super::{binop, kty, FnLowerer};
@@ -36,7 +36,7 @@ impl<'a> FnLowerer<'a> {
             ast::ExprKind::Str(s) => ExprKind::StrLit(s.clone()),
             ast::ExprKind::Interp(_) => unreachable!("checker allows interpolation only inside print"),
             ast::ExprKind::Ident(_) => match self.t.res[&e.id] {
-                Res::Local(l) => ExprKind::Load(Place::local(self.local_map[&l])),
+                Res::Local(_) => ExprKind::Load(self.place(e).expect("a local is a place")),
                 Res::Const(c) => return self.const_value(c),
                 other => unreachable!("name resolved to {other:?}"),
             },
@@ -86,6 +86,15 @@ impl<'a> FnLowerer<'a> {
                     Self::with_pre(pre, kind, ty, line)
                 }
                 other => unreachable!("method call resolved to {other:?}"),
+            },
+            ast::ExprKind::Field { base, .. } if matches!(self.t.ty(base.id), Ty::Array(_) | Ty::List(_)) => {
+                self.len_value(base, line)
+            }
+            ast::ExprKind::Index { base, index } => self.index_value(e, base, index, ty, line),
+            ast::ExprKind::ArrayLit(items) => ExprKind::ArrayLit(items.iter().map(|i| self.value(i)).collect()),
+            ast::ExprKind::TypeCall { args, .. } => match ty {
+                KTy::Array(_) => ExprKind::ArrayNew(Box::new(self.expr(&args[0].value))),
+                _ => ExprKind::ListNew,
             },
             ast::ExprKind::Field { base, .. } if self.t.swizzles.contains_key(&e.id) => {
                 let comps = self.t.swizzles[&e.id].clone();

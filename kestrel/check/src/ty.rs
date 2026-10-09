@@ -1,6 +1,6 @@
 /// A checked type. `Never` is the type of code that doesn't finish
 /// (`return`, `break`); `Error` suppresses follow-on errors.
-use crate::tables::{EnumId, StructId};
+use crate::tables::{ElemId, EnumId, StructId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Ty {
@@ -19,6 +19,10 @@ pub enum Ty {
     /// A `match` binding: the fields of one variant of the matched value.
     /// Only usable as `binding.field`.
     Variant(EnumId, u32),
+    /// `[T]`: fixed length once created. The element type is in `Tables::elems`.
+    Array(ElemId),
+    /// `list[T]`: growable.
+    List(ElemId),
     Error,
 }
 
@@ -50,6 +54,8 @@ impl Ty {
             Ty::Struct(_) => "struct",
             Ty::Enum(_) => "enum",
             Ty::Variant(..) => "variant",
+            Ty::Array(_) => "array",
+            Ty::List(_) => "list",
             Ty::Error => "{error}",
         }
     }
@@ -64,6 +70,11 @@ impl Ty {
 
     pub fn is_numeric(self) -> bool {
         self.is_int() || self.is_float()
+    }
+
+    /// Values that live in memory and are passed by pointer.
+    pub fn is_aggregate(self) -> bool {
+        matches!(self, Ty::Struct(_) | Ty::Enum(_) | Ty::Str | Ty::Array(_) | Ty::List(_))
     }
 
     /// Whether a value of `self` may be used where `to` is expected without

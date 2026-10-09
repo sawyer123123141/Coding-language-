@@ -69,6 +69,9 @@ impl<'a> BodyChecker<'a> {
             return self.variant_value(e, id, name, *name_span);
         }
         let base_ty = self.check_field_base(base);
+        if matches!(base_ty, Ty::Array(_) | Ty::List(_)) {
+            return self.collection_field(base_ty, name, *name_span);
+        }
         let (owner, fields) = match base_ty {
             Ty::Struct(sid) => {
                 let info = self.t.strukt(sid);
@@ -107,6 +110,9 @@ impl<'a> BodyChecker<'a> {
             return self.variant_construct(e, id, name, *name_span, args);
         }
         let receiver_ty = self.check_expr(receiver, None);
+        if matches!(receiver_ty, Ty::Array(_) | Ty::List(_)) {
+            return self.collection_method(e, receiver, receiver_ty, args);
+        }
         let found = match receiver_ty {
             Ty::Struct(sid) => {
                 let info = self.t.strukt(sid);
@@ -156,7 +162,7 @@ impl<'a> BodyChecker<'a> {
     }
 
     /// The variable a `var self` call changes, once it's known it may change.
-    fn receiver_root(&mut self, receiver: &Expr, method: &str) -> Option<LocalId> {
+    pub(super) fn receiver_root(&mut self, receiver: &Expr, method: &str) -> Option<LocalId> {
         let Some(root) = self.place_root(receiver) else {
             let msg = format!("`{method}` changes its receiver, so it needs a variable, not a temporary");
             self.error(receiver.span, msg);

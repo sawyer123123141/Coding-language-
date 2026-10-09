@@ -14,7 +14,7 @@ pub(crate) enum Immutable {
 }
 
 impl<'a> BodyChecker<'a> {
-    /// The variable a place expression (`x`, `x.f`, `x.f.g`) is rooted at.
+    /// The variable a place expression (`x`, `x.f`, `x[i].g`) is rooted at.
     /// Call after the expression has been checked.
     pub(crate) fn place_root(&self, e: &Expr) -> Option<LocalId> {
         match &e.kind {
@@ -25,7 +25,7 @@ impl<'a> BodyChecker<'a> {
             },
             // A swizzle (`v.xz`) builds a new vector; it isn't a place.
             ExprKind::Field { .. } if self.t.swizzles.contains_key(&e.id) => None,
-            ExprKind::Field { base, .. } => self.place_root(base),
+            ExprKind::Field { base, .. } | ExprKind::Index { base, .. } => self.place_root(base),
             _ => None,
         }
     }
@@ -52,8 +52,8 @@ impl<'a> BodyChecker<'a> {
     }
 
     pub(crate) fn check_assign(&mut self, target: &Expr, op: AssignOp, value: &Expr) {
-        if !matches!(target.kind, ExprKind::Ident(_) | ExprKind::Field { .. }) {
-            self.error(target.span, "only variables and their fields can be assigned to");
+        if !matches!(target.kind, ExprKind::Ident(_) | ExprKind::Field { .. } | ExprKind::Index { .. }) {
+            self.error(target.span, "only variables, fields and elements can be assigned to");
             self.check_expr(value, None);
             return;
         }
@@ -63,7 +63,7 @@ impl<'a> BodyChecker<'a> {
                 let msg = format!("can't change constant `{name}`");
                 self.error(target.span, msg);
             } else if target_ty != Ty::Error {
-                self.error(target.span, "only variables and their fields can be assigned to");
+                self.error(target.span, "only variables, fields and elements can be assigned to");
             }
             self.check_expr(value, None);
             return;

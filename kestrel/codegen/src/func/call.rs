@@ -22,7 +22,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             vals.push(match a {
                 kir::Arg::Value(e) if e.ty.is_aggregate() => self.materialize(e)?,
                 kir::Arg::Value(e) => self.expr(e)?,
-                kir::Arg::Ref(p) => self.place_addr(p),
+                kir::Arg::Ref(p) => self.place_addr(p)?,
             });
         }
         let id = self.shared.funcs[fi.0 as usize];

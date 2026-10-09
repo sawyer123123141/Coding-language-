@@ -9,7 +9,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     pub(crate) fn lower_into(&mut self, e: &kir::Expr, dest: Value) -> Result<(), String> {
         match &e.kind {
             ExprKind::Load(p) => {
-                let src = self.place_addr(p);
+                let src = self.place_addr(p)?;
                 self.copy_aggregate(dest, src, e.ty);
             }
             ExprKind::StructLit(s, fields) => {
@@ -26,6 +26,9 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                     self.store_at(f, dest, layout.offset as i32)?;
                 }
             }
+            ExprKind::ArrayNew(len) => self.array_new(len, e.ty, e.line, dest)?,
+            ExprKind::ArrayLit(items) => self.array_lit(items, e.ty, e.line, dest)?,
+            ExprKind::ListNew => self.list_new(dest),
             ExprKind::StrLit(s) => {
                 let (p, n) = self.string(s)?;
                 self.b.ins().store(MemFlags::trusted(), p, dest, 0);
@@ -68,7 +71,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     }
 
     /// Stores `e` (a scalar or a struct) at `base + offset`.
-    fn store_at(&mut self, e: &kir::Expr, base: Value, offset: i32) -> Result<(), String> {
+    pub(crate) fn store_at(&mut self, e: &kir::Expr, base: Value, offset: i32) -> Result<(), String> {
         if e.ty.is_aggregate() {
             let dest = if offset == 0 { base } else { self.b.ins().iadd_imm(base, offset as i64) };
             self.lower_into(e, dest)
@@ -83,7 +86,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// it is built in. Only for reading.
     pub(crate) fn materialize(&mut self, e: &kir::Expr) -> Result<Value, String> {
         if let ExprKind::Load(p) = &e.kind {
-            return Ok(self.place_addr(p));
+            return self.place_addr(p);
         }
         let tmp = self.temp_addr(e.ty);
         self.lower_into(e, tmp)?;

@@ -1,0 +1,37 @@
+// expect: [5, 5, 3] 3 13
+// expect: [0, 0, 0, 7]
+// expect: [] ["a", "b"]
+// expect: 3 3
+// expect: [[1, 2], [3]]
+// expect: 11
+pure total(xs: [int]) -> int {
+    var s = 0
+    for v in xs { s += v }
+    s
+}
+
+pure squares(n: int) -> [int] {
+    var out = array[int](n)
+    for i from 0 to n { out[i] = i * i }
+    out
+}
+
+main() {
+    var a = [1, 2, 3]
+    a[0] = 5
+    a[1] += a[2]
+    print(a, a.len, total(a))
+    var grid = array[u8](4)
+    grid[3] = 7
+    print(grid)
+    let e: [float] = []
+    print(e, ["a", "b"])
+    let big: i64 = 2
+    print(a[big - 1] - 2, [10, 20, 30].len)
+    var nested = [[1, 2], [3]]
+    print(nested)
+    for i, v in squares(3) {
+        nested[1][0] += v * i
+    }
+    print(nested[1][0] - 3 + total(squares(2)) + 1)
+}

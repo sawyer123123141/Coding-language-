@@ -1,0 +1,13 @@
+// error 8: can't tell what `[]` holds
+// error 9: arrays have a fixed length; use a `list[int]` to add items
+// error 10: can't call `add` on `l`: it changes `l`, which was declared with `let`
+// error 11: an index must be an integer, found float
+// error 12: can't loop over int; `for ... in` needs an array or list
+main() {
+    var a = [1, 2]
+    let e = []
+    a.add(3)
+    let l = list[int](); l.add(1)
+    let x = a[1.5]
+    for v in 5 { }
+}

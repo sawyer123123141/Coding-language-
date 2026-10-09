@@ -26,7 +26,7 @@ fn vector_math_and_swizzles_check() {
 fn vector_errors() {
     let cases: &[(&str, &str)] = &[
         ("main() {\n let v = vec2(1, 2)\n let b = v < v\n}\n", "`<` needs numbers, found vec2 and vec2"),
-        ("main() {\n var v = vec2(1, 2)\n v.yx = vec2(0, 0)\n}\n", "only variables and their fields can be assigned to"),
+        ("main() {\n var v = vec2(1, 2)\n v.yx = vec2(0, 0)\n}\n", "only variables, fields and elements can be assigned to"),
         ("main() {\n let v = vec2(1, 2)\n let w = v.xz\n}\n", "`vec2` has no field `xz`"),
         ("main() {\n let v = vec2(1, 2) % 2.0\n}\n", "`%` doesn't work on vectors"),
         ("main() {\n let v = vec2(1, 2) + vec3(1, 2, 3)\n}\n", "`+` can't mix vec2 and vec3"),
