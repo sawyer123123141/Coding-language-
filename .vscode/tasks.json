@@ -2,11 +2,10 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "kestrelc watch",
+      "label": "kestrel run",
       "type": "shell",
-      "command": "${workspaceFolder}/kestrelc/target/release/kestrelc.exe",
-      "args": ["watch", "${file}"],
-      "isBackground": true,
+      "command": "${workspaceFolder}/kestrel/target/release/kestrel.exe",
+      "args": ["run", "${file}"],
       "problemMatcher": []
     }
   ]

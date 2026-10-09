@@ -1,43 +1,26 @@
-# Kestrel — Coding Language
+# Kestrel
 
-## Project Summary
-Kestrel is a compiled programming language with compile-time purity checking, bounds proof verification, and native compilation.
+A compiled language for games (Rust + Cranelift). The compiler is the Cargo workspace in `kestrel/`. The old `kestrelc/` and `kestrel.js` implementations were removed in October 2026; they are in git history only.
 
-## Core Concepts
-- **Purity System**: Functions marked `@pure` enable fearless parallelism
-- **Bounds Proofs**: Compile-time verification of array bounds (eliminates runtime checks)
-- **Type System**: Static typing with constraint-based reasoning
-- **Backends**: 
-  - JS interpreter (kestrel.js)
-  - Native Rust compiler (via Cranelift AOT/JIT — `kestrelc`)
+## Where things are
 
-(The old WASM backend — `kestrelc-web` + the browser-based `kestrel-editor.html` playground — was removed; `kestrelc-devtool` is the current native dev tool.)
+- Language design: `docs/superpowers/specs/2026-10-09-kestrel-syntax-design.md`
+- Compiler design: `docs/superpowers/specs/2026-10-09-kestrel-core-rebuild-design.md`
+- Plans and open follow-ups: `docs/superpowers/plans/` (`2026-10-09-core-2a-followups.md` lists known gaps)
+- The pipeline is `syntax → check → kir → codegen`. The runtime is linked as a staticlib (built by `cli/build.rs`).
 
-## Directory Structure
-```
-kestrelc/           - Rust compiler (primary implementation)
-kestrelc-devtool/   - Native devtool (AOT/JIT, no WASM)
-kestrel.js          - JavaScript interpreter/backend
-test/               - Test suite
-examples/           - Example programs
-docs/               - Documentation
-```
+## Commands (run in `kestrel/`)
 
-## Key Entry Points
-- **Compiler**: `kestrelc/main.rs` or `kestrelc/lib.rs`
-- **JS Backend**: `kestrel.js`
-- **Devtool**: `kestrelc-devtool/`
-- **Design Doc**: `kestrel-DESIGN.md` (for architectural details)
-
-## Development Commands
 ```bash
-cargo build          # Build compiler
-cargo test           # Run tests
-npm run build        # Build JS backend
+cargo test --workspace          # unit, program (JIT + exe) and error tests
+cargo clippy --workspace --all-targets -- -D warnings
+cargo run -q -p kestrel-cli -- run file.kes
 ```
 
-## Common Mistakes
-(Add mistakes you encounter frequently here)
+Program tests are `kestrel/tests/programs/*.kes`, with `// expect:`, `// expect-exit:` and `// expect-stderr:` lines. Error tests are `kestrel/tests/errors/*.kes`, with `// error <line>: <message>` lines.
 
-## Recent Sessions
-(Sessions archived in `.claude/completions/`)
+## Conventions
+
+- Keep source files under about 400 lines; split by responsibility.
+- Error messages are plain sentences that say what to do.
+- Never call a bare `link.exe`: Git's coreutils `link.exe` shadows the MSVC linker on PATH (`find-msvc-tools` locates the real one).

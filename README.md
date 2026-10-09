@@ -1,108 +1,69 @@
 # Kestrel
 
-A toy programming language focused on speed: compile-time purity
-checking, compile-time bounds proofs, a real native compiler with a
-persistent compile cache, and — powered entirely by the purity proof —
-real multi-threaded `parallel_map`. Layout polymorphism and a more
-general proof system are still to come; see the design doc for the
-honest status of every idea. "Kestrel" is a placeholder name.
+A compiled language for games: plain values, arenas instead of a garbage
+collector, and (coming in sub-project 3) parallel loops over `pure` code.
+It compiles through Cranelift to native code, either JIT-run in place or
+built into an executable.
 
-See [`kestrel-DESIGN.md`](./kestrel-DESIGN.md) for the full design
-rationale and status of each idea, and [`docs/SYNTAX.md`](./docs/SYNTAX.md)
-for the syntax reference and grammar.
+```kestrel
+struct Chunk {
+    x: int
+    mem: Arena = Arena()
+    heights: [int] = []
 
-## Structure
+    generate(var self) {
+        in self.mem {
+            self.heights = array[int](32 * 32)
+        }
+        for i, h in self.heights {
+            self.heights[i] = self.x + i % 32
+        }
+    }
+}
 
-- `kestrel.js` — lexer, parser, purity checker, bounds-proof notes, and
-  two backends: `Kestrel.run` (tree-walking interpreter) and
-  `Kestrel.runFast` (bytecode compiler + stack VM). Zero dependencies;
-  runs unmodified in Node or as a browser `<script>`.
-- `kestrelc/` — a real native compiler (Rust + Cranelift) that emits a
-  standalone executable, no VM at runtime at all. Separate program from
-  `kestrel.js`; supports a subset of the language so far (see
-  `kestrelc/README.md`) but already lands within a few multiples of
-  hand-written Rust/C++ on what it does support. Also has a persistent
-  on-disk compile cache, and real OS-thread parallelism for
-  `parallel_map(f, arr)` (`runtime/` — a small C shim linked into every
-  native build). (An earlier WASM backend and browser playground —
-  `kestrelc-web` + `kestrel-editor.html` — have been removed; see
-  `kestrelc-devtool/` for the current native dev tool.)
-- `docs/SYNTAX.md` — syntax reference and full grammar.
-- `examples/` — runnable example programs:
-  - `basics.kes` — `pure fn`, arrays, `where`-bounded access.
-  - `fibonacci.kes` — recursion.
-  - `purity_violation.kes` — a program that's *meant* to fail the
-    purity check, for testing the checker itself.
-- `test/` — automated test suite (Node's built-in `node:test`, no
-  dependencies).
-
-## Running
-
-```sh
-node -e 'require("./kestrel.js").run(require("fs").readFileSync("examples/basics.kes", "utf8"))'
+main() {
+    var world = list[Chunk]()
+    for x from 0 to 4 { world.add(Chunk(x: x)) }
+    for chunk in world { chunk.generate() }
+    print("chunks: {world.len}, first: {world[0].heights[1]}")
+}
 ```
 
-Swap `.run(` for `.runFast(` to use the bytecode VM instead — same
-output, same errors, and faster on every workload measured so far (see
-Status below). The editor defaults to it for this reason.
+## Use
 
-## Testing
+Needs Rust (stable) and, on Windows, Visual Studio's C++ build tools (for `link.exe`).
 
-```sh
-npm test
+```bash
+cd kestrel
+cargo build --release
+target/release/kestrel run program.kes        # compile in memory and run
+target/release/kestrel build program.kes -o program.exe
+target/release/kestrel check program.kes      # errors only
 ```
+
+`kestrel build --release` turns off overflow and narrowing checks (they wrap instead).
+
+## Layout
+
+- `kestrel/`: the compiler, a Cargo workspace.
+  - `syntax`: lexer, parser, AST and diagnostics.
+  - `check`: names, types, purity, moves, exclusivity and the arena escape check.
+  - `kir`: a typed, structured middle layer, plus lowering and inlining.
+  - `codegen`: Cranelift JIT and object files.
+  - `runtime`: arenas, printing and panics.
+  - `cli`: the `kestrel` command.
+- `kestrel/tests/programs/` and `kestrel/tests/errors/`: example programs with their expected output, and expected errors.
+- `kestrel/bench/`: benchmarks against Rust and C, with results.
+- `docs/superpowers/specs/`: the language (syntax spec) and compiler (core spec) designs.
+- `docs/superpowers/plans/`: the implementation plans, done so far.
 
 ## Status
 
-Four ways to run Kestrel now exist. `run` (tree-walking) and `runFast`
-(bytecode VM) are semantics-identical and both cover the full language;
-`runFast` is faster than `run` on every workload measured so far
-(59-89% faster, depending on the workload — see `kestrel-DESIGN.md` for
-the numbers and methodology). `kestrelc` (native, via Cranelift)
-compiles a subset of the language straight to a real executable and is
-**~50-175x faster than `runFast`**, landing within a few multiples of
-hand-written Rust/C++ on its first working version — see
-`kestrelc/README.md` for its exact scope and `kestrel-DESIGN.md` for the
-full benchmark writeup and methodology. (An earlier WASM backend and
-browser playground — `kestrelc-web` + `kestrel-editor.html` — have
-since been removed; see `kestrelc-devtool/` for the current native dev
-tool.) `kestrelc` also has a persistent,
-cross-invocation compile cache now (skips redundant recompilation of
-unchanged source — see `kestrelc/README.md`), though not yet the fuller
-runtime-profile-guided version `kestrel-DESIGN.md` describes. And
-`parallel_map(f, arr)` now gives `pure fn`s real multi-threaded
-execution in `kestrelc`'s native backend — ~2.1x faster than sequential
-on this machine, purity alone as the safety proof, no `unsafe` — while
-every other backend (`run` and `runFast`) accepts the same programs and
-runs them sequentially, correctly, just not in parallel. There's now
-also a first, honestly-scoped **type checker**
-(every backend) — catches `5 + true`, `if (5) {...}`, and function
-calls with the wrong argument count at compile time, though it doesn't
-yet check declared parameter type names against call-site arguments;
-see `docs/SYNTAX.md`'s "Type checking" section. Compile errors now
-include line, column, and a length too, not just a line number —
-`kestrelc`'s CLI output prints `file:line:col: message` with a `^`
-under the offending span. Purity-check and type-check errors (JS backends)
-get the same `file:line:col:` + caret treatment now too, pinned to the
-statement that triggered them (not the exact sub-expression yet); see
-`kestrel-DESIGN.md` for the exact scope and what's still message-only
-(`kestrelc`'s own checkers, runtime errors everywhere). `pure fn`
-calls are now memoized too, in both JS backends (`run` and `runFast`)
-— a repeated call with identical arguments returns the cached result
-instead of re-executing, scoped to a single run, always safe per the
-purity proof. `kestrelc` doesn't memoize yet — JS-backends-first, a
-known gap. A narrow form of pure-function loop fusion is also in now,
-**in every backend including `kestrelc`**: a
-chain of `parallel_map` calls where each one's array comes straight
-from the previous one's result fuses into a single pass with a
-synthesized function, instead of materializing an intermediate array
-per step — see `kestrel-DESIGN.md` for exactly which shapes trigger it.
-`kestrelc` also picked up a real cross-platform pass this round — it
-now builds, links, and runs correctly on Windows too (previously
-untested there), after fixing a hardcoded Linux/macOS calling
-convention, a missing Windows stack-probing setting, and a POSIX-only
-processor-count call; see `kestrelc/README.md`. Next up, in priority
-order: extending position-tracking to the rest of the compiler's error
-stages, bringing memoization to `kestrelc`, the fuller profile-guided
-cache, and layout polymorphism (blocked on structs, which don't exist
-yet).
+The core language works: functions, structs with methods, enums and `match`, vectors, strings, arrays, lists, `for in`, arenas, owning values that move, and checked arithmetic.
+
+Next:
+1. Modules, optional values (`T?`) and `map`.
+2. A Godot bridge.
+3. `par for`.
+
+Speed versus Rust is between 1.0x and 1.5x on loops and structs, and about 3x on the voxel heightmap milestone. The numbers are in `kestrel/bench/*/results.md`.
