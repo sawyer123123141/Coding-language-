@@ -1,0 +1,6 @@
+[package]
+name = "kestrel-syntax"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

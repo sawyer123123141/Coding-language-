@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = ["syntax"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+kestrel-syntax = { path = "syntax" }
+kestrel-check = { path = "check" }
+kestrel-kir = { path = "kir" }
+kestrel-runtime = { path = "runtime" }
+kestrel-codegen = { path = "codegen" }
+cranelift-codegen = "0.116"
+cranelift-frontend = "0.116"
+cranelift-module = "0.116"
+cranelift-jit = "0.116"
+cranelift-object = "0.116"
+cranelift-native = "0.116"
+find-msvc-tools = "0.1.9"
