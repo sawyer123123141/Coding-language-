@@ -1,0 +1,5 @@
+﻿// A UTF-8 byte order mark starts this file.
+// expect: bom ok
+main() {
+    print("bom ok")
+}

@@ -41,8 +41,33 @@ fn parse_args(raw: Vec<String>) -> Option<Args> {
     matches!(cmd.as_str(), "run" | "check" | "build").then_some(Args { cmd, path, out, release, style })
 }
 
+/// The compiler recurses over the syntax tree, so it runs on a stack far bigger than the
+/// platform default.
+const STACK_SIZE: usize = 256 * 1024 * 1024;
+
 fn main() -> ExitCode {
     install_panic_hook();
+    match std::thread::Builder::new().stack_size(STACK_SIZE).spawn(run) {
+        Ok(worker) => worker.join().unwrap_or(ExitCode::from(3)),
+        // Couldn't reserve the stack; the default one still handles ordinary programs.
+        Err(_) => run(),
+    }
+}
+
+/// Source text without a leading UTF-8 byte order mark, which editors on Windows add.
+fn without_bom(src: &str) -> &str {
+    src.strip_prefix('\u{feff}').unwrap_or(src)
+}
+
+/// True when both paths name the same file (compared canonically when both exist).
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
+fn run() -> ExitCode {
     let Some(args) = parse_args(std::env::args().skip(1).collect()) else {
         eprintln!("{USAGE}");
         return ExitCode::from(2);
@@ -54,7 +79,14 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let Some(module) = driver::compile(&args.path, &src, args.style) else { return ExitCode::from(1) };
+    let src = without_bom(&src);
+    if args.cmd == "build" {
+        if let Err(e) = check_output(&args) {
+            eprintln!("kestrel: {e}");
+            return ExitCode::from(2);
+        }
+    }
+    let Some(module) = driver::compile(&args.path, src, args.style) else { return ExitCode::from(1) };
     let opts = Options { checked_arith: !args.release };
     let result = match args.cmd.as_str() {
         "check" => return ExitCode::SUCCESS,
@@ -83,6 +115,15 @@ fn output_path(args: &Args) -> Result<PathBuf, String> {
     Ok(PathBuf::from(format!("{}{}", stem.to_string_lossy(), std::env::consts::EXE_SUFFIX)))
 }
 
+/// Refuses a `build` whose executable would overwrite the source file.
+fn check_output(args: &Args) -> Result<(), String> {
+    let exe = output_path(args)?;
+    if same_file(&exe, Path::new(&args.path)) {
+        return Err(format!("the output {} is the source file; pick another with -o", exe.display()));
+    }
+    Ok(())
+}
+
 fn build(module: &kestrel_kir::Module, opts: Options, args: &Args) -> Result<(), String> {
     let exe = output_path(args)?;
     let bytes = emit_object(module, opts).map_err(internal_error)?;
@@ -97,7 +138,7 @@ fn build(module: &kestrel_kir::Module, opts: Options, args: &Args) -> Result<(),
 mod tests {
     use std::process::Command;
 
-    use super::{output_path, parse_args};
+    use super::{output_path, parse_args, without_bom};
 
     fn args(list: &[&str]) -> Option<super::Args> {
         parse_args(list.iter().map(|s| s.to_string()).collect())
@@ -119,6 +160,13 @@ mod tests {
         assert!(args(&["frob", "x.kes"]).is_none());
         assert!(args(&["build"]).is_none());
         assert!(args(&["build", "x.kes", "extra"]).is_none());
+    }
+
+    #[test]
+    fn only_a_leading_byte_order_mark_is_stripped() {
+        assert_eq!(without_bom("\u{feff}main() {}"), "main() {}");
+        assert_eq!(without_bom("main() {}"), "main() {}");
+        assert_eq!(without_bom("a\u{feff}"), "a\u{feff}");
     }
 
     const CHILD_ENV: &str = "KESTREL_PANIC_HOOK_CHILD";

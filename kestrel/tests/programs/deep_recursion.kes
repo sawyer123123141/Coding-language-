@@ -1,0 +1,16 @@
+// expect: before
+// expect: 500000
+// expect: 125000250000
+depth(n: int) -> int {
+    if n == 0 { 0 } else { 1 + depth(n - 1) }
+}
+
+sum_to(n: i64) -> i64 {
+    if n == 0 { 0 } else { n + sum_to(n - 1) }
+}
+
+main() {
+    print("before")
+    print(depth(500000))
+    print(sum_to(500000))
+}
