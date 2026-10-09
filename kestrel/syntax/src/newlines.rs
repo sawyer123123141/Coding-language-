@@ -13,7 +13,7 @@ pub fn filter(raw: Vec<Token>) -> Vec<Token> {
                 j += 1;
             }
             let in_parens = matches!(brackets.last(), Some(Tok::LParen) | Some(Tok::LBracket));
-            let prev_continues = out.last().map_or(true, |p| p.tok.continues_line());
+            let prev_continues = out.last().is_none_or(|p| p.tok.continues_line());
             let next_continues = matches!(
                 raw.get(j).map(|t| &t.tok),
                 None | Some(Tok::Else) | Some(Tok::Dot) | Some(Tok::RBrace) | Some(Tok::Eof)

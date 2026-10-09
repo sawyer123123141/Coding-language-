@@ -31,7 +31,9 @@ impl<'a> Lexer<'a> {
     }
 
     fn error(&mut self, start: usize, msg: impl Into<String>) {
-        self.diags.push(Diagnostic::error(Span::new(start, self.pos.max(start + 1)), msg));
+        // Clamp to the source so a span never points past the end of the file.
+        let end = self.pos.max(start + 1).min(self.src.len());
+        self.diags.push(Diagnostic::error(Span::new(start.min(end), end), msg));
     }
 
     fn run(&mut self) {
@@ -126,7 +128,11 @@ impl<'a> Lexer<'a> {
                         b'}' => '}',
                         _ => {
                             let at = self.pos;
-                            self.pos += 2;
+                            self.pos += 1;
+                            // Skip the whole escaped char, but leave a newline or EOF for the loop.
+                            if let Some(c) = self.src[self.pos..].chars().next().filter(|&c| c != '\n') {
+                                self.pos += c.len_utf8();
+                            }
                             self.error(at, "unknown escape sequence");
                             continue;
                         }

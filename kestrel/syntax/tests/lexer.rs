@@ -26,8 +26,8 @@ fn keywords_and_identifiers() {
 #[test]
 fn numbers() {
     assert_eq!(
-        toks("42 1_000 0xFF 3.14 5"),
-        vec![Tok::Int(42), Tok::Int(1000), Tok::Int(255), Tok::Float(3.14), Tok::Int(5), Tok::Eof]
+        toks("42 1_000 0xFF 2.5 5"),
+        vec![Tok::Int(42), Tok::Int(1000), Tok::Int(255), Tok::Float(2.5), Tok::Int(5), Tok::Eof]
     );
 }
 
@@ -107,4 +107,24 @@ fn helpful_errors() {
     assert_eq!(errors("\"abc"), vec!["unterminated string"]);
     assert_eq!(errors("a @ b"), vec!["unexpected character `@`"]);
     assert_eq!(errors("99999999999999999999"), vec!["number is too large"]);
+}
+
+#[test]
+fn unknown_escape_skips_the_whole_character() {
+    // A multi-byte escaped char must not leave the cursor mid-UTF-8 (it used to panic).
+    assert_eq!(errors("\"\\é\""), vec!["unknown escape sequence"]);
+    assert_eq!(errors("\"\\éx\""), vec!["unknown escape sequence"]);
+    // A backslash before a newline or EOF leaves it for the unterminated-string check.
+    assert_eq!(errors("\"a\\\nb"), vec!["unknown escape sequence", "unterminated string"]);
+    assert_eq!(errors("\"abc\\"), vec!["unknown escape sequence", "unterminated string"]);
+}
+
+#[test]
+fn diagnostic_spans_stay_inside_the_source() {
+    for src in ["\"abc\\", "\"abc", "\"\\é", "@", "a &&", "99999999999999999999", "0x"] {
+        for d in lex(src).1 {
+            assert!(d.span.start < d.span.end, "empty span for {src:?}: {d:?}");
+            assert!(d.span.end as usize <= src.len(), "span past end for {src:?}: {d:?}");
+        }
+    }
 }
