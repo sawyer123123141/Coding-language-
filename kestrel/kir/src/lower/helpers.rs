@@ -134,7 +134,8 @@ impl Helpers {
     /// `for i from 0 to xs.len { body(xs[i]) }`
     fn each(body: impl FnOnce(Place) -> Vec<Stmt>) -> Stmt {
         let (xs, i) = (Place::local(LocalIdx(0)), LocalIdx(1));
-        let at = with(&xs, Proj::Index(expr(ExprKind::Load(Place::local(i)), KTy::I64)));
+        // The body never moves the elements, so `i < xs.len` holds throughout.
+        let at = with(&xs, Proj::Index { at: expr(ExprKind::Load(Place::local(i)), KTy::I64), checked: false });
         Stmt::ForRange {
             var: i,
             start: expr(ExprKind::Int(0), KTy::I64),

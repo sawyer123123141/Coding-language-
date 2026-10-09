@@ -1,0 +1,28 @@
+struct Particle {
+    x: float
+    y: float
+    vx: float
+    vy: float
+}
+
+main() {
+    var ps = list[Particle]()
+    for i from 0 to 1000000 {
+        let f = float(i % 1000)
+        ps.add(Particle(f, f * 0.5, 1.0 - f * 0.002, 0.0))
+    }
+    for step from 0 to 100 {
+        for p in ps {
+            p.vy -= 0.01
+            p.x += p.vx * 0.01
+            p.y += p.vy * 0.01
+            if p.y < 0.0 {
+                p.y = -p.y
+                p.vy = -p.vy * 0.9
+            }
+        }
+    }
+    var sum = 0.0
+    for p in ps { sum += p.x + p.y }
+    print(int(sum))
+}

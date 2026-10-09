@@ -225,6 +225,11 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             kir::Stmt::Write(args) => self.print(args, false)?,
             kir::Stmt::ListAdd(list, value) => self.list_add(list, value)?,
             kir::Stmt::Dup(p) => self.dup(p)?,
+            kir::Stmt::Bind(l, p) => {
+                let addr = self.place_addr(p)?;
+                let Slot::Ptr(v) = self.slots[l.0 as usize] else { unreachable!("binds a reference local") };
+                self.b.def_var(v, addr);
+            }
         }
         Ok(true)
     }

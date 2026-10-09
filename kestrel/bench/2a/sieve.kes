@@ -1,0 +1,16 @@
+main() {
+    let n = 50000000
+    var composite = array[bool](n)
+    var count = 0
+    for i from 2 to n {
+        if not composite[i] {
+            count += 1
+            var j = i * 2
+            while j < n {
+                composite[j] = true
+                j += i
+            }
+        }
+    }
+    print(count)
+}

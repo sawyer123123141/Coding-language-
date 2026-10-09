@@ -3,7 +3,7 @@
 # Run from kestrel/bench/2a in PowerShell (Git Bash adds ~60 ms per process).
 $ErrorActionPreference = "Stop"
 $kestrel = Resolve-Path "..\..\target\release\kestrel.exe"
-$workloads = "fib", "loop", "collatz", "mandelbrot", "particles"
+$workloads = if ($args.Count -gt 0) { $args } else { "fib", "loop", "collatz", "mandelbrot", "particles", "sieve", "swarm" }
 $runs = 5
 
 function Median([scriptblock]$cmd) {

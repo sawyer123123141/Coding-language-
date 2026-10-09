@@ -66,8 +66,33 @@ fn for_in_is_a_counted_loop_over_an_element_place() {
     let main = func(&m, "main");
     let Stmt::ForRange { end, body, .. } = &main.body[1] else { panic!("{:#?}", main.body) };
     assert!(matches!(&end.kind, ExprKind::Cast(len) if matches!(len.kind, ExprKind::Len(_))));
-    let [Stmt::Assign(place, _)] = &body[..] else { panic!("{body:#?}") };
-    assert!(matches!(place.path[..], [Proj::Index(_)]));
+    // `v` is a pointer to `xs[i]`, found once per iteration.
+    let [Stmt::Bind(ptr, elem), Stmt::Assign(place, _)] = &body[..] else { panic!("{body:#?}") };
+    assert!(matches!(elem.path[..], [Proj::Index { checked: false, .. }]));
+    assert_eq!((place.root, place.path.len()), (*ptr, 0));
+}
+
+#[test]
+fn for_in_reindexes_when_the_body_may_move_the_elements() {
+    let src = "struct S {
+ xs: list[int]
+}
+main() {
+ var s = S([1])
+ for x in s.xs {
+  s.xs.add(x)
+ }
+ for x in s.xs {
+  s = S([])
+ }
+}
+";
+    let m = lower_src(src);
+    let main = func(&m, "main");
+    for s in &main.body[1..] {
+        let Stmt::ForRange { body, .. } = s else { panic!("{s:#?}") };
+        assert!(!matches!(body[0], Stmt::Bind(..)), "{body:#?}");
+    }
 }
 
 #[test]

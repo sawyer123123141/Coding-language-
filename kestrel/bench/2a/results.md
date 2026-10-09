@@ -45,3 +45,25 @@ Kestrel `--release` ÷ Rust release: fib 2.4x, loop 1.2x, collatz 2.4x, mandelbr
 
 - Structs cost little: the method call passes a pointer and the fields are loaded and stored in memory, and it lands within 1.3x of Rust (which inlines `step` and keeps the fields in registers).
 - C is far ahead on particles (143 ms); GCC keeps the particle in registers across the whole loop. Inlining small methods and promoting struct fields to registers (KIR scalar replacement) would close most of the gap; both are candidates for sub-project 5.
+
+## After plan 2c-i (arrays, lists, `for in`), 2026-10-10
+
+Two new workloads:
+- `sieve`: count the primes below 50M with an `array[bool]`.
+- `swarm`: build a `list` of 1M four-float structs with `add`, update each in a `for p in ps` loop for 100 steps, then sum them.
+
+This machine was very noisy during these runs: Rust's swarm time ranged from 127 to 211 ms. The table is one representative run; ratios moved by about ±0.2x between runs.
+
+| Workload | Kestrel exe (checked) | Kestrel exe (`--release`) | `kestrel run` | Rust -O3 (checks on) | Rust -O3 | C gcc -O2 |
+|---|---:|---:|---:|---:|---:|---:|
+| sieve | 1,265 ms | 1,374 ms | 1,442 ms | 1,238 ms | 1,102 ms | 813 ms |
+| swarm | 267 ms | 316 ms | 281 ms | 168 ms | 192 ms | 220 ms |
+
+Kestrel checked ÷ Rust with checks on: **sieve 1.02x, swarm 1.6x**. Swarm is about 1.4–1.6x across runs.
+
+What changed swarm:
+- **First version: 388 ms (about 3x Rust).** Every `p.x` inside the loop re-indexed `ps[i]`: a header load and a bounds check for each field access.
+- **Element pointers.** A `for ... in` element is now a pointer, computed once per iteration. This applies when the compiler proves the body can't move the elements, meaning it never writes `ps` itself or a place containing it, only elements. Otherwise the loop still re-indexes (correct, slower). This brought it to about 300 ms.
+- **No bounds check on the loop's own index** in that case, since `i < len` holds throughout. This brought it to about 270–300 ms.
+
+What remains: Cranelift reloads a field right after storing to it. For example, `p.vy` is stored, then reloaded for `p.y += p.vy * dt`, because its alias analysis can't tell that `p.x` and `p.vy` don't overlap. Keeping the element's fields in registers for the iteration (scalar replacement in KIR) or a stronger backend would close this. Both are sub-project 5.

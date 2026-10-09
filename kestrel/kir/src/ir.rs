@@ -148,8 +148,10 @@ pub enum Proj {
     Field(u32),
     /// Field `.1` of variant `.0` of an enum (valid while that variant is stored).
     Variant(u32, u32),
-    /// An element of an array or list, bounds-checked. The index is any integer type.
-    Index(Expr),
+    /// An element of an array or list. The index is any integer type. It is
+    /// bounds-checked unless the compiler proved it in bounds (a `for ... in`
+    /// loop's own index, when the body can't move the elements).
+    Index { at: Expr, checked: bool },
 }
 
 impl Place {
@@ -184,7 +186,8 @@ pub enum LocalKind {
     /// Needs a memory slot: passed as a `var` argument somewhere, or a struct.
     Addressed,
     /// Holds a pointer to the caller's value: a `var` parameter, or any
-    /// struct parameter (read-only ones are passed by pointer too).
+    /// aggregate parameter (read-only ones are passed by pointer too). Also
+    /// a `for ... in` element, set by `Stmt::Bind`.
     RefParam,
 }
 
@@ -207,6 +210,9 @@ pub enum Stmt {
     Write(Vec<PrintArg>),
     /// Appends a value to the list at a place, growing it if it's full.
     ListAdd(Place, Expr),
+    /// Points a reference local at a place (a `for ... in` element, found
+    /// once per iteration).
+    Bind(LocalIdx, Place),
     /// Gives the array or list at a place its own copy of its elements, in
     /// the current arena (a list's capacity becomes its length).
     Dup(Place),

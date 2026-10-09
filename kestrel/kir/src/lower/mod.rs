@@ -56,13 +56,15 @@ pub(crate) struct FnLowerer<'a> {
     bindings: HashMap<LocalId, (Place, u32)>,
     /// `for ... in` bindings: the element place they stand for.
     elems: HashMap<LocalId, Place>,
+    /// Element pointers made by `for ... in`: the place each points at.
+    origins: HashMap<LocalIdx, Place>,
     helpers: &'a mut Helpers,
 }
 
 impl<'a> FnLowerer<'a> {
     fn new(program: &'a Program, t: &'a Tables, lines: &'a LineIndex, fn_id: FnId, helpers: &'a mut Helpers) -> Self {
         let (local_map, locals, bindings, elems) = (HashMap::new(), Vec::new(), HashMap::new(), HashMap::new());
-        FnLowerer { program, t, lines, fn_id, local_map, locals, bindings, elems, helpers }
+        FnLowerer { program, t, lines, fn_id, local_map, locals, bindings, elems, origins: HashMap::new(), helpers }
     }
 
     fn lower(mut self) -> Func {

@@ -19,7 +19,7 @@ impl<'a> FnLowerer<'a> {
             },
             ast::ExprKind::Index { base, index } => {
                 let mut p = self.place(base)?;
-                p.path.push(Proj::Index(self.expr(index)));
+                p.path.push(Proj::Index { at: self.expr(index), checked: true });
                 Some(p)
             }
             ast::ExprKind::Field { base, .. } => {

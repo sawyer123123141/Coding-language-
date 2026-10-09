@@ -14,7 +14,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             ty = match (proj, ty) {
                 (Proj::Field(fi), KTy::Struct(s)) => kir.layout(s).fields[*fi as usize].ty,
                 (Proj::Variant(v, fi), KTy::Enum(e)) => kir.enum_layout(e).variants[*v as usize].fields[*fi as usize].ty,
-                (Proj::Index(_), KTy::Array(el) | KTy::List(el)) => kir.elem(el),
+                (Proj::Index { .. }, KTy::Array(el) | KTy::List(el)) => kir.elem(el),
                 _ => unreachable!("place path doesn't match the type"),
             };
         }
@@ -36,10 +36,10 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             let field = match (proj, ty) {
                 (Proj::Field(fi), KTy::Struct(s)) => &kir.layout(s).fields[*fi as usize],
                 (Proj::Variant(v, fi), KTy::Enum(e)) => &kir.enum_layout(e).variants[*v as usize].fields[*fi as usize],
-                (Proj::Index(i), KTy::Array(el) | KTy::List(el)) => {
+                (Proj::Index { at, checked }, KTy::Array(el) | KTy::List(el)) => {
                     let header = self.offset(addr, offset);
                     ty = kir.elem(el);
-                    addr = self.element_addr(header, i, ty)?;
+                    addr = self.element_addr(header, at, *checked, ty)?;
                     offset = 0;
                     continue;
                 }
@@ -60,9 +60,20 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     }
 
     /// The address of element `index` of the array or list whose header is at `header`.
-    fn element_addr(&mut self, header: Value, index: &kir::Expr, elem: KTy) -> Result<Value, String> {
+    fn element_addr(&mut self, header: Value, index: &kir::Expr, checked: bool, elem: KTy) -> Result<Value, String> {
         let i = self.expr(index)?;
         let i = self.widen_i64(i, index.ty);
+        if checked {
+            self.bounds_check(header, i, index.line);
+        }
+        let ptr = self.b.ins().load(self.ptr, MemFlags::trusted(), header, 0);
+        let (size, _) = self.shared.kir.size_align(elem);
+        let at = self.b.ins().imul_imm(i, size as i64);
+        Ok(self.b.ins().iadd(ptr, at))
+    }
+
+    /// Panics unless `0 <= i < len` for the collection whose header is at `header`.
+    fn bounds_check(&mut self, header: Value, i: Value, line: u32) {
         let len = self.b.ins().load(types::I64, MemFlags::trusted(), header, 8);
         // Unsigned: a negative index looks huge, so one compare checks both ends.
         let bad = self.b.ins().icmp(IntCC::UnsignedGreaterThanOrEqual, i, len);
@@ -70,14 +81,10 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         self.b.ins().brif(bad, fail, &[], ok, &[]);
         self.b.switch_to_block(fail);
         self.b.set_cold_block(fail);
-        let line = self.b.ins().iconst(types::I32, index.line as i64);
+        let line = self.b.ins().iconst(types::I32, line as i64);
         self.call_id(self.shared.rt.panic_index, &[i, len, line]);
         self.b.ins().trap(TrapCode::unwrap_user(2));
         self.b.switch_to_block(ok);
-        let ptr = self.b.ins().load(self.ptr, MemFlags::trusted(), header, 0);
-        let (size, _) = self.shared.kir.size_align(elem);
-        let at = self.b.ins().imul_imm(i, size as i64);
-        Ok(self.b.ins().iadd(ptr, at))
     }
 
     /// An integer of type `ty` as an i64 (lengths and indexes are i64).
