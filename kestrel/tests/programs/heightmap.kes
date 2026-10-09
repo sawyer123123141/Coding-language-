@@ -1,0 +1,115 @@
+// expect: columns: 16384
+// expect: tallest: 51
+// expect: checksum: 13371312
+// A voxel heightmap: 4x4 chunks of 32x32 columns, value noise for the
+// ground, three block kinds, and a checksum over every block.
+let SIZE = 32
+let WORLD = 4
+let HEIGHT = 64
+
+enum Block {
+    Air
+    Dirt
+    Stone { hardness: u8 }
+
+    pure weight(self) -> int {
+        match self {
+            Air { 0 }
+            Dirt { 1 }
+            Stone s { 2 + int(s.hardness) }
+        }
+    }
+}
+
+pure hash(x: int, z: int, seed: int) -> int {
+    let h = i64(x) * 73856093 + i64(z) * 19349663 + i64(seed) * 83492791
+    int(h % 1000003)
+}
+
+pure lattice(x: int, z: int, seed: int) -> float {
+    float(hash(x, z, seed)) / 1000003.0
+}
+
+pure smooth(t: float) -> float {
+    t * t * (3.0 - 2.0 * t)
+}
+
+pure noise(x: int, z: int, scale: int, seed: int) -> float {
+    let cx = x / scale
+    let cz = z / scale
+    let fx = smooth(float(x - cx * scale) / float(scale))
+    let fz = smooth(float(z - cz * scale) / float(scale))
+    let a = lattice(cx, cz, seed)
+    let b = lattice(cx + 1, cz, seed)
+    let c = lattice(cx, cz + 1, seed)
+    let d = lattice(cx + 1, cz + 1, seed)
+    let top = a + (b - a) * fx
+    let bottom = c + (d - c) * fx
+    top + (bottom - top) * fz
+}
+
+pure height(x: int, z: int, seed: int) -> int {
+    let n = noise(x, z, 64, seed) * 0.6 + noise(x, z, 16, seed + 1) * 0.3 + noise(x, z, 4, seed + 2) * 0.1
+    int(n * float(HEIGHT - 8)) + 4
+}
+
+pure block_at(y: int, ground: int) -> Block {
+    if y > ground { Block.Air }
+    else if y > ground - 3 { Block.Dirt }
+    else { Block.Stone(hardness: u8(3 + y % 4)) }
+}
+
+struct Chunk {
+    x: int
+    z: int
+    mem: Arena = Arena()
+    heights: [int] = []
+
+    generate(var self, seed: int) {
+        in self.mem {
+            self.heights = array[int](SIZE * SIZE)
+        }
+        for i from 0 to SIZE * SIZE {
+            let wx = self.x * SIZE + i % SIZE
+            let wz = self.z * SIZE + i / SIZE
+            self.heights[i] = height(wx, wz, seed)
+        }
+    }
+
+    pure checksum(self) -> i64 {
+        var sum: i64 = 0
+        for i, h in self.heights {
+            for y from 0 to HEIGHT {
+                sum += i64(block_at(y, h).weight() * (i % 7 + 1))
+            }
+        }
+        sum
+    }
+}
+
+main() {
+    var world = list[Chunk]()
+    for cx from 0 to WORLD {
+        for cz from 0 to WORLD {
+            world.add(Chunk(x: cx, z: cz))
+        }
+    }
+    for chunk in world {
+        chunk.generate(seed: 1337)
+    }
+    var total: i64 = 0
+    var tallest = 0
+    arena {
+        var columns = list[int]()
+        for chunk in world {
+            total += chunk.checksum()
+            for h in chunk.heights { columns.add(h) }
+        }
+        for h in columns {
+            if h > tallest { tallest = h }
+        }
+        print("columns: {columns.len}")
+    }
+    print("tallest: {tallest}")
+    print("checksum: {total}")
+}
