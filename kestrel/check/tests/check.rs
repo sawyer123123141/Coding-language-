@@ -105,3 +105,50 @@ fn assigning_var_param_marks_function() {
     let t = ok("bump(var x: int) {\n x += 1\n}\nmain() {}\n");
     assert!(t.fns[0].mutates_params);
 }
+
+use kestrel_check::Res;
+
+#[test]
+fn calls_resolve_and_mark_var_arguments() {
+    let t = ok("pure square(x: int) -> int { x * x }\nbump(var n: int, by: int) {\n n += by\n}\nmain() {\n var total = 0\n bump(var total, by: square(3))\n bump(var total, 2)\n print(\"total\", total, 1.5, true)\n let f = float(total) / 2.0\n let i = int(f)\n}\n");
+    let total = t.locals.iter().find(|l| l.name == "total").unwrap();
+    assert!(total.addressed);
+    assert!(t.fns[1].mutates_params);
+    assert!(t.fns[2].io);
+    assert_eq!(t.call_args.len(), 3);
+    assert!(t.res.values().any(|r| *r == Res::Print));
+    assert!(t.res.values().any(|r| *r == Res::Convert(Ty::Int)));
+    assert_eq!(local_ty(&t, "f"), Ty::Float);
+    assert_eq!(local_ty(&t, "i"), Ty::Int);
+}
+
+#[test]
+fn labels_reorder_arguments() {
+    let t = ok("f(a: int, b: int) -> int { a - b }\nmain() {\n let x = f(b: 1, a: 2)\n}\n");
+    assert_eq!(t.call_args.values().next().unwrap(), &vec![1, 0]);
+}
+
+#[test]
+fn call_errors() {
+    let cases: &[(&str, &str)] = &[
+        ("pure f() -> int {\n print(1)\n 1\n}\nmain() {}\n", "pure functions can't call `print`"),
+        ("g() {}\npure f() {\n g()\n}\nmain() {}\n", "pure functions can only call pure functions; `g` isn't pure"),
+        ("f(var x: int) {}\nmain() {\n var a = 1\n f(a)\n}\n", "parameter `x` of `f` is `var`, so the call must say so"),
+        ("f(x: int) {}\nmain() {\n var a = 1\n f(var a)\n}\n", "parameter `x` of `f` isn't `var`"),
+        ("f(var x: int) {}\nmain() {\n let a = 1\n f(var a)\n}\n", "can't pass `a` as `var`: it was declared with `let`"),
+        ("f(var x: int, y: int) {}\nmain() {\n var a = 1\n f(var a, a)\n}\n", "`a` is passed as `var` and also used in another argument of the same call"),
+        ("f(x: int) {}\nmain() {\n f(1, 2)\n}\n", "`f` takes 1 argument(s), got 2"),
+        ("f(x: int) {}\nmain() {\n f()\n}\n", "missing argument `x` for `f`"),
+        ("f(x: int) {}\nmain() {\n f(y: 1)\n}\n", "`f` has no parameter named `y`"),
+        ("f(a: int, b: int) {}\nmain() {\n f(b: 1, 2)\n}\n", "positional arguments must come before labelled ones"),
+        ("main() {\n g()\n}\n", "unknown function `g`"),
+        ("pure sq(x: int) -> int { x * x }\nmain() {\n sq(2)\n}\n", "the result of pure function `sq` is unused, so this line does nothing"),
+        ("f(var x: i64) {}\nmain() {\n var a = 1\n f(var a)\n}\n", "`var` parameter `x` needs exactly i64, found int"),
+        ("main() {\n let x = int(true)\n}\n", "can't convert bool to int"),
+        ("main() {\n let x = int(1, 2)\n}\n", "`int(...)` takes exactly one value"),
+        ("f(x: int) {}\nmain() {\n f(1.5)\n}\n", "expected int, found float"),
+    ];
+    for (src, expected) in cases {
+        assert_eq!(errors(src), vec![expected.to_string()], "source:\n{src}");
+    }
+}
