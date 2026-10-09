@@ -12,7 +12,7 @@ pub use jit::JitProgram;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Options {
-    /// Trap on integer overflow (debug-style). Off for `--release`.
+    /// Panic on integer overflow (exit 101). Off for `--release`.
     pub checked_arith: bool,
 }
 

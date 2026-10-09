@@ -313,8 +313,17 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     }
 
     fn print(&mut self, args: &[kir::PrintArg]) -> Result<(), String> {
+        // Evaluate every argument before writing anything, so output (or a
+        // panic) inside an argument can't interleave with this line.
+        let mut vals = Vec::with_capacity(args.len());
+        for a in args {
+            vals.push(match a {
+                kir::PrintArg::Value(e) => Some(self.expr(e)?),
+                kir::PrintArg::Str(_) => None,
+            });
+        }
         let rt = self.shared.rt;
-        for (i, a) in args.iter().enumerate() {
+        for (i, (a, val)) in args.iter().zip(vals).enumerate() {
             if i > 0 {
                 self.call_id(rt.print_space, &[]);
             }
@@ -324,7 +333,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                     self.call_id(rt.print_str, &[p, n]);
                 }
                 kir::PrintArg::Value(e) => {
-                    let v = self.expr(e)?;
+                    let v = val.expect("value arguments are evaluated above");
                     match e.ty {
                         KTy::Bool => self.call_id(rt.print_bool, &[v]),
                         KTy::U8 => {

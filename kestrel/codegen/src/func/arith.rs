@@ -139,7 +139,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     }
 
     /// Converts `v` from `from` to `to`: int widening/narrowing (narrowing
-    /// truncates), int↔float, float→int saturating (NaN → 0).
+    /// truncates), int<->float, float->int saturating (NaN -> 0).
     pub(crate) fn cast(&mut self, v: Value, from: KTy, to: KTy) -> Value {
         if from == to {
             return v;

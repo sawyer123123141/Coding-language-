@@ -80,3 +80,101 @@ fn main_runs_through_runtime() {
     let p = jit_with("main() {\n print(1, 2.5, true, \"hi\")\n}\n", Options::default());
     assert_eq!(p.run_main(), 0);
 }
+
+fn call2(p: &JitProgram, name: &str, x: i32, y: i32) -> i32 {
+    let f: extern "C" fn(i32, i32) -> i32 = unsafe { std::mem::transmute(p.fn_ptr(name).expect(name)) };
+    f(x, y)
+}
+
+#[test]
+fn continue_in_for_runs_the_step() {
+    let p = jit("odds() -> int {\n var s = 0\n for i from 0 to 10 {\n  if i % 2 == 0 { continue }\n  s += i\n }\n s\n}");
+    assert_eq!(call0::<i32>(&p, "odds"), 25);
+}
+
+#[test]
+fn var_parameter_forwarded_to_another_call() {
+    let p = jit("bump(var x: int, by: int) {\n x += by\n}\ntwice(var x: int) {\n bump(var x, by: 1)\n bump(var x, by: 2)\n}\nf() -> int {\n var a = 5\n twice(var a)\n a\n}");
+    assert_eq!(call0::<i32>(&p, "f"), 8);
+}
+
+#[test]
+fn unchecked_min_div_neg_one_wraps() {
+    let src = "d(a: int, b: int) -> int {\n a / b\n}\nr(a: int, b: int) -> int {\n a % b\n}\nmain() {}\n";
+    let p = jit_with(src, Options { checked_arith: false });
+    assert_eq!(call2(&p, "d", i32::MIN, -1), i32::MIN);
+    assert_eq!(call2(&p, "r", i32::MIN, -1), 0);
+}
+
+#[test]
+fn u8_compares_unsigned() {
+    let p = jit("gt() -> int {\n let a: u8 = 200\n let b: u8 = 100\n if a > b { 1 } else { 0 }\n}\nlt() -> int {\n let a: u8 = 200\n let b: u8 = 100\n if a < b { 1 } else { 0 }\n}");
+    assert_eq!(call0::<i32>(&p, "gt"), 1);
+    assert_eq!(call0::<i32>(&p, "lt"), 0);
+}
+
+#[test]
+fn float_to_u8_saturates() {
+    let p = jit("hi() -> int {\n let x = 300.0\n int(u8(x))\n}\nlo() -> int {\n let x = -5.0\n int(u8(x))\n}");
+    assert_eq!(call0::<i32>(&p, "hi"), 255);
+    assert_eq!(call0::<i32>(&p, "lo"), 0);
+}
+
+// Output and panics can't be observed in-process (the runtime writes to the
+// real stdout and `kestrel_rt_panic` exits), so these cases run `main` in a
+// child copy of this test binary and inspect its stdout and exit code.
+const CHILD_CASES: &[(&str, &str)] = &[
+    (
+        "print_order",
+        "noisy() -> int {\n print(\"in noisy\")\n 5\n}\nmain() {\n print(\"result\", noisy())\n}\n",
+    ),
+    ("print_panic", "main() {\n var z = 0\n z += 0\n print(\"x =\", 10 / z)\n}\n"),
+    (
+        "print_left_to_right",
+        "tick(var n: int) -> int {\n n += 1\n n\n}\nmain() {\n var a = 0\n var b = 10\n print(tick(var a), tick(var b), tick(var a))\n}\n",
+    ),
+];
+
+/// Entry point for the child process; does nothing in a normal test run.
+#[test]
+fn child_entry() {
+    let Ok(case) = std::env::var("KESTREL_CHILD_CASE") else { return };
+    let src = CHILD_CASES.iter().find(|(n, _)| *n == case).expect("known case").1;
+    jit_with(src, Options::default()).run_main();
+}
+
+/// Runs a `CHILD_CASES` entry; returns (exit code, stdout, stderr).
+fn run_child(case: &str) -> (Option<i32>, String, String) {
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["child_entry", "--exact", "--nocapture", "--test-threads=1"])
+        .env("KESTREL_CHILD_CASE", case)
+        .output()
+        .unwrap();
+    (
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+#[test]
+fn print_evaluates_arguments_before_any_output() {
+    let (code, stdout, _) = run_child("print_order");
+    assert_eq!(code, Some(0), "stdout: {stdout}");
+    assert!(stdout.contains("in noisy\nresult 5\n"), "stdout: {stdout}");
+}
+
+#[test]
+fn panic_inside_print_argument_writes_nothing() {
+    let (code, stdout, stderr) = run_child("print_panic");
+    assert_eq!(code, Some(101), "stdout: {stdout}\nstderr: {stderr}");
+    assert!(stderr.contains("division by zero on line 4"), "stderr: {stderr}");
+    assert!(!stdout.contains("x ="), "stdout: {stdout}");
+}
+
+#[test]
+fn print_arguments_evaluate_left_to_right() {
+    let (code, stdout, _) = run_child("print_left_to_right");
+    assert_eq!(code, Some(0), "stdout: {stdout}");
+    assert!(stdout.contains("1 11 2\n"), "stdout: {stdout}");
+}
