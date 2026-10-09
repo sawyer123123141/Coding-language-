@@ -34,7 +34,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             ExprKind::Binary(op, l, r) => {
                 let a = self.expr(l)?;
                 let b = self.expr(r)?;
-                self.binary(*op, a, b, l.ty, e.line)
+                let const_divisor = if let ExprKind::Int(c) = r.kind { Some(c) } else { None };
+                self.binary(*op, a, b, l.ty, e.line, const_divisor)
             }
             ExprKind::And(l, r) => self.short_circuit(l, r, true)?,
             ExprKind::Or(l, r) => self.short_circuit(l, r, false)?,

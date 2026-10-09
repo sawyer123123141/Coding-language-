@@ -2,7 +2,7 @@ use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{types, InstBuilder, TrapCode, Value};
 use cranelift_module::Module;
 use kestrel_kir::{BinOp, KTy};
-use kestrel_runtime::{PANIC_DIV_ZERO, PANIC_OVERFLOW};
+use kestrel_runtime::PANIC_OVERFLOW;
 
 use super::{cl_type, FuncLowerer};
 
@@ -15,8 +15,17 @@ fn bits(t: KTy) -> u32 {
 }
 
 impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
-    /// `a op b` where both operands have type `t`.
-    pub(crate) fn binary(&mut self, op: BinOp, a: Value, b: Value, t: KTy, line: u32) -> Value {
+    /// `a op b` where both operands have type `t`. `const_divisor` is `b`'s
+    /// value when it is an integer literal (used only by `/` and `%`).
+    pub(crate) fn binary(
+        &mut self,
+        op: BinOp,
+        a: Value,
+        b: Value,
+        t: KTy,
+        line: u32,
+        const_divisor: Option<i64>,
+    ) -> Value {
         if op.is_comparison() {
             return self.compare(op, a, b, t);
         }
@@ -35,7 +44,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         }
         match op {
             BinOp::Add | BinOp::Sub | BinOp::Mul => self.int_arith(op, a, b, t, line),
-            BinOp::Div | BinOp::Rem => self.int_div(op, a, b, t, line),
+            BinOp::Div | BinOp::Rem => self.int_div(op, a, b, t, line, const_divisor),
             _ => unreachable!("comparisons handled above"),
         }
     }
@@ -69,36 +78,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         r
     }
 
-    fn int_div(&mut self, op: BinOp, a: Value, b: Value, t: KTy, line: u32) -> Value {
-        let is_zero = self.b.ins().icmp_imm(IntCC::Equal, b, 0);
-        self.panic_if(is_zero, PANIC_DIV_ZERO, line);
-        if !t.is_signed() {
-            return if op == BinOp::Div { self.b.ins().udiv(a, b) } else { self.b.ins().urem(a, b) };
-        }
-        // MIN / -1 overflows (and traps in hardware).
-        let min = if t == KTy::I32 { i32::MIN as i64 } else { i64::MIN };
-        let min_v = self.iconst(t, min);
-        let neg_one = self.iconst(t, -1);
-        let a_is_min = self.b.ins().icmp(IntCC::Equal, a, min_v);
-        let b_is_neg1 = self.b.ins().icmp(IntCC::Equal, b, neg_one);
-        let both = self.b.ins().band(a_is_min, b_is_neg1);
-        let divisor = if self.shared.opts.checked_arith {
-            self.panic_if(both, PANIC_OVERFLOW, line);
-            b
-        } else {
-            // Wrapping: MIN / 1 == MIN and MIN % 1 == 0, matching wrapping semantics.
-            let one = self.iconst(t, 1);
-            self.b.ins().select(both, one, b)
-        };
-        if op == BinOp::Div {
-            self.b.ins().sdiv(a, divisor)
-        } else {
-            self.b.ins().srem(a, divisor)
-        }
-    }
-
     /// Calls the runtime panic (which doesn't return) when `cond` is true.
-    fn panic_if(&mut self, cond: Value, kind: i32, line: u32) {
+    pub(super) fn panic_if(&mut self, cond: Value, kind: i32, line: u32) {
         let (fail, ok) = (self.b.create_block(), self.b.create_block());
         self.b.ins().brif(cond, fail, &[], ok, &[]);
         self.b.switch_to_block(fail);

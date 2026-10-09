@@ -120,6 +120,81 @@ fn float_to_u8_saturates() {
     assert_eq!(call0::<i32>(&p, "lo"), 0);
 }
 
+/// Dividends that straddle every power-of-two boundary and the type limits.
+const I32_XS: &[i32] =
+    &[0, 1, -1, 2, -2, 3, -3, 7, -7, 31, -31, 32, -33, 1000, -1000, i32::MAX, i32::MIN, i32::MIN + 1];
+const I64_XS: &[i64] = &[
+    0, 1, -1, 2, -2, 3, -3, 63, 64, -64, -65, 1000, -1000, i32::MAX as i64, i32::MIN as i64, i64::MAX,
+    i64::MIN, i64::MIN + 1,
+];
+const U8_XS: &[u8] = &[0, 1, 2, 15, 16, 17, 127, 128, 255];
+
+/// Kestrel function-name suffix for a divisor (`-2` -> `m2`).
+fn tag(n: i64) -> String {
+    if n < 0 { format!("m{}", -n) } else { n.to_string() }
+}
+
+/// Source for `d_N(x) = x / N` and `r_N(x) = x % N` over every divisor, at type `ty`.
+fn div_source(ty: &str, divisors: &[i64]) -> String {
+    let mut src = String::new();
+    for &n in divisors {
+        let t = tag(n);
+        src += &format!("d_{t}(x: {ty}) -> {ty} {{\n x / {n}\n}}\nr_{t}(x: {ty}) -> {ty} {{\n x % {n}\n}}\n");
+    }
+    src + "main() {}\n"
+}
+
+fn call_as<A, R>(p: &JitProgram, name: &str, x: A) -> R {
+    let f: extern "C" fn(A) -> R = unsafe { std::mem::transmute(p.fn_ptr(name).expect(name)) };
+    f(x)
+}
+
+#[test]
+fn division_by_constant_matches_rust_i32() {
+    const DIVISORS: &[i64] = &[1, 2, 4, 8, 32, 1024, 7, 100, -2, -8];
+    for checked_arith in [true, false] {
+        let p = jit_with(&div_source("int", DIVISORS), Options { checked_arith });
+        for &n in DIVISORS {
+            for &x in I32_XS {
+                let n32 = n as i32;
+                let (d, r) = (format!("d_{}", tag(n)), format!("r_{}", tag(n)));
+                assert_eq!(call1(&p, &d, x), x.wrapping_div(n32), "{x} / {n} (checked={checked_arith})");
+                assert_eq!(call1(&p, &r, x), x.wrapping_rem(n32), "{x} % {n} (checked={checked_arith})");
+            }
+        }
+    }
+}
+
+#[test]
+fn division_by_constant_matches_rust_i64() {
+    const DIVISORS: &[i64] = &[2, 64, 3];
+    for checked_arith in [true, false] {
+        let p = jit_with(&div_source("i64", DIVISORS), Options { checked_arith });
+        for &n in DIVISORS {
+            for &x in I64_XS {
+                let (d, r) = (format!("d_{}", tag(n)), format!("r_{}", tag(n)));
+                assert_eq!(call_as::<i64, i64>(&p, &d, x), x.wrapping_div(n), "{x} / {n} (checked={checked_arith})");
+                assert_eq!(call_as::<i64, i64>(&p, &r, x), x.wrapping_rem(n), "{x} % {n} (checked={checked_arith})");
+            }
+        }
+    }
+}
+
+#[test]
+fn division_by_constant_matches_rust_u8() {
+    const DIVISORS: &[i64] = &[1, 2, 16, 3];
+    for checked_arith in [true, false] {
+        let p = jit_with(&div_source("u8", DIVISORS), Options { checked_arith });
+        for &n in DIVISORS {
+            for &x in U8_XS {
+                let (d, r) = (format!("d_{}", tag(n)), format!("r_{}", tag(n)));
+                assert_eq!(call_as::<u8, u8>(&p, &d, x), x / n as u8, "{x} / {n} (checked={checked_arith})");
+                assert_eq!(call_as::<u8, u8>(&p, &r, x), x % n as u8, "{x} % {n} (checked={checked_arith})");
+            }
+        }
+    }
+}
+
 // Output and panics can't be observed in-process (the runtime writes to the
 // real stdout and `kestrel_rt_panic` exits), so these cases run `main` in a
 // child copy of this test binary and inspect its stdout and exit code.
@@ -132,6 +207,32 @@ const CHILD_CASES: &[(&str, &str)] = &[
     (
         "print_left_to_right",
         "tick(var n: int) -> int {\n n += 1\n n\n}\nmain() {\n var a = 0\n var b = 10\n print(tick(var a), tick(var b), tick(var a))\n}\n",
+    ),
+    ("div_by_variable_zero", "main() {
+ var d = 1
+ d -= 1
+ print(\"q =\", 10 / d)
+}
+"),
+    ("rem_by_variable_zero", "main() {
+ var d = 1
+ d -= 1
+ print(\"r =\", 10 % d)
+}
+"),
+    ("div_by_literal_zero", "main() {
+ print(\"q =\", 10 / 0)
+}
+"),
+    (
+        "min_div_variable_neg_one",
+        "main() {
+ var v = 0
+ v -= 1
+ let m = -2147483647 - 1
+ print(\"q =\", m / v)
+}
+",
     ),
     (
         "labelled_arg_order",
@@ -181,6 +282,29 @@ fn print_arguments_evaluate_left_to_right() {
     let (code, stdout, _) = run_child("print_left_to_right");
     assert_eq!(code, Some(0), "stdout: {stdout}");
     assert!(stdout.contains("1 11 2\n"), "stdout: {stdout}");
+}
+
+#[test]
+fn division_by_a_zero_variable_still_panics() {
+    for case in ["div_by_variable_zero", "rem_by_variable_zero", "div_by_literal_zero"] {
+        let (code, stdout, stderr) = run_child(case);
+        assert_eq!(code, Some(101), "{case}
+stdout: {stdout}
+stderr: {stderr}");
+        assert!(stderr.contains("division by zero"), "{case}
+stderr: {stderr}");
+        assert!(!stdout.contains("q =") && !stdout.contains("r ="), "{case}
+stdout: {stdout}");
+    }
+}
+
+#[test]
+fn min_divided_by_a_variable_neg_one_still_panics() {
+    let (code, stdout, stderr) = run_child("min_div_variable_neg_one");
+    assert_eq!(code, Some(101), "stdout: {stdout}
+stderr: {stderr}");
+    assert!(stderr.contains("integer overflow"), "stderr: {stderr}");
+    assert!(!stdout.contains("q ="), "stdout: {stdout}");
 }
 
 #[test]

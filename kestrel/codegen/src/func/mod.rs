@@ -1,4 +1,5 @@
 mod arith;
+mod divide;
 mod expr;
 
 use std::collections::HashMap;
