@@ -3,7 +3,7 @@ use crate::ast::{ConstDecl, EnumDecl, FieldDecl, FnDecl, Item, Param, StructDecl
 use crate::span::Span;
 use crate::token::Tok;
 
-impl<'t> Parser<'t> {
+impl Parser {
     pub(crate) fn items(&mut self) -> Vec<Item> {
         let mut items = Vec::new();
         self.skip_newlines();

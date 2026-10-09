@@ -1,4 +1,4 @@
-use kestrel_syntax::ast::{Arg, Expr, ExprKind};
+use kestrel_syntax::ast::{Arg, Expr, ExprKind, InterpPart};
 use kestrel_syntax::Span;
 
 use super::place::Immutable;
@@ -66,17 +66,26 @@ impl<'a> BodyChecker<'a> {
             if a.label.is_some() || a.is_var {
                 self.error(a.span, "`print` arguments can't be labelled or `var`");
             }
-            if let ExprKind::Str(_) = a.value.kind {
+            if let ExprKind::Interp(parts) = &a.value.kind {
                 self.t.expr_ty[a.value.id.0 as usize] = Ty::Str;
+                for part in parts {
+                    if let InterpPart::Expr(x) = part {
+                        self.check_printable(x);
+                    }
+                }
                 continue;
             }
-            let ty = self.check_expr(&a.value, None);
-            let ty = self.reject_never(&a.value, ty);
-            if ty == Ty::Unit {
-                self.error(a.value.span, "this has no value to print");
-            }
+            self.check_printable(&a.value);
         }
         Ty::Unit
+    }
+
+    fn check_printable(&mut self, e: &Expr) {
+        let ty = self.check_expr(e, None);
+        let ty = self.reject_never(e, ty);
+        if ty == Ty::Unit {
+            self.error(e.span, "this has no value to print");
+        }
     }
 
     fn check_convert(&mut self, e: &Expr, to: Ty, args: &[Arg]) -> Ty {

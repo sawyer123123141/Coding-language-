@@ -9,17 +9,17 @@ use crate::token::{Tok, Token};
 
 pub(crate) type PResult<T> = Result<T, ()>;
 
-pub struct Parser<'t> {
-    toks: &'t [Token],
+pub struct Parser {
+    toks: Vec<Token>,
     pos: usize,
     diags: Vec<Diagnostic>,
     next_expr: u32,
     next_bind: u32,
 }
 
-impl<'t> Parser<'t> {
+impl Parser {
     /// `toks` must end with `Tok::Eof` (as `lex` guarantees).
-    pub fn new(toks: &'t [Token]) -> Self {
+    pub fn new(toks: Vec<Token>) -> Self {
         Parser { toks, pos: 0, diags: Vec::new(), next_expr: 0, next_bind: 0 }
     }
 

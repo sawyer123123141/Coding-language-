@@ -2,7 +2,7 @@ use super::{PResult, Parser};
 use crate::ast::{AssignOp, Block, Stmt};
 use crate::token::Tok;
 
-impl<'t> Parser<'t> {
+impl Parser {
     pub(crate) fn block(&mut self) -> PResult<Block> {
         let start = self.expect(&Tok::LBrace, "`{`")?;
         let mut stmts = Vec::new();

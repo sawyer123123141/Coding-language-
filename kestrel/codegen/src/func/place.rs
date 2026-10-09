@@ -77,7 +77,9 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                     }
                 }
             }
-            KTy::Enum(_) => {
+            // Enums copy whole (the payload's meaning depends on the tag);
+            // strings are a pointer and a length.
+            KTy::Enum(_) | KTy::Str => {
                 let (size, align) = kir.size_align(ty);
                 let (chunk, chunk_ty) = match align {
                     8.. => (8, types::I64),

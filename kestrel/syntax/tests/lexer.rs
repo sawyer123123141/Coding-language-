@@ -1,5 +1,5 @@
 use kestrel_syntax::lexer::lex;
-use kestrel_syntax::token::Tok;
+use kestrel_syntax::token::{StrPart, Tok};
 
 fn toks(src: &str) -> Vec<Tok> {
     let (t, d) = lex(src);
@@ -100,10 +100,9 @@ fn helpful_errors() {
     assert_eq!(errors("a && b"), vec!["Kestrel uses `and`, not `&&`"]);
     assert_eq!(errors("a || b"), vec!["Kestrel uses `or`, not `||`"]);
     assert_eq!(errors("!a"), vec!["Kestrel uses `not`, not `!`"]);
-    assert_eq!(
-        errors("\"hp {x}\""),
-        vec!["string interpolation isn't supported yet; escape the brace as `\\{`"]
-    );
+    assert_eq!(errors("\"hp {}\""), vec!["empty `{}` in a string; write `\\{` for a brace"]);
+    assert_eq!(errors("\"hp {x\""), vec!["unterminated `{` in a string"]);
+    assert_eq!(errors("\"a {\"b\"}\""), vec!["unterminated `{` in a string"]);
     assert_eq!(errors("\"abc"), vec!["unterminated string"]);
     assert_eq!(errors("a @ b"), vec!["unexpected character `@`"]);
     assert_eq!(errors("99999999999999999999"), vec!["number is too large"]);
@@ -127,4 +126,29 @@ fn diagnostic_spans_stay_inside_the_source() {
             assert!(d.span.end as usize <= src.len(), "span past end for {src:?}: {d:?}");
         }
     }
+}
+
+#[test]
+fn interpolated_strings_keep_code_and_its_offset() {
+    assert_eq!(
+        toks("\"hp = {hp}!\""),
+        vec![
+            Tok::StrParts(vec![
+                StrPart::Lit("hp = ".into()),
+                StrPart::Code { text: "hp".into(), start: 7 },
+                StrPart::Lit("!".into()),
+            ]),
+            Tok::Eof,
+        ]
+    );
+    assert_eq!(
+        toks("\"{a.b + 1}{c}\""),
+        vec![
+            Tok::StrParts(vec![
+                StrPart::Code { text: "a.b + 1".into(), start: 2 },
+                StrPart::Code { text: "c".into(), start: 11 },
+            ]),
+            Tok::Eof,
+        ]
+    );
 }

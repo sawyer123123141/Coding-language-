@@ -27,6 +27,7 @@ pub(crate) fn kty(ty: Ty) -> KTy {
         Ty::I64 => KTy::I64,
         Ty::Float => KTy::F32,
         Ty::F64 => KTy::F64,
+        Ty::Str => KTy::Str,
         Ty::Struct(s) => KTy::Struct(StructIdx(s.0)),
         Ty::Enum(e) => KTy::Enum(EnumIdx(e.0)),
         other => panic!("type {other:?} has no runtime representation"),
@@ -228,6 +229,15 @@ impl<'a> FnLowerer<'a> {
     fn print_arg(&mut self, e: &ast::Expr) -> PrintArg {
         match &e.kind {
             ast::ExprKind::Str(s) => PrintArg::Str(s.clone()),
+            ast::ExprKind::Interp(parts) => PrintArg::Interp(
+                parts
+                    .iter()
+                    .map(|p| match p {
+                        ast::InterpPart::Lit(s) => PrintArg::Str(s.clone()),
+                        ast::InterpPart::Expr(x) => self.print_arg(x),
+                    })
+                    .collect(),
+            ),
             _ => PrintArg::Value(self.expr(e)),
         }
     }

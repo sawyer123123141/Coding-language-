@@ -26,6 +26,7 @@ Done in 2b-i: labelled arguments evaluate in source order; `func/mod.rs` split; 
 
 ## Do in 2c
 
+- **Strings (2b-ii scope).** String values are a pointer plus a length into read-only data, so only literals exist. `"{x}"` interpolation works only as a direct `print` argument, because building a new string needs memory, which comes with arenas. No `==`, length, indexing or concatenation yet; `"a" == "b"` reports "`==` needs numbers". Strings nested in a printed struct are quoted, but `"` inside them isn't escaped.
 - **Exclusivity** only checks bare identifiers (`f(var a, a + 1)` passes; 3+ `var` uses of one local give duplicate diagnostics). Redesign it around place paths once aggregates are passed by pointer.
 - **Cleanup stack in codegen.** `break`/`continue`/`return` jump directly, but `arena { }` exits and scope-end drops need cleanup on every exit edge.
 - **Runtime stdout buffer is thread-local.** It must change before `par for` (sub-project 3).

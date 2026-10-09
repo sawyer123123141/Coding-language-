@@ -1,4 +1,4 @@
-use kestrel_syntax::ast::{BinaryOp, Expr, ExprKind, UnaryOp};
+use kestrel_syntax::ast::{BinaryOp, Expr, ExprKind, InterpPart, UnaryOp};
 use kestrel_syntax::Diagnostic;
 
 use super::{BodyChecker, Expect};
@@ -29,8 +29,15 @@ impl<'a> BodyChecker<'a> {
                 }
             }
             ExprKind::Bool(_) => Ty::Bool,
-            ExprKind::Str(_) => {
-                self.error(e.span, "string values aren't supported yet (only as `print` arguments)");
+            ExprKind::Str(_) => Ty::Str,
+            ExprKind::Interp(parts) => {
+                // Building a new string needs memory to put it in; that comes with arenas.
+                self.error(e.span, "string interpolation only works directly inside `print(...)` for now");
+                for part in parts {
+                    if let InterpPart::Expr(x) = part {
+                        self.check_expr(x, None);
+                    }
+                }
                 Ty::Error
             }
             ExprKind::Ident(name) => self.ident(e, name),

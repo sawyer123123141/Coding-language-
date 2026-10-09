@@ -1,0 +1,39 @@
+// expect: hello Kestrel
+// expect: hp = 7, pos = vec2(x: 1, y: 2)!
+// expect: Named(name: "bob", age: 3)
+// expect: {braces} and "quotes"
+// expect: 7hp bob
+// expect: Item.Sword(label: "Edge")
+// expect: Kestrel
+let GREETING = "hello"
+
+struct Named {
+    name: string
+    age: int
+}
+
+enum Item {
+    Empty
+    Sword { label: string }
+}
+
+pure pick(a: string, b: string, first: bool) -> string {
+    if first { a } else { b }
+}
+
+main() {
+    let who = "Kestrel"
+    print(GREETING, who)
+    let hp = 7
+    let pos = vec2(1, 2)
+    print("hp = {hp}, pos = {pos}!")
+    var n = Named(pick("bob", "amy", true), 3)
+    print(n)
+    print("\{braces\} and \"quotes\"")
+    print("{hp}hp", n.name)
+    let item = Item.Sword(label: "Edge")
+    print(item)
+    var last = "nobody"
+    last = who
+    print(last)
+}

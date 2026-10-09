@@ -55,10 +55,10 @@ pub(crate) fn check_consts(program: &Program, t: &mut Tables, diags: &mut Vec<Di
 
 pub(crate) fn is_const_expr(e: &Expr) -> bool {
     match &e.kind {
-        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::Ident(_) => true,
+        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::Str(_) | ExprKind::Ident(_) => true,
         ExprKind::Unary { expr, .. } => is_const_expr(expr),
         ExprKind::Binary { lhs, rhs, .. } => is_const_expr(lhs) && is_const_expr(rhs),
-        ExprKind::Str(_)
+        ExprKind::Interp(_)
         | ExprKind::Call { .. }
         | ExprKind::If { .. }
         | ExprKind::Field { .. }

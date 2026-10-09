@@ -1,0 +1,12 @@
+// error 8: string interpolation only works directly inside `print(...)` for now
+// error 9: `+` needs numbers, found string and string
+// error 10: expected string, found int
+// error 11: this has no value to print
+f() {}
+main() {
+    let hp = 3
+    let s = "hp {hp}"
+    let t = "a" + "b"
+    let u: string = 5
+    print("{f()}")
+}

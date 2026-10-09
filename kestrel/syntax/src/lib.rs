@@ -12,7 +12,7 @@ pub use span::{LineIndex, Span};
 /// Lex and parse one source file. Diagnostics from both stages, in order.
 pub fn parse(src: &str) -> (ast::Program, Vec<Diagnostic>) {
     let (toks, mut diags) = lexer::lex(src);
-    let (program, parse_diags) = parser::Parser::new(&toks).parse_program();
+    let (program, parse_diags) = parser::Parser::new(toks).parse_program();
     diags.extend(parse_diags);
     (program, diags)
 }

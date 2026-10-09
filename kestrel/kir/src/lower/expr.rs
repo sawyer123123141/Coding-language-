@@ -33,7 +33,8 @@ impl<'a> FnLowerer<'a> {
             }
             ast::ExprKind::Float(f) => ExprKind::Float(*f),
             ast::ExprKind::Bool(b) => ExprKind::Bool(*b),
-            ast::ExprKind::Str(_) => unreachable!("strings only appear as print arguments"),
+            ast::ExprKind::Str(s) => ExprKind::StrLit(s.clone()),
+            ast::ExprKind::Interp(_) => unreachable!("checker allows interpolation only inside print"),
             ast::ExprKind::Ident(_) => match self.t.res[&e.id] {
                 Res::Local(l) => ExprKind::Load(Place::local(self.local_map[&l])),
                 Res::Const(c) => return self.const_value(c),

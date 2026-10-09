@@ -1,7 +1,7 @@
 use super::{PResult, Parser};
-use crate::ast::{Arg, BinaryOp, Block, Expr, ExprKind, MatchArm, Pattern, Stmt, UnaryOp};
+use crate::ast::{Arg, BinaryOp, Block, Expr, ExprKind, InterpPart, MatchArm, Pattern, Stmt, UnaryOp};
 use crate::span::Span;
-use crate::token::Tok;
+use crate::token::{StrPart, Tok, Token};
 
 fn cmp_op(t: &Tok) -> Option<BinaryOp> {
     Some(match t {
@@ -15,7 +15,7 @@ fn cmp_op(t: &Tok) -> Option<BinaryOp> {
     })
 }
 
-impl<'t> Parser<'t> {
+impl Parser {
     pub(crate) fn expr(&mut self) -> PResult<Expr> {
         self.or_expr()
     }
@@ -98,6 +98,31 @@ impl<'t> Parser<'t> {
         Ok(self.expr_node(ExprKind::Unary { op, expr: Box::new(inner) }, span))
     }
 
+    /// Parses the code inside `{...}` of an interpolated string. `start` is
+    /// its byte offset in the file, so spans point into the string.
+    fn interpolated(&mut self, text: &str, start: u32) -> PResult<Expr> {
+        let shift = |s: Span| Span { start: s.start + start, end: s.end + start };
+        let (mut toks, diags) = crate::lexer::lex(text);
+        for d in diags {
+            self.error(shift(d.span), d.message);
+        }
+        for t in &mut toks {
+            t.span = shift(t.span);
+        }
+        // The expression must end at the `}`: give the token stream one to stop at.
+        let close = Span::new((start as usize) + text.len(), (start as usize) + text.len() + 1);
+        let eof = toks.pop().expect("lex always ends with Eof");
+        toks.push(Token { tok: Tok::RBrace, span: close });
+        toks.push(eof);
+        let saved = (std::mem::replace(&mut self.toks, toks), std::mem::replace(&mut self.pos, 0));
+        let result = self.expr().and_then(|e| {
+            self.expect(&Tok::RBrace, "`}` after the expression")?;
+            Ok(e)
+        });
+        (self.toks, self.pos) = saved;
+        result
+    }
+
     /// A primary expression followed by any `.field` / `.method(args)`.
     fn postfix(&mut self) -> PResult<Expr> {
         let mut e = self.primary()?;
@@ -122,6 +147,17 @@ impl<'t> Parser<'t> {
             Tok::Int(n) => ExprKind::Int(n),
             Tok::Float(f) => ExprKind::Float(f),
             Tok::Str(s) => ExprKind::Str(s),
+            Tok::StrParts(parts) => {
+                self.bump();
+                let mut out = Vec::with_capacity(parts.len());
+                for part in parts {
+                    out.push(match part {
+                        StrPart::Lit(s) => InterpPart::Lit(s),
+                        StrPart::Code { text, start } => InterpPart::Expr(self.interpolated(&text, start)?),
+                    });
+                }
+                return Ok(self.expr_node(ExprKind::Interp(out), span));
+            }
             Tok::True => ExprKind::Bool(true),
             Tok::False => ExprKind::Bool(false),
             Tok::Ident(name) => {

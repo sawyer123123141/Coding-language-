@@ -75,7 +75,7 @@ fn errors_are_reported() {
         ("f() -> int { }\nmain() {}\n", "`f` must return int, but its body can finish without a value"),
         ("let A = B\nlet B = 1\nmain() {}\n", "unknown name `B`"),
         ("f(x: vec9) {}\nmain() {}\n", "unknown type `vec9`"),
-        ("main() {\n let s = \"hi\"\n}\n", "string values aren't supported yet (only as `print` arguments)"),
+        ("main() {\n let n = 1\n let s = \"n = {n}\"\n}\n", "string interpolation only works directly inside `print(...)` for now"),
         ("pure f(var x: int) {}\nmain() {}\n", "pure functions can't take `var` parameters"),
         ("f(x: int) {\n x = 1\n}\nmain() {}\n", "can't change parameter `x`"),
         ("main() {\n let u: u8 = 1\n let n = -u\n}\n", "can't negate a u8"),
@@ -84,7 +84,7 @@ fn errors_are_reported() {
         ("f() -> vec9 { }\nmain() {}\n", "unknown type `vec9`"),
         ("main() {\n let y: int = if true { return } else { return }\n}\n", NEVER_IF),
         ("f(x: int) {}\nmain() {\n f(if true { return } else { return })\n}\n", NEVER_IF),
-        ("g(s: string) {}\nmain() {}\n", "string values aren't supported yet (only as `print` arguments)"),
+        ("main() {\n let s = \"a\" + \"b\"\n}\n", "`+` needs numbers, found string and string"),
     ];
     for (src, expected) in cases {
         let errs = errors(src);

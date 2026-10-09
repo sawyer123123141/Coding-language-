@@ -13,11 +13,13 @@ pub enum KTy {
     Struct(StructIdx),
     /// An enum, laid out by `Module::enums`: a u8 tag, then the variant's fields.
     Enum(EnumIdx),
+    /// A string: a pointer to UTF-8 bytes at offset 0, its length (i64) at 8.
+    Str,
 }
 
 impl KTy {
     pub fn is_aggregate(self) -> bool {
-        matches!(self, KTy::Struct(_) | KTy::Enum(_))
+        matches!(self, KTy::Struct(_) | KTy::Enum(_) | KTy::Str)
     }
 
     pub fn is_float(self) -> bool {
@@ -68,6 +70,7 @@ impl Module {
             KTy::Bool | KTy::U8 => (1, 1),
             KTy::I32 | KTy::F32 => (4, 4),
             KTy::I64 | KTy::F64 => (8, 8),
+            KTy::Str => (16, 8),
             KTy::Struct(s) => {
                 let l = self.layout(s);
                 (l.size, l.align)
@@ -186,6 +189,8 @@ pub enum Stmt {
 pub enum PrintArg {
     Value(Expr),
     Str(String),
+    /// An interpolated string: its parts print with nothing between them.
+    Interp(Vec<PrintArg>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -201,6 +206,8 @@ pub enum ExprKind {
     Int(i64),
     Float(f64),
     Bool(bool),
+    /// A string literal; the bytes live in read-only data.
+    StrLit(String),
     /// The value stored at a place (a scalar, or a whole struct).
     Load(Place),
     Unary(UnOp, Box<Expr>),

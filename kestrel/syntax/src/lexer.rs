@@ -1,7 +1,7 @@
 use crate::diag::Diagnostic;
 use crate::newlines;
 use crate::span::Span;
-use crate::token::{keyword, Tok, Token};
+use crate::token::{keyword, StrPart, Tok, Token};
 
 /// Source text to tokens. Always ends with one `Eof`; statement-continuing
 /// newlines are already removed.
@@ -107,6 +107,7 @@ impl<'a> Lexer<'a> {
         let start = self.pos;
         self.pos += 1;
         let mut value = String::new();
+        let mut parts: Vec<StrPart> = Vec::new();
         loop {
             if self.pos >= self.bytes.len() || self.peek(0) == b'\n' {
                 self.error(start, "unterminated string");
@@ -115,7 +116,14 @@ impl<'a> Lexer<'a> {
             match self.peek(0) {
                 b'"' => {
                     self.pos += 1;
-                    self.push(Tok::Str(value), start);
+                    if parts.is_empty() {
+                        self.push(Tok::Str(value), start);
+                    } else {
+                        if !value.is_empty() {
+                            parts.push(StrPart::Lit(value));
+                        }
+                        self.push(Tok::StrParts(parts), start);
+                    }
                     return;
                 }
                 b'\\' => {
@@ -141,9 +149,13 @@ impl<'a> Lexer<'a> {
                     self.pos += 2;
                 }
                 b'{' => {
-                    let at = self.pos;
-                    self.pos += 1;
-                    self.error(at, "string interpolation isn't supported yet; escape the brace as `\\{`");
+                    if !value.is_empty() {
+                        parts.push(StrPart::Lit(std::mem::take(&mut value)));
+                    }
+                    match self.interpolation() {
+                        Some(part) => parts.push(part),
+                        None => return,
+                    }
                 }
                 _ => {
                     let ch = self.src[self.pos..].chars().next().unwrap();
@@ -152,6 +164,43 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
+    }
+
+    /// `{code}` inside a string, with `pos` on the `{`. On error, reports it,
+    /// skips the rest of the string, and returns `None`.
+    fn interpolation(&mut self) -> Option<StrPart> {
+        let open = self.pos;
+        let code_start = self.pos + 1;
+        let mut depth = 0;
+        let mut i = code_start;
+        let fail = |lx: &mut Self, msg: &str| {
+            lx.pos = lx.pos.max(open + 1);
+            lx.error(open, msg);
+            while lx.pos < lx.bytes.len() && !matches!(lx.peek(0), b'"' | b'\n') {
+                lx.pos += 1;
+            }
+            if lx.peek(0) == b'"' {
+                lx.pos += 1;
+            }
+            None
+        };
+        loop {
+            match self.bytes.get(i) {
+                // A `"` ends the string (strings nested inside `{...}` aren't supported).
+                None | Some(b'\n' | b'"') => return fail(self, "unterminated `{` in a string"),
+                Some(b'{') => depth += 1,
+                Some(b'}') if depth == 0 => break,
+                Some(b'}') => depth -= 1,
+                _ => {}
+            }
+            i += 1;
+        }
+        let text = &self.src[code_start..i];
+        if text.trim().is_empty() {
+            return fail(self, "empty `{}` in a string; write `\\{` for a brace");
+        }
+        self.pos = i + 1;
+        Some(StrPart::Code { text: text.to_string(), start: code_start as u32 })
     }
 
     fn punct(&mut self) {

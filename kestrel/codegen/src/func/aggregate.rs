@@ -26,6 +26,11 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                     self.store_at(f, dest, layout.offset as i32)?;
                 }
             }
+            ExprKind::StrLit(s) => {
+                let (p, n) = self.string(s)?;
+                self.b.ins().store(MemFlags::trusted(), p, dest, 0);
+                self.b.ins().store(MemFlags::trusted(), n, dest, 8);
+            }
             ExprKind::FieldOf(base, i) => {
                 let src = self.field_addr(base, *i)?;
                 self.copy_aggregate(dest, src, e.ty);

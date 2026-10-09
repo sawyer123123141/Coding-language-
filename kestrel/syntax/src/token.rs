@@ -6,6 +6,8 @@ pub enum Tok {
     Int(u64),
     Float(f64),
     Str(String),
+    /// A string with `{...}` interpolation.
+    StrParts(Vec<StrPart>),
     // keywords
     Pure, Let, Var, If, Else, While, For, From, To, In, Par, Match, Struct, Enum, Arena,
     Return, Break, Continue, And, Or, Not, True, False, Use, Pub, SelfKw,
@@ -16,6 +18,13 @@ pub enum Tok {
     Plus, Minus, Star, Slash, Percent, Assign, EqEq, NotEq, Lt, Gt, Le, Ge,
     PlusEq, MinusEq, StarEq, SlashEq, PercentEq,
     Eof,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum StrPart {
+    Lit(String),
+    /// Source text of an interpolated expression and its byte offset in the file.
+    Code { text: String, start: u32 },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -75,7 +84,7 @@ impl Tok {
             Ident(s) => format!("name `{s}`"),
             Int(n) => format!("number `{n}`"),
             Float(f) => format!("number `{f}`"),
-            Str(_) => "a string".into(),
+            Str(_) | StrParts(_) => "a string".into(),
             Newline => "end of line".into(),
             Eof => "end of file".into(),
             other => format!("`{}`", other.symbol()),
@@ -97,7 +106,7 @@ impl Tok {
             Slash => "/", Percent => "%", Assign => "=", EqEq => "==", NotEq => "!=",
             Lt => "<", Gt => ">", Le => "<=", Ge => ">=", PlusEq => "+=", MinusEq => "-=",
             StarEq => "*=", SlashEq => "/=", PercentEq => "%=",
-            Ident(_) | Int(_) | Float(_) | Str(_) | Newline | Eof => "",
+            Ident(_) | Int(_) | Float(_) | Str(_) | StrParts(_) | Newline | Eof => "",
         }
     }
 }

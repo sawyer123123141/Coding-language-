@@ -201,3 +201,13 @@ fn enum_errors() {
     assert_eq!(errs("enum A {\n    X { a int }\n}\nmain() {}"), vec!["expected `:` and a type, found name `int`"]);
     assert_eq!(errs("main() {\n match x { 1 { } }\n}"), vec!["expected a variant name or `else`, found number `1`"]);
 }
+
+#[test]
+fn interpolated_strings() {
+    assert_eq!(body("print(\"hp = {hp + 1}!\")"), "{(call print (interp \"hp = \" (+ hp 1) \"!\"))}");
+    assert_eq!(body("print(\"{p.x}{p.y}\")"), "{(call print (interp (. p x) (. p y)))}");
+    // Spans inside the string point at the source text.
+    let (_, d) = parse("main() {\n print(\"x {1 +}\")\n}");
+    assert_eq!(d.iter().map(|d| d.message.as_str()).collect::<Vec<_>>(), ["expected an expression, found `}`"]);
+    assert_eq!(d[0].span.start, 23, "points at the closing brace");
+}

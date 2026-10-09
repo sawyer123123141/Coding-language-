@@ -7,11 +7,19 @@ use super::{cl_type, FuncLowerer};
 
 impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     pub(crate) fn print(&mut self, args: &[kir::PrintArg]) -> Result<(), String> {
-        // Evaluate every argument before writing anything, so output (or a
-        // panic) inside an argument can't interleave with this line. Structs
-        // are copied out so a later argument can't change them first.
-        let mut vals = Vec::with_capacity(args.len());
-        for a in args {
+        // Arguments are separated by spaces; an interpolated string's parts aren't.
+        let mut pieces = Vec::with_capacity(args.len());
+        for (i, a) in args.iter().enumerate() {
+            match a {
+                kir::PrintArg::Interp(parts) => pieces.extend(parts.iter().enumerate().map(|(j, p)| (p, i > 0 && j == 0))),
+                _ => pieces.push((a, i > 0)),
+            }
+        }
+        // Evaluate everything before writing anything, so output (or a panic)
+        // inside an argument can't interleave with this line. Aggregates are
+        // copied out so a later argument can't change them first.
+        let mut vals = Vec::with_capacity(pieces.len());
+        for &(a, _) in &pieces {
             vals.push(match a {
                 kir::PrintArg::Value(e) if e.ty.is_aggregate() => {
                     let tmp = self.temp_addr(e.ty);
@@ -20,23 +28,19 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 }
                 kir::PrintArg::Value(e) => Some(self.expr(e)?),
                 kir::PrintArg::Str(_) => None,
+                kir::PrintArg::Interp(_) => unreachable!("interpolations don't nest"),
             });
         }
         let rt = self.shared.rt;
-        for (i, (a, val)) in args.iter().zip(vals).enumerate() {
-            if i > 0 {
+        for ((a, space), val) in pieces.into_iter().zip(vals) {
+            if space {
                 self.call_id(rt.print_space, &[]);
             }
-            match a {
-                kir::PrintArg::Str(s) => self.print_text(s)?,
-                kir::PrintArg::Value(e) => {
-                    let v = val.expect("value arguments are evaluated above");
-                    if e.ty.is_aggregate() {
-                        self.print_aggregate(v, 0, e.ty)?;
-                    } else {
-                        self.print_scalar(v, e.ty);
-                    }
-                }
+            match (a, val) {
+                (kir::PrintArg::Value(e), Some(v)) if e.ty.is_aggregate() => self.print_aggregate(v, 0, e.ty)?,
+                (kir::PrintArg::Value(e), Some(v)) => self.print_scalar(v, e.ty),
+                (kir::PrintArg::Str(s), _) => self.print_text(s)?,
+                _ => unreachable!("value pieces are evaluated above"),
             }
         }
         self.call_id(rt.print_newline, &[]);
@@ -58,15 +62,21 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             KTy::I64 => self.call_id(rt.print_i64, &[v]),
             KTy::F32 => self.call_id(rt.print_f32, &[v]),
             KTy::F64 => self.call_id(rt.print_f64, &[v]),
-            KTy::Struct(_) | KTy::Enum(_) => unreachable!("structs and enums are printed field by field"),
+            KTy::Struct(_) | KTy::Enum(_) | KTy::Str => unreachable!("aggregates are printed from memory"),
         };
     }
 
-    /// Prints the struct or enum at `addr + offset`: `Point(x: 1, y: 2)`,
-    /// `Block.Air`, `Block.Stone(hardness: 3)`.
+    /// Prints the value at `addr + offset`: `Point(x: 1, y: 2)`, `Block.Air`,
+    /// `Block.Stone(hardness: 3)`, or a string's text.
     fn print_aggregate(&mut self, addr: Value, offset: i32, ty: KTy) -> Result<(), String> {
         let kir = self.shared.kir;
         match ty {
+            KTy::Str => {
+                let p = self.b.ins().load(self.ptr, MemFlags::trusted(), addr, offset);
+                let n = self.b.ins().load(types::I64, MemFlags::trusted(), addr, offset + 8);
+                self.call_id(self.shared.rt.print_str, &[p, n]);
+                Ok(())
+            }
             KTy::Struct(s) => {
                 let layout = kir.layout(s);
                 self.print_text(&format!("{}(", layout.name))?;
@@ -97,7 +107,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 self.b.switch_to_block(done);
                 Ok(())
             }
-            _ => unreachable!("not a struct or enum"),
+            _ => unreachable!("not an aggregate"),
         }
     }
 
@@ -106,7 +116,12 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             let label = if i == 0 { format!("{}: ", f.name) } else { format!(", {}: ", f.name) };
             self.print_text(&label)?;
             let at = offset + f.offset as i32;
-            if f.ty.is_aggregate() {
+            if f.ty == KTy::Str {
+                // Quoted, so `name: "a, b: 1"` can't pass for two fields.
+                self.print_text("\"")?;
+                self.print_aggregate(addr, at, f.ty)?;
+                self.print_text("\"")?;
+            } else if f.ty.is_aggregate() {
                 self.print_aggregate(addr, at, f.ty)?;
             } else {
                 let v = self.b.ins().load(cl_type(f.ty), MemFlags::trusted(), addr, at);
@@ -123,7 +138,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     }
 
     /// Pointer and length of a string literal's bytes.
-    fn string(&mut self, s: &str) -> Result<(Value, Value), String> {
+    pub(crate) fn string(&mut self, s: &str) -> Result<(Value, Value), String> {
         let id = match self.strings.ids.get(s) {
             Some(&id) => id,
             None => {

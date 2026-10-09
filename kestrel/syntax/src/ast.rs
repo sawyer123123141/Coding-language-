@@ -150,6 +150,8 @@ pub enum ExprKind {
     Float(f64),
     Bool(bool),
     Str(String),
+    /// `"hp = {hp}"`: literal text and expressions, in order.
+    Interp(Vec<InterpPart>),
     Ident(String),
     Unary { op: UnaryOp, expr: Box<Expr> },
     Binary { op: BinaryOp, lhs: Box<Expr>, rhs: Box<Expr> },
@@ -160,6 +162,12 @@ pub enum ExprKind {
     /// `receiver.name(args)`
     MethodCall { receiver: Box<Expr>, name: String, name_span: Span, args: Vec<Arg> },
     Match { scrutinee: Box<Expr>, arms: Vec<MatchArm> },
+}
+
+#[derive(Clone, Debug)]
+pub enum InterpPart {
+    Lit(String),
+    Expr(Expr),
 }
 
 #[derive(Clone, Debug)]
@@ -309,6 +317,16 @@ impl Expr {
             ExprKind::Float(f) => f.to_string(),
             ExprKind::Bool(b) => b.to_string(),
             ExprKind::Str(s) => format!("{s:?}"),
+            ExprKind::Interp(parts) => {
+                let parts: Vec<String> = parts
+                    .iter()
+                    .map(|p| match p {
+                        InterpPart::Lit(s) => format!("{s:?}"),
+                        InterpPart::Expr(e) => e.to_sexpr(),
+                    })
+                    .collect();
+                format!("(interp {})", parts.join(" "))
+            }
             ExprKind::Ident(name) => name.clone(),
             ExprKind::Unary { op, expr } => {
                 let sym = match op {
