@@ -17,6 +17,11 @@ pub struct ConstId(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct StructId(pub u32);
 
+/// The built-in vector types are the first structs, before any user struct.
+pub const VEC2: StructId = StructId(0);
+pub const VEC3: StructId = StructId(1);
+pub const BUILTIN_STRUCTS: u32 = 2;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EnumId(pub u32);
 
@@ -88,6 +93,7 @@ impl FnInfo {
 #[derive(Clone, Debug)]
 pub struct StructInfo {
     pub name: String,
+    /// Index into `Program::items`; `usize::MAX` for built-in structs.
     pub item: usize,
     pub span: Span,
     pub fields: Vec<FieldInfo>,
@@ -149,6 +155,8 @@ pub struct Tables {
     /// For a struct or variant constructor: per field, the argument index,
     /// or `None` for the default.
     pub ctor_args: HashMap<ExprId, Vec<Option<usize>>>,
+    /// For a swizzle like `v.xz`: the components it picks, in order.
+    pub swizzles: HashMap<ExprId, Vec<u32>>,
     pub fn_by_name: HashMap<String, FnId>,
     pub const_by_name: HashMap<String, ConstId>,
     pub main: Option<FnId>,
@@ -169,6 +177,15 @@ impl Tables {
 
     pub fn strukt(&self, id: StructId) -> &StructInfo {
         &self.structs[id.0 as usize]
+    }
+
+    /// The number of components when `ty` is `vec2` or `vec3`.
+    pub fn vec_dims(&self, ty: Ty) -> Option<u32> {
+        match ty {
+            Ty::Struct(VEC2) => Some(2),
+            Ty::Struct(VEC3) => Some(3),
+            _ => None,
+        }
     }
 
     pub fn enm(&self, id: EnumId) -> &EnumInfo {

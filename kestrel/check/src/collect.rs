@@ -5,10 +5,11 @@ use kestrel_syntax::{Diagnostic, Span};
 
 use crate::tables::{
     ConstInfo, EnumId, EnumInfo, FieldInfo, FnId, FnInfo, ParamSig, StructId, StructInfo, Tables, VariantInfo,
+    BUILTIN_STRUCTS,
 };
 use crate::ty::Ty;
 
-const BUILTINS: &[&str] = &["print", "int", "i64", "u8", "float", "f64", "bool", "string"];
+const BUILTINS: &[&str] = &["print", "int", "i64", "u8", "float", "f64", "bool", "string", "vec2", "vec3"];
 
 pub(crate) fn resolve_type(ty: &TypeExpr, t: &Tables, diags: &mut Vec<Diagnostic>) -> Ty {
     let msg = match &ty.kind {
@@ -37,6 +38,7 @@ pub(crate) fn resolve_type(ty: &TypeExpr, t: &Tables, diags: &mut Vec<Diagnostic
 /// checked. Type names come first so any type can refer to any other.
 pub(crate) fn collect(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
     check_names(program, diags);
+    add_builtin_vectors(t);
     for (item_idx, item) in program.items.iter().enumerate() {
         match item {
             Item::Struct(s) => {
@@ -54,7 +56,7 @@ pub(crate) fn collect(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnos
             Item::Fn(_) | Item::Const(_) => {}
         }
     }
-    let (mut struct_id, mut enum_id) = (0, 0);
+    let (mut struct_id, mut enum_id) = (BUILTIN_STRUCTS, 0);
     for (item_idx, item) in program.items.iter().enumerate() {
         match item {
             Item::Fn(f) => {
@@ -83,6 +85,19 @@ pub(crate) fn collect(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnos
     check_self_containment(t, diags);
     if t.main.is_none() {
         diags.push(Diagnostic::error(Span::new(0, 0), "program needs a `main()` function"));
+    }
+}
+
+/// `vec2` and `vec3`: structs of floats, always `StructId` 0 and 1.
+fn add_builtin_vectors(t: &mut Tables) {
+    for (name, comps) in [("vec2", &["x", "y"][..]), ("vec3", &["x", "y", "z"][..])] {
+        let id = StructId(t.structs.len() as u32);
+        t.struct_by_name.insert(name.to_string(), id);
+        let fields = comps
+            .iter()
+            .map(|c| FieldInfo { name: c.to_string(), ty: Ty::Float, span: Span::default(), has_default: false })
+            .collect();
+        t.structs.push(StructInfo { name: name.to_string(), item: usize::MAX, span: Span::default(), fields, methods: HashMap::new() });
     }
 }
 

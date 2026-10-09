@@ -105,6 +105,9 @@ impl<'a> BodyChecker<'a> {
             }
             UnaryOp::Neg => {
                 let ty = self.check_expr(inner, want.filter(|t| t.is_numeric()));
+                if self.t.vec_dims(ty).is_some() {
+                    return ty;
+                }
                 if ty == Ty::U8 {
                     self.error(inner.span, "can't negate a u8");
                     return Ty::Error;
@@ -139,9 +142,42 @@ impl<'a> BodyChecker<'a> {
                 let hint = want.filter(|t| t.is_numeric());
                 let lt = self.check_expr(lhs, hint);
                 let rt = self.check_expr(rhs, Some(lt).filter(|t| t.is_numeric()).or(hint));
+                if self.t.vec_dims(lt).is_some() || self.t.vec_dims(rt).is_some() {
+                    return self.vec_binary(e, op, lhs, lt, rhs, rt);
+                }
                 self.operands(e, op, lhs, lt, rhs, rt)
             }
         }
+    }
+
+    /// `+ - * /` on vectors: component-wise with a vector of the same size,
+    /// or with a number (applied to every component).
+    fn vec_binary(&mut self, e: &Expr, op: BinaryOp, lhs: &Expr, lt: Ty, rhs: &Expr, rt: Ty) -> Ty {
+        if lt == Ty::Error || rt == Ty::Error {
+            return Ty::Error;
+        }
+        let sym = op.symbol();
+        if !matches!(op, BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div) {
+            self.error(e.span, format!("`{sym}` doesn't work on vectors"));
+            return Ty::Error;
+        }
+        let (vec, scalar, scalar_ty) = match (self.t.vec_dims(lt), self.t.vec_dims(rt)) {
+            (Some(_), Some(_)) if lt == rt => return lt,
+            (Some(_), Some(_)) => {
+                let msg = format!("`{sym}` can't mix {} and {}", self.tn(lt), self.tn(rt));
+                self.error(e.span, msg);
+                return Ty::Error;
+            }
+            (Some(_), None) => (lt, rhs, rt),
+            _ => (rt, lhs, lt),
+        };
+        if !scalar_ty.is_numeric() {
+            let msg = format!("`{sym}` needs a vector and a number, found {} and {}", self.tn(lt), self.tn(rt));
+            self.error(e.span, msg);
+            return Ty::Error;
+        }
+        self.coerce(scalar, scalar_ty, Ty::Float);
+        vec
     }
 
     /// Both operands must be numbers that meet at a common type.

@@ -23,6 +23,8 @@ impl<'a> BodyChecker<'a> {
                 Some(Res::Local(l)) => Some(self.t.local(*l).alias.unwrap_or(*l)),
                 _ => None,
             },
+            // A swizzle (`v.xz`) builds a new vector; it isn't a place.
+            ExprKind::Field { .. } if self.t.swizzles.contains_key(&e.id) => None,
             ExprKind::Field { base, .. } => self.place_root(base),
             _ => None,
         }
@@ -88,10 +90,26 @@ impl<'a> BodyChecker<'a> {
             }
             None => {}
         }
+        if op != AssignOp::Set && self.t.vec_dims(target_ty).is_some() {
+            return self.check_vec_compound(target_ty, op, value);
+        }
         if op != AssignOp::Set && !target_ty.is_numeric() && target_ty != Ty::Error {
             let msg = format!("`{}` needs a number, found {}", op.symbol(), self.tn(target_ty));
             self.error(target.span, msg);
         }
         self.check_value(value, Some(target_ty));
+    }
+
+    /// `v += w`, `v *= 2.0`: the value is a vector of the same size, or a number.
+    fn check_vec_compound(&mut self, target_ty: Ty, op: AssignOp, value: &Expr) {
+        let value_ty = self.check_expr(value, None);
+        if op == AssignOp::Rem {
+            self.error(value.span, "`%=` doesn't work on vectors");
+        } else if value_ty.is_numeric() {
+            self.coerce(value, value_ty, Ty::Float);
+        } else if value_ty != target_ty && value_ty != Ty::Error {
+            let msg = format!("`{}` needs a {} or a number, found {}", op.symbol(), self.tn(target_ty), self.tn(value_ty));
+            self.error(value.span, msg);
+        }
     }
 }

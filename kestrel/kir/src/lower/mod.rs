@@ -2,6 +2,7 @@ mod call;
 mod expr;
 mod layout;
 mod matching;
+mod vector;
 
 use std::collections::HashMap;
 
@@ -170,7 +171,12 @@ impl<'a> FnLowerer<'a> {
                     Some(bop) => {
                         let line = rhs.line;
                         let cur = Expr { kind: ExprKind::Load(place.clone()), ty, line };
-                        Expr { kind: ExprKind::Binary(binop(bop), Box::new(cur), Box::new(rhs)), ty, line }
+                        let kind = if ty.is_aggregate() {
+                            self.vec_combine(binop(bop), cur, rhs, ty, line)
+                        } else {
+                            ExprKind::Binary(binop(bop), Box::new(cur), Box::new(rhs))
+                        };
+                        Expr { kind, ty, line }
                     }
                 };
                 Stmt::Assign(place, value)

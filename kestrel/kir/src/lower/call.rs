@@ -33,7 +33,7 @@ impl<'a> FnLowerer<'a> {
     }
 
     /// Stores `v` in a fresh temporary and returns a load of it.
-    fn spill(&mut self, v: Expr, pre: &mut Vec<Stmt>) -> Expr {
+    pub(crate) fn spill(&mut self, v: Expr, pre: &mut Vec<Stmt>) -> Expr {
         let (ty, line) = (v.ty, v.line);
         let tmp = self.temp(ty);
         pre.push(Stmt::Let(tmp, v));
@@ -94,7 +94,6 @@ impl<'a> FnLowerer<'a> {
     pub(crate) fn construct(&mut self, e: &ast::Expr, sid: StructId, args: &[ast::Arg]) -> (Vec<Stmt>, ExprKind) {
         let (t, program) = (self.t, self.program);
         let slots = &t.ctor_args[&e.id];
-        let ast::Item::Struct(decl) = &program.items[t.strukt(sid).item] else { unreachable!("StructInfo points at a struct") };
         let bound: Vec<usize> = slots.iter().flatten().copied().collect();
         let in_order = bound.windows(2).all(|w| w[0] < w[1]);
         let mut pre = Vec::new();
@@ -112,7 +111,11 @@ impl<'a> FnLowerer<'a> {
                     Some(v) => v,
                     None => self.expr(&args[*ai].value),
                 },
-                None => self.expr(decl.fields[fi].default.as_ref().expect("checker requires a default for a missing field")),
+                None => {
+                    // Only user structs have defaults; built-in ones have no declaration.
+                    let ast::Item::Struct(decl) = &program.items[t.strukt(sid).item] else { unreachable!("a struct with defaults") };
+                    self.expr(decl.fields[fi].default.as_ref().expect("checker requires a default for a missing field"))
+                }
             });
         }
         (pre, ExprKind::StructLit(StructIdx(sid.0), fields))

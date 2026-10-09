@@ -39,12 +39,20 @@ impl<'a> FnLowerer<'a> {
                 Res::Const(c) => return self.const_value(c),
                 other => unreachable!("name resolved to {other:?}"),
             },
+            ast::ExprKind::Unary { op: ast::UnaryOp::Neg, expr } if self.vec_ty(e).is_some() => {
+                let v = self.expr(expr);
+                self.vec_negate(v, ty, line)
+            }
             ast::ExprKind::Unary { op, expr } => {
                 let op = match op {
                     ast::UnaryOp::Neg => UnOp::Neg,
                     ast::UnaryOp::Not => UnOp::Not,
                 };
                 ExprKind::Unary(op, Box::new(self.expr(expr)))
+            }
+            ast::ExprKind::Binary { op, lhs, rhs } if self.vec_ty(e).is_some() => {
+                let (l, r) = (self.expr(lhs), self.expr(rhs));
+                self.vec_combine(binop(*op), l, r, ty, line)
             }
             ast::ExprKind::Binary { op, lhs, rhs } => {
                 let l = Box::new(self.expr(lhs));
@@ -78,6 +86,10 @@ impl<'a> FnLowerer<'a> {
                 }
                 other => unreachable!("method call resolved to {other:?}"),
             },
+            ast::ExprKind::Field { base, .. } if self.t.swizzles.contains_key(&e.id) => {
+                let comps = self.t.swizzles[&e.id].clone();
+                self.swizzle(base, &comps, ty, line)
+            }
             ast::ExprKind::Field { base, .. } => match (self.t.res.get(&e.id), self.place(e)) {
                 (Some(Res::Variant(id, v)), _) => ExprKind::VariantLit(EnumIdx(id.0), *v, Vec::new()),
                 (_, Some(place)) => ExprKind::Load(place),

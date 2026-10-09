@@ -3,7 +3,7 @@ use kestrel_syntax::Diagnostic;
 
 use super::place::Immutable;
 use super::{is_const_expr, BodyChecker};
-use crate::tables::{LocalId, Res, StructId, Tables};
+use crate::tables::{LocalId, Res, StructId, Tables, BUILTIN_STRUCTS};
 use crate::ty::Ty;
 
 /// Field defaults are constant expressions of the field's type.
@@ -15,6 +15,7 @@ pub(crate) fn check_field_defaults(program: &Program, t: &mut Tables, diags: &mu
     for (sid, s) in structs.enumerate() {
         for f in &s.fields {
             let Some(default) = &f.default else { continue };
+            let sid = sid + BUILTIN_STRUCTS as usize;
             let Some(field) = t.structs[sid].fields.iter().find(|g| g.name == f.name) else { continue };
             let ty = field.ty;
             let mut bc = BodyChecker::new(t, diags, None, Ty::Unit, false);
@@ -87,10 +88,16 @@ impl<'a> BodyChecker<'a> {
                 self.t.field_index.insert(e.id, i as u32);
                 ty
             }
-            None => {
-                self.error(*name_span, format!("`{owner}` has no field `{name}`"));
-                Ty::Error
-            }
+            None => match self.swizzle(base_ty, name) {
+                Some((comps, ty)) => {
+                    self.t.swizzles.insert(e.id, comps);
+                    ty
+                }
+                None => {
+                    self.error(*name_span, format!("`{owner}` has no field `{name}`"));
+                    Ty::Error
+                }
+            },
         }
     }
 
@@ -133,6 +140,19 @@ impl<'a> BodyChecker<'a> {
             }
         }
         self.check_args(e, fid, args, 1, var_roots)
+    }
+
+    /// `v.xz`, `v.zyx`: 2 or 3 components of a vector, as a new vector.
+    fn swizzle(&self, base_ty: Ty, name: &str) -> Option<(Vec<u32>, Ty)> {
+        let dims = self.t.vec_dims(base_ty)?;
+        let comps: Option<Vec<u32>> = name.chars().map(|c| "xyz"[..dims as usize].find(c).map(|i| i as u32)).collect();
+        let comps = comps?;
+        let ty = match comps.len() {
+            2 => Ty::Struct(crate::tables::VEC2),
+            3 => Ty::Struct(crate::tables::VEC3),
+            _ => return None,
+        };
+        Some((comps, ty))
     }
 
     /// The variable a `var self` call changes, once it's known it may change.
