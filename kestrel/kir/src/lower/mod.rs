@@ -96,7 +96,7 @@ impl<'a> FnLowerer<'a> {
         let Some((last, init)) = block.stmts.split_last() else { return (Vec::new(), None) };
         let mut stmts: Vec<Stmt> = init.iter().map(|s| self.stmt(s)).collect();
         match last {
-            ast::Stmt::Expr(e) if self.t.ty(e.id) != Ty::Never => {
+            ast::Stmt::Expr(e) if !self.leaves_early(e) => {
                 let v = self.expr(e);
                 (stmts, Some(v))
             }
@@ -104,6 +104,23 @@ impl<'a> FnLowerer<'a> {
                 stmts.push(self.stmt(other));
                 (stmts, None)
             }
+        }
+    }
+
+    /// Whether `e` as a block's last expression can never yield a value: it
+    /// is typed `Never`, or an `if` whose branches all end that way.
+    fn leaves_early(&self, e: &ast::Expr) -> bool {
+        if self.t.ty(e.id) == Ty::Never {
+            return true;
+        }
+        match &e.kind {
+            ast::ExprKind::If { then_block, else_block: Some(else_block), .. } => {
+                [then_block, else_block].into_iter().all(|b| match b.stmts.last() {
+                    Some(ast::Stmt::Expr(tail)) => self.leaves_early(tail),
+                    _ => true,
+                })
+            }
+            _ => false,
         }
     }
 

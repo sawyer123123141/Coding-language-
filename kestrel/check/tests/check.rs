@@ -18,6 +18,8 @@ fn errors(src: &str) -> Vec<String> {
     run(src).1
 }
 
+const NEVER_IF: &str = "this `if` always leaves early, so it has no value";
+
 fn local_ty(t: &Tables, name: &str) -> Ty {
     t.locals.iter().find(|l| l.name == name).unwrap_or_else(|| panic!("no local {name}")).ty
 }
@@ -80,11 +82,35 @@ fn errors_are_reported() {
         ("main() {}\nmain() {}\n", "`main` is defined twice"),
         ("print() {}\nmain() {}\n", "`print` is a built-in name; pick another"),
         ("f() -> vec9 { }\nmain() {}\n", "unknown type `vec9`"),
+        ("main() {\n let y: int = if true { return } else { return }\n}\n", NEVER_IF),
+        ("f(x: int) {}\nmain() {\n f(if true { return } else { return })\n}\n", NEVER_IF),
+        ("g(s: string) {}\nmain() {}\n", "string values aren't supported yet (only as `print` arguments)"),
     ];
     for (src, expected) in cases {
         let errs = errors(src);
         assert_eq!(errs, vec![expected.to_string()], "source:\n{src}");
     }
+}
+
+#[test]
+fn always_leaving_if_has_no_value_outside_a_tail() {
+    let programs = [
+        "main() {\n print(if true { return } else { return })\n}\n",
+        "main() {\n var x = 1\n x = if true { return } else { return }\n}\n",
+        "main() {\n while if true { return } else { return } { }\n}\n",
+        "f() -> int {\n return if true { return 1 } else { return 2 }\n}\nmain() {}\n",
+        "main() {\n for i from if true { return } else { return } to 3 { }\n}\n",
+        "main() {\n let y: int = if true { if true { return } else { return } } else { return }\n}\n",
+    ];
+    for src in programs {
+        assert_eq!(errors(src), vec![NEVER_IF.to_string()], "source:\n{src}");
+    }
+}
+
+#[test]
+fn partly_leaving_if_is_still_a_value() {
+    ok("f(x: int) -> int {\n let y = if x > 0 { x * 2 } else { return -1 }\n y\n}\nmain() {}\n");
+    ok("f(x: int) -> int {\n let y: int = if x > 0 { if x > 5 { return 1 } else { return 2 } } else { 3 }\n y\n}\nmain() {}\n");
 }
 
 #[test]

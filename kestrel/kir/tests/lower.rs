@@ -97,6 +97,13 @@ fn labelled_arguments_are_in_parameter_order() {
 }
 
 #[test]
+fn nested_diverging_tail_is_a_statement() {
+    let src = "f(x: int) -> int {\n if x > 0 { if x > 5 { return 1 } else { return 2 } } else { return 3 }\n}\nmain() {}\n";
+    let m = lower_src(src);
+    assert!(matches!(&func(&m, "f").body[..], [Stmt::If { .. }]));
+}
+
+#[test]
 fn diverging_tail_adds_no_return() {
     let m = lower_src("f(x: int) -> int {\n if x > 0 { return 1 } else { return 2 }\n}\nmain() {}\n");
     assert!(matches!(&func(&m, "f").body[..], [Stmt::If { .. }]));

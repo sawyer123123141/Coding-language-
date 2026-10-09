@@ -67,6 +67,7 @@ impl<'a> BodyChecker<'a> {
                 continue;
             }
             let ty = self.check_expr(&a.value, None);
+            let ty = self.reject_never(&a.value, ty);
             if ty == Ty::Unit {
                 self.error(a.value.span, "this has no value to print");
             }

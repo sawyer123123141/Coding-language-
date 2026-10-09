@@ -124,6 +124,9 @@ impl<'a> BodyChecker<'a> {
     /// Checks `e` against an expected type, recording a conversion or an error.
     pub(crate) fn check_value(&mut self, e: &Expr, want: Option<Ty>) -> Ty {
         let found = self.check_expr(e, want);
+        if found == Ty::Never {
+            return self.reject_never(e, found);
+        }
         match want {
             Some(w) => {
                 self.coerce(e, found, w);
@@ -131,6 +134,32 @@ impl<'a> BodyChecker<'a> {
             }
             None => found,
         }
+    }
+
+    /// Like `check_value`, for a block's last expression: an `if` whose
+    /// branches all leave early is fine there (the block just diverges).
+    pub(crate) fn check_tail(&mut self, e: &Expr, want: Option<Ty>) -> Ty {
+        let found = self.check_expr(e, want);
+        match want {
+            Some(w) => {
+                self.coerce(e, found, w);
+                if found == Ty::Never {
+                    Ty::Never
+                } else {
+                    w
+                }
+            }
+            None => found,
+        }
+    }
+
+    /// An `if` whose branches all leave early produces nothing to use here.
+    pub(crate) fn reject_never(&mut self, e: &Expr, ty: Ty) -> Ty {
+        if ty != Ty::Never {
+            return ty;
+        }
+        self.error(e.span, "this `if` always leaves early, so it has no value");
+        Ty::Error
     }
 
     pub(crate) fn coerce(&mut self, e: &Expr, from: Ty, to: Ty) {
@@ -155,7 +184,7 @@ impl<'a> BodyChecker<'a> {
         let last = block.stmts.len().saturating_sub(1);
         for (i, stmt) in block.stmts.iter().enumerate() {
             ty = match (stmt, expect) {
-                (Stmt::Expr(e), Expect::Value(want)) if i == last => self.check_value(e, want),
+                (Stmt::Expr(e), Expect::Value(want)) if i == last => self.check_tail(e, want),
                 _ => self.check_stmt(stmt),
             };
         }
@@ -189,7 +218,9 @@ impl<'a> BodyChecker<'a> {
             }
             Stmt::ForRange { var, start, end, body, .. } => {
                 let st = self.check_expr(start, None);
+                let st = self.reject_never(start, st);
                 let et = self.check_expr(end, if st.is_int() { Some(st) } else { None });
+                let et = self.reject_never(end, et);
                 let var_ty = match Ty::common(st, et) {
                     _ if st == Ty::Error || et == Ty::Error => Ty::Error,
                     Some(t) if t.is_int() => {

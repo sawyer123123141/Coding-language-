@@ -11,6 +11,7 @@ const BUILTINS: &[&str] = &["print", "int", "i64", "u8", "float", "f64", "bool",
 pub(crate) fn resolve_type(ty: &TypeExpr, diags: &mut Vec<Diagnostic>) -> Ty {
     let msg = match &ty.kind {
         TypeKind::Named { name, args } if args.is_empty() => match Ty::from_name(name) {
+            Some(Ty::Str) => "string values aren't supported yet (only as `print` arguments)".to_string(),
             Some(t) => return t,
             None => format!("unknown type `{name}`"),
         },
