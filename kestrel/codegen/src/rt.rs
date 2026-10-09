@@ -1,0 +1,60 @@
+use cranelift_codegen::ir::{types, AbiParam, Signature, Type};
+use cranelift_module::{FuncId, Linkage, Module};
+
+/// Runtime functions, declared as imports in a module.
+pub(crate) struct RtFuncs {
+    pub print_i64: FuncId,
+    pub print_f32: FuncId,
+    pub print_f64: FuncId,
+    pub print_bool: FuncId,
+    pub print_str: FuncId,
+    pub print_space: FuncId,
+    pub print_newline: FuncId,
+    pub panic: FuncId,
+    pub fmod_f32: FuncId,
+    pub fmod_f64: FuncId,
+}
+
+impl RtFuncs {
+    pub fn declare<M: Module>(module: &mut M) -> Result<Self, String> {
+        let cc = module.isa().default_call_conv();
+        let ptr = module.target_config().pointer_type();
+        let mut decl = |name: &str, params: &[Type], ret: Option<Type>| -> Result<FuncId, String> {
+            let mut sig = Signature::new(cc);
+            sig.params.extend(params.iter().map(|&p| AbiParam::new(p)));
+            sig.returns.extend(ret.map(AbiParam::new));
+            module.declare_function(name, Linkage::Import, &sig).map_err(|e| e.to_string())
+        };
+        use types::{F32, F64, I32, I64, I8};
+        Ok(RtFuncs {
+            print_i64: decl("kestrel_rt_print_i64", &[I64], None)?,
+            print_f32: decl("kestrel_rt_print_f32", &[F32], None)?,
+            print_f64: decl("kestrel_rt_print_f64", &[F64], None)?,
+            print_bool: decl("kestrel_rt_print_bool", &[I8], None)?,
+            print_str: decl("kestrel_rt_print_str", &[ptr, I64], None)?,
+            print_space: decl("kestrel_rt_print_space", &[], None)?,
+            print_newline: decl("kestrel_rt_print_newline", &[], None)?,
+            panic: decl("kestrel_rt_panic", &[I32, I32], None)?,
+            fmod_f32: decl("kestrel_rt_fmod_f32", &[F32, F32], Some(F32))?,
+            fmod_f64: decl("kestrel_rt_fmod_f64", &[F64, F64], Some(F64))?,
+        })
+    }
+}
+
+/// Addresses of every runtime export, for registering with the JIT.
+pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
+    use kestrel_runtime::{panic, print, start};
+    vec![
+        ("kestrel_rt_print_i64", print::kestrel_rt_print_i64 as *const u8),
+        ("kestrel_rt_print_f32", print::kestrel_rt_print_f32 as *const u8),
+        ("kestrel_rt_print_f64", print::kestrel_rt_print_f64 as *const u8),
+        ("kestrel_rt_print_bool", print::kestrel_rt_print_bool as *const u8),
+        ("kestrel_rt_print_str", print::kestrel_rt_print_str as *const u8),
+        ("kestrel_rt_print_space", print::kestrel_rt_print_space as *const u8),
+        ("kestrel_rt_print_newline", print::kestrel_rt_print_newline as *const u8),
+        ("kestrel_rt_panic", panic::kestrel_rt_panic as *const u8),
+        ("kestrel_rt_fmod_f32", panic::kestrel_rt_fmod_f32 as *const u8),
+        ("kestrel_rt_fmod_f64", panic::kestrel_rt_fmod_f64 as *const u8),
+        ("kestrel_rt_start", start::kestrel_rt_start as *const u8),
+    ]
+}
