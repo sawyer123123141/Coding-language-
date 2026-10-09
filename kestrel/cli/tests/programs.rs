@@ -131,3 +131,16 @@ fn release_builds_wrap_on_overflow() {
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n"), "before\nafter\n");
 }
+
+#[test]
+fn release_builds_still_panic_on_division_by_zero() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/programs/div_zero.kes");
+    let exe = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("div_zero_release")
+        .with_extension(std::env::consts::EXE_EXTENSION);
+    let built = build(&path, &exe, &["--release"]);
+    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+    let out = Command::new(&exe).output().unwrap();
+    assert_eq!(out.status.code(), Some(101));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("division by zero on line 5"));
+}

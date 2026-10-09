@@ -1,0 +1,10 @@
+// expect: 4611686018427387904
+// expect-exit: 101
+// expect-stderr: integer overflow on line 8
+main() {
+    var x: i64 = 2147483648
+    x *= 2147483648
+    print(x)
+    x *= 2
+    print("unreachable")
+}

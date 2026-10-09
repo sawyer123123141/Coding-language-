@@ -1,0 +1,15 @@
+// expect: 28 4
+// expect: 127 15
+// expect: 0 5
+// expect: 1 0
+let TOP: u8 = 255
+
+main() {
+    let a: u8 = 200
+    let b: u8 = 7
+    print(a / b, a % b)
+    print(TOP / 2, TOP % 16)
+    let small: u8 = 5
+    print(small / a, small % a)
+    print(a / a, a % a)
+}

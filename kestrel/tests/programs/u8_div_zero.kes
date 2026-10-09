@@ -1,0 +1,11 @@
+// expect: 28
+// expect-exit: 101
+// expect-stderr: division by zero on line 9
+main() {
+    let a: u8 = 200
+    var b: u8 = 7
+    print(a / b)
+    b -= 7
+    print(a % b)
+    print("unreachable")
+}

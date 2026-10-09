@@ -1,0 +1,28 @@
+// expect: false
+// expect: true
+// expect: true
+// expect: false
+// expect: true
+// expect: false true
+// expect: 3
+let ON = true
+
+flip(b: bool) -> bool {
+    not b
+}
+
+main() {
+    let t = true
+    let f = false
+    print(not t)
+    print(not f)
+    print(not (1 > 2))
+    print(not (3 > 2) or not t)
+    print(not not t)
+    print(not ON, flip(ON) == flip(true) and not f)
+    var n = 0
+    while not (n == 3) {
+        n += 1
+    }
+    print(n)
+}

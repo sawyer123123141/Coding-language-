@@ -1,0 +1,16 @@
+// expect: 9223372036854775807
+// expect: -9223372036854775807
+// expect: -9223372036854775808
+// expect-exit: 101
+// expect-stderr: integer overflow on line 14
+main() {
+    var x: i64 = 9223372036854775806
+    x += 1
+    print(x)
+    var y: i64 = -9223372036854775807
+    print(y)
+    y -= 1
+    print(y)
+    y -= 1
+    print(y)
+}
