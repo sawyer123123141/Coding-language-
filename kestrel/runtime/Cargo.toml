@@ -1,0 +1,9 @@
+[package]
+name = "kestrel-runtime"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[dependencies]

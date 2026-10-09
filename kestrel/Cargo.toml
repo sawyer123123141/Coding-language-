@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["syntax", "check", "kir"]
+members = ["syntax", "check", "kir", "runtime"]
 
 [workspace.package]
 version = "0.1.0"
