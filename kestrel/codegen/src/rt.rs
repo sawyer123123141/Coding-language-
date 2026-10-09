@@ -21,7 +21,14 @@ impl RtFuncs {
         let ptr = module.target_config().pointer_type();
         let mut decl = |name: &str, params: &[Type], ret: Option<Type>| -> Result<FuncId, String> {
             let mut sig = Signature::new(cc);
-            sig.params.extend(params.iter().map(|&p| AbiParam::new(p)));
+            // The C ABI leaves an i8 argument's upper bits undefined unless the caller extends it.
+            sig.params.extend(params.iter().map(|&p| {
+                if p == types::I8 {
+                    AbiParam::new(p).uext()
+                } else {
+                    AbiParam::new(p)
+                }
+            }));
             sig.returns.extend(ret.map(AbiParam::new));
             module.declare_function(name, Linkage::Import, &sig).map_err(|e| e.to_string())
         };
@@ -57,4 +64,26 @@ pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
         ("kestrel_rt_fmod_f64", panic::kestrel_rt_fmod_f64 as *const u8),
         ("kestrel_rt_start", start::kestrel_rt_start as *const u8),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use cranelift_codegen::ir::ArgumentExtension;
+    use cranelift_module::{default_libcall_names, Module};
+    use cranelift_object::{ObjectBuilder, ObjectModule};
+
+    use super::RtFuncs;
+    use crate::isa;
+
+    #[test]
+    fn i8_runtime_arguments_are_zero_extended() {
+        let builder = ObjectBuilder::new(isa::host_isa().unwrap(), "t", default_libcall_names()).unwrap();
+        let mut module = ObjectModule::new(builder);
+        let rt = RtFuncs::declare(&mut module).unwrap();
+        let sig = &module.declarations().get_function_decl(rt.print_bool).signature;
+        assert_eq!(sig.params[0].extension, ArgumentExtension::Uext);
+        // Only the i8 parameter is extended.
+        let sig = &module.declarations().get_function_decl(rt.print_i64).signature;
+        assert_eq!(sig.params[0].extension, ArgumentExtension::None);
+    }
 }
