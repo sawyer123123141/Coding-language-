@@ -1,9 +1,11 @@
 use std::env;
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Builds kestrel-runtime as a staticlib (which `cargo test` doesn't do for
-/// workspace members) and exports its path as KESTREL_RUNTIME_LIB.
+/// workspace members), exports its path as KESTREL_RUNTIME_LIB, and copies it
+/// next to the `kestrel` binary where `kestrel build` looks first.
 fn main() {
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
     let workspace = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("..");
@@ -34,4 +36,31 @@ fn main() {
     println!("cargo:rustc-env=KESTREL_RUNTIME_LIB={}", lib.display());
     println!("cargo:rerun-if-changed=../runtime/src");
     println!("cargo:rerun-if-changed=../runtime/Cargo.toml");
+
+    // Best effort: `kestrel build` falls back to the path above if this is skipped or fails.
+    if let Some(dir) = binary_dir(&out) {
+        if let Err(e) = install_beside(&lib, &dir.join(file)) {
+            println!("cargo:warning=couldn't copy the runtime library next to the kestrel binary: {e}");
+        }
+    }
+}
+
+/// The directory the `kestrel` binary lands in, for an OUT_DIR shaped
+/// `<dir>/build/<package>-<hash>/out`. Any other layout gives `None`, so we never guess.
+fn binary_dir(out: &Path) -> Option<PathBuf> {
+    let build = out.ancestors().nth(2)?;
+    if build.file_name()? != "build" {
+        return None;
+    }
+    build.parent().map(Path::to_path_buf)
+}
+
+/// Replaces `dest` with a copy of `lib`. Going through a temporary file keeps
+/// cargo's own hard-linked output of the same name (and its `deps/` original) untouched.
+fn install_beside(lib: &Path, dest: &Path) -> std::io::Result<()> {
+    let tmp = dest.with_extension("tmp");
+    fs::copy(lib, &tmp)?;
+    fs::rename(&tmp, dest).inspect_err(|_| {
+        let _ = fs::remove_file(&tmp);
+    })
 }
