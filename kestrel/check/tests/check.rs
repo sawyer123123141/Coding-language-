@@ -79,10 +79,24 @@ fn errors_are_reported() {
         ("main() {\n let u: u8 = 1\n let n = -u\n}\n", "can't negate a u8"),
         ("main() {}\nmain() {}\n", "`main` is defined twice"),
         ("print() {}\nmain() {}\n", "`print` is a built-in name; pick another"),
+        ("f() -> vec9 { }\nmain() {}\n", "unknown type `vec9`"),
     ];
     for (src, expected) in cases {
         let errs = errors(src);
         assert_eq!(errs, vec![expected.to_string()], "source:\n{src}");
+    }
+}
+
+#[test]
+fn value_branches_must_produce_a_value() {
+    let programs = [
+        "f(c: bool) -> int {\n var y = 0\n if c { 1 } else { y = 2 }\n}\nmain() {}\n",
+        "main() {\n let z: int = if true { 1 } else { }\n}\n",
+        "main() {\n let c = true\n let x = if c { 1 } else { }\n}\n",
+        "main() {\n let z: int = if true { } else { 1 }\n}\n",
+    ];
+    for src in programs {
+        assert_eq!(errors(src), vec!["this branch has no value".to_string()], "source:\n{src}");
     }
 }
 

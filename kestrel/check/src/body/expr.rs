@@ -176,6 +176,17 @@ impl<'a> BodyChecker<'a> {
                 let t1 = self.check_block(then_block, Expect::Value(want));
                 let hint = want.or(if is_value_ty(t1) { Some(t1) } else { None });
                 let t2 = self.check_block(else_block, Expect::Value(hint));
+                // A branch that finishes without a value would bypass the value checks.
+                let mut missing = false;
+                for (ty, block) in [(t1, then_block), (t2, else_block)] {
+                    if ty == Ty::Unit {
+                        self.error(block.span, "this branch has no value");
+                        missing = true;
+                    }
+                }
+                if missing {
+                    return Ty::Error;
+                }
                 if t1 == Ty::Never && t2 == Ty::Never {
                     Ty::Never
                 } else if let Some(w) = want {

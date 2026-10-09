@@ -67,7 +67,8 @@ pub(crate) fn check_fn(program: &Program, fn_id: FnId, t: &mut Tables, diags: &m
     }
     let expect = if ret == Ty::Unit { Expect::Discard } else { Expect::Value(Some(ret)) };
     let body = bc.check_block(&decl.body, expect);
-    if ret != Ty::Unit && body == Ty::Unit {
+    // An unresolved return type was already reported; don't pile on.
+    if !matches!(ret, Ty::Unit | Ty::Error) && body == Ty::Unit {
         let msg = format!("`{}` must return {}, but its body can finish without a value", decl.name, ret.name());
         bc.diags.push(Diagnostic::error(decl.name_span, msg).with_help("end the body with a value or a `return`"));
     }
@@ -226,7 +227,7 @@ impl<'a> BodyChecker<'a> {
                     (Some(v), r) => {
                         self.check_value(v, Some(r));
                     }
-                    (None, Ty::Unit) => {}
+                    (None, Ty::Unit | Ty::Error) => {}
                     (None, r) => self.error(*span, format!("this function must return {}", r.name())),
                 }
                 Ty::Never
