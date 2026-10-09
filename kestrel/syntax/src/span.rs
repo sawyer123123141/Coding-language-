@@ -19,25 +19,40 @@ impl Span {
 /// Maps byte offsets to 1-based line and column numbers.
 pub struct LineIndex {
     line_starts: Vec<u32>,
+    /// Per file: where its bytes start, and the index of its first line.
+    files: Vec<(u32, usize)>,
 }
 
 impl LineIndex {
     pub fn new(src: &str) -> Self {
-        let mut line_starts = vec![0];
-        for (i, b) in src.bytes().enumerate() {
-            if b == b'\n' {
-                line_starts.push(i as u32 + 1);
-            }
-        }
-        LineIndex { line_starts }
+        Self::for_files(&[(0, src)])
     }
 
-    /// 1-based line containing `offset`.
-    pub fn line(&self, offset: u32) -> u32 {
-        match self.line_starts.binary_search(&offset) {
-            Ok(i) => i as u32 + 1,
-            Err(i) => i as u32,
+    /// For several files laid out at the given byte offsets (see
+    /// `parse_at`); `line` then counts within each offset's own file.
+    pub fn for_files(files: &[(u32, &str)]) -> Self {
+        let mut line_starts = Vec::new();
+        let mut firsts = Vec::new();
+        for &(base, src) in files {
+            firsts.push((base, line_starts.len()));
+            line_starts.push(base);
+            for (i, b) in src.bytes().enumerate() {
+                if b == b'\n' {
+                    line_starts.push(base + i as u32 + 1);
+                }
+            }
         }
+        LineIndex { line_starts, files: firsts }
+    }
+
+    /// 1-based line containing `offset`, within its file.
+    pub fn line(&self, offset: u32) -> u32 {
+        let global = match self.line_starts.binary_search(&offset) {
+            Ok(i) => i + 1,
+            Err(i) => i,
+        };
+        let first = self.files.iter().rev().find(|(base, _)| *base <= offset).map_or(0, |&(_, first)| first);
+        (global - first) as u32
     }
 
     /// 1-based (line, column); column counts characters, not bytes.

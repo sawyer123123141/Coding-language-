@@ -20,7 +20,13 @@ pub struct Parser {
 impl Parser {
     /// `toks` must end with `Tok::Eof` (as `lex` guarantees).
     pub fn new(toks: Vec<Token>) -> Self {
-        Parser { toks, pos: 0, diags: Vec::new(), next_expr: 0, next_bind: 0 }
+        Self::with_ids(toks, 0, 0)
+    }
+
+    /// Like `new`, numbering expressions and bindings from these values
+    /// (so several files can share one set of side tables).
+    pub fn with_ids(toks: Vec<Token>, next_expr: u32, next_bind: u32) -> Self {
+        Parser { toks, pos: 0, diags: Vec::new(), next_expr, next_bind }
     }
 
     pub fn parse_program(mut self) -> (Program, Vec<Diagnostic>) {

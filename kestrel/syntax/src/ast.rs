@@ -20,6 +20,23 @@ pub enum Item {
     Const(ConstDecl),
     Struct(StructDecl),
     Enum(EnumDecl),
+    Use(UseDecl),
+}
+
+/// `use math`, `use { noise2, lerp from math }`, or several clauses in braces.
+#[derive(Clone, Debug)]
+pub struct UseDecl {
+    pub clauses: Vec<UseClause>,
+    pub span: Span,
+}
+
+/// One module: with `names`, those come into scope unqualified; without,
+/// the module's `pub` items are reached as `module.name`.
+#[derive(Clone, Debug)]
+pub struct UseClause {
+    pub module: String,
+    pub module_span: Span,
+    pub names: Vec<(String, Span)>,
 }
 
 #[derive(Clone, Debug)]

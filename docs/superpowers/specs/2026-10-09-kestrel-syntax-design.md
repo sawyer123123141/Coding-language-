@@ -182,9 +182,23 @@ prefix: `Block.Air`, `Block.Stone(hardness: 3)`.
 
 ### Imports and visibility
 
-Unchanged from the existing modules/visibility designs:
-`use { a, b from module }`, `use module` (then `module.f()`), `pub`
-marks a function/struct/enum importable.
+```
+use geom                        // then geom.dist2(a, b), geom.Shape.Box(w: 2, h: 3)
+use { Point, dist2 from geom }  // then Point(1, 2), dist2(a, b)
+use {
+    noise2, lerp from math
+    colors
+}
+```
+
+- **Modules.** A module is one file, named after it, found next to the file that uses it. A file is loaded once; files may use each other.
+- **`pub`** marks a function, struct, enum or constant as importable. Anything else stays private to its file.
+- **Names must be unique.** An imported name can't collide with the file's own items, another import, or a local variable.
+- **Printing** shows a type's own name (`Point`), not `geom.Point`.
+- **Types from another module** must be imported by name; `geom.Point` doesn't work in a type position yet.
+- **Runtime errors** give the line in their own file, but not the file name yet.
+
+(Implemented 2026-10-10.)
 
 ## Types
 

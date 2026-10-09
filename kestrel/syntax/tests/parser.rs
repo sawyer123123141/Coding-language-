@@ -113,7 +113,7 @@ fn helpful_errors_and_recovery() {
         vec!["expected a variable name, found `=`", "expected an expression, found `}`"]
     );
     assert_eq!(errs("main() { a < b < c }"), vec!["comparisons can't be chained; combine them with `and`"]);
-    assert_eq!(errs("use foo\nmain() {}"), vec!["`use` isn't supported yet"]);
+    assert_eq!(errs("pub use foo\nmain() {}"), vec!["`use` can't be `pub`"]);
     assert_eq!(errs("main() { a b }"), vec!["expected end of line, found name `b`"]);
 }
 
@@ -238,9 +238,7 @@ fn collection_errors() {
 
 #[test]
 fn arena_and_in_blocks() {
-    assert_eq!(body("arena {
- var t = list[vec3]()
-}"), "{(arena {(var t (make list[vec3]))})}");
+    assert_eq!(body("arena {\n var t = list[vec3]()\n}"), "{(arena {(var t (make list[vec3]))})}");
     assert_eq!(body("in self.mem { self.h = [] }"), "{(in (. self mem) {(= (. self h) [])})}");
 }
 
@@ -248,7 +246,18 @@ fn arena_and_in_blocks() {
 fn optionals() {
     assert_eq!(body("let t = load(1) else { return }"), "{(let t (call load 1) else {return})}");
     assert_eq!(body("var x: int? = none"), "{(var x none)}");
-    let p = ok("f(a: Chunk?) {}
-");
+    let p = ok("f(a: Chunk?) {}\n");
     assert!(matches!(fn_decl(&p, 0).params[0].ty.kind, TypeKind::Optional(_)));
+}
+
+#[test]
+fn use_declarations() {
+    let p = ok("use math\nuse { noise2, lerp from math\n    vectors, colors\n}\nmain() {}\n");
+    let Item::Use(u) = &p.items[0] else { panic!() };
+    assert_eq!((u.clauses[0].module.as_str(), u.clauses[0].names.len()), ("math", 0));
+    let Item::Use(u) = &p.items[1] else { panic!() };
+    let names: Vec<&str> = u.clauses[0].names.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!((u.clauses[0].module.as_str(), names), ("math", vec!["noise2", "lerp"]));
+    let modules: Vec<&str> = u.clauses[1..].iter().map(|c| c.module.as_str()).collect();
+    assert_eq!(modules, ["vectors", "colors"]);
 }

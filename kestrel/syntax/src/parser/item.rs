@@ -1,5 +1,7 @@
 use super::{PResult, Parser};
-use crate::ast::{ConstDecl, EnumDecl, FieldDecl, FnDecl, Item, Param, StructDecl, TypeExpr, TypeKind, VariantDecl};
+use crate::ast::{
+    ConstDecl, EnumDecl, FieldDecl, FnDecl, Item, Param, StructDecl, TypeExpr, TypeKind, UseClause, UseDecl, VariantDecl,
+};
 use crate::span::Span;
 use crate::token::Tok;
 
@@ -45,15 +47,51 @@ impl Parser {
                 Err(())
             }
             Tok::Enum => self.enum_decl(is_pub, start),
-            Tok::Use => {
-                self.error_here("`use` isn't supported yet");
+            Tok::Use if is_pub => {
+                self.error_here("`use` can't be `pub`");
                 Err(())
             }
+            Tok::Use => self.use_decl(start),
             other => {
                 self.error_here(format!("expected a function or `let`, found {}", other.describe()));
                 Err(())
             }
         }
+    }
+
+    /// `use m`, `use { a, b from m }`; braces may hold several clauses,
+    /// one per line. A list without `from` names whole modules.
+    fn use_decl(&mut self, start: Span) -> PResult<Item> {
+        self.bump();
+        let mut clauses = Vec::new();
+        if !self.eat(&Tok::LBrace) {
+            let (module, module_span) = self.expect_ident("a module name")?;
+            clauses.push(UseClause { module, module_span, names: Vec::new() });
+            return Ok(Item::Use(UseDecl { clauses, span: start.to(module_span) }));
+        }
+        loop {
+            self.skip_newlines();
+            if self.at(&Tok::RBrace) {
+                break;
+            }
+            let mut names = vec![self.expect_ident("a name or a module")?];
+            while self.eat(&Tok::Comma) {
+                names.push(self.expect_ident("a name or a module")?);
+            }
+            if self.eat(&Tok::From) {
+                let (module, module_span) = self.expect_ident("a module name")?;
+                clauses.push(UseClause { module, module_span, names });
+            } else {
+                clauses.extend(names.into_iter().map(|(module, module_span)| UseClause { module, module_span, names: Vec::new() }));
+            }
+            if !(self.eat(&Tok::Newline) || self.eat(&Tok::Semi)) && !self.at(&Tok::RBrace) {
+                let found = self.peek().describe();
+                self.error_here(format!("expected `from`, a new line or `}}`, found {found}"));
+                return Err(());
+            }
+        }
+        let end = self.expect(&Tok::RBrace, "`}`")?;
+        Ok(Item::Use(UseDecl { clauses, span: start.to(end) }))
     }
 
     fn fn_decl(&mut self, is_pub: bool, is_pure: bool, start: Span) -> PResult<Item> {

@@ -45,7 +45,7 @@ impl Layouts<'_> {
                     let info = &t.structs[i];
                     let (fields, end, align) = self.fields(&info.fields, 0);
                     let size = end.next_multiple_of(align);
-                    self.structs[i] = Some(StructLayout { name: info.name.clone(), fields, size, align });
+                    self.structs[i] = Some(StructLayout { name: shown(&info.name), fields, size, align });
                 }
                 let l = self.structs[i].as_ref().expect("just laid out");
                 (l.size, l.align)
@@ -96,6 +96,11 @@ impl Layouts<'_> {
             end = end.max(variant_end);
             variants.push(VariantLayout { name: v.name.clone(), fields });
         }
-        EnumLayout { name: info.name.clone(), variants, size: end.next_multiple_of(payload_align), align: payload_align }
+        EnumLayout { name: shown(&info.name), variants, size: end.next_multiple_of(payload_align), align: payload_align }
     }
+}
+
+/// A type's name as printed: without the module it came from (`geom.Point` prints as `Point`).
+fn shown(name: &str) -> String {
+    name.rsplit('.').next().unwrap_or(name).to_string()
 }

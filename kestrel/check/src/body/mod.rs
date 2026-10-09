@@ -51,7 +51,7 @@ pub(crate) struct BodyChecker<'a> {
 pub(crate) fn check_consts(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
     let consts = program.items.iter().filter_map(|it| match it {
         Item::Const(c) => Some(c),
-        Item::Fn(_) | Item::Struct(_) | Item::Enum(_) => None,
+        Item::Fn(_) | Item::Struct(_) | Item::Enum(_) | Item::Use(_) => None,
     });
     for (i, c) in consts.enumerate() {
         let mut bc = BodyChecker::new(t, diags, None, Ty::Unit, false);

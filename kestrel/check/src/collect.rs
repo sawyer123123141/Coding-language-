@@ -65,7 +65,7 @@ pub(crate) fn collect(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnos
                 let info = EnumInfo { name: e.name.clone(), item: item_idx, span: e.name_span, variants: Vec::new(), methods: HashMap::new() };
                 t.enums.push(info);
             }
-            Item::Fn(_) | Item::Const(_) => {}
+            Item::Fn(_) | Item::Const(_) | Item::Use(_) => {}
         }
     }
     let (mut struct_id, mut enum_id) = (BUILTIN_STRUCTS, 0);
@@ -92,6 +92,7 @@ pub(crate) fn collect(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnos
                 add_enum_members(e, item_idx, EnumId(enum_id), t, diags);
                 enum_id += 1;
             }
+            Item::Use(_) => {}
         }
     }
     check_self_containment(t, diags);
@@ -122,8 +123,11 @@ fn check_names(program: &Program, diags: &mut Vec<Diagnostic>) {
             Item::Const(c) => (&c.bind.name, c.bind.span),
             Item::Struct(s) => (&s.name, s.name_span),
             Item::Enum(e) => (&e.name, e.name_span),
+            Item::Use(_) => continue,
         };
-        if BUILTINS.contains(&name.as_str()) {
+        // Items from other modules are named `module.name`.
+        let own = name.rsplit('.').next().unwrap_or(name);
+        if BUILTINS.contains(&own) {
             diags.push(Diagnostic::error(span, format!("`{name}` is a built-in name; pick another")));
         } else if !seen.insert(name) {
             diags.push(Diagnostic::error(span, format!("`{name}` is defined twice")));
