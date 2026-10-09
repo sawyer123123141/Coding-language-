@@ -9,7 +9,8 @@ pub fn jit_with(src: &str, opts: Options) -> JitProgram {
     assert!(d.is_empty(), "parse: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
     let (t, d) = kestrel_check::check(&p);
     assert!(d.is_empty(), "check: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
-    let m = kestrel_kir::lower(&p, &t.unwrap(), &LineIndex::new(src));
+    let mut m = kestrel_kir::lower(&p, &t.unwrap(), &LineIndex::new(src));
+    kestrel_kir::inline::inline_small(&mut m);
     JitProgram::compile(&m, opts).expect("codegen")
 }
 

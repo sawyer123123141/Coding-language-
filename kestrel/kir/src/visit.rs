@@ -1,17 +1,34 @@
-//! Walks KIR, reporting every place it reads or writes.
+//! Walks KIR, reporting every statement, expression and place in it.
 
 use crate::ir::*;
 
-/// Calls `f(place, written)` for each place in `stmts`, including places
-/// nested in index expressions and in calls inside expressions. A place
-/// passed as a `var` argument counts as written.
-pub fn places(stmts: &[Stmt], f: &mut impl FnMut(&Place, bool)) {
+pub enum Node<'a> {
+    Stmt(&'a Stmt),
+    Expr(&'a Expr),
+    /// A place and whether it's written (assigned, passed as `var`, moved from).
+    Place(&'a Place, bool),
+}
+
+/// Calls `f` for each statement and expression in `stmts`, outermost
+/// first, and for each place (after the index expressions inside it).
+pub fn walk<'a>(stmts: &'a [Stmt], f: &mut impl FnMut(Node<'a>)) {
     for s in stmts {
         stmt(s, f);
     }
 }
 
-fn stmt(s: &Stmt, f: &mut impl FnMut(&Place, bool)) {
+/// Calls `f(place, written)` for each place in `stmts`. A place passed as
+/// a `var` argument counts as written.
+pub fn places(stmts: &[Stmt], f: &mut impl FnMut(&Place, bool)) {
+    walk(stmts, &mut |n| {
+        if let Node::Place(p, written) = n {
+            f(p, written);
+        }
+    });
+}
+
+fn stmt<'a>(s: &'a Stmt, f: &mut impl FnMut(Node<'a>)) {
+    f(Node::Stmt(s));
     match s {
         Stmt::Let(_, e) | Stmt::Return(Some(e)) => expr(e, f),
         Stmt::Assign(p, e) | Stmt::ListAdd(p, e) => {
@@ -24,17 +41,17 @@ fn stmt(s: &Stmt, f: &mut impl FnMut(&Place, bool)) {
         Stmt::PushArena(None) | Stmt::PopArena { .. } => {}
         Stmt::If { cond, then_body, else_body } => {
             expr(cond, f);
-            places(then_body, f);
-            places(else_body, f);
+            walk(then_body, f);
+            walk(else_body, f);
         }
         Stmt::While { cond, body } => {
             expr(cond, f);
-            places(body, f);
+            walk(body, f);
         }
         Stmt::ForRange { start, end, body, .. } => {
             expr(start, f);
             expr(end, f);
-            places(body, f);
+            walk(body, f);
         }
         Stmt::Call(_, args) => self::args(args, f),
         Stmt::Print(parts) | Stmt::Write(parts) => print_args(parts, f),
@@ -42,16 +59,16 @@ fn stmt(s: &Stmt, f: &mut impl FnMut(&Place, bool)) {
     }
 }
 
-fn place(p: &Place, written: bool, f: &mut impl FnMut(&Place, bool)) {
+fn place<'a>(p: &'a Place, written: bool, f: &mut impl FnMut(Node<'a>)) {
     for proj in &p.path {
         if let Proj::Index { at, .. } = proj {
             expr(at, f);
         }
     }
-    f(p, written);
+    f(Node::Place(p, written));
 }
 
-fn args(args: &[Arg], f: &mut impl FnMut(&Place, bool)) {
+fn args<'a>(args: &'a [Arg], f: &mut impl FnMut(Node<'a>)) {
     for a in args {
         match a {
             Arg::Value(e) => expr(e, f),
@@ -60,7 +77,7 @@ fn args(args: &[Arg], f: &mut impl FnMut(&Place, bool)) {
     }
 }
 
-fn print_args(parts: &[PrintArg], f: &mut impl FnMut(&Place, bool)) {
+fn print_args<'a>(parts: &'a [PrintArg], f: &mut impl FnMut(Node<'a>)) {
     for p in parts {
         match p {
             PrintArg::Value(e) => expr(e, f),
@@ -70,7 +87,8 @@ fn print_args(parts: &[PrintArg], f: &mut impl FnMut(&Place, bool)) {
     }
 }
 
-fn expr(e: &Expr, f: &mut impl FnMut(&Place, bool)) {
+fn expr<'a>(e: &'a Expr, f: &mut impl FnMut(Node<'a>)) {
+    f(Node::Expr(e));
     match &e.kind {
         ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::StrLit(_) | ExprKind::ListNew | ExprKind::NewArena => {}
         ExprKind::Move(p) => place(p, true, f),
@@ -87,13 +105,13 @@ fn expr(e: &Expr, f: &mut impl FnMut(&Place, bool)) {
             }
         }
         ExprKind::Seq(stmts, v) => {
-            places(stmts, f);
+            walk(stmts, f);
             expr(v, f);
         }
         ExprKind::If { cond, then_body, then_val, else_body, else_val } => {
             expr(cond, f);
-            places(then_body, f);
-            places(else_body, f);
+            walk(then_body, f);
+            walk(else_body, f);
             for v in [then_val, else_val].into_iter().flatten() {
                 expr(v, f);
             }

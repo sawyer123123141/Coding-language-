@@ -19,7 +19,9 @@ pub fn compile(path: &str, src: &str, style: DiagStyle) -> Option<kestrel_kir::M
     };
     report(path, src, &diags, style);
     let tables = tables?;
-    Some(kestrel_kir::lower(&program, &tables, &LineIndex::new(src)))
+    let mut module = kestrel_kir::lower(&program, &tables, &LineIndex::new(src));
+    kestrel_kir::inline::inline_small(&mut module);
+    Some(module)
 }
 
 fn report(path: &str, src: &str, diags: &[Diagnostic], style: DiagStyle) {

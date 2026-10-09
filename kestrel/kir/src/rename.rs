@@ -1,0 +1,122 @@
+//! Renames a function body's locals into another function, for inlining.
+
+use crate::ir::*;
+
+/// How a callee local maps into the caller.
+#[derive(Clone)]
+pub(crate) enum Subst {
+    Local(LocalIdx),
+    /// A by-pointer parameter: the argument's place.
+    Place(Place),
+}
+
+fn rename_local(l: &mut LocalIdx, subst: &[Subst]) {
+    match &subst[l.0 as usize] {
+        Subst::Local(n) => *l = *n,
+        Subst::Place(_) => unreachable!("a by-pointer parameter is only used as a place"),
+    }
+}
+
+fn rename_place(p: &mut Place, subst: &[Subst]) {
+    for proj in &mut p.path {
+        if let Proj::Index { at, .. } = proj {
+            rename_expr(at, subst);
+        }
+    }
+    match &subst[p.root.0 as usize] {
+        Subst::Local(n) => p.root = *n,
+        Subst::Place(base) => {
+            let mut path = base.path.clone();
+            path.append(&mut p.path);
+            *p = Place { root: base.root, path };
+        }
+    }
+}
+
+pub(crate) fn rename_stmts(stmts: &mut [Stmt], subst: &[Subst]) {
+    for s in stmts {
+        match s {
+            Stmt::Let(l, e) => {
+                rename_local(l, subst);
+                rename_expr(e, subst);
+            }
+            Stmt::Return(Some(e)) => rename_expr(e, subst),
+            Stmt::Assign(p, e) | Stmt::ListAdd(p, e) => {
+                rename_place(p, subst);
+                rename_expr(e, subst);
+            }
+            Stmt::If { cond, then_body, else_body } => {
+                rename_expr(cond, subst);
+                rename_stmts(then_body, subst);
+                rename_stmts(else_body, subst);
+            }
+            Stmt::While { cond, body } => {
+                rename_expr(cond, subst);
+                rename_stmts(body, subst);
+            }
+            Stmt::ForRange { var, start, end, body } => {
+                rename_local(var, subst);
+                rename_expr(start, subst);
+                rename_expr(end, subst);
+                rename_stmts(body, subst);
+            }
+            Stmt::Call(_, args) => rename_args(args, subst),
+            Stmt::Print(parts) | Stmt::Write(parts) => rename_print(parts, subst),
+            Stmt::Bind(l, p) => {
+                rename_local(l, subst);
+                rename_place(p, subst);
+            }
+            Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::PushArena(Some(p)) => rename_place(p, subst),
+            Stmt::PushArena(None) | Stmt::PopArena { .. } | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
+        }
+    }
+}
+
+fn rename_args(args: &mut [Arg], subst: &[Subst]) {
+    for a in args {
+        match a {
+            Arg::Value(e) => rename_expr(e, subst),
+            Arg::Ref(p) => rename_place(p, subst),
+        }
+    }
+}
+
+fn rename_print(parts: &mut [PrintArg], subst: &[Subst]) {
+    for p in parts {
+        match p {
+            PrintArg::Value(e) => rename_expr(e, subst),
+            PrintArg::Interp(inner) => rename_print(inner, subst),
+            PrintArg::Str(_) => {}
+        }
+    }
+}
+
+pub(crate) fn rename_expr(e: &mut Expr, subst: &[Subst]) {
+    match &mut e.kind {
+        ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::Move(p) => rename_place(p, subst),
+        ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) => rename_expr(x, subst),
+        ExprKind::Binary(_, a, b) | ExprKind::And(a, b) | ExprKind::Or(a, b) => {
+            rename_expr(a, subst);
+            rename_expr(b, subst);
+        }
+        ExprKind::Call(_, args) => rename_args(args, subst),
+        ExprKind::StructLit(_, xs) | ExprKind::VariantLit(_, _, xs) | ExprKind::ArrayLit(xs) => {
+            for x in xs {
+                rename_expr(x, subst);
+            }
+        }
+        ExprKind::Seq(stmts, v) => {
+            rename_stmts(stmts, subst);
+            rename_expr(v, subst);
+        }
+        ExprKind::If { cond, then_body, then_val, else_body, else_val } => {
+            rename_expr(cond, subst);
+            rename_stmts(then_body, subst);
+            rename_stmts(else_body, subst);
+            for v in [then_val, else_val].into_iter().flatten() {
+                rename_expr(v, subst);
+            }
+        }
+        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::StrLit(_) | ExprKind::ListNew | ExprKind::NewArena => {}
+    }
+}

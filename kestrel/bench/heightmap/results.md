@@ -35,3 +35,27 @@ Where the time goes (release exe, median of 5):
 - **Calls: about 37 ms.** 33M calls to `block_at` (which returns an enum through memory) and `weight`. Rust inlines both. A KIR inliner for small functions is the fix.
 - **The checksum loop itself: about 43 ms, even inlined.** That is roughly 8 cycles per block, with overflow-checked multiply and add, an if-chain, and `% 7` per block. Rust's whole program takes 29 ms, likely because the loop is vectorized. Closing this needs sub-project 5 (a stronger backend).
 - **`kestrel run` meets the "< 50 ms including compile" goal only for smaller worlds.** Compile plus startup is about 15–20 ms (`kestrel check` is 18 ms), and the rest is run time.
+
+## After the KIR inliner, 2026-10-10
+
+Small non-recursive functions (at most 64 KIR nodes, with no `return` except a final one) are now inlined, including `var self` methods.
+
+| Variant | Time |
+|---|---:|
+| Kestrel exe (checked) | 102 ms |
+| Kestrel exe (`--release`) | 88 ms |
+| `kestrel run` (JIT, incl. compile) | 112 ms |
+| `kestrel check` | 17 ms |
+| Rust -O3 (overflow checks on) | 31 ms |
+| Rust -O3 | 28 ms |
+
+Kestrel is now **about 3.2x** Rust (it was 4x).
+
+What's left is backend quality:
+- `block_at`'s enum still makes a round trip through a stack slot.
+- Field loads aren't forwarded from stores.
+- Nothing is vectorized.
+
+Those belong to sub-project 5, as the milestone allows ("if missed, record the gap; it does not block the rest of sub-project 2").
+
+The inliner also moved `particles` (2a suite) from 1.26x to **1.05x** Rust: its `step` method is now inlined.
