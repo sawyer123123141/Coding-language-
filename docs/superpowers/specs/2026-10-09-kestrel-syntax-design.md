@@ -1,6 +1,6 @@
 # Kestrel Syntax Redesign
 
-Date: 2026-10-09. Status: approved in brainstorm, awaiting spec review.
+Date: 2026-10-09. Status: approved.
 
 Sub-project 1 of 5 in the Kestrel redesign. Defines what Kestrel source
 looks like. Semantics beyond what syntax needs (type checker, IR,
@@ -198,7 +198,7 @@ marks a function/struct/enum importable.
 | `string` | text |
 | `vec2 vec3 vec4` | float vectors, SIMD-backed |
 | `ivec2 ivec3 ivec4` | int vectors (voxel coordinates) |
-| `[T]` | array of `T` (length known at runtime) |
+| `[T]` | array of `T`, fixed length once created (fast, arena/SIMD friendly) |
 | `list[T]` | growable list |
 | `map[K, V]` | hash map |
 | `T?` | a `T` or `none` |
@@ -240,6 +240,11 @@ marks a function/struct/enum importable.
   %=`. Target must be a `var`, a `var` parameter, or reached through
   `var self`.
 - `print(...)` is an ordinary (effectful) function, usable anywhere.
+- **No-effect statements are errors.** An expression statement whose
+  value is unused and that has no effect (`+bonus`, `x == 1`) is a
+  compile error: "this line has no effect; did you mean to continue
+  the line above?" This closes the line-continuation trap where a line
+  starting with an operator silently becomes its own statement.
 
 ## Control flow
 
