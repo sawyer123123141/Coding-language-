@@ -1,0 +1,10 @@
+// error 8: this line has no effect; did you mean to continue the line above?
+// error 9: the result of pure function `sq` is unused, so this line does nothing
+pure sq(x: int) -> int { x * x }
+
+main() {
+    var total = 1
+    total = total
+        - 2
+    sq(3)
+}

@@ -1,0 +1,6 @@
+// error 4: expected a variable name, found `=`
+// error 5: comparisons can't be chained; combine them with `and`
+main() {
+    let = 5
+    let ok = 1 < 2 < 3
+}

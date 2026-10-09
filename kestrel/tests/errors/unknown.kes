@@ -1,0 +1,6 @@
+// error 4: unknown name `y`
+// error 5: unknown function `nope`
+main() {
+    let x = y
+    nope()
+}

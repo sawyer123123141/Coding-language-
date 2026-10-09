@@ -1,0 +1,8 @@
+// error 5: expected int, found bool
+// error 6: `+` needs numbers, found int and bool
+// error 7: expected bool, found int
+main() {
+    let a: int = true
+    let b = 1 + true
+    while 1 { }
+}

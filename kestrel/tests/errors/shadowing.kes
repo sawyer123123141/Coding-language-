@@ -1,0 +1,5 @@
+// error 4: `x` is already defined; Kestrel doesn't allow shadowing
+main() {
+    let x = 1
+    if true { let x = 2 }
+}

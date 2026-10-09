@@ -1,0 +1,11 @@
+// error 6: can't change `count`: it was declared with `let`
+// error 10: can't change parameter `n`
+main() {
+    let count = 0
+    print(count)
+    count = 1
+}
+
+f(n: int) {
+    n = 2
+}
