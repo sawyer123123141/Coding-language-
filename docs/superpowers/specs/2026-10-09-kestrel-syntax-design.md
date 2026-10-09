@@ -90,7 +90,7 @@ main() {
 
     arena {
         var tris = list[vec3]()
-        for chunk in world { mesh(chunk, tris) }
+        for chunk in world { mesh(chunk, var tris) }
         print("triangles: {tris.len / 3}")
     }
 }
@@ -128,6 +128,11 @@ main() {
   value, and the change is visible to the caller (by reference). A
   `var` parameter has no other meaning — there are no "mutable local
   copy" parameters.
+- **Call sites mark `var` arguments:** `mesh(chunk, var tris)`, so a
+  reader sees what a call changes. Passing a `var` argument without the
+  marker (or marking a read-only one) is a compile error. The receiver
+  of a method call is exempt: `chunk.generate()`, not
+  `var chunk.generate()`.
 - Program entry point: `main()`.
 
 ### Methods
@@ -213,8 +218,10 @@ marks a function/struct/enum importable.
 
 ## Expressions
 
-- **Operators**, highest to lowest precedence: unary `- !`; `* / %`;
-  `+ -`; `== != < > <= >=`; `&&`; `||`. Comparisons don't chain.
+- **Operators**, highest to lowest precedence: unary `-` and `not`;
+  `* / %`; `+ -`; `== != < > <= >=`; `and`; `or`. Comparisons don't
+  chain. Logic is words only: `&&`, `||` and `!` don't exist (`!=`
+  stays).
 - **Calls:** `f(a, b)`. Any argument may be labelled with its
   parameter name: `f(a, seed: 1337)`. Labelled arguments come after
   positional ones.
@@ -241,6 +248,7 @@ if cond { ... } else if cond { ... } else { ... }
 while cond { ... }
 for i from 0 to n { ... }      // n exclusive, step +1
 for v in xs { ... }            // each element
+for i, v in xs { ... }         // index and element
 par for v in xs { ... }        // parallel, see below
 break
 continue
@@ -336,7 +344,7 @@ stmt      := 'let' binding | 'var' binding | assign | if | while | for
            | 'par' for | match | arena | in | 'break' | 'continue'
            | 'return' expr? | expr
 binding   := IDENT (':' type)? '=' expr ('else' block)?
-for       := 'for' IDENT ('from' expr 'to' expr | 'in' expr) block
+for       := 'for' IDENT ('from' expr 'to' expr | (',' IDENT)? 'in' expr) block
 arena     := 'arena' block
 in        := 'in' expr block
 match     := 'match' expr '{' (pattern block)* '}'
@@ -349,10 +357,8 @@ User-defined generic types/functions, interfaces, closures/lambdas,
 string operations, error types beyond `?`, fixed-size arrays, bitwise
 operators, C FFI declarations, GPU/shader code.
 
-## Open questions (defaults chosen, revisit if they feel wrong)
+## Resolved in review
 
-1. **Call-site marker for `var` arguments.** Default: none —
-   `mesh(chunk, tris)`. Alternative: `mesh(chunk, var tris)` so readers
-   see what changes.
-2. **`&& || !` vs `and or not`.** Default: symbols, as today.
-3. **Index + value loop:** `for i, v in xs`. Default: not included yet.
+- Call-site `var` marker: yes (receiver exempt).
+- Logic operators: `and` / `or` / `not` only.
+- Index + value loop `for i, v in xs`: included.
