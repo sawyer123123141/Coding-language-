@@ -9,18 +9,22 @@ struct Expect {
     stderr: Vec<String>,
 }
 
-fn expectations(src: &str) -> Expect {
+/// Reads the directives of program `name`. Panics on a malformed or unknown
+/// `// expect...` line so a typo can't silently drop a check.
+fn expectations(name: &str, src: &str) -> Expect {
     let mut lines = Vec::new();
     let mut exit = 0;
     let mut stderr = Vec::new();
     for line in src.lines() {
         let line = line.trim();
         if let Some(rest) = line.strip_prefix("// expect-exit:") {
-            exit = rest.trim().parse().expect("expect-exit number");
+            exit = rest.trim().parse().unwrap_or_else(|_| panic!("{name}: bad expect-exit number: {line}"));
         } else if let Some(rest) = line.strip_prefix("// expect-stderr:") {
             stderr.push(rest.trim().to_string());
         } else if let Some(rest) = line.strip_prefix("// expect:") {
             lines.push(rest.strip_prefix(' ').unwrap_or(rest).to_string());
+        } else if line.starts_with("// expect") {
+            panic!("{name}: unknown expect directive: {line}");
         }
     }
     let stdout = lines.iter().map(|l| format!("{l}\n")).collect();
@@ -34,6 +38,7 @@ pub fn programs() -> Vec<PathBuf> {
         .map(|e| e.unwrap().path())
         .filter(|p| p.extension().is_some_and(|x| x == "kes"))
         .collect();
+    assert!(!files.is_empty(), "no .kes programs in {}", dir.display());
     files.sort();
     files
 }
@@ -63,7 +68,7 @@ fn programs_run_via_jit() {
         let src = fs::read_to_string(&path).unwrap();
         let name = path.file_name().unwrap().to_string_lossy().to_string();
         let out = kestrel(&["run", path.to_str().unwrap()]);
-        failures.extend(compare(&name, "jit", &out, &expectations(&src)));
+        failures.extend(compare(&name, "jit", &out, &expectations(&name, &src)));
     }
     assert!(failures.is_empty(), "\n{}", failures.join("\n"));
 }
@@ -74,4 +79,16 @@ fn check_command_reports_success() {
     let out = kestrel(&["check", path.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(0));
     assert!(out.stdout.is_empty());
+}
+
+#[test]
+#[should_panic(expected = "typo.kes: unknown expect directive: // expect-stderr missing colon")]
+fn unknown_expect_directive_panics() {
+    expectations("typo.kes", "// expect-stderr missing colon\nmain() {}\n");
+}
+
+#[test]
+#[should_panic(expected = "typo.kes: bad expect-exit number: // expect-exit: one")]
+fn bad_expect_exit_number_panics() {
+    expectations("typo.kes", "// expect-exit: one\nmain() {}\n");
 }
