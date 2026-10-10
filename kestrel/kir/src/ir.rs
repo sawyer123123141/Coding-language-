@@ -72,7 +72,8 @@ pub struct Module {
     pub elems: Vec<KTy>,
     /// The generated function that prints each array or list type printed.
     pub print_fns: HashMap<KTy, FuncIdx>,
-    pub main: FuncIdx,
+    /// `None` for a library (see `kestrel_check::check_with`).
+    pub main: Option<FuncIdx>,
 }
 
 impl Module {

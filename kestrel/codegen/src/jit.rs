@@ -8,7 +8,7 @@ use crate::{define_module, isa, rt, Options};
 /// A module compiled into this process's memory.
 pub struct JitProgram {
     module: JITModule,
-    main: FuncId,
+    main: Option<FuncId>,
     funcs: Vec<(String, FuncId)>,
     exports: Vec<(ExportInfo, FuncId)>,
 }
@@ -27,7 +27,7 @@ impl JitProgram {
         let exports = define_thunks(&mut module, m, &ids)?;
         module.finalize_definitions().map_err(|e| e.to_string())?;
         let funcs = m.funcs.iter().zip(&ids).map(|(f, &id)| (f.name.clone(), id)).collect();
-        Ok(JitProgram { main: ids[m.main.0 as usize], module, funcs, exports })
+        Ok(JitProgram { main: m.main.map(|f| ids[f.0 as usize]), module, funcs, exports })
     }
 
     /// The `pub` functions of the entry file, with the thunks that call them.
@@ -49,7 +49,7 @@ impl JitProgram {
     /// Runs `main` through the runtime entry point; returns the exit code.
     /// The compiled code stays mapped until the process exits.
     pub fn run_main(&self) -> i32 {
-        let code = self.module.get_finalized_function(self.main);
+        let code = self.module.get_finalized_function(self.main.expect("a program (not a library) has `main`"));
         // SAFETY: the checker requires `main()` to take no parameters and
         // return nothing, and it was compiled with the host's C convention.
         let entry: extern "C" fn() = unsafe { std::mem::transmute(code) };

@@ -1,0 +1,34 @@
+// Every kind of value the Godot bridge carries, plus a panic.
+struct Chunk {
+    x: int
+}
+
+pub pure add(a: int, b: float) -> float { float(a) + b }
+pub pure over(x: u8) -> bool { x > 3 }
+pub pure big(x: i64) -> i64 { x * 1000000 }
+pub pure same(name: string) -> string { name }
+pub pure sum(xs: [int]) -> int {
+    var s = 0
+    for x in xs { s += x }
+    s
+}
+pub pure scale(vs: [vec3], k: float) -> [vec3] {
+    var out = array[vec3](vs.len)
+    for i, v in vs { out[i] = v * k }
+    out
+}
+pub pure up(v: vec3) -> vec3 { v + vec3(0, 1, 0) }
+pub pure ramp(n: int) -> [u8] {
+    var out = array[u8](n)
+    for i from 0 to n { out[i] = u8(i) }
+    out
+}
+pub talk(n: int) -> int {
+    print("talking", n)
+    n + 1
+}
+pub pure crash(i: int) -> int {
+    let xs = [1, 2]
+    xs[i]
+}
+pub pure hidden() -> Chunk { Chunk(1) }

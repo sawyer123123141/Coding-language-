@@ -1,0 +1,16 @@
+[package]
+name = "kestrel-godot"
+version = "0.1.0"
+edition = "2021"
+
+# Its own workspace: godot-rust is big, and the compiler's tests shouldn't build it.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+godot = "0.5.5"
+kestrel-driver = { path = "../driver" }
+kestrel-codegen = { path = "../codegen" }
+kestrel-runtime = { path = "../runtime" }

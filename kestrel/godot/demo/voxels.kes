@@ -1,0 +1,96 @@
+// Voxel terrain for the Godot demo. Heights come from value noise; the
+// mesh is each column's top plus walls down to lower neighbours, as
+// triangles (positions from `vertices`, matching normals from `normals`).
+// Edit this file while the demo runs: it rebuilds on save.
+let SIZE = 32
+let HEIGHT = 40
+
+pure hash(x: int, z: int, seed: int) -> int {
+    let h = i64(x) * 73856093 + i64(z) * 19349663 + i64(seed) * 83492791
+    int(h % 1000003)
+}
+
+pure lattice(x: int, z: int, seed: int) -> float {
+    float(hash(x, z, seed)) / 1000003.0
+}
+
+pure smooth(t: float) -> float {
+    t * t * (3.0 - 2.0 * t)
+}
+
+pure noise(x: int, z: int, scale: int, seed: int) -> float {
+    let cx = x / scale
+    let cz = z / scale
+    let fx = smooth(float(x - cx * scale) / float(scale))
+    let fz = smooth(float(z - cz * scale) / float(scale))
+    let a = lattice(cx, cz, seed)
+    let b = lattice(cx + 1, cz, seed)
+    let c = lattice(cx, cz + 1, seed)
+    let d = lattice(cx + 1, cz + 1, seed)
+    let top = a + (b - a) * fx
+    let bottom = c + (d - c) * fx
+    top + (bottom - top) * fz
+}
+
+pub pure height(x: int, z: int, seed: int) -> int {
+    let n = noise(x, z, 64, seed) * 0.6 + noise(x, z, 16, seed + 1) * 0.3 + noise(x, z, 4, seed + 2) * 0.1
+    int(n * float(HEIGHT)) + 1
+}
+
+pub pure heights(cx: int, cz: int, seed: int) -> [int] {
+    var out = array[int](SIZE * SIZE)
+    for i from 0 to SIZE * SIZE {
+        out[i] = height(cx * SIZE + i % SIZE, cz * SIZE + i / SIZE, seed)
+    }
+    out
+}
+
+pub vertices(cx: int, cz: int, seed: int) -> list[vec3] {
+    mesh(cx, cz, seed, false)
+}
+
+pub normals(cx: int, cz: int, seed: int) -> list[vec3] {
+    mesh(cx, cz, seed, true)
+}
+
+// One quad (corners a b c d, counter-clockwise seen from outside) as two
+// triangles in Godot's front-face order (clockwise): its corners, or its
+// normal six times.
+quad(var out: list[vec3], want_normals: bool, n: vec3, a: vec3, b: vec3, c: vec3, d: vec3) {
+    if want_normals {
+        for k from 0 to 6 { out.add(n) }
+    } else {
+        out.add(a); out.add(b); out.add(c)
+        out.add(a); out.add(c); out.add(d)
+    }
+}
+
+mesh(cx: int, cz: int, seed: int, want_normals: bool) -> list[vec3] {
+    var out = list[vec3]()
+    for i from 0 to SIZE * SIZE {
+        let x = cx * SIZE + i % SIZE
+        let z = cz * SIZE + i / SIZE
+        let h = height(x, z, seed)
+        let fx = float(x)
+        let fz = float(z)
+        let fh = float(h)
+        quad(var out, want_normals, vec3(0, 1, 0), vec3(fx, fh, fz), vec3(fx + 1.0, fh, fz), vec3(fx + 1.0, fh, fz + 1.0), vec3(fx, fh, fz + 1.0))
+        let east = float(height(x + 1, z, seed))
+        if east < fh {
+            quad(var out, want_normals, vec3(1, 0, 0), vec3(fx + 1.0, east, fz), vec3(fx + 1.0, east, fz + 1.0), vec3(fx + 1.0, fh, fz + 1.0), vec3(fx + 1.0, fh, fz))
+        }
+        let west = float(height(x - 1, z, seed))
+        if west < fh {
+            quad(var out, want_normals, vec3(-1, 0, 0), vec3(fx, west, fz + 1.0), vec3(fx, west, fz), vec3(fx, fh, fz), vec3(fx, fh, fz + 1.0))
+        }
+        let south = float(height(x, z + 1, seed))
+        if south < fh {
+            quad(var out, want_normals, vec3(0, 0, 1), vec3(fx + 1.0, south, fz + 1.0), vec3(fx, south, fz + 1.0), vec3(fx, fh, fz + 1.0), vec3(fx + 1.0, fh, fz + 1.0))
+        }
+        let north = float(height(x, z - 1, seed))
+        if north < fh {
+            quad(var out, want_normals, vec3(0, 0, -1), vec3(fx, north, fz), vec3(fx + 1.0, north, fz), vec3(fx + 1.0, fh, fz), vec3(fx, fh, fz))
+        }
+    }
+    out
+}

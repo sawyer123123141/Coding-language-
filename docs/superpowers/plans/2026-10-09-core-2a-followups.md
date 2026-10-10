@@ -24,6 +24,13 @@ Done in 2b-i: labelled arguments evaluate in source order; `func/mod.rs` split; 
 - **Compound assignment** takes the operand type from `rhs.ty`. It should come from the place once `Place` exists.
 - **Thin KIR-shape tests** (while/for/break/continue/and/or/unary/convert). Add them before refactoring the KIR shape.
 
+## Found while building the Godot demo (2026-10-10)
+
+- **A `pure` function can't call a helper that only changes a `var` argument rooted at its own local** (for example `quad(var out, ...)` filling a local list). This is observationally pure, but the checker rejects it because the helper has `MutatesParams`. Allow calls whose `var` arguments are all rooted at the caller's locals.
+- **`let x = opt else` always moves or copies.** Unwrapping an owning optional parameter is therefore an error; a view (like a `match` binding) would fix it.
+- **Runtime errors don't name the file** in multi-file programs, only the line.
+- **The Godot add-on is built and tested on Windows only.** The `.gdextension` file lists Linux and macOS library names, but they've never been built.
+
 ## Do in 2c
 
 - **Strings (2b-ii scope).** String values are a pointer plus a length into read-only data, so only literals exist. `"{x}"` interpolation works only as a direct `print` argument, because building a new string needs memory, which comes with arenas. No `==`, length, indexing or concatenation yet; `"a" == "b"` reports "`==` needs numbers". Strings nested in a printed struct are quoted, but `"` inside them isn't escaped.

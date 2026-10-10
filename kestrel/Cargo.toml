@@ -1,5 +1,6 @@
 [workspace]
 resolver = "2"
+exclude = ["godot"]
 members = ["syntax", "check", "kir", "runtime", "codegen", "driver", "cli"]
 
 [workspace.package]

@@ -15,9 +15,15 @@ pub use ty::Ty;
 /// Resolves names and checks types. Tables are returned only when there
 /// are no errors; warnings may still be present.
 pub fn check(program: &Program) -> (Option<Tables>, Vec<Diagnostic>) {
+    check_with(program, true)
+}
+
+/// Like `check`; with `needs_main` false the program is a library (code a
+/// host calls, like the Godot add-on), which doesn't need a `main`.
+pub fn check_with(program: &Program, needs_main: bool) -> (Option<Tables>, Vec<Diagnostic>) {
     let mut t = Tables { expr_ty: vec![Ty::Error; program.expr_count as usize], ..Tables::default() };
     let mut diags = Vec::new();
-    collect::collect(program, &mut t, &mut diags);
+    collect::collect(program, &mut t, &mut diags, needs_main);
     t.compute_owning();
     body::check_consts(program, &mut t, &mut diags);
     body::check_field_defaults(program, &mut t, &mut diags);

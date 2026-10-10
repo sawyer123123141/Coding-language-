@@ -12,7 +12,8 @@ pub fn emit_object(m: &kir::Module, opts: Options) -> Result<Vec<u8>, String> {
         .map_err(|e| e.to_string())?;
     let mut module = ObjectModule::new(builder);
     let ids = define_module(&mut module, m, opts)?;
-    define_c_main(&mut module, ids[m.main.0 as usize])?;
+    let main = m.main.ok_or("a library has no `main` to build an executable from")?;
+    define_c_main(&mut module, ids[main.0 as usize])?;
     module.finish().emit().map_err(|e| e.to_string())
 }
 

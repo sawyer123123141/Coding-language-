@@ -30,7 +30,12 @@ impl SourceFile {
 
     /// Whether the file changed (or vanished) since it was read.
     pub fn changed(&self) -> bool {
-        modified(&self.path) != self.modified
+        self.current() != self.modified
+    }
+
+    /// When the file last changed, as of now.
+    pub fn current(&self) -> Option<SystemTime> {
+        modified(&self.path)
     }
 }
 
@@ -54,6 +59,11 @@ struct File {
 /// Compiles the program whose entry file is `path` (with text `src`). The
 /// second result is every diagnostic, rendered as text (empty when clean).
 pub fn compile(path: &str, src: &str, style: DiagStyle) -> (Option<Compiled>, String) {
+    compile_as(path, src, style, true)
+}
+
+/// Like `compile`; with `needs_main` false it compiles a library (no `main`).
+pub fn compile_as(path: &str, src: &str, style: DiagStyle, needs_main: bool) -> (Option<Compiled>, String) {
     let (files, modules, mut diags) = load(path, src);
     if diags.iter().any(Diagnostic::is_error) {
         return (None, report(&files, &diags, style));
@@ -63,7 +73,7 @@ pub fn compile(path: &str, src: &str, style: DiagStyle) -> (Option<Compiled>, St
     let tables = if diags.iter().any(Diagnostic::is_error) {
         None
     } else {
-        let (tables, check_diags) = kestrel_check::check(&program);
+        let (tables, check_diags) = kestrel_check::check_with(&program, needs_main);
         diags.extend(check_diags);
         tables
     };
@@ -76,10 +86,10 @@ pub fn compile(path: &str, src: &str, style: DiagStyle) -> (Option<Compiled>, St
     (Some(Compiled { module, files }), text)
 }
 
-/// Reads `path` and compiles it.
-pub fn compile_file(path: &Path, style: DiagStyle) -> (Option<Compiled>, String) {
+/// Reads `path` and compiles it (as a library when `needs_main` is false).
+pub fn compile_file(path: &Path, style: DiagStyle, needs_main: bool) -> (Option<Compiled>, String) {
     match std::fs::read_to_string(path) {
-        Ok(src) => compile(&path.to_string_lossy(), src.strip_prefix('\u{feff}').unwrap_or(&src), style),
+        Ok(src) => compile_as(&path.to_string_lossy(), src.strip_prefix('\u{feff}').unwrap_or(&src), style, needs_main),
         Err(e) => (None, format!("error: can't read {}: {e}\n", path.display())),
     }
 }

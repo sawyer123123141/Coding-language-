@@ -51,7 +51,9 @@ target/release/kestrel check program.kes      # errors only
   - `kir`: a typed, structured middle layer, plus lowering and inlining.
   - `codegen`: Cranelift JIT and object files.
   - `runtime`: arenas, printing and panics.
+  - `driver`: loading modules and compiling a program, shared by the CLI and the Godot add-on.
   - `cli`: the `kestrel` command.
+  - `godot`: the Godot add-on and its demo project (built separately).
 - `kestrel/tests/programs/` and `kestrel/tests/errors/`: example programs with their expected output, and expected errors.
 - `kestrel/bench/`: benchmarks against Rust and C, with results.
 - `docs/superpowers/specs/`: the language (syntax spec) and compiler (core spec) designs.
@@ -59,11 +61,10 @@ target/release/kestrel check program.kes      # errors only
 
 ## Status
 
-The core language works: functions, structs with methods, enums and `match`, vectors, strings, arrays, lists, `for in`, arenas, owning values that move, and checked arithmetic.
+The core language works: functions, structs with methods, enums and `match`, vectors, strings, arrays, lists, `for in`, optionals, modules, bit operators, arenas, owning values that move, and checked arithmetic.
 
-Next:
-1. Modules, optional values (`T?`) and `map`.
-2. A Godot bridge.
-3. `par for`.
+It also runs inside Godot 4: see [`kestrel/godot`](kestrel/godot/README.md). GDScript calls Kestrel functions, and edits hot-reload.
+
+Next: `map`, then `par for`.
 
 Speed versus Rust is between 1.0x and 1.5x on loops and structs, and about 3x on the voxel heightmap milestone. The numbers are in `kestrel/bench/*/results.md`.

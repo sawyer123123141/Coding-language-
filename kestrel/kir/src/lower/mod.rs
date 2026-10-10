@@ -24,7 +24,7 @@ pub fn lower(program: &Program, t: &Tables, lines: &LineIndex) -> Module {
         (0..t.fns.len()).map(|i| FnLowerer::new(program, t, lines, FnId(i as u32), &mut helpers).lower()).collect();
     funcs.append(&mut helpers.funcs);
     let elems = t.elems.iter().map(|&e| kty(e)).collect();
-    let main = FuncIdx(t.main.expect("checked program has main").0);
+    let main = t.main.map(|m| FuncIdx(m.0));
     Module { funcs, structs, enums, elems, print_fns: helpers.print, main }
 }
 

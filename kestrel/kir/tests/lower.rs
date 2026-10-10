@@ -24,7 +24,7 @@ fn tail_expression_becomes_return() {
         &sq.body[..],
         [Stmt::Return(Some(Expr { kind: ExprKind::Binary(BinOp::Mul, _, _), ty: KTy::I32, .. }))]
     ));
-    assert_eq!(m.main, FuncIdx(1));
+    assert_eq!(m.main, Some(FuncIdx(1)));
 }
 
 #[test]

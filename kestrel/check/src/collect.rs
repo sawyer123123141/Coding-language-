@@ -48,7 +48,7 @@ pub(crate) fn resolve_type(ty: &TypeExpr, t: &mut Tables, diags: &mut Vec<Diagno
 
 /// Records every type, function signature and constant before bodies are
 /// checked. Type names come first so any type can refer to any other.
-pub(crate) fn collect(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
+pub(crate) fn collect(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnostic>, needs_main: bool) {
     check_names(program, diags);
     add_builtin_vectors(t);
     for (item_idx, item) in program.items.iter().enumerate() {
@@ -96,7 +96,7 @@ pub(crate) fn collect(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnos
         }
     }
     check_self_containment(t, diags);
-    if t.main.is_none() {
+    if t.main.is_none() && needs_main {
         diags.push(Diagnostic::error(Span::new(0, 0), "program needs a `main()` function"));
     }
 }
