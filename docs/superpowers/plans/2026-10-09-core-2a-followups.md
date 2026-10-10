@@ -58,7 +58,7 @@ From plan 2's reviews and the particles demo. The window spec is `docs/superpowe
 ### Platforms and build
 
 - **Only Windows is built.** raylib's `build.rs` and the `kestrel build` link line name Windows libraries. On another platform the window crate fails with C compile errors, and a window program's link fails with undefined symbols, instead of a plain sentence. Say so up front.
-- **The window must move to the main thread for macOS.** The window runs on the CLI's big-stack thread, which GLFW allows on Windows only.
+- **The window must move to the main thread for macOS.** The window runs on the CLI's big-stack thread. GLFW needs the main thread on macOS; Windows is fine with any single thread that makes all the calls.
 - **raylib compiles twice on a cold build.** `cli/build.rs` builds the two staticlibs in a nested cargo build with its own target directory, so raylib is compiled there and again for the workspace's own `kestrel-window` build. Build it once, or share the directory.
 - **A missing window library error is only unit-tested.** `kestrel build` of a window program without `kestrel_window.lib` has a plain message; nothing runs it end to end.
 
@@ -79,13 +79,12 @@ From plan 2's reviews and the particles demo. The window spec is `docs/superpowe
 - **raylib keeps the window title pointer after `InitWindow`** (`CORE.Window.title`), but the title's `CString` is dropped after the call. It is benign in raylib 6.0, which reads the title only inside `glfwCreateWindow`, but the `SAFETY` comment doesn't say why, and a raylib upgrade could break it.
 - **`headless::QUIET` is a second thread-local** that has to follow `state::STATE`. Both are set in `window.open`; keep them together if either moves.
 - **The `real` and `state` modules call each other.** `real::init` needs only the `hidden` flag; passing it would remove the cycle.
-- **`png_pixel` (a test helper) logs raylib INFO lines to stdout.** Call `SetTraceLogLevel(LOG_ERROR)` first. It also doesn't handle non-ASCII paths.
+- **`png_pixel` and `png_pixels` (test helpers) don't handle non-ASCII paths.**
 
 ### Tests
 
-- **The program-test harness isn't hermetic.** It passes through the `KESTREL_*` variables of the process that runs `cargo test`, and a window test that is missing `// env: KESTREL_HEADLESS=...` opens a real window and hangs the suite. Remove `KESTREL_*` from the child's environment first, then apply the file's `// env:` lines.
-- **Smoke test.** The visible fallback runs on any failure, not only on a wrong centre pixel (tighten it). It doesn't check the screenshot is exactly 64×64, and its scratch directories aren't unique per run or removed.
-- **Native argument coverage.** No unit test shows that `i8` native parameters are zero-extended, and no codegen test passes a struct with `u8`, `bool`, `i64` and `string` fields to a native.
+- **Smoke test.** Its scratch directories (`target/tmp/window_smoke/<program>_<jit or exe>`) aren't unique per run or removed. The hidden-window fallback has no test of its own (it can't be provoked on a machine where the hidden window works).
+- **The harness's window check is textual.** `cli/tests/programs.rs` panics for a program that calls `window.open` (or an imported `open`) without `// env: KESTREL_HEADLESS=...`. A call hidden in a string would be a false alarm, and a window opened some other way (a future native) wouldn't be caught.
 - **The Godot refusal test** can't tell the refusal of a built-in module from another load error. Check the message.
 
 ## Maps (built 2026-10-09)
