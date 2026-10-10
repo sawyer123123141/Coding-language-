@@ -45,6 +45,46 @@ fn var_self_methods_inline_onto_the_receiver_place() {
     assert!(matches!(assigns[..], [p] if matches!(p.path[..], [Proj::Index { .. }, Proj::Field(0)])), "{:#?}", main.body);
 }
 
+/// A pure function of `x` whose body is a sum of `terms` products: about
+/// four KIR nodes per term.
+fn sum_fn(name: &str, terms: usize) -> String {
+    let body: Vec<String> = (1..=terms).map(|i| format!("x * {i}")).collect();
+    format!("pure {name}(x: int) -> int {{ {} }}\n", body.join(" + "))
+}
+
+#[test]
+fn mid_sized_functions_are_inlined() {
+    // Like a noise octave: too big for the old 64-node limit.
+    let src = format!("{}f(a: int) -> int {{ mid(a) + mid(a + 1) }}\nmain() {{}}\n", sum_fn("mid", 30));
+    let m = lower_inlined(&src);
+    assert_eq!(calls(&func(&m, "f").body), 0);
+}
+
+#[test]
+fn calls_in_the_arguments_of_inlined_calls_are_inlined() {
+    // Like `mix(lattice(..), lattice(..), t)` in a noise octave.
+    let src = "pure sq(x: int) -> int { x * x }\npure add(a: int, b: int) -> int { a + b }\nf(a: int) -> int { add(sq(a), sq(sq(a + 1))) }\nmain() {}\n";
+    let m = lower_inlined(src);
+    assert_eq!(calls(&func(&m, "f").body), 0, "{:#?}", func(&m, "f").body);
+}
+
+#[test]
+fn chains_deeper_than_four_calls_are_inlined() {
+    // solids -> density -> octave -> lattice -> hash, inside a mesher.
+    let src = "pure e(x: int) -> int { x + 1 }\npure d(x: int) -> int { e(x) * 2 }\npure c(x: int) -> int { d(x) + 3 }\npure b(x: int) -> int { c(x) - 4 }\npure a(x: int) -> int { b(x) * 5 }\nf(x: int) -> int { a(x) }\nmain() {}\n";
+    let m = lower_inlined(src);
+    assert_eq!(calls(&func(&m, "f").body), 0, "{:#?}", func(&m, "f").body);
+}
+
+#[test]
+fn inlining_stops_when_the_caller_has_grown_enough() {
+    let uses: Vec<String> = (0..60).map(|i| format!("mid(a + {i})")).collect();
+    let src = format!("{}f(a: int) -> int {{ {} }}\nmain() {{}}\n", sum_fn("mid", 30), uses.join(" + "));
+    let m = lower_inlined(&src);
+    let left = calls(&func(&m, "f").body);
+    assert!(left > 0 && left < 60, "{left} of 60 calls left");
+}
+
 #[test]
 fn functions_with_early_returns_stay_calls() {
     let src = "pick(a: int) -> int {\n if a > 0 { return 1 }\n 2\n}\nf() -> int { pick(3) }\nmain() {}\n";

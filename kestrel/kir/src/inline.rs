@@ -6,31 +6,39 @@ use crate::ir::*;
 use crate::rename::{rename_expr, rename_stmts, Subst};
 use crate::visit::{walk, Node};
 
-/// Callees larger than this many KIR nodes stay calls.
-const MAX_NODES: usize = 64;
-/// How deep inlined bodies are themselves inlined (bounds mutual recursion).
-const MAX_DEPTH: u32 = 4;
+/// Callees larger than this many KIR nodes stay calls. Big enough for a
+/// noise octave (8 lattice lookups), whose constant arguments then fold.
+const MAX_NODES: usize = 256;
+/// How many KIR nodes inlining may add to one function; calls past that
+/// stay calls, so nested inlining can't blow up code size.
+const GROWTH_BUDGET: usize = 4096;
+/// How deep inlined bodies are themselves inlined (the budget also bounds
+/// mutual recursion; this keeps a chain like solids -> density -> octave ->
+/// lattice -> hash whole even when it is itself inlined).
+const MAX_DEPTH: u32 = 8;
 
 /// Inlines small functions everywhere in `m`.
 pub fn inline_small(m: &mut Module) {
     let originals = m.funcs.clone();
-    let inlinable: Vec<bool> = originals.iter().enumerate().map(|(i, f)| inlinable(FuncIdx(i as u32), f)).collect();
+    let sizes: Vec<Option<usize>> = originals.iter().enumerate().map(|(i, f)| inlinable(FuncIdx(i as u32), f)).collect();
     for f in &mut m.funcs {
-        let mut cx = Inliner { originals: &originals, inlinable: &inlinable, locals: std::mem::take(&mut f.locals) };
+        let locals = std::mem::take(&mut f.locals);
+        let mut cx = Inliner { originals: &originals, sizes: &sizes, locals, budget: GROWTH_BUDGET };
         cx.stmts(&mut f.body, 0);
         f.locals = cx.locals;
     }
 }
 
-/// Small, not directly recursive, and with no `return` except a final one
-/// (so the body can be spliced in place of the call).
-fn inlinable(idx: FuncIdx, f: &Func) -> bool {
+/// The size in KIR nodes of a function that can be inlined: small, not
+/// directly recursive, and with no `return` except a final one (so the body
+/// can be spliced in place of the call).
+fn inlinable(idx: FuncIdx, f: &Func) -> Option<usize> {
     let (init, last) = match f.body.split_last() {
         Some((Stmt::Return(Some(_)), init)) => (init, true),
         _ => (&f.body[..], false),
     };
     if !last && f.ret.is_some() {
-        return false;
+        return None;
     }
     let mut nodes = 0;
     let mut ok = true;
@@ -46,17 +54,32 @@ fn inlinable(idx: FuncIdx, f: &Func) -> bool {
     });
     let mut early_return = false;
     walk(init, &mut |s| early_return |= matches!(s, Node::Stmt(Stmt::Return(_))));
-    ok && !early_return && nodes <= MAX_NODES
+    (ok && !early_return && nodes <= MAX_NODES).then_some(nodes)
 }
 
 struct Inliner<'a> {
     originals: &'a [Func],
-    inlinable: &'a [bool],
+    /// Each function's size when it can be inlined.
+    sizes: &'a [Option<usize>],
     /// The caller's locals; inlined callees add theirs.
     locals: Vec<Local>,
+    /// Nodes the caller may still grow by.
+    budget: usize,
 }
 
 impl Inliner<'_> {
+    /// True when a call to `fi` at `depth` should be inlined; takes its size
+    /// from the budget.
+    fn take(&mut self, fi: FuncIdx, depth: u32) -> bool {
+        match self.sizes[fi.0 as usize] {
+            Some(size) if depth < MAX_DEPTH && size <= self.budget => {
+                self.budget -= size;
+                true
+            }
+            _ => false,
+        }
+    }
+
     fn temp(&mut self, name: String, ty: KTy, kind: LocalKind) -> LocalIdx {
         self.locals.push(Local { name, ty, kind });
         LocalIdx(self.locals.len() as u32 - 1)
@@ -66,7 +89,7 @@ impl Inliner<'_> {
         let mut out = Vec::with_capacity(stmts.len());
         for mut s in std::mem::take(stmts) {
             if let Stmt::Call(fi, args) = &mut s {
-                if depth < MAX_DEPTH && self.inlinable[fi.0 as usize] {
+                if self.take(*fi, depth) {
                     let (fi, args) = (*fi, std::mem::take(args));
                     let (mut body, value) = self.expand(fi, args, depth);
                     if let Some(v) = value {
@@ -141,7 +164,7 @@ impl Inliner<'_> {
 
     fn expr(&mut self, e: &mut Expr, depth: u32) {
         match &mut e.kind {
-            ExprKind::Call(fi, args) if depth < MAX_DEPTH && self.inlinable[fi.0 as usize] => {
+            ExprKind::Call(fi, args) if self.take(*fi, depth) => {
                 let (fi, args) = (*fi, std::mem::take(args));
                 let (body, value) = self.expand(fi, args, depth);
                 let value = value.expect("a value call's callee ends in `return value`");
@@ -181,7 +204,12 @@ impl Inliner<'_> {
         let callee = &self.originals[fi.0 as usize];
         let mut pre = Vec::new();
         let mut subst: Vec<Option<Subst>> = vec![None; callee.locals.len()];
-        for (&p, arg) in callee.params.iter().zip(args) {
+        for (&p, mut arg) in callee.params.iter().zip(args) {
+            // The arguments belong to the caller: inline their calls too.
+            match &mut arg {
+                Arg::Value(v) => self.expr(v, depth),
+                Arg::Ref(place) => self.place(place, depth),
+            }
             let local = &callee.locals[p.0 as usize];
             let name = format!("{}.{}", callee.name, local.name);
             subst[p.0 as usize] = Some(match (local.kind, arg) {
