@@ -156,6 +156,7 @@ impl<'a> BodyChecker<'a> {
         // Text built for a native's arguments is freed when the call returns (see `wants_scratch`),
         // so memory made while checking them can't be kept past the call.
         let scratch = wants_scratch(info, args);
+        let native = info.is_native;
         let names: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
         let (slots, mut ok) = self.bind_args(&fname, &names, args, "parameter");
         if ok {
@@ -180,7 +181,11 @@ impl<'a> BodyChecker<'a> {
                 if a.is_var {
                     self.error_help(a.span, format!("parameter `{}` of `{fname}` isn't `var`", p.name), "remove `var`");
                 }
-                self.check_value(&a.value, Some(p.ty));
+                if native && matches!(p.ty, Ty::Array(_)) {
+                    self.check_native_array_arg(&a.value, p.ty);
+                } else {
+                    self.check_value(&a.value, Some(p.ty));
+                }
             }
         }
         for (ai, a) in args.iter().enumerate() {
@@ -205,6 +210,22 @@ impl<'a> BodyChecker<'a> {
             self.t.call_args.insert(e.id, order);
         }
         ret
+    }
+
+    /// A native's `[T]` parameter also takes a `list[T]`: a native reads only the
+    /// `{ptr, len}` that both headers start with.
+    fn check_native_array_arg(&mut self, e: &Expr, want: Ty) {
+        let found = self.check_expr(e, Some(want));
+        if found == Ty::Never {
+            self.reject_never(e, found);
+            return;
+        }
+        if let (Ty::List(have), Ty::Array(need)) = (found, want) {
+            if self.t.elem(have) == self.t.elem(need) {
+                return;
+            }
+        }
+        self.coerce(e, found, want);
     }
 
     /// Matches arguments to named slots (parameters or fields): positional

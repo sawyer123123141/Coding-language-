@@ -12,7 +12,7 @@ fn errors(src: &str) -> Vec<String> {
     run(src).1
 }
 
-const BAD_TYPE: &str = "native functions can only take numbers, bools, strings, vectors, and enums or structs of those";
+const BAD_TYPE: &str = "native functions can only take numbers, bools, strings, vectors, arrays of plain values, and enums or structs of those";
 
 /// Every shape a native may take and return.
 const ALLOWED: &str = "enum Dir {
@@ -90,7 +90,7 @@ fn a_native_that_is_not_pure_does_io() {
 #[test]
 fn bad_parameter_and_return_types_are_errors() {
     assert_eq!(errors("native f(xs: list[int])\nmain() {}\n"), vec![BAD_TYPE]);
-    assert_eq!(errors("native f(xs: [int])\nmain() {}\n"), vec![BAD_TYPE]);
+    assert_eq!(errors("native f(xs: [string])\nmain() {}\n"), vec![BAD_TYPE]);
     assert_eq!(errors("native f(m: map[string, int])\nmain() {}\n"), vec![BAD_TYPE]);
     assert_eq!(errors("native f(x: int?)\nmain() {}\n"), vec![BAD_TYPE]);
     assert_eq!(errors("native f(a: Arena)\nmain() {}\n"), vec![BAD_TYPE]);
@@ -100,23 +100,97 @@ fn bad_parameter_and_return_types_are_errors() {
 
 #[test]
 fn struct_and_enum_parameters_must_hold_only_simple_values() {
-    // A struct field that is a list, an array or a user struct isn't allowed.
-    assert_eq!(errors("struct S {\n xs: list[int]\n}\nnative f(s: S)\nmain() {}\n"), vec![BAD_TYPE]);
-    assert_eq!(errors("struct In {\n n: int\n}\nstruct S {\n i: In\n}\nnative f(s: S)\nmain() {}\n"), vec![BAD_TYPE]);
+    // A struct field that is an array or list of strings, or a struct holding a string array, isn't allowed.
+    assert_eq!(errors("struct S {\n xs: list[string]\n}\nnative f(s: S)\nmain() {}\n"), vec![BAD_TYPE]);
+    assert_eq!(errors("struct In {\n xs: [string]\n}\nstruct S {\n i: In\n}\nnative f(s: S)\nmain() {}\n"), vec![BAD_TYPE]);
     // Structs declared after the native are still seen in full.
-    assert_eq!(errors("native f(s: S)\nstruct S {\n xs: [int]\n}\nmain() {}\n"), vec![BAD_TYPE]);
+    assert_eq!(errors("native f(s: S)\nstruct S {\n xs: [string]\n}\nmain() {}\n"), vec![BAD_TYPE]);
     // An enum with fields isn't allowed; one without is.
     assert_eq!(errors("enum E {\n A { n: int }\n B\n}\nnative f(e: E)\nmain() {}\n"), vec![BAD_TYPE]);
     assert_eq!(errors("enum E {\n A\n B\n}\nnative f(e: E)\nmain() {}\n"), Vec::<String>::new());
-    // Only vec2 and vec3 may be returned; a user struct or enum may not.
-    assert_eq!(errors("struct S {\n n: int\n}\nnative f() -> S\nmain() {}\n"), vec![BAD_TYPE]);
+    // An enum can't be returned, or be a struct's field (a field holding an array or list of plain values is fine).
     assert_eq!(errors("enum E {\n A\n}\nnative f() -> E\nmain() {}\n"), vec![BAD_TYPE]);
+    assert_eq!(errors("enum E {\n A\n}\nstruct S {\n e: E\n}\nnative f() -> S\nmain() {}\n"), vec![BAD_TYPE]);
+    assert_eq!(errors("struct S {\n xs: list[int]\n ys: [float]\n}\nnative f(s: S)\nmain() {}\n"), Vec::<String>::new());
 }
 
 #[test]
 fn each_bad_type_is_reported_once_at_its_own_place() {
-    let e = errors("native f(a: list[int], b: int, c: [int]) -> string\nmain() {}\n");
+    let e = errors("native f(a: list[int], b: int, c: [string]) -> string\nmain() {}\n");
     assert_eq!(e, vec![BAD_TYPE, BAD_TYPE, BAD_TYPE]);
+}
+
+const ARRAYS_AND_STRUCTS: &str = r#"struct Rgba {
+    r: float
+    g: float
+    b: float
+    a: float = 1
+}
+struct Vertex {
+    pos: vec3
+    tint: Rgba
+}
+struct Data {
+    xs: list[int] = []
+    ps: [vec2] = []
+    vs: list[Vertex] = []
+    name: string = ""
+}
+struct Pair {
+    n: int
+    at: vec3
+    ok: bool
+    tint: Rgba
+}
+native sum(vs: [vec3]) -> float
+native colors(cs: [Rgba], bytes: [u8], flags: [bool])
+native verts(vs: [Vertex]) -> int
+native count(d: Data) -> int
+native pair(n: int) -> Pair
+main() {
+    var grown = list[vec3]()
+    grown.add(vec3(1, 2, 3))
+    print(sum([vec3(1, 2, 3)]), sum(grown))
+    colors([Rgba(1, 0, 0)], [1, 2], [true])
+    print(verts([Vertex(pos: vec3(0, 0, 0), tint: Rgba(1, 1, 1))]), count(Data()), pair(1))
+}
+"#;
+
+#[test]
+fn arrays_of_plain_values_and_struct_results_check() {
+    assert_eq!(errors(ARRAYS_AND_STRUCTS), Vec::<String>::new());
+}
+
+#[test]
+fn arrays_of_other_values_are_refused() {
+    let data = "struct Data {\n xs: list[int] = []\n ps: [vec2] = []\n name: string = \"\"\n}\n";
+    let cases = [
+        // Strings aren't plain, and neither is an array of arrays.
+        "native a(xs: [string])\n".to_string(),
+        "native b(xs: [[int]])\n".to_string(),
+        // A direct list parameter isn't allowed; only a struct field may be a list.
+        "native c(xs: list[int])\n".to_string(),
+        "enum Dir {\n North\n}\nnative d(xs: [Dir])\n".to_string(),
+        "struct Holder {\n names: [string]\n}\nnative e(h: Holder)\n".to_string(),
+        // A result can't hold an array or list, or a string.
+        format!("{data}native f() -> Data\n"),
+        "struct Named {\n s: string\n}\nnative g() -> Named\n".to_string(),
+    ];
+    for case in cases {
+        assert_eq!(errors(&format!("{case}main() {{}}\n")), vec![BAD_TYPE], "{case}");
+    }
+}
+
+#[test]
+fn a_list_is_passed_to_a_natives_array_but_not_to_a_function() {
+    let program = |decls: &str, call: &str| format!("{decls}main() {{\n var grown = list[vec3]()\n grown.add(vec3(1, 2, 3))\n var ints = list[int]()\n ints.add(1)\n print({call})\n}}\n");
+    let native = "native sum(vs: [vec3]) -> float\n";
+    assert_eq!(errors(&program(native, "sum(grown)")), Vec::<String>::new());
+    // A Kestrel function's `[T]` parameter still refuses a list.
+    let function = "total(vs: [vec3]) -> float { 0.0 }\n";
+    assert_eq!(errors(&program(function, "total(grown)")), ["expected [vec3], found list[vec3]"]);
+    // The element type has to match.
+    assert_eq!(errors(&program(native, "sum(ints)")), ["expected [vec3], found list[int]"]);
 }
 
 #[test]
@@ -182,4 +256,11 @@ fn memory_declared_inside_the_arguments_may_be_used_there() {
 fn leaving_a_function_from_a_native_argument_cannot_return_memory_made_there() {
     let src = format!("{SCRATCH}f(n: int) -> string {{\n show(\"a{{n}}\", if n > 0 {{ return tag(n) }} else {{ 2 }})\n return \"no\"\n}}\nmain() {{}}\n");
     assert_eq!(errors(&src), ["can't return memory from inside a call to `show`: it's freed when the call returns"]);
+}
+
+#[test]
+fn a_struct_that_contains_itself_is_reported_once_not_looped_over() {
+    // The plain-value rule looks inside structs; it must stop at one that holds itself.
+    let src = "struct A {\n a: A\n}\nstruct B {\n c: C\n}\nstruct C {\n b: B\n}\nnative f(xs: [A], d: B) -> A\nmain() {}\n";
+    assert_eq!(errors(src), ["struct `A` contains itself", "struct `B` contains itself", "struct `C` contains itself"]);
 }
