@@ -336,6 +336,12 @@ impl Rewriter<'_> {
                 self.expr(index);
             }
             ExprKind::ArrayLit(items) => items.iter_mut().for_each(|i| self.expr(i)),
+            ExprKind::MapLit(entries) => {
+                for (k, v) in entries {
+                    self.expr(k);
+                    self.expr(v);
+                }
+            }
             ExprKind::TypeCall { type_args, args, .. } => {
                 type_args.iter_mut().for_each(|t| self.ty(t));
                 self.args(args);

@@ -2,7 +2,7 @@
 // error 9: arrays have a fixed length; use a `list[int]` to add items
 // error 10: can't call `add` on `l`: it changes `l`, which was declared with `let`
 // error 11: an index must be an integer, found float
-// error 12: can't loop over int; `for ... in` needs an array or list
+// error 12: can't loop over int; `for ... in` needs an array, list or map
 main() {
     var a = [1, 2]
     let e = []

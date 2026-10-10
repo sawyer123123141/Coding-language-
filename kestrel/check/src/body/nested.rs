@@ -15,7 +15,7 @@ impl<'a> BodyChecker<'a> {
             ExprKind::MethodCall { receiver, args, .. } => {
                 let changes_receiver = match self.t.res.get(&e.id) {
                     Some(Res::Fn(f)) => self.t.func(*f).params.first().is_some_and(|p| p.is_var),
-                    Some(Res::ListAdd) => true,
+                    Some(Res::ListAdd | Res::MapRemove) => true,
                     _ => false,
                 };
                 if changes_receiver {
@@ -36,6 +36,12 @@ impl<'a> BodyChecker<'a> {
                 self.changed_inside(index, out);
             }
             ExprKind::ArrayLit(items) => items.iter().for_each(|i| self.changed_inside(i, out)),
+            ExprKind::MapLit(entries) => {
+                for (k, v) in entries {
+                    self.changed_inside(k, out);
+                    self.changed_inside(v, out);
+                }
+            }
             ExprKind::Interp(parts) => {
                 for p in parts {
                     if let InterpPart::Expr(x) = p {

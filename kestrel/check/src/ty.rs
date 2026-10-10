@@ -23,6 +23,8 @@ pub enum Ty {
     Array(ElemId),
     /// `list[T]`: growable.
     List(ElemId),
+    /// `map[K, V]`: keys and values, in insertion order.
+    Map(ElemId, ElemId),
     /// A memory bucket. Values holding one are owning: they move, never copy.
     Arena,
     /// `T?`: a `T` or `none`.
@@ -61,6 +63,7 @@ impl Ty {
             Ty::Variant(..) => "variant",
             Ty::Array(_) => "array",
             Ty::List(_) => "list",
+            Ty::Map(..) => "map",
             Ty::Arena => "Arena",
             Ty::Optional(_) => "optional",
             Ty::Error => "{error}",
@@ -81,7 +84,10 @@ impl Ty {
 
     /// Values that live in memory and are passed by pointer.
     pub fn is_aggregate(self) -> bool {
-        matches!(self, Ty::Struct(_) | Ty::Enum(_) | Ty::Str | Ty::Array(_) | Ty::List(_) | Ty::Arena | Ty::Optional(_))
+        matches!(
+            self,
+            Ty::Struct(_) | Ty::Enum(_) | Ty::Str | Ty::Array(_) | Ty::List(_) | Ty::Map(..) | Ty::Arena | Ty::Optional(_)
+        )
     }
 
     /// Whether a value of `self` may be used where `to` is expected without

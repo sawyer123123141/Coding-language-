@@ -198,6 +198,8 @@ pub enum ExprKind {
     Index { base: Box<Expr>, index: Box<Expr> },
     /// `[a, b, c]`
     ArrayLit(Vec<Expr>),
+    /// `{k: v, ...}`, a map's keys and values in order.
+    MapLit(Vec<(Expr, Expr)>),
     /// `array[int](n)`, `list[vec3]()`: a built-in generic type, called.
     TypeCall { name: String, name_span: Span, type_args: Vec<TypeExpr>, args: Vec<Arg> },
 }

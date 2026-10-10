@@ -138,6 +138,7 @@ impl<'a> FnLowerer<'a> {
                     else_val: else_val.map(Box::new),
                 }
             }
+            ast::ExprKind::MapLit(_) => unreachable!("maps aren't lowered yet"),
         };
         Expr { kind, ty, line }
     }

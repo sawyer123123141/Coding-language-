@@ -100,6 +100,10 @@ impl Expr {
                 let items: Vec<String> = items.iter().map(Expr::to_sexpr).collect();
                 format!("[{}]", items.join(" "))
             }
+            ExprKind::MapLit(entries) => {
+                let entries: Vec<String> = entries.iter().map(|(k, v)| format!(" ({} {})", k.to_sexpr(), v.to_sexpr())).collect();
+                format!("(map{})", entries.concat())
+            }
             ExprKind::TypeCall { name, type_args, args, .. } => {
                 let tys: Vec<String> = type_args.iter().map(TypeExpr::to_sexpr).collect();
                 format!("(make {name}[{}]{})", tys.join(", "), args_sexpr(args))

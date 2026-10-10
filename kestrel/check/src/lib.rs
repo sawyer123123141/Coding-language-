@@ -30,6 +30,7 @@ pub fn check_with(program: &Program, needs_main: bool) -> (Option<Tables>, Vec<D
     for f in 0..t.fns.len() {
         body::check_fn(program, FnId(f as u32), &mut t, &mut diags);
     }
+    collect::check_map_values(&t, &mut diags);
     let ok = !diags.iter().any(|d| d.is_error());
     (ok.then_some(t), diags)
 }

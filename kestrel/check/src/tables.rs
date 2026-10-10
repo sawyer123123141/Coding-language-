@@ -43,6 +43,10 @@ pub enum Res {
     Variant(EnumId, u32),
     /// `xs.add(v)` on a list.
     ListAdd,
+    /// `m.remove(k)`: changes the map.
+    MapRemove,
+    /// `m.get(k, d)` / `m.has(k)`: reads the map.
+    MapRead,
     /// `Arena()`
     NewArena,
 }
@@ -175,6 +179,9 @@ pub struct Tables {
     pub owning_enums: Vec<bool>,
     /// Element types of arrays and lists, indexed by `ElemId`.
     pub elems: Vec<Ty>,
+    /// Every map type written or inferred, with where; their value types
+    /// are checked once it's known which types own an arena.
+    pub map_types: Vec<(Ty, Span)>,
     pub elem_ids: HashMap<Ty, ElemId>,
     pub fn_by_name: HashMap<String, FnId>,
     pub const_by_name: HashMap<String, ConstId>,
@@ -219,7 +226,7 @@ impl Tables {
     /// directly or in fields. (An `Arena` itself doesn't.)
     pub fn has_heap(&self, ty: Ty) -> bool {
         match ty {
-            Ty::Array(_) | Ty::List(_) => true,
+            Ty::Array(_) | Ty::List(_) | Ty::Map(..) => true,
             Ty::Optional(e) => self.has_heap(self.elem(e)),
             Ty::Struct(s) => self.strukt(s).fields.iter().any(|f| self.has_heap(f.ty)),
             Ty::Enum(e) => self.enm(e).variants.iter().flat_map(|v| &v.fields).any(|f| self.has_heap(f.ty)),
@@ -234,6 +241,7 @@ impl Tables {
             Ty::Struct(s) => self.owning_structs.get(s.0 as usize).copied().unwrap_or(false),
             Ty::Enum(e) => self.owning_enums.get(e.0 as usize).copied().unwrap_or(false),
             Ty::Array(e) | Ty::List(e) | Ty::Optional(e) => self.is_owning(self.elem(e)),
+            // Maps can't hold owning values (see `check_map_values`).
             _ => false,
         }
     }
@@ -281,6 +289,7 @@ impl Tables {
             Ty::Variant(id, v) => format!("{}.{}", self.enm(id).name, self.enm(id).variants[v as usize].name),
             Ty::Array(e) => format!("[{}]", self.ty_name(self.elem(e))),
             Ty::List(e) => format!("list[{}]", self.ty_name(self.elem(e))),
+            Ty::Map(k, v) => format!("map[{}, {}]", self.ty_name(self.elem(k)), self.ty_name(self.elem(v))),
             Ty::Optional(e) => format!("{}?", self.ty_name(self.elem(e))),
             other => other.name().to_string(),
         }

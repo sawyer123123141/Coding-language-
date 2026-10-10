@@ -77,6 +77,15 @@ fn continuation_and_else_on_next_line() {
 }
 
 #[test]
+fn map_literals() {
+    assert_eq!(body("let m = {}"), "{(let m (map))}");
+    assert_eq!(body("let m = {\"a\": 1, \"b\": x + 1}"), "{(let m (map (\"a\" 1) (\"b\" (+ x 1))))}");
+    assert_eq!(body("let m = {\n    \"a\": 1,\n    \"b\": 2,\n}\nf(m)"), "{(let m (map (\"a\" 1) (\"b\" 2))); (call f m)}");
+    assert_eq!(body("let m = {\n}"), "{(let m (map))}");
+    assert_eq!(errs("main() {\n let m = {1 2}\n}\n")[0], "expected `:`, found number `2`");
+}
+
+#[test]
 fn types() {
     let p = ok("f(a: [int], b: list[vec3], c: map[string, int]?, var d: float) {}\n");
     let f = fn_decl(&p, 0);

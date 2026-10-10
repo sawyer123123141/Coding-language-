@@ -31,6 +31,12 @@ pub(crate) fn resolve_type(ty: &TypeExpr, t: &mut Tables, diags: &mut Vec<Diagno
             return if elem == Ty::Error { Ty::Error } else { Ty::List(t.intern_elem(elem)) };
         }
         TypeKind::Named { name, .. } if name == "list" => "`list[...]` takes one element type".to_string(),
+        TypeKind::Named { name, args } if name == "map" && args.len() == 2 => {
+            let k = resolve_type(&args[0], t, diags);
+            let v = resolve_type(&args[1], t, diags);
+            return map_ty(k, v, args[0].span, ty.span, t, diags);
+        }
+        TypeKind::Named { name, .. } if name == "map" => "`map[...]` takes a key type and a value type".to_string(),
         TypeKind::Named { name, .. } if name == "array" => "write array types as `[T]`".to_string(),
         TypeKind::Named { name, .. } => format!("`{name}[...]` types aren't supported yet"),
         TypeKind::Array(inner) => {
@@ -44,6 +50,43 @@ pub(crate) fn resolve_type(ty: &TypeExpr, t: &mut Tables, diags: &mut Vec<Diagno
     };
     diags.push(Diagnostic::error(ty.span, msg));
     Ty::Error
+}
+
+/// `map[k, v]`, once `k` is known to work as a key (else an error at
+/// `key_span`). Value types are checked by `check_map_values`, which needs
+/// to know which types own an arena.
+pub(crate) fn map_ty(k: Ty, v: Ty, key_span: Span, span: Span, t: &mut Tables, diags: &mut Vec<Diagnostic>) -> Ty {
+    if k == Ty::Error || v == Ty::Error {
+        return Ty::Error;
+    }
+    if !(k.is_int() || matches!(k, Ty::Bool | Ty::Str)) {
+        let msg = if k.is_float() {
+            format!("map keys must be integers, bools or strings; `{}` keys would be unreliable", t.ty_name(k))
+        } else {
+            format!("map keys must be integers, bools or strings, not `{}`", t.ty_name(k))
+        };
+        diags.push(Diagnostic::error(key_span, msg));
+        return Ty::Error;
+    }
+    let ty = Ty::Map(t.intern_elem(k), t.intern_elem(v));
+    t.map_types.push((ty, span));
+    ty
+}
+
+/// Reports map types whose values own an arena (once per type).
+pub(crate) fn check_map_values(t: &Tables, diags: &mut Vec<Diagnostic>) {
+    let mut seen = HashSet::new();
+    for &(ty, span) in &t.map_types {
+        let Ty::Map(_, v) = ty else { continue };
+        let v = t.elem(v);
+        if t.is_owning(v) && seen.insert(ty) {
+            let msg = format!(
+                "maps can't hold values that own an arena yet (`{}` has one); keep them in a list and map keys to indexes",
+                t.ty_name(v)
+            );
+            diags.push(Diagnostic::error(span, msg));
+        }
+    }
 }
 
 /// Records every type, function signature and constant before bodies are
@@ -146,7 +189,7 @@ fn fields_of(owner: &str, decls: &[FieldDecl], t: &mut Tables, diags: &mut Vec<D
         let ty = resolve_type(&f.ty, t, diags);
         let default_allocates = match f.default.as_ref().map(|d| &d.kind) {
             Some(ExprKind::ArrayLit(items)) => !items.is_empty() || matches!(ty, Ty::List(_)),
-            Some(ExprKind::TypeCall { .. }) => true,
+            Some(ExprKind::TypeCall { .. } | ExprKind::MapLit(_)) => true,
             _ => false,
         };
         fields.push(FieldInfo { name: f.name.clone(), ty, span: f.name_span, has_default: f.default.is_some(), default_allocates });

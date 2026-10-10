@@ -217,6 +217,7 @@ impl Parser {
                 inner.span = span.to(end);
                 return Ok(inner);
             }
+            Tok::LBrace => return self.map_lit(span),
             Tok::LBracket => {
                 self.bump();
                 let mut items = Vec::new();
@@ -250,6 +251,27 @@ impl Parser {
     }
 
     /// `array[int](n)`: type arguments in brackets, then call arguments.
+    /// `{k: v, ...}`. A `{` never starts a block expression, so here it's a
+    /// map. Newlines inside it don't end anything.
+    fn map_lit(&mut self, start: Span) -> PResult<Expr> {
+        self.bump();
+        self.skip_newlines();
+        let mut entries = Vec::new();
+        while !self.at(&Tok::RBrace) {
+            let key = self.expr()?;
+            self.expect(&Tok::Colon, "`:`")?;
+            let value = self.expr()?;
+            entries.push((key, value));
+            self.skip_newlines();
+            if !self.eat(&Tok::Comma) {
+                break;
+            }
+            self.skip_newlines();
+        }
+        let end = self.expect(&Tok::RBrace, "`}` or `,`")?;
+        Ok(self.expr_node(ExprKind::MapLit(entries), start.to(end)))
+    }
+
     fn type_call(&mut self, name: String, name_span: Span) -> PResult<Expr> {
         self.expect(&Tok::LBracket, "`[`")?;
         let mut type_args = Vec::new();

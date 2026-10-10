@@ -56,6 +56,9 @@ impl<'a> BodyChecker<'a> {
                 let name = self.t.fns[f.0 as usize].name.clone();
                 self.error(e.span, format!("the result of pure function `{name}` is unused, so this line does nothing"));
             }
+            Some(Res::MapRead) => {
+                self.error(e.span, "this only reads the map, so the line does nothing");
+            }
             Some(Res::Convert(_) | Res::Construct(_) | Res::Variant(..) | Res::NewArena) => {
                 self.error(e.span, "this line has no effect; did you mean to continue the line above?");
             }

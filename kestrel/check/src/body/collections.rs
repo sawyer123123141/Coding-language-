@@ -45,7 +45,7 @@ impl<'a> BodyChecker<'a> {
     }
 
     /// A value stored into a collection: a literal element or an `.add` argument.
-    fn check_element(&mut self, item: &Expr, want: Option<Ty>) -> Ty {
+    pub(crate) fn check_element(&mut self, item: &Expr, want: Option<Ty>) -> Ty {
         let ty = self.check_value(item, want);
         if ty == Ty::Unit {
             self.error(item.span, "this has no value to store");
@@ -58,6 +58,9 @@ impl<'a> BodyChecker<'a> {
     pub(crate) fn check_index(&mut self, e: &Expr) -> Ty {
         let ExprKind::Index { base, index } = &e.kind else { unreachable!("check_index on non-index") };
         let base_ty = self.check_expr(base, None);
+        if let Some(kv) = self.map_of(base_ty) {
+            return self.check_map_index(index, kv.0, kv.1);
+        }
         let index_ty = self.check_expr(index, None);
         let index_ty = self.reject_never(index, index_ty);
         if !index_ty.is_int() && index_ty != Ty::Error {
@@ -68,7 +71,7 @@ impl<'a> BodyChecker<'a> {
             Some(elem) => elem,
             None if base_ty == Ty::Error => Ty::Error,
             None => {
-                let msg = format!("can't index {}; only arrays and lists can be indexed", self.tn(base_ty));
+                let msg = format!("can't index {}; only arrays, lists and maps can be indexed", self.tn(base_ty));
                 self.error(base.span, msg);
                 Ty::Error
             }
@@ -79,9 +82,7 @@ impl<'a> BodyChecker<'a> {
     pub(crate) fn check_type_call(&mut self, e: &Expr) -> Ty {
         let ExprKind::TypeCall { name, name_span, type_args, args } = &e.kind else { unreachable!("not a type call") };
         if name == "map" {
-            self.error(*name_span, "`map` isn't supported yet");
-            self.check_loose_args(args);
-            return Ty::Error;
+            return self.check_map_new(e, *name_span, type_args, args);
         }
         let elem = match type_args.as_slice() {
             [ty] => resolve_type(ty, self.t, self.diags),
@@ -120,7 +121,7 @@ impl<'a> BodyChecker<'a> {
         }
     }
 
-    fn check_loose_args(&mut self, args: &[Arg]) {
+    pub(crate) fn check_loose_args(&mut self, args: &[Arg]) {
         for a in args {
             self.check_expr(&a.value, None);
         }
@@ -194,11 +195,14 @@ impl<'a> BodyChecker<'a> {
     pub(crate) fn check_for_in(&mut self, index: Option<&Binding>, var: &Binding, iter: &Expr, body: &Block) {
         let iter_ty = self.check_expr(iter, None);
         let iter_ty = self.reject_never(iter, iter_ty);
+        if let Some(kv) = self.map_of(iter_ty) {
+            return self.check_map_for_in(iter, kv, index, var, body);
+        }
         let elem = match self.elem_of(iter_ty) {
             Some(elem) => elem,
             None => {
                 if iter_ty != Ty::Error {
-                    let msg = format!("can't loop over {}; `for ... in` needs an array or list", self.tn(iter_ty));
+                    let msg = format!("can't loop over {}; `for ... in` needs an array, list or map", self.tn(iter_ty));
                     self.error(iter.span, msg);
                 }
                 Ty::Error

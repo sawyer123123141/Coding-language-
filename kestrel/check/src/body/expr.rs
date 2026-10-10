@@ -57,6 +57,7 @@ impl<'a> BodyChecker<'a> {
             ExprKind::Match { .. } => self.check_match(e, Expect::Value(want)),
             ExprKind::Index { .. } => self.check_index(e),
             ExprKind::ArrayLit(items) => self.check_array_lit(e, items, want),
+            ExprKind::MapLit(entries) => self.check_map_lit(e, entries, want),
             ExprKind::TypeCall { .. } => self.check_type_call(e),
         }
     }
@@ -176,7 +177,11 @@ impl<'a> BodyChecker<'a> {
             _ if op.is_comparison() => {
                 let lt = self.check_expr(lhs, None);
                 let rt = self.check_expr(rhs, Some(lt).filter(|t| t.is_numeric()));
-                if lt == Ty::Bool && rt == Ty::Bool && matches!(op, BinaryOp::Eq | BinaryOp::Ne) {
+                if matches!(op, BinaryOp::Eq | BinaryOp::Ne) && [lt, rt].iter().any(|t| matches!(t, Ty::Bool | Ty::Str)) {
+                    if lt != rt && lt != Ty::Error && rt != Ty::Error {
+                        let msg = format!("`{}` needs two numbers, two bools or two strings, found {} and {}", op.symbol(), self.tn(lt), self.tn(rt));
+                        self.error(e.span, msg);
+                    }
                     return Ty::Bool;
                 }
                 self.operands(e, op, lhs, lt, rhs, rt);

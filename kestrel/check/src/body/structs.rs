@@ -66,7 +66,7 @@ impl<'a> BodyChecker<'a> {
             return self.variant_value(e, id, name, *name_span);
         }
         let base_ty = self.check_field_base(base);
-        if matches!(base_ty, Ty::Array(_) | Ty::List(_)) {
+        if matches!(base_ty, Ty::Array(_) | Ty::List(_) | Ty::Map(..)) {
             return self.collection_field(base_ty, name, *name_span);
         }
         let (owner, fields) = match base_ty {
@@ -76,6 +76,11 @@ impl<'a> BodyChecker<'a> {
             }
             Ty::Variant(id, v) => (self.tn(base_ty), &self.t.enm(id).variants[v as usize].fields),
             Ty::Error => return Ty::Error,
+            Ty::Optional(_) => {
+                let msg = format!("{} may be `none`, so it has no field `{name}`", self.tn(base_ty));
+                self.error_help(*name_span, msg, "unwrap it first: `let x = ... else { ... }`");
+                return Ty::Error;
+            }
             other => {
                 let msg = format!("{} has no field `{name}`", self.tn(other));
                 self.error(*name_span, msg);
@@ -109,6 +114,9 @@ impl<'a> BodyChecker<'a> {
         let receiver_ty = self.check_expr(receiver, None);
         if matches!(receiver_ty, Ty::Array(_) | Ty::List(_)) {
             return self.collection_method(e, receiver, receiver_ty, args);
+        }
+        if let Ty::Map(..) = receiver_ty {
+            return self.map_method(e, receiver, receiver_ty, args);
         }
         let found = match receiver_ty {
             Ty::Struct(sid) => {

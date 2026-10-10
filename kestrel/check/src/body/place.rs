@@ -26,7 +26,7 @@ impl<'a> BodyChecker<'a> {
             // A swizzle (`v.xz`) builds a new vector; it isn't a place.
             ExprKind::Field { .. } if self.t.swizzles.contains_key(&e.id) => None,
             // `xs.len` is computed, not stored.
-            ExprKind::Field { base, .. } if matches!(self.t.ty(base.id), Ty::Array(_) | Ty::List(_)) => None,
+            ExprKind::Field { base, .. } if matches!(self.t.ty(base.id), Ty::Array(_) | Ty::List(_) | Ty::Map(..)) => None,
             ExprKind::Field { base, .. } | ExprKind::Index { base, .. } => self.place_root(base),
             _ => None,
         }
@@ -92,6 +92,11 @@ impl<'a> BodyChecker<'a> {
                 self.t.fns[f.0 as usize].mutates_params = true;
             }
             None => {}
+        }
+        if let ExprKind::Index { base, .. } = &target.kind {
+            if let Some((_, v)) = self.map_of(self.t.ty(base.id)) {
+                return self.check_map_set(target, op, value, v);
+            }
         }
         if target_ty == Ty::Arena {
             self.error_help(

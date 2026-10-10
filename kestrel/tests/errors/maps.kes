@@ -1,0 +1,50 @@
+struct Chunk {
+    mem: Arena = Arena()
+}
+
+struct P {
+    x: int
+}
+
+main() {
+    var a: map[float, int] = {}
+    var b: map[int, Chunk] = {}
+    let c = {}
+    var m: map[string, int] = {"a": 1}
+    m["a"] += 1
+    m[1] = 2
+    m["b"] = "x"
+    let n: int = m["a"]
+    let k = {"a": 1, 2: 3}
+    let fixed: map[string, int] = {"a": 1}
+    fixed["b"] = 2
+    print(m.size, m.missing(1))
+    print("a" == 1, "a" < "b")
+    var ps: map[int, P] = {}
+    ps[1].x = 5
+    m.has("a")
+    let bad = map[int, int](5)
+    let pair: map[int] = {}
+    fixed.remove("a")
+    print(m.get("a"))
+}
+
+// error 10: map keys must be integers, bools or strings; `float` keys would be unreliable
+// error 12: can't tell what `{}` holds
+// error 14: a map's value may be missing, so `+=` can't change it in place; write `m[k] = m.get(k, 0) + 1`
+// error 15: expected string, found int
+// error 16: expected int, found string
+// error 17: expected int, found int?
+// error 18: expected string, found int
+// error 20: can't change `fixed`: it was declared with `let`
+// error 21: `map[string, int]` has no field `size`
+// error 21: `map[string, int]` has no method `missing`
+// error 22: `==` needs two numbers, two bools or two strings, found string and int
+// error 22: `<` needs numbers, found string and string
+// error 24: P? may be `none`, so it has no field `x`
+// error 25: this only reads the map, so the line does nothing
+// error 26: `map[K, V]()` takes no arguments
+// error 27: `map[...]` takes a key type and a value type
+// error 28: can't call `remove` on `fixed`: it changes `fixed`, which was declared with `let`
+// error 29: `get` takes a key and a default value: `m.get(k, 0)`
+// error 11: maps can't hold values that own an arena yet (`Chunk` has one); keep them in a list and map keys to indexes

@@ -2,6 +2,7 @@ mod call;
 mod collections;
 mod enums;
 mod expr;
+mod maps;
 mod matching;
 mod nested;
 mod place;
@@ -75,6 +76,7 @@ pub(crate) fn is_const_expr(e: &Expr) -> bool {
         ExprKind::Binary { lhs, rhs, .. } => is_const_expr(lhs) && is_const_expr(rhs),
         // Each use builds a fresh array, like any other value.
         ExprKind::ArrayLit(items) => items.iter().all(is_const_expr),
+        ExprKind::MapLit(entries) => entries.iter().all(|(k, v)| is_const_expr(k) && is_const_expr(v)),
         ExprKind::TypeCall { args, .. } => args.iter().all(|a| is_const_expr(&a.value)),
         ExprKind::Interp(_)
         | ExprKind::Index { .. }
