@@ -21,7 +21,7 @@ mod native_tests;
 use std::ffi::CString;
 use std::path::Path;
 
-use raylib::{GetImageColor, LoadImage, UnloadImage};
+use raylib::{GetImageColor, LoadImage, SetTraceLogLevel, UnloadImage, LOG_ERROR};
 
 /// The native functions, as `(symbol, address)` pairs: what the JIT needs to
 /// link a program that uses `window`, `draw` or `input`. A built program finds
@@ -65,18 +65,32 @@ pub fn symbols() -> Vec<(&'static str, *const u8)> {
 /// No window is needed. Gives `None` if the file can't be read as an image or
 /// the point is outside it.
 pub fn png_pixel(path: &Path, x: i32, y: i32) -> Option<[u8; 4]> {
+    png_pixels(path, &[(x, y)])?.pop().flatten()
+}
+
+/// Reads the pixels at `points` of the image file at `path`, loading the file
+/// once. Gives `None` if the file can't be read as an image; a point outside it
+/// gives `None` in its place.
+pub fn png_pixels(path: &Path, points: &[(i32, i32)]) -> Option<Vec<Option<[u8; 4]>>> {
     let c_path = CString::new(path.to_str()?).ok()?;
     // SAFETY: `c_path` is a valid C string. `image` is read only while loaded
     // and is unloaded before returning.
     unsafe {
+        // raylib's loader logs an INFO line to stdout per image; tests don't want it.
+        SetTraceLogLevel(LOG_ERROR);
         let image = LoadImage(c_path.as_ptr());
         if image.data.is_null() {
             return None;
         }
-        let inside = (0..image.width).contains(&x) && (0..image.height).contains(&y);
-        let pixel = inside.then(|| GetImageColor(image, x, y));
+        let pixels = points
+            .iter()
+            .map(|&(x, y)| {
+                let inside = (0..image.width).contains(&x) && (0..image.height).contains(&y);
+                inside.then(|| GetImageColor(image, x, y)).map(|c| [c.r, c.g, c.b, c.a])
+            })
+            .collect();
         UnloadImage(image);
-        pixel.map(|c| [c.r, c.g, c.b, c.a])
+        Some(pixels)
     }
 }
 
@@ -93,6 +107,7 @@ mod tests {
         let c_path = CString::new(path.to_str().unwrap()).unwrap();
         // SAFETY: a fresh image, drawn within its bounds, exported and freed once.
         unsafe {
+            SetTraceLogLevel(LOG_ERROR);
             let mut image = GenImageColor(4, 4, black);
             ImageDrawPixel(&mut image, 2, 1, red);
             assert!(ExportImage(image, c_path.as_ptr()));
@@ -102,6 +117,7 @@ mod tests {
         assert_eq!(png_pixel(&path, 2, 1), Some([255, 0, 0, 255]));
         assert_eq!(png_pixel(&path, 0, 0), Some([0, 0, 0, 255]));
         assert_eq!(png_pixel(&path, 4, 0), None, "outside the image");
+        assert_eq!(png_pixels(&path, &[(2, 1), (0, 4), (3, 3)]), Some(vec![Some([255, 0, 0, 255]), None, Some([0, 0, 0, 255])]));
         std::fs::remove_file(&path).unwrap();
         assert_eq!(png_pixel(&path, 0, 0), None, "missing file");
     }
