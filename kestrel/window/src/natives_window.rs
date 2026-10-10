@@ -8,6 +8,7 @@ use kestrel_runtime::panic::fail;
 use crate::abi::{c_string, str_bytes, write, KStr, V2};
 use crate::headless::{self, Arg};
 use crate::raylib as rl;
+use crate::real;
 use crate::state::{self, Mode, Settings, View};
 
 /// # Safety
@@ -56,7 +57,7 @@ pub extern "C" fn kestrel_window_delta() -> f32 {
 #[no_mangle]
 pub extern "C" fn kestrel_window_time() -> f32 {
     match state::view("window.time") {
-        View::Real { time_base } => state::real_time(time_base),
+        View::Real { time_base } => real::time(time_base),
         View::Fixed(values) => values.time,
     }
 }
@@ -66,7 +67,7 @@ pub extern "C" fn kestrel_window_time() -> f32 {
 #[no_mangle]
 pub unsafe extern "C" fn kestrel_window_size(out: *mut V2) {
     let size = match state::view("window.size") {
-        View::Real { .. } => state::real_size(),
+        View::Real { .. } => real::size(),
         View::Fixed(values) => values.size,
     };
     write(out, size);

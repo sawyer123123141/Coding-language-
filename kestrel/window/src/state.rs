@@ -24,9 +24,10 @@ use std::env;
 
 use kestrel_runtime::panic::fail;
 
-use crate::abi::{c_string, V2};
+use crate::abi::V2;
 use crate::headless;
 use crate::raylib as rl;
+use crate::real;
 
 /// Which backend a window uses.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -143,8 +144,8 @@ impl Window {
                     }
                     if self.close_requested || rl::WindowShouldClose() {
                         let last = Fixed {
-                            size: real_size(),
-                            time: real_time(time_base),
+                            size: real::size(),
+                            time: real::time(time_base),
                             delta: rl::GetFrameTime(),
                             fps: rl::GetFPS(),
                         };
@@ -160,18 +161,6 @@ impl Window {
     }
 }
 
-/// The real window's size in pixels.
-pub fn real_size() -> V2 {
-    // SAFETY: only called while a real window is open.
-    unsafe { V2 { x: rl::GetScreenWidth() as f32, y: rl::GetScreenHeight() as f32 } }
-}
-
-/// Seconds since `time_base`, a value `GetTime()` gave.
-pub fn real_time(time_base: f64) -> f32 {
-    // SAFETY: only called while a real window is open.
-    unsafe { (rl::GetTime() - time_base) as f32 }
-}
-
 /// `window.open`: opens the window, or says why it can't.
 pub fn open(settings: &Settings, width: i32, height: i32, title: &[u8]) -> Result<Mode, String> {
     STATE.with_borrow_mut(|state| {
@@ -185,7 +174,7 @@ pub fn open(settings: &Settings, width: i32, height: i32, title: &[u8]) -> Resul
         }
         let kind = match settings.headless {
             Some(frames_to_run) => Kind::Headless { frames_to_run },
-            None => Kind::Real { time_base: init_real(settings, width, height, title)? },
+            None => Kind::Real { time_base: real::init(settings, width, height, title)? },
         };
         let size = V2 { x: width as f32, y: height as f32 };
         let window = Window { kind, size, frames: 0, close_requested: false };
@@ -193,29 +182,6 @@ pub fn open(settings: &Settings, width: i32, height: i32, title: &[u8]) -> Resul
         *state = State::Open(window);
         Ok(mode)
     })
-}
-
-/// Opens the real window. Gives `GetTime()` as of now, the start of `window.time()`.
-fn init_real(settings: &Settings, width: i32, height: i32, title: &[u8]) -> Result<f64, String> {
-    let mut flags = rl::FLAG_WINDOW_RESIZABLE | rl::FLAG_VSYNC_HINT | rl::FLAG_MSAA_4X_HINT;
-    if settings.hidden {
-        flags |= rl::FLAG_WINDOW_HIDDEN;
-    }
-    let title = c_string(title);
-    // SAFETY: `title` is a NUL-terminated string that lives through the call. Nothing else has
-    // used raylib on this thread yet.
-    unsafe {
-        // Errors only: raylib logs its progress on stdout, which would mix with the program's output.
-        rl::SetTraceLogLevel(rl::LOG_ERROR);
-        rl::SetConfigFlags(flags);
-        rl::InitWindow(width, height, title.as_ptr());
-        if !rl::IsWindowReady() {
-            return Err("window.open could not open a window; check that the graphics driver supports OpenGL 3.3".to_string());
-        }
-        // Escape doesn't quit; the program decides.
-        rl::SetExitKey(rl::KEY_NULL);
-        Ok(rl::GetTime())
-    }
 }
 
 /// `window.frame`: finishes the previous frame and starts the next. `false`
