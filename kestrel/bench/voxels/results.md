@@ -44,3 +44,13 @@ dotnet run -c Release --project cs -- 60
 # inside Godot (from kestrel/godot/bench)
 ./run.ps1 <path to Godot console exe>
 ```
+
+## After the inliner changes for the 3D voxel benchmark
+
+`bench/voxels3d` changed the KIR inliner: callees up to 256 nodes (was 64), and calls inside the arguments of an inlined call are inlined too. Per build, median of 7, one pass each; the machine was slower during the last pass (C# 13.1 ms).
+
+| Per build | Before | 256-node limit | + calls in arguments |
+|---|---:|---:|---:|
+| Kestrel exe (checks on) | 12.1–12.4 ms | 11.4 ms | 12.6 ms |
+| Kestrel exe (`--release`) | 10.8–11.0 ms | 8.1 ms | 8.6 ms |
+| C# .NET 9 | 10.6–11.9 ms | | 13.1 ms |

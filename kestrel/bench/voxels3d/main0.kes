@@ -1,0 +1,8 @@
+// Same as main.kes with an empty world: measures process startup.
+use { bench from voxels3d }
+
+let WIDTH = 0
+
+main() {
+    print(bench(1337, WIDTH))
+}

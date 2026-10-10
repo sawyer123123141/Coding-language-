@@ -1,0 +1,9 @@
+// Builds the 3D voxel world (8x4x8 chunks, see voxels3d.kes) and prints
+// its face count.
+use { bench from voxels3d }
+
+let WIDTH = 8
+
+main() {
+    print(bench(1337, WIDTH))
+}

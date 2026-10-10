@@ -59,3 +59,18 @@ What's left is backend quality:
 Those belong to sub-project 5, as the milestone allows ("if missed, record the gap; it does not block the rest of sub-project 2").
 
 The inliner also moved `particles` (2a suite) from 1.26x to **1.05x** Rust: its `step` method is now inlined.
+
+## After the inliner changes for the 3D voxel benchmark
+
+`bench/voxels3d` changed the KIR inliner in two steps: callees up to 256 nodes (was 64) with a growth budget per caller, then inlining the calls inside the arguments of an inlined call too. Before the second step, `block_at(y, h)` stayed a call, because it is the receiver (an argument) of the inlined `.weight()`. One pass each:
+
+| Variant | 256-node limit | + calls in arguments |
+|---|---:|---:|
+| Kestrel exe (checked) | 84 ms | 81 ms |
+| Kestrel exe (`--release`) | 78 ms | 52 ms |
+| `kestrel run` (JIT, incl. compile) | 102 ms | 109 ms |
+| `kestrel check` | 14 ms | 19 ms |
+| Rust -O3 (overflow checks on) | 28 ms | 37 ms |
+| Rust -O3 | 25 ms | 26 ms |
+
+`--release` is now **about 2x** Rust (it was 3.1x). The checked build barely moved: its overflow checks are branches that keep the work in the loop.

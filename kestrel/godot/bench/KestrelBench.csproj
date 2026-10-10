@@ -5,4 +5,7 @@
     <RootNamespace>KestrelBench</RootNamespace>
     <Nullable>disable</Nullable>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\bench\voxels3d\cs\Voxels3dCs.cs" Link="Voxels3dCs.cs" />
+  </ItemGroup>
 </Project>
