@@ -23,6 +23,14 @@ enum Shape {
     Pair { rest: Shape? }
 }
 
+struct P {
+    q: Q?
+}
+
+struct Q {
+    p: P?
+}
+
 // A list or an array keeps its items elsewhere, so these are fine.
 struct Tree {
     kids: [Tree]
@@ -42,3 +50,5 @@ main() {
 // error 13: struct `A` contains itself
 // error 17: struct `B` contains itself
 // error 21: enum `Shape` contains itself
+// error 26: struct `P` contains itself
+// error 30: struct `Q` contains itself
