@@ -318,13 +318,21 @@ fn add_fn(f: &FnDecl, item_idx: usize, method: Option<(usize, &str)>, t: &mut Ta
     id
 }
 
-/// The types a value of `ty` holds directly inside it.
+/// The types a value of `ty` holds directly inside it. An optional holds its
+/// payload in place, so `Node?` inside `Node` is as endless as `Node` is; an
+/// array, list or map keeps its items elsewhere, so those can hold their own type.
 fn contained(t: &Tables, ty: Ty) -> Vec<Ty> {
     match ty {
+        Ty::Optional(e) => vec![t.elem(e)],
         Ty::Struct(s) => t.strukt(s).fields.iter().map(|f| f.ty).collect(),
         Ty::Enum(e) => t.enm(e).variants.iter().flat_map(|v| v.fields.iter().map(|f| f.ty)).collect(),
         _ => Vec::new(),
     }
+}
+
+/// How to build a recursive type anyway.
+fn self_help(name: &str) -> String {
+    format!("to make `{name}` recursive, hold a `list[{name}]` or an array `[{name}]` instead of a `{name}` or `{name}?`; they keep their items elsewhere")
 }
 
 /// A type can't hold itself, directly or through others: it would be infinitely large.
@@ -346,13 +354,13 @@ fn check_self_containment(t: &Tables, diags: &mut Vec<Diagnostic>) {
     for (i, s) in t.structs.iter().enumerate() {
         let ty = Ty::Struct(StructId(i as u32));
         if reaches(t, ty, ty, &mut Vec::new()) {
-            diags.push(Diagnostic::error(s.span, format!("struct `{}` contains itself", s.name)));
+            diags.push(Diagnostic::error(s.span, format!("struct `{}` contains itself", s.name)).with_help(self_help(&s.name)));
         }
     }
     for (i, e) in t.enums.iter().enumerate() {
         let ty = Ty::Enum(EnumId(i as u32));
         if reaches(t, ty, ty, &mut Vec::new()) {
-            diags.push(Diagnostic::error(e.span, format!("enum `{}` contains itself", e.name)));
+            diags.push(Diagnostic::error(e.span, format!("enum `{}` contains itself", e.name)).with_help(self_help(&e.name)));
         }
     }
 }

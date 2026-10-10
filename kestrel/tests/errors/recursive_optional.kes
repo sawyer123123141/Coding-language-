@@ -1,0 +1,44 @@
+// A struct holds its optional field in place, so `Node?` inside `Node` has no end.
+struct Node {
+    value: int
+    next: Node?
+}
+
+struct Chain {
+    value: int
+    next: Chain? = none
+}
+
+// The same through two structs, and through an enum.
+struct A {
+    b: B?
+}
+
+struct B {
+    a: A? = none
+}
+
+enum Shape {
+    Dot
+    Pair { rest: Shape? }
+}
+
+// A list or an array keeps its items elsewhere, so these are fine.
+struct Tree {
+    kids: [Tree]
+}
+
+struct Graph {
+    edges: list[Graph]
+    parent: [Graph]?
+}
+
+main() {
+    print(Tree([]).kids.len)
+}
+
+// error 2: struct `Node` contains itself
+// error 7: struct `Chain` contains itself
+// error 13: struct `A` contains itself
+// error 17: struct `B` contains itself
+// error 21: enum `Shape` contains itself

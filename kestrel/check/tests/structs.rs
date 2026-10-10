@@ -74,6 +74,7 @@ fn struct_errors() {
     let cases: Vec<(String, &str)> = vec![
         ("struct P {\n x: int\n x: int\n}\nmain() {}\n".into(), "`P` has two fields named `x`"),
         ("struct A {\n a: A\n}\nmain() {}\n".into(), "struct `A` contains itself"),
+        ("struct A {\n a: A? = none\n}\nmain() {}\n".into(), "struct `A` contains itself"),
         ("pure f() -> int { 1 }\nstruct P {\n x: int = f()\n}\nmain() {}\n".into(), "field defaults can only use literals, operators and constants"),
         ("struct P {\n x: int = true\n}\nmain() {}\n".into(), "expected int, found bool"),
         (format!("{p}main() {{\n let a = P()\n}}\n"), "missing field `x` for `P`"),
@@ -144,7 +145,7 @@ struct Sprite {{
     limit: int = LIMIT
     name: string = NAME
     ids: [int] = []
-    parent: Sprite? = none
+    parent: [Sprite]? = none
 }}
 main() {{
     print(Sprite(), TINT)
@@ -201,7 +202,7 @@ struct Outer {
 main() {}
 ".to_string(),
         "struct Node {
- next: Node? = Node()
+ next: [Node]? = [Node()]
 }
 main() {}
 ".to_string(),
@@ -228,9 +229,9 @@ fn field_defaults_cant_use_constants_that_hold_structs() {
     let cases = [
         // A cycle through a constant: `N` is a `Node`, whose default is `N`.
         "struct Node {
- next: Node? = N
+ kids: [Node] = N
 }
-let N = Node(none)
+let N = [Node([])]
 main() {}
 ".to_string(),
         format!("{COLOR}let RED = Color(1, 0, 0)

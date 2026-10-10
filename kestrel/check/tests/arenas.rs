@@ -222,7 +222,7 @@ struct S {
 struct S {
     name: string = \"anon\"
     tag: string = NAME
-    next: S? = none
+    nick: string? = none
     ids: [int] = []
 }
 main() {
