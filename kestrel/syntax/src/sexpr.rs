@@ -23,12 +23,13 @@ impl Stmt {
                 end.to_sexpr(),
                 body.to_sexpr()
             ),
-            Stmt::ForIn { index, var, iter, body, .. } => {
+            Stmt::ForIn { par, index, var, iter, body, .. } => {
                 let names = match index {
                     Some(i) => format!("{} {}", i.name, var.name),
                     None => var.name.clone(),
                 };
-                format!("(for-in {names} {} {})", iter.to_sexpr(), body.to_sexpr())
+                let head = if *par { "par-for" } else { "for-in" };
+                format!("({head} {names} {} {})", iter.to_sexpr(), body.to_sexpr())
             }
             Stmt::Arena { body, .. } => format!("(arena {})", body.to_sexpr()),
             Stmt::In { arena, body, .. } => format!("(in {} {})", arena.to_sexpr(), body.to_sexpr()),

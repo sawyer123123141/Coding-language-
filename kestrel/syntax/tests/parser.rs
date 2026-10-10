@@ -77,6 +77,14 @@ fn continuation_and_else_on_next_line() {
 }
 
 #[test]
+fn par_for() {
+    assert_eq!(body("par for c in world {\n c.x = 1\n}"), "{(par-for c world {(= (. c x) 1)})}");
+    assert_eq!(body("par for i, c in world {}"), "{(par-for i c world {})}");
+    assert_eq!(errs("main() {\n par for i from 0 to 3 {}\n}\n")[0], "`par for` needs items to work on; loop over an array or list");
+    assert_eq!(errs("main() {\n par x\n}\n")[0], "expected `for` after `par`, found name `x`");
+}
+
+#[test]
 fn map_literals() {
     assert_eq!(body("let m = {}"), "{(let m (map))}");
     assert_eq!(body("let m = {\"a\": 1, \"b\": x + 1}"), "{(let m (map (\"a\" 1) (\"b\" (+ x 1))))}");

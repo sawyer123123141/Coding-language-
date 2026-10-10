@@ -31,7 +31,7 @@ impl Parser {
         let start = self.span();
         match self.peek() {
             Tok::Let | Tok::Var => self.let_stmt(),
-            Tok::For => self.for_stmt(),
+            Tok::For => self.for_stmt(false),
             Tok::While => {
                 self.bump();
                 let cond = self.expr()?;
@@ -39,8 +39,12 @@ impl Parser {
                 Ok(Stmt::While { span: start.to(body.span), cond, body })
             }
             Tok::Par => {
-                self.error_here("`par for` isn't supported yet");
-                Err(())
+                self.bump();
+                if !self.at(&Tok::For) {
+                    self.error_here(format!("expected `for` after `par`, found {}", self.peek().describe()));
+                    return Err(());
+                }
+                self.for_stmt(true)
             }
             Tok::Arena => {
                 self.bump();
@@ -86,7 +90,8 @@ impl Parser {
         Ok(Stmt::Let { is_var, bind, ty, span: start.to(end), value, else_block })
     }
 
-    fn for_stmt(&mut self) -> PResult<Stmt> {
+    /// `for ...`, after `par` when `par` is true (only the `in` forms then).
+    fn for_stmt(&mut self, par: bool) -> PResult<Stmt> {
         let start = self.span();
         self.bump();
         let (name, name_span) = self.expect_ident("a loop variable name")?;
@@ -94,10 +99,14 @@ impl Parser {
         if self.eat(&Tok::Comma) {
             let (name, name_span) = self.expect_ident("a loop variable name")?;
             let var = self.binding(name, name_span);
-            return self.for_in(start, Some(first), var);
+            return self.for_in(par, start, Some(first), var);
         }
         if self.at(&Tok::In) {
-            return self.for_in(start, None, first);
+            return self.for_in(par, start, None, first);
+        }
+        if par {
+            self.error_here("`par for` needs items to work on; loop over an array or list");
+            return Err(());
         }
         let var = first;
         self.expect(&Tok::From, "`from`")?;
@@ -108,11 +117,11 @@ impl Parser {
         Ok(Stmt::ForRange { var, start: lo, end: hi, span: start.to(body.span), body })
     }
 
-    fn for_in(&mut self, start: Span, index: Option<Binding>, var: Binding) -> PResult<Stmt> {
+    fn for_in(&mut self, par: bool, start: Span, index: Option<Binding>, var: Binding) -> PResult<Stmt> {
         self.expect(&Tok::In, "`in`")?;
         let iter = self.expr()?;
         let body = self.block()?;
-        Ok(Stmt::ForIn { index, var, iter, span: start.to(body.span), body })
+        Ok(Stmt::ForIn { par, index, var, iter, span: start.to(body.span), body })
     }
 
     fn expr_or_assign(&mut self) -> PResult<Stmt> {

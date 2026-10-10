@@ -141,7 +141,8 @@ pub enum Stmt {
     While { cond: Expr, body: Block, span: Span },
     ForRange { var: Binding, start: Expr, end: Expr, body: Block, span: Span },
     /// `for v in xs` / `for i, v in xs`
-    ForIn { index: Option<Binding>, var: Binding, iter: Expr, body: Block, span: Span },
+    /// `for v in xs` / `for i, v in xs`; with `par`, iterations run at the same time.
+    ForIn { par: bool, index: Option<Binding>, var: Binding, iter: Expr, body: Block, span: Span },
     /// `arena { ... }`: everything allocated inside is freed at `}`.
     Arena { body: Block, span: Span },
     /// `in x.mem { ... }`: allocations inside go to the arena at `x.mem`.
