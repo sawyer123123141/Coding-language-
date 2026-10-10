@@ -1,8 +1,29 @@
 //! Converting between Godot values and the bytes Kestrel's export thunks
 //! take and return (see `kestrel_codegen::ExportInfo`).
 
+use godot::meta::PackedElement;
 use godot::prelude::*;
 use kestrel_codegen::ExportTy;
+
+/// The bytes of `items`. Every element type used here (`u8`, `i32`, `i64`,
+/// `f32`, `f64`, `Vector2`, `Vector3`) has the layout Kestrel uses for it:
+/// plain little-endian numbers, vectors as packed `f32`s.
+fn raw_bytes<T: Copy>(items: &[T]) -> Vec<u8> {
+    let len = std::mem::size_of_val(items);
+    // SAFETY: `T` is a plain-old-data type (see above), so its bytes are all initialized.
+    unsafe { std::slice::from_raw_parts(items.as_ptr() as *const u8, len) }.to_vec()
+}
+
+/// A packed array holding the elements whose bytes are `heap`: one copy.
+fn packed<T: PackedElement + Copy>(heap: &[u8]) -> PackedArray<T> {
+    let n = heap.len() / std::mem::size_of::<T>();
+    let mut out = PackedArray::<T>::new();
+    out.resize(n);
+    // SAFETY: `out` has room for `n` elements, and `T` matches Kestrel's
+    // layout for the element type (see `raw_bytes`).
+    unsafe { std::ptr::copy_nonoverlapping(heap.as_ptr(), out.as_mut_slice().as_mut_ptr() as *mut u8, n * std::mem::size_of::<T>()) };
+    out
+}
 
 /// Why a type can't cross between Godot and Kestrel, or `None` if it can.
 pub fn unsupported(ty: &ExportTy) -> Option<String> {
@@ -101,35 +122,17 @@ pub fn write_arg(v: &Variant, ty: &ExportTy, buf: &mut [u8], at: usize, keep: &m
             put_seq(buf, at, s, len, false, keep);
         }
         ExportTy::Seq { list, elem, .. } => {
+            fn take<T: PackedElement + Copy>(a: PackedArray<T>) -> (Vec<u8>, usize) {
+                (raw_bytes(a.as_slice()), a.len())
+            }
             let (bytes, len) = match **elem {
-                ExportTy::U8 => {
-                    let a = v.try_to::<PackedByteArray>().map_err(|_| want("a PackedByteArray"))?;
-                    (a.as_slice().to_vec(), a.len())
-                }
-                ExportTy::Int => {
-                    let a = v.try_to::<PackedInt32Array>().map_err(|_| want("a PackedInt32Array"))?;
-                    (a.as_slice().iter().flat_map(|n| n.to_le_bytes()).collect(), a.len())
-                }
-                ExportTy::I64 => {
-                    let a = v.try_to::<PackedInt64Array>().map_err(|_| want("a PackedInt64Array"))?;
-                    (a.as_slice().iter().flat_map(|n| n.to_le_bytes()).collect(), a.len())
-                }
-                ExportTy::Float => {
-                    let a = v.try_to::<PackedFloat32Array>().map_err(|_| want("a PackedFloat32Array"))?;
-                    (floats(a.as_slice().iter().copied()), a.len())
-                }
-                ExportTy::F64 => {
-                    let a = v.try_to::<PackedFloat64Array>().map_err(|_| want("a PackedFloat64Array"))?;
-                    (a.as_slice().iter().flat_map(|n| n.to_le_bytes()).collect(), a.len())
-                }
-                ExportTy::Vec2 => {
-                    let a = v.try_to::<PackedVector2Array>().map_err(|_| want("a PackedVector2Array"))?;
-                    (floats(a.as_slice().iter().flat_map(|p| [p.x, p.y])), a.len())
-                }
-                ExportTy::Vec3 => {
-                    let a = v.try_to::<PackedVector3Array>().map_err(|_| want("a PackedVector3Array"))?;
-                    (floats(a.as_slice().iter().flat_map(|p| [p.x, p.y, p.z])), a.len())
-                }
+                ExportTy::U8 => take(v.try_to::<PackedByteArray>().map_err(|_| want("a PackedByteArray"))?),
+                ExportTy::Int => take(v.try_to::<PackedInt32Array>().map_err(|_| want("a PackedInt32Array"))?),
+                ExportTy::I64 => take(v.try_to::<PackedInt64Array>().map_err(|_| want("a PackedInt64Array"))?),
+                ExportTy::Float => take(v.try_to::<PackedFloat32Array>().map_err(|_| want("a PackedFloat32Array"))?),
+                ExportTy::F64 => take(v.try_to::<PackedFloat64Array>().map_err(|_| want("a PackedFloat64Array"))?),
+                ExportTy::Vec2 => take(v.try_to::<PackedVector2Array>().map_err(|_| want("a PackedVector2Array"))?),
+                ExportTy::Vec3 => take(v.try_to::<PackedVector3Array>().map_err(|_| want("a PackedVector3Array"))?),
                 _ => unreachable!("checked by `unsupported`"),
             };
             put_seq(buf, at, bytes, len, *list, keep);
@@ -165,43 +168,13 @@ pub fn read_ret(ty: &ExportTy, ret: &[u8], heap: &[u8]) -> Variant {
         }
         ExportTy::Str => Variant::from(GString::from(String::from_utf8_lossy(heap).as_ref())),
         ExportTy::Seq { elem, .. } => match **elem {
-            ExportTy::U8 => Variant::from(PackedByteArray::from(heap)),
-            ExportTy::Int => {
-                let v: Vec<i32> = heap.chunks_exact(4).map(|c| i32::from_le_bytes(c.try_into().expect("4 bytes"))).collect();
-                Variant::from(PackedInt32Array::from(&v[..]))
-            }
-            ExportTy::I64 => {
-                let v: Vec<i64> = heap.chunks_exact(8).map(|c| i64::from_le_bytes(c.try_into().expect("8 bytes"))).collect();
-                Variant::from(PackedInt64Array::from(&v[..]))
-            }
-            ExportTy::Float => {
-                let v: Vec<f32> = f32s(heap).collect();
-                Variant::from(PackedFloat32Array::from(&v[..]))
-            }
-            ExportTy::F64 => {
-                let v: Vec<f64> = heap.chunks_exact(8).map(|c| f64::from_le_bytes(c.try_into().expect("8 bytes"))).collect();
-                Variant::from(PackedFloat64Array::from(&v[..]))
-            }
-            ExportTy::Vec2 => {
-                let v: Vec<Vector2> = heap
-                    .chunks_exact(8)
-                    .map(|c| {
-                        let f: Vec<f32> = f32s(c).collect();
-                        Vector2::new(f[0], f[1])
-                    })
-                    .collect();
-                Variant::from(PackedVector2Array::from(&v[..]))
-            }
-            ExportTy::Vec3 => {
-                let v: Vec<Vector3> = heap
-                    .chunks_exact(12)
-                    .map(|c| {
-                        let f: Vec<f32> = f32s(c).collect();
-                        Vector3::new(f[0], f[1], f[2])
-                    })
-                    .collect();
-                Variant::from(PackedVector3Array::from(&v[..]))
-            }
+            ExportTy::U8 => Variant::from(packed::<u8>(heap)),
+            ExportTy::Int => Variant::from(packed::<i32>(heap)),
+            ExportTy::I64 => Variant::from(packed::<i64>(heap)),
+            ExportTy::Float => Variant::from(packed::<f32>(heap)),
+            ExportTy::F64 => Variant::from(packed::<f64>(heap)),
+            ExportTy::Vec2 => Variant::from(packed::<Vector2>(heap)),
+            ExportTy::Vec3 => Variant::from(packed::<Vector3>(heap)),
             _ => Variant::nil(),
         },
         ExportTy::Other(_) => Variant::nil(),

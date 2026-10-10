@@ -2,8 +2,10 @@
 //! current arena, the top of a per-thread stack. The program arena sits
 //! at the bottom, made on first use and freed when the thread ends.
 
-use std::alloc::{alloc_zeroed, dealloc, handle_alloc_error, Layout};
+use std::alloc::Layout;
 use std::cell::RefCell;
+
+use crate::blocks;
 
 const BLOCK: usize = 64 * 1024;
 
@@ -27,6 +29,17 @@ impl Arena {
 
     /// `size` zeroed bytes aligned to `align` (a power of two).
     pub fn alloc(&mut self, size: usize, align: usize) -> *mut u8 {
+        let p = self.alloc_uninit(size, align);
+        if size > 0 {
+            // SAFETY: `p` has room for `size` bytes (blocks are recycled, so not already zero).
+            unsafe { std::ptr::write_bytes(p, 0, size) };
+        }
+        p
+    }
+
+    /// `size` bytes aligned to `align`, contents unspecified: for memory
+    /// that's written before it's read (copies, a list's spare capacity).
+    pub fn alloc_uninit(&mut self, size: usize, align: usize) -> *mut u8 {
         if size == 0 {
             // Never read or written; it only needs to be non-null and aligned.
             return align as *mut u8;
@@ -38,32 +51,28 @@ impl Arena {
         }
         // A big request gets a block of its own, so the current one keeps its free space.
         if size > BLOCK / 4 {
-            return self.block(size, align.max(16));
+            return self.block(size, align.max(16)).0;
         }
-        let base = self.block(BLOCK, 16) as usize;
+        let (base, cap) = self.block(BLOCK, 16);
+        let base = base as usize;
         let start = base.next_multiple_of(align);
         self.next = start + size;
-        self.end = base + BLOCK;
+        self.end = base + cap;
         start as *mut u8
     }
 
-    fn block(&mut self, size: usize, align: usize) -> *mut u8 {
-        let layout = Layout::from_size_align(size, align).unwrap_or_else(|_| too_large());
-        // SAFETY: `layout` has a non-zero size.
-        let p = unsafe { alloc_zeroed(layout) };
-        if p.is_null() {
-            handle_alloc_error(layout);
-        }
+    /// A block of at least `size` bytes, and how big it really is.
+    fn block(&mut self, size: usize, align: usize) -> (*mut u8, usize) {
+        let (p, layout) = blocks::take(size, align);
         self.blocks.push((p, layout));
-        p
+        (p, layout.size())
     }
 }
 
 impl Drop for Arena {
     fn drop(&mut self) {
         for (p, layout) in self.blocks.drain(..) {
-            // SAFETY: each block was allocated with exactly this layout.
-            unsafe { dealloc(p, layout) };
+            blocks::give(p, layout);
         }
     }
 }
@@ -151,7 +160,7 @@ pub extern "C" fn kestrel_rt_alloc(count: i64, elem_size: i64, align: i64, line:
 pub unsafe extern "C" fn kestrel_rt_dup(src: *const u8, bytes: i64, align: i64) -> *mut u8 {
     let n = bytes as usize;
     // SAFETY: the current arena is alive while it's on the stack.
-    let dst = unsafe { (*kestrel_rt_current_arena()).alloc(n, align as usize) };
+    let dst = unsafe { (*kestrel_rt_current_arena()).alloc_uninit(n, align as usize) };
     if n > 0 {
         // SAFETY: the caller guarantees `src`; `dst` is fresh, so they can't overlap.
         unsafe { std::ptr::copy_nonoverlapping(src, dst, n) };
@@ -184,8 +193,9 @@ pub unsafe extern "C" fn kestrel_rt_list_grow(list: *mut List, elem_size: i64, a
     }
     let cap = (l.cap * 2).max(4);
     let size = cap.checked_mul(elem_size).and_then(|s| usize::try_from(s).ok()).unwrap_or_else(|| too_large());
-    // SAFETY: a list's arena outlives the list.
-    let p = unsafe { (*l.arena).alloc(size, align as usize) };
+    // SAFETY: a list's arena outlives the list. Spare capacity is never read
+    // before it's written, so it needn't be zeroed.
+    let p = unsafe { (*l.arena).alloc_uninit(size, align as usize) };
     if l.len > 0 {
         // SAFETY: the old buffer holds `len` elements; the new one is fresh and bigger.
         unsafe { std::ptr::copy_nonoverlapping(l.ptr, p, (l.len * elem_size) as usize) };
@@ -215,6 +225,22 @@ mod tests {
         // The small block's free space survives a big request.
         let r = a.alloc(4, 4);
         assert!(r as usize > q as usize && (r as usize) < q as usize + BLOCK);
+    }
+
+    #[test]
+    fn freed_blocks_are_reused_and_still_come_back_zeroed() {
+        let first = {
+            let mut a = Arena::new();
+            let p = a.alloc(BLOCK, 16);
+            // SAFETY: `p` holds `BLOCK` bytes.
+            unsafe { std::ptr::write_bytes(p, 0xAB, BLOCK) };
+            p
+        };
+        let mut b = Arena::new();
+        let q = b.alloc(BLOCK, 16);
+        assert_eq!(q, first, "the freed block is reused");
+        // SAFETY: `q` holds `BLOCK` bytes.
+        assert!(unsafe { std::slice::from_raw_parts(q, BLOCK) }.iter().all(|&x| x == 0));
     }
 
     #[test]

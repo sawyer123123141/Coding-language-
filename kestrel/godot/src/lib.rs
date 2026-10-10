@@ -40,6 +40,11 @@ struct Loaded {
 #[class(base = RefCounted)]
 pub struct Kestrel {
     base: Base<RefCounted>,
+    /// Overflow, narrowing and shift checks (on by default). Off is like
+    /// `kestrel build --release`: faster, and overflow wraps. Takes effect
+    /// at the next `load` or reload.
+    #[var]
+    checks: bool,
     path: Option<PathBuf>,
     loaded: Option<Loaded>,
     worker: Option<Worker>,
@@ -48,7 +53,7 @@ pub struct Kestrel {
 #[godot_api]
 impl IRefCounted for Kestrel {
     fn init(base: Base<RefCounted>) -> Self {
-        Kestrel { base, path: None, loaded: None, worker: None }
+        Kestrel { base, checks: true, path: None, loaded: None, worker: None }
     }
 }
 
@@ -123,7 +128,7 @@ impl Kestrel {
         if !diagnostics.is_empty() {
             godot_warn!("{diagnostics}");
         }
-        match JitProgram::compile(&compiled.module, Options::default()) {
+        match JitProgram::compile(&compiled.module, Options { checked_arith: self.checks }) {
             Ok(program) => {
                 let exports = program.exports();
                 self.loaded = Some(Loaded { _program: program, exports, files: compiled.files });

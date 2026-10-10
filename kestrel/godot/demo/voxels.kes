@@ -94,3 +94,20 @@ mesh(cx: int, cz: int, seed: int, want_normals: bool) -> list[vec3] {
     }
     out
 }
+
+// For benchmarks: builds every chunk of a 4x4 world (vertices and
+// normals) `reps` times; returns how many vectors that made.
+pub bench(seed: int, reps: int) -> int {
+    var total = 0
+    for r from 0 to reps {
+        // Each round's lists are freed when the block ends.
+        arena {
+            for cx from 0 to 4 {
+                for cz from 0 to 4 {
+                    total += vertices(cx, cz, seed).len + normals(cx, cz, seed).len
+                }
+            }
+        }
+    }
+    total
+}

@@ -1,0 +1,11 @@
+; Engine configuration file.
+config_version=5
+
+[application]
+
+config/name="Kestrel Bench"
+config/features=PackedStringArray("4.7", "C#")
+
+[dotnet]
+
+project/assembly_name="KestrelBench"

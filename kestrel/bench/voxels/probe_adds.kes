@@ -1,0 +1,38 @@
+use { height from voxels }
+
+// Just the noise math the mesher does: 5 heights per column.
+heights_only(seed: int) -> int {
+    var total = 0
+    for cx from 0 to 4 {
+        for cz from 0 to 4 {
+            for i from 0 to 32 * 32 {
+                let x = cx * 32 + i % 32
+                let z = cz * 32 + i / 32
+                total += height(x, z, seed) + height(x + 1, z, seed) + height(x - 1, z, seed) + height(x, z + 1, seed) + height(x, z - 1, seed)
+            }
+        }
+    }
+    total
+}
+
+// Just the list building: as many vec3 adds as one build makes.
+adds_only() -> int {
+    var total = 0
+    for r from 0 to 32 {
+        var out = list[vec3]()
+        for i from 0 to 11094 {
+            let f = float(i)
+            out.add(vec3(f, f + 1.0, f))
+        }
+        total += out.len
+    }
+    total
+}
+
+main() {
+    var t = 0
+    for r from 0 to 60 {
+        arena { t += adds_only() }
+    }
+    print(t)
+}

@@ -2,6 +2,7 @@
 //! `extern "C"` with a fixed name; codegen declares matching imports.
 
 pub mod arena;
+mod blocks;
 pub mod panic;
 pub mod print;
 pub mod start;

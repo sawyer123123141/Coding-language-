@@ -1,0 +1,8 @@
+// Builds the Godot demo's 4x4 voxel world `REPS` times (see voxels.kes).
+use { bench from voxels }
+
+let REPS = 0
+
+main() {
+    print(bench(1337, REPS))
+}
