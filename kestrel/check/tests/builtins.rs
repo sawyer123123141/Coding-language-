@@ -164,7 +164,7 @@ fn builtin_errors() {
         ("main() {\n PI = 3\n}\n", "can't change constant `PI`"),
         ("main() {\n let f = sqrt\n}\n", "`sqrt` is a function; call it with `sqrt(...)`"),
         ("main() {\n let x = PI(1)\n}\n", "`PI` is a constant; write it without `(...)`"),
-        ("let X = randf()\nmain() {}\n", "constants can only use literals, operators and earlier constants"),
+        ("let X = randf()\nmain() {}\n", "constants can only use literals, operators and other constants"),
         ("main() {\n print(abs(\"x\"))\n}\n", "`abs` needs a number here, found string"),
         ("main() {\n print(abs(1, 2))\n}\n", "`abs` takes one value"),
         ("main() {\n print(min(1))\n}\n", "`min` takes two values"),

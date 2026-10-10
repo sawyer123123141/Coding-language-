@@ -17,5 +17,5 @@ main() {
     print(OK, ALSO_OK, BAD, WORSE, FINE)
 }
 
-// error 12: constants can only use literals, operators and earlier constants
-// error 13: constants can only use literals, operators and earlier constants
+// error 12: constants can only use literals, operators and other constants
+// error 13: constants can only use literals, operators and other constants

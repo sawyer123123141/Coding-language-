@@ -154,7 +154,7 @@ main() {{
 }
 #[test]
 fn struct_constants_need_constant_arguments() {
-    let msg = "constants can only use literals, operators and earlier constants";
+    let msg = "constants can only use literals, operators and other constants";
     let cases = [
         format!("{COLOR}f() -> float {{ 1 }}\nlet X = Color(1, 2, f())\nmain() {{}}\n"),
         format!("{COLOR}let X = Color(1, 2, randf())\nmain() {{}}\n"),

@@ -51,6 +51,12 @@ fn constants() {
 }
 
 #[test]
+fn a_constant_may_use_one_declared_below_it() {
+    let t = ok("let AREA = SIZE * SIZE\nlet SIZE = WIDTH + 1\nlet WIDTH = 31\nmain() {}\n");
+    assert_eq!([t.consts[0].ty, t.consts[1].ty, t.consts[2].ty], [Ty::Int; 3]);
+}
+
+#[test]
 fn diverging_branches_satisfy_return_type() {
     ok("f(x: int) -> int {\n if x > 0 { return 1 } else { return 2 }\n}\nmain() {}\n");
     ok("f(x: int) -> int {\n if x > 0 { 1 } else { 2 }\n}\nmain() {}\n");
@@ -73,7 +79,7 @@ fn errors_are_reported() {
         ("main() {\n var total = 1\n total = total\n - 2\n}\n", "this line has no effect; did you mean to continue the line above?"),
         ("main() {\n let x = if true { 1 }\n}\n", "this `if` needs an `else` to produce a value"),
         ("f() -> int { }\nmain() {}\n", "`f` must return int, but its body can finish without a value"),
-        ("let A = B\nlet B = 1\nmain() {}\n", "unknown name `B`"),
+        ("let A = B\nlet C = 1\nmain() {}\n", "unknown name `B`"),
         ("f(x: vec9) {}\nmain() {}\n", "unknown type `vec9`"),
         ("f() {}\nmain() {\n let s = \"n = {f()}\"\n}\n", "this has no value to print"),
         ("pure f(var x: int) {\n print(x)\n}\nmain() {}\n", "pure functions can't call `print`"),

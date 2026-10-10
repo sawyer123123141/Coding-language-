@@ -189,3 +189,42 @@ main() {
     assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
     assert!(out.stderr.is_empty(), "{}", String::from_utf8_lossy(&out.stderr));
 }
+
+#[test]
+fn a_module_constant_can_use_a_constant_of_another_module() {
+    // `palette` loads before `draw` here, and the order of the `use` lines doesn't matter.
+    let palette = "use draw\npub let SKY = draw.BLUE\npub let FADED = draw.Color(0.5, 0.5, 1, a: 0.5)\n";
+    let want = "Color(r: 0, g: 0, b: 1, a: 1) Color(r: 0.5, g: 0.5, b: 1, a: 0.5) Color(r: 0, g: 0, b: 1, a: 1)\n";
+    for (name, uses) in [("modules_consts_palette_first", "use palette\nuse draw"), ("modules_consts_draw_first", "use draw\nuse palette")] {
+        let main = format!("{uses}\nlet MINE = palette.SKY\nmain() {{\n    print(palette.SKY, palette.FADED, MINE)\n}}\n");
+        let dir = project(name, &[("main.kes", &main), ("palette.kes", palette)]);
+        let out = kestrel(&["run"], &dir.join("main.kes"));
+        assert!(out.status.success(), "{name}: {}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(String::from_utf8_lossy(&out.stdout), want, "{name}");
+    }
+}
+
+#[test]
+fn constants_of_plain_modules_may_use_each_other_in_any_order() {
+    // Load order is main, a, b, c; `a.TOTAL` needs `b.WIDTH`, which needs `c.UNIT`.
+    let a = "use b\npub let TOTAL = b.WIDTH * 3\n";
+    let b = "use c\npub let WIDTH = c.UNIT + 1\n";
+    let c = "pub let UNIT = 4\n";
+    let main = "use a\nuse b\nuse c\nlet ALL = a.TOTAL + c.UNIT\nmain() {\n    print(a.TOTAL, b.WIDTH, c.UNIT, ALL)\n}\n";
+    let dir = project("modules_consts_chain", &[("main.kes", main), ("a.kes", a), ("b.kes", b), ("c.kes", c)]);
+    let out = kestrel(&["run"], &dir.join("main.kes"));
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "15 5 4 19\n");
+}
+
+#[test]
+fn constants_that_use_each_other_across_modules_are_a_named_error() {
+    let a = "use b\npub let X = b.Y + 1\n";
+    let b = "use a\npub let Y = a.X\n";
+    let dir = project("modules_consts_cycle", &[("main.kes", "use a\nmain() {\n    print(a.X)\n}\n"), ("a.kes", a), ("b.kes", b)]);
+    let out = kestrel(&["check", "--diagnostics=short"], &dir.join("main.kes"));
+    assert_eq!(out.status.code(), Some(1));
+    // The error is where the loop closes: `a.X` in `b.kes`, line 2.
+    let err = String::from_utf8_lossy(&out.stderr).replace("\r\n", "\n");
+    assert_eq!(err, "2:13: error: constants can't use each other in a loop: a.X -> b.Y -> a.X; give one of them a value that doesn't use the others\n");
+}

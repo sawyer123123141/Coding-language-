@@ -1,0 +1,16 @@
+let A = B + 1
+let B = C
+let C = A * 2
+let SELF = SELF
+
+// A constant that uses a loop adds no errors of its own, and a constant may use one declared below it.
+let D = A
+let E = F
+let F = 1
+
+main() {
+    print(A, D, E, SELF)
+}
+
+// error 3: constants can't use each other in a loop: A -> B -> C -> A
+// error 4: constant `SELF` uses itself
