@@ -1,6 +1,7 @@
 mod builtins;
 mod call;
 mod collections;
+mod consts;
 mod enums;
 mod expr;
 mod maps;
@@ -11,16 +12,16 @@ mod place;
 mod regions;
 mod structs;
 
+pub(crate) use consts::{check_consts, is_const_expr};
 pub(crate) use structs::check_field_defaults;
 
 use std::collections::{HashMap, HashSet};
 
-use kestrel_syntax::ast::{Binding, Block, Expr, ExprKind, Item, Program, Stmt};
+use kestrel_syntax::ast::{Binding, Block, Expr, ExprKind, Program, Stmt};
 use kestrel_syntax::{Diagnostic, Span};
 
-use crate::builtins::Builtin;
 use crate::collect::resolve_type;
-use crate::tables::{ConstId, FnId, LocalId, LocalInfo, Tables};
+use crate::tables::{FnId, LocalId, LocalInfo, Tables};
 use crate::ty::Ty;
 
 /// What the surrounding code does with a block's or expression's value.
@@ -52,49 +53,6 @@ pub(crate) struct BodyChecker<'a> {
     match_guards: Vec<regions::MatchGuard>,
     /// Enclosing `par for` bodies, outermost first.
     par: Vec<par::ParBody>,
-}
-
-pub(crate) fn check_consts(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
-    let consts = program.items.iter().filter_map(|it| match it {
-        Item::Const(c) => Some(c),
-        Item::Fn(_) | Item::Struct(_) | Item::Enum(_) | Item::Use(_) => None,
-    });
-    for (i, c) in consts.enumerate() {
-        let mut bc = BodyChecker::new(t, diags, None, Ty::Unit, false);
-        let want = c.ty.as_ref().map(|ty| resolve_type(ty, bc.t, bc.diags));
-        let ty = if is_const_expr(&c.value) {
-            bc.check_value(&c.value, want)
-        } else {
-            bc.error(c.value.span, "constants can only use literals, operators and earlier constants");
-            Ty::Error
-        };
-        t.consts[i].ty = ty;
-        t.const_by_name.insert(c.bind.name.clone(), ConstId(i as u32));
-    }
-}
-
-pub(crate) fn is_const_expr(e: &Expr) -> bool {
-    match &e.kind {
-        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::None | ExprKind::Str(_) | ExprKind::Ident(_) => true,
-        ExprKind::Call { name, args, .. } if name == "Arena" => args.is_empty(),
-        // Pure built-ins (`sqrt(2.0)`) are fine; the random ones change state.
-        ExprKind::Call { name, args, .. } if Builtin::global(name).is_some_and(Builtin::is_pure) => {
-            args.iter().all(|a| is_const_expr(&a.value))
-        }
-        ExprKind::Unary { expr, .. } => is_const_expr(expr),
-        ExprKind::Binary { lhs, rhs, .. } => is_const_expr(lhs) && is_const_expr(rhs),
-        // Each use builds a fresh array, like any other value.
-        ExprKind::ArrayLit(items) => items.iter().all(is_const_expr),
-        ExprKind::MapLit(entries) => entries.iter().all(|(k, v)| is_const_expr(k) && is_const_expr(v)),
-        ExprKind::TypeCall { args, .. } => args.iter().all(|a| is_const_expr(&a.value)),
-        ExprKind::Interp(_)
-        | ExprKind::Index { .. }
-        | ExprKind::Call { .. }
-        | ExprKind::If { .. }
-        | ExprKind::Field { .. }
-        | ExprKind::MethodCall { .. }
-        | ExprKind::Match { .. } => false,
-    }
 }
 
 pub(crate) fn check_fn(program: &Program, fn_id: FnId, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
