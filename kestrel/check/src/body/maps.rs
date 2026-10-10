@@ -87,7 +87,7 @@ impl<'a> BodyChecker<'a> {
             return;
         }
         self.check_element(value, Some(v));
-        // The key is stored too: a string key's bytes must outlive the map.
+        // A new entry's string key is copied into the current arena, so it is stored like a value.
         if let ExprKind::Index { index, .. } = &target.kind {
             self.check_store(target, index);
         }

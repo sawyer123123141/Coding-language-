@@ -207,7 +207,9 @@ pub enum Stmt {
     /// becomes its length).
     Dup(Place),
     /// `m[key] = value`: adds the key or replaces its value. The key, then
-    /// the value, are evaluated first.
+    /// the value, are evaluated first. A string key that adds an entry gets
+    /// its own copy of its bytes in the current arena (unless it is a literal
+    /// or a `Format`, which are fresh); a key already there keeps its bytes.
     MapSet(Place, Expr, Expr),
     /// Ends a loop over the map: its lock count goes back to `saved`.
     MapUnlock(Place, Expr),

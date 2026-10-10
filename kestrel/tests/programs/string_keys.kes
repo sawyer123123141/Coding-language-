@@ -1,0 +1,52 @@
+// expect: {"key number 1": 1}
+// expect: {"key number 1": 5}
+// expect: {"key number 2": 1}
+struct Holder {
+    mem: Arena = Arena()
+    m: map[string, int] = {}
+}
+
+// Writes over the memory that earlier `arena { }` blocks gave back.
+churn() {
+    for r from 0 to 20 {
+        arena {
+            let junk = "XXXXXXXXXXX{r % 10}"
+        }
+    }
+}
+
+main() {
+    // A key built in an arena block and stored in a map that outlives it.
+    var h = Holder()
+    arena {
+        let k = "key number {1}"
+        in h.mem {
+            h.m[k] = 1
+        }
+    }
+    churn()
+    print(h.m)
+
+    // An existing key keeps its own bytes; only the value changes.
+    arena {
+        let k = "key number {1}"
+        in h.mem {
+            h.m[k] = 5
+        }
+    }
+    churn()
+    print(h.m)
+
+    // A map copied out of an arena block takes its keys with it.
+    var h2 = Holder()
+    arena {
+        var m = map[string, int]()
+        let n = 2
+        m["key number {n}"] = 1
+        in h2.mem {
+            h2.m = m
+        }
+    }
+    churn()
+    print(h2.m)
+}

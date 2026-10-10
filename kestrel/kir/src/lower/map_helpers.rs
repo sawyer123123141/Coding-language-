@@ -44,17 +44,22 @@ fn shown(p: Place, ty: KTy) -> Vec<PrintArg> {
 }
 
 impl Helpers {
-    /// `copy(var m)`: fresh, compact entries for `m`, then each value's own copies.
+    /// `copy(var m)`: fresh, compact entries for `m`, then each key's and
+    /// value's own copies.
     pub(crate) fn map_copy_fn(&mut self, ty: KTy, t: &Tables) -> FuncIdx {
         if let Some(&f) = self.copy.get(&ty) {
             return f;
         }
         let idx = self.reserve();
         self.copy.insert(ty, idx);
-        let (_, v) = key_value(ty, t);
+        let (k, v) = key_value(ty, t);
         let mut body = vec![Stmt::Dup(Place::local(LocalIdx(0)))];
-        if has_heap(v, t) {
-            body.push(each_entry(|_, value| self.fixup(value, v, t)));
+        if has_heap(k, t) || has_heap(v, t) {
+            body.push(each_entry(|key, value| {
+                let mut copies = self.fixup(key, k, t);
+                copies.extend(self.fixup(value, v, t));
+                copies
+            }));
         }
         self.funcs[(idx.0 - self.base) as usize] = Func {
             name: format!("__kestrel_copy_{}", idx.0),

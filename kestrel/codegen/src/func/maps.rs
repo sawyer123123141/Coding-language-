@@ -11,6 +11,7 @@ use kestrel_runtime::PANIC_MAP_CHANGED;
 use super::FuncLowerer;
 
 const ENTRIES: i32 = 0;
+const COUNT: i32 = 8;
 const USED: i32 = 16;
 const LOCKS: i32 = 48;
 const ARENA: i32 = 56;
@@ -152,7 +153,10 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         }
     }
 
-    /// `m[key] = value`: the key, then the value, then the entry.
+    /// `m[key] = value`: the key, then the value, then the entry. A string key
+    /// added as a new entry (not a literal, nor built just now) gets its own copy
+    /// of its bytes in the current arena, like any string stored somewhere new; a
+    /// key already there keeps the bytes the map owns.
     pub(crate) fn map_set(&mut self, map: &Place, key: &kir::Expr, value: &kir::Expr, line: u32) -> Result<(), String> {
         let l = self.map_layout_of(self.place_ty(map));
         let k = self.key_slot(key)?;
@@ -168,7 +172,12 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let size = self.b.ins().iconst(types::I64, l.entry_size as i64);
         let align = self.b.ins().iconst(types::I64, l.entry_align as i64);
         let line = self.b.ins().iconst(types::I32, line as i64);
+        let copy_key = key.ty == KTy::Str && !matches!(key.kind, kir::ExprKind::StrLit(_) | kir::ExprKind::Format(_));
+        let count = if copy_key { Some(self.load_i64(header, COUNT)) } else { None };
         let entry = self.call_id(self.shared.rt.map_insert, &[header, k, kind, size, align, line]).expect("returns a pointer");
+        if let Some(before) = count {
+            self.own_new_key(header, entry, before);
+        }
         let slot = self.b.ins().iadd_imm(entry, l.val_off as i64);
         if value.ty.is_aggregate() {
             self.copy_aggregate(slot, v, value.ty);
@@ -176,6 +185,24 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             self.b.ins().store(MemFlags::trusted(), v, slot, 0);
         }
         Ok(())
+    }
+
+    /// If the insert that returned `entry` added it (the map's live count
+    /// grew past `before`), its string key gets its own bytes.
+    fn own_new_key(&mut self, header: Value, entry: Value, before: Value) {
+        let after = self.load_i64(header, COUNT);
+        let added = self.b.ins().icmp(IntCC::NotEqual, after, before);
+        let (copy, done) = (self.b.create_block(), self.b.create_block());
+        self.b.ins().brif(added, copy, &[], done, &[]);
+        self.b.switch_to_block(copy);
+        let key = self.b.ins().iadd_imm(entry, KEY);
+        let ptr = self.b.ins().load(self.ptr, MemFlags::trusted(), key, 0);
+        let len = self.load_i64(key, 8);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let own = self.call_id(self.shared.rt.dup, &[ptr, len, one]).expect("returns a pointer");
+        self.b.ins().store(MemFlags::trusted(), own, key, 0);
+        self.b.ins().jump(done, &[]);
+        self.b.switch_to_block(done);
     }
 
     /// Ends a loop over the map: the lock count goes back to what it was.
