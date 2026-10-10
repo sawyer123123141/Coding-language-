@@ -180,7 +180,7 @@ pub struct Tables {
     pub swizzles: HashMap<ExprId, Vec<u32>>,
     /// Reads of owning variables that move them (they can't be copied).
     pub moves: HashSet<ExprId>,
-    /// Per struct and enum: whether it holds an `Arena` somewhere inside.
+    /// Per struct and enum: whether it holds an `Arena` or a `GpuHandle` somewhere inside.
     pub owning_structs: Vec<bool>,
     pub owning_enums: Vec<bool>,
     /// Element types of arrays and lists, indexed by `ElemId`.
@@ -197,6 +197,9 @@ pub struct Tables {
     pub fn_by_name: HashMap<String, FnId>,
     pub const_by_name: HashMap<String, ConstId>,
     pub main: Option<FnId>,
+    /// Copied from the program: where the built-in modules' source is. Only they may
+    /// name `GpuHandle` (see `in_builtin`).
+    pub builtin_ranges: Vec<std::ops::Range<u32>>,
 }
 
 impl Tables {
@@ -260,16 +263,55 @@ impl Tables {
         }
     }
 
-    /// Whether `ty` holds an `Arena` (in fields, payloads or elements).
+    /// Whether `ty` holds an `Arena` or a `GpuHandle` (in fields, payloads or elements):
+    /// values of it move, never copy, and are dropped.
     pub fn is_owning(&self, ty: Ty) -> bool {
         match ty {
-            Ty::Arena => true,
+            Ty::Arena | Ty::Gpu => true,
             Ty::Struct(s) => self.owning_structs.get(s.0 as usize).copied().unwrap_or(false),
             Ty::Enum(e) => self.owning_enums.get(e.0 as usize).copied().unwrap_or(false),
             Ty::Array(e) | Ty::List(e) | Ty::Optional(e) => self.is_owning(self.elem(e)),
             // Maps can't hold owning values (see `check_map_values`).
             _ => false,
         }
+    }
+
+    /// Whether `ty` holds an `Arena` anywhere inside: `is_owning` without the `GpuHandle` case.
+    pub fn holds_arena(&self, ty: Ty) -> bool {
+        self.holds_arena_below(ty, &mut Vec::new())
+    }
+
+    /// `holds_arena`, skipping the types in `seen`: a type that contains itself is an error
+    /// reported elsewhere, and looking into it again would never end.
+    fn holds_arena_below(&self, ty: Ty, seen: &mut Vec<Ty>) -> bool {
+        match ty {
+            Ty::Arena => true,
+            Ty::Array(e) | Ty::List(e) | Ty::Optional(e) => self.holds_arena_below(self.elem(e), seen),
+            Ty::Struct(_) | Ty::Enum(_) if seen.contains(&ty) => false,
+            Ty::Struct(s) => {
+                seen.push(ty);
+                self.strukt(s).fields.iter().any(|f| self.holds_arena_below(f.ty, seen))
+            }
+            Ty::Enum(e) => {
+                seen.push(ty);
+                self.enm(e).variants.iter().flat_map(|v| &v.fields).any(|f| self.holds_arena_below(f.ty, seen))
+            }
+            _ => false,
+        }
+    }
+
+    /// What makes `ty` owning, for messages: "an `Arena`" when it holds one, else a GPU object.
+    pub fn owns_what(&self, ty: Ty) -> &'static str {
+        if self.holds_arena(ty) {
+            "an `Arena`"
+        } else {
+            "a GPU object"
+        }
+    }
+
+    /// Whether `span` starts inside the source of a built-in module.
+    pub fn in_builtin(&self, span: Span) -> bool {
+        self.builtin_ranges.iter().any(|r| r.contains(&span.start))
     }
 
     /// Fills `owning_structs` / `owning_enums`, growing from `false` until

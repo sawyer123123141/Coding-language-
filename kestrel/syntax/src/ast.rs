@@ -12,6 +12,10 @@ pub struct Program {
     /// Total `ExprId`s handed out; side tables size by this.
     pub expr_count: u32,
     pub bind_count: u32,
+    /// The span offsets of the source of Kestrel's built-in modules (which may use types
+    /// that user code can't, like `GpuHandle`). Empty from the parser and `link`; the
+    /// driver, which knows which files are built in, fills it after linking.
+    pub builtin_ranges: Vec<std::ops::Range<u32>>,
 }
 
 #[derive(Clone, Debug)]

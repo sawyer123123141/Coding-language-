@@ -3,6 +3,7 @@
 
 pub mod arena;
 mod blocks;
+pub mod gpu;
 pub mod map;
 pub mod math;
 pub mod panic;

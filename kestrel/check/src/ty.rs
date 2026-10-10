@@ -27,6 +27,10 @@ pub enum Ty {
     Map(ElemId, ElemId),
     /// A memory bucket. Values holding one are owning: they move, never copy.
     Arena,
+    /// `GpuHandle`: the id of a GPU object (a texture, a mesh), only for Kestrel's built-in
+    /// modules. Values holding one are owning: they move, never copy, and dropping one
+    /// frees the GPU object. It can't be constructed or compared, only passed to natives.
+    Gpu,
     /// `T?`: a `T` or `none`.
     Optional(ElemId),
     Error,
@@ -43,6 +47,7 @@ impl Ty {
             "bool" => Ty::Bool,
             "string" => Ty::Str,
             "Arena" => Ty::Arena,
+            "GpuHandle" => Ty::Gpu,
             _ => return None,
         })
     }
@@ -65,6 +70,7 @@ impl Ty {
             Ty::List(_) => "list",
             Ty::Map(..) => "map",
             Ty::Arena => "Arena",
+            Ty::Gpu => "GpuHandle",
             Ty::Optional(_) => "optional",
             Ty::Error => "{error}",
         }
@@ -86,7 +92,15 @@ impl Ty {
     pub fn is_aggregate(self) -> bool {
         matches!(
             self,
-            Ty::Struct(_) | Ty::Enum(_) | Ty::Str | Ty::Array(_) | Ty::List(_) | Ty::Map(..) | Ty::Arena | Ty::Optional(_)
+            Ty::Struct(_)
+                | Ty::Enum(_)
+                | Ty::Str
+                | Ty::Array(_)
+                | Ty::List(_)
+                | Ty::Map(..)
+                | Ty::Arena
+                | Ty::Gpu
+                | Ty::Optional(_)
         )
     }
 

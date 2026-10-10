@@ -49,7 +49,7 @@ fn stmt<'a>(s: &'a Stmt, f: &mut impl FnMut(Node<'a>)) {
             expr(count, f);
             args(a, f);
         }
-        Stmt::Dup(p) | Stmt::FreeArena(p) => place(p, true, f),
+        Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::DropGpu(p) => place(p, true, f),
         Stmt::PushArena(Some(p)) => place(p, true, f),
         Stmt::PushArena(None) | Stmt::PopArena { .. } => {}
         Stmt::If { cond, then_body, else_body } => {

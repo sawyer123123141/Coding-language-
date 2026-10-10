@@ -73,7 +73,7 @@ pub fn link(modules: Vec<Module>) -> (Program, Vec<Diagnostic>) {
         }
         diags.append(&mut rw.diags);
     }
-    (Program { items, expr_count, bind_count }, diags)
+    (Program { items, expr_count, bind_count, builtin_ranges: Vec::new() }, diags)
 }
 
 struct Rewriter<'a> {

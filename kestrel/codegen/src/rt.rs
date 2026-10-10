@@ -34,6 +34,7 @@ pub(crate) struct RtFuncs {
     pub rand_seed: FuncId,
     pub str_begin: FuncId,
     pub str_end: FuncId,
+    pub gpu_drop: FuncId,
 }
 
 impl RtFuncs {
@@ -86,13 +87,14 @@ impl RtFuncs {
             rand_seed: decl("kestrel_rt_rand_seed", &[I64], None)?,
             str_begin: decl("kestrel_rt_str_begin", &[], None)?,
             str_end: decl("kestrel_rt_str_end", &[ptr], None)?,
+            gpu_drop: decl("kestrel_rt_gpu_drop", &[I64], None)?,
         })
     }
 }
 
 /// Addresses of every runtime export, for registering with the JIT.
 pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
-    use kestrel_runtime::{arena, map, math, panic, par, print, start};
+    use kestrel_runtime::{arena, gpu, map, math, panic, par, print, start};
     vec![
         ("kestrel_rt_print_i64", print::kestrel_rt_print_i64 as *const u8),
         ("kestrel_rt_print_f32", print::kestrel_rt_print_f32 as *const u8),
@@ -126,6 +128,7 @@ pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
         ("kestrel_rt_rand_seed", math::kestrel_rt_rand_seed as *const u8),
         ("kestrel_rt_str_begin", print::kestrel_rt_str_begin as *const u8),
         ("kestrel_rt_str_end", print::kestrel_rt_str_end as *const u8),
+        ("kestrel_rt_gpu_drop", gpu::kestrel_rt_gpu_drop as *const u8),
     ]
 }
 

@@ -47,6 +47,7 @@ pub(crate) fn kty(ty: Ty) -> KTy {
         Ty::Array(e) => KTy::Array(ElemIdx(e.0)),
         Ty::List(e) => KTy::List(ElemIdx(e.0)),
         Ty::Arena => KTy::Arena,
+        Ty::Gpu => KTy::Gpu,
         Ty::Optional(e) => KTy::Optional(ElemIdx(e.0)),
         Ty::Map(k, v) => KTy::Map(ElemIdx(k.0), ElemIdx(v.0)),
         other => panic!("type {other:?} has no runtime representation"),

@@ -11,7 +11,7 @@ use crate::tables::{
 use crate::ty::Ty;
 
 pub(crate) const BUILTINS: &[&str] =
-    &["print", "int", "i64", "u8", "float", "f64", "bool", "string", "vec2", "vec3", "array", "list", "map", "Arena"];
+    &["print", "int", "i64", "u8", "float", "f64", "bool", "string", "vec2", "vec3", "array", "list", "map", "Arena", "GpuHandle"];
 
 /// Names an item, local or parameter can't take: types and constructors (`BUILTINS`),
 /// and every global built-in function or constant.
@@ -22,6 +22,7 @@ pub(crate) fn is_builtin_name(name: &str) -> bool {
 pub(crate) fn resolve_type(ty: &TypeExpr, t: &mut Tables, diags: &mut Vec<Diagnostic>) -> Ty {
     let msg = match &ty.kind {
         TypeKind::Named { name, args } if args.is_empty() => match Ty::from_name(name) {
+            Some(Ty::Gpu) if !t.in_builtin(ty.span) => "`GpuHandle` is only for Kestrel's built-in modules".to_string(),
             Some(found) => return found,
             None => {
                 if let Some(&id) = t.struct_by_name.get(name) {
@@ -80,15 +81,16 @@ pub(crate) fn map_ty(k: Ty, v: Ty, key_span: Span, span: Span, t: &mut Tables, d
     ty
 }
 
-/// Reports map types whose values own an arena (once per type).
+/// Reports map types whose values own an arena or a GPU object (once per type).
 pub(crate) fn check_map_values(t: &Tables, diags: &mut Vec<Diagnostic>) {
     let mut seen = HashSet::new();
     for &(ty, span) in &t.map_types {
         let Ty::Map(_, v) = ty else { continue };
         let v = t.elem(v);
         if t.is_owning(v) && seen.insert(ty) {
+            let what = if t.holds_arena(v) { "an arena" } else { "a GPU object" };
             let msg = format!(
-                "maps can't hold values that own an arena yet (`{}` has one); keep them in a list and map keys to indexes",
+                "maps can't hold values that own {what} yet (`{}` has one); keep them in a list and map keys to indexes",
                 t.ty_name(v)
             );
             diags.push(Diagnostic::error(span, msg));

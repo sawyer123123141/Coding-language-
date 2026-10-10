@@ -68,7 +68,7 @@ impl Module {
         match ty {
             KTy::Bool | KTy::U8 => (1, 1),
             KTy::I32 | KTy::F32 => (4, 4),
-            KTy::I64 | KTy::F64 | KTy::Arena => (8, 8),
+            KTy::I64 | KTy::F64 | KTy::Arena | KTy::Gpu => (8, 8),
             KTy::Str | KTy::Array(_) => (16, 8),
             KTy::List(_) => (32, 8),
             KTy::Map(..) => (64, 8),

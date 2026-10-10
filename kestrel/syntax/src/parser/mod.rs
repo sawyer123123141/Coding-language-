@@ -31,7 +31,7 @@ impl Parser {
 
     pub fn parse_program(mut self) -> (Program, Vec<Diagnostic>) {
         let items = self.items();
-        let program = Program { items, expr_count: self.next_expr, bind_count: self.next_bind };
+        let program = Program { items, expr_count: self.next_expr, bind_count: self.next_bind, builtin_ranges: Vec::new() };
         (program, self.diags)
     }
 

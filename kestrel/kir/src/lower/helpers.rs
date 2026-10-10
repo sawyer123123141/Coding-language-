@@ -37,10 +37,10 @@ fn has_heap_below(ty: KTy, t: &Tables, seen: &mut Vec<KTy>) -> bool {
     }
 }
 
-/// Whether `ty` holds an `Arena`, so values of it move and get dropped.
+/// Whether `ty` holds an `Arena` or a GPU object, so values of it move and get dropped.
 pub(crate) fn owning(ty: KTy, t: &Tables) -> bool {
     match ty {
-        KTy::Arena => true,
+        KTy::Arena | KTy::Gpu => true,
         KTy::Struct(s) => t.owning_structs[s.0 as usize],
         KTy::Enum(e) => t.owning_enums[e.0 as usize],
         KTy::Array(e) | KTy::List(e) | KTy::Optional(e) => t.is_owning(t.elems[e.0 as usize]),
@@ -143,12 +143,13 @@ impl Helpers {
         out
     }
 
-    /// Statements that free every arena inside the value at `place`.
+    /// Statements that free every arena and drop every GPU object inside the value at `place`.
     pub(crate) fn drop_stmts(&mut self, place: Place, ty: KTy, t: &Tables) -> Vec<Stmt> {
         let mut out = Vec::new();
         match ty {
             _ if !owning(ty, t) => {}
             KTy::Arena => out.push(Stmt::FreeArena(place)),
+            KTy::Gpu => out.push(Stmt::DropGpu(place)),
             KTy::Optional(e) => {
                 let then_body = self.drop_stmts(with(&place, Proj::Payload), kty(t.elems[e.0 as usize]), t);
                 out.push(Stmt::If { cond: has_value(&place), then_body, else_body: Vec::new() });

@@ -61,6 +61,7 @@ pub(crate) fn export_ty(m: &kir::Module, ty: KTy) -> ExportTy {
         KTy::Struct(s) => ExportTy::Other(m.layout(s).name.clone()),
         KTy::Enum(e) => ExportTy::Other(m.enum_layout(e).name.clone()),
         KTy::Arena => ExportTy::Other("Arena".into()),
+        KTy::Gpu => ExportTy::Other("GpuHandle".into()),
         KTy::Optional(_) => ExportTy::Other("an optional".into()),
         KTy::Map(..) => ExportTy::Other("a map".into()),
     }

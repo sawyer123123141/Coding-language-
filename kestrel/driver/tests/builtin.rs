@@ -114,6 +114,21 @@ fn only_built_in_modules_declare_natives() {
 }
 
 #[test]
+fn only_built_in_modules_name_gpu_handle() {
+    let message = "`GpuHandle` is only for Kestrel's built-in modules";
+    let dir = project("gpu_handle", &[("geom.kes", "pub struct Holder {\n    h: GpuHandle\n}\n")]);
+
+    // The program and a module file are refused, even with built-in modules loaded beside them.
+    let (compiled, text) = build(&dir, "use draw\nstruct Mine {\n    h: GpuHandle\n}\nmain() {}\n");
+    assert!(compiled.is_none());
+    assert_eq!(text, format!("3:8: error: {message}\n"));
+
+    let (compiled, text) = build(&dir, "use draw\nuse geom\nmain() {}\n");
+    assert!(compiled.is_none());
+    assert_eq!(text, format!("2:8: error: {message}\n"));
+}
+
+#[test]
 fn the_built_in_modules_themselves_compile_clean() {
     let dir = project("clean", &[]);
     let src = "use window\nuse draw\nuse input\nmain() {}\n";

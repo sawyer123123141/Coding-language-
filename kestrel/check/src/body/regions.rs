@@ -335,12 +335,14 @@ impl<'a> BodyChecker<'a> {
         self.error(value.span, msg);
     }
 
-    /// `v` is stored somewhere new. An owning value (one holding an `Arena`)
+    /// `v` is stored somewhere new. An owning value (one holding an `Arena` or a GPU object)
     /// can't be copied, only moved, and only whole variables move.
     pub(crate) fn consume(&mut self, v: &Expr) {
-        if !self.t.is_owning(self.t.ty(v.id)) {
+        let ty = self.t.ty(v.id);
+        if !self.t.is_owning(ty) {
             return;
         }
+        let what = self.t.owns_what(ty);
         match &v.kind {
             ExprKind::If { then_block, else_block, .. } => {
                 for b in std::iter::once(then_block).chain(else_block.as_ref()) {
@@ -362,10 +364,10 @@ impl<'a> BodyChecker<'a> {
                 let name = info.name.clone();
                 let loops = self.local_ctx.get(&l).map_or(0, |&(_, loops)| loops);
                 if info.is_param {
-                    let msg = format!("can't move parameter `{name}`: it belongs to the caller, and it holds an `Arena`, so it can't be copied");
+                    let msg = format!("can't move parameter `{name}`: it belongs to the caller, and it holds {what}, so it can't be copied");
                     self.error(v.span, msg);
                 } else if self.views.contains(&l) {
-                    let msg = format!("can't move `{name}` out of its collection: it holds an `Arena`, so it can't be copied");
+                    let msg = format!("can't move `{name}` out of its collection: it holds {what}, so it can't be copied");
                     self.error(v.span, msg);
                 } else if self.loop_breaks.len() > loops {
                     let msg = format!("`{name}` is moved inside a loop, so the next time around it would already be gone");
@@ -376,11 +378,8 @@ impl<'a> BodyChecker<'a> {
                 }
             }
             ExprKind::Field { .. } | ExprKind::Index { .. } if self.place_root(v).is_some() => {
-                self.error_help(
-                    v.span,
-                    "can't move this out: it holds an `Arena`, so it can't be copied, and only whole variables move",
-                    "move the whole variable that holds it",
-                );
+                let msg = format!("can't move this out: it holds {what}, so it can't be copied, and only whole variables move");
+                self.error_help(v.span, msg, "move the whole variable that holds it");
             }
             _ => {}
         }

@@ -86,7 +86,10 @@ fn plain_seq(t: &Tables, ty: Ty, list: bool) -> bool {
 
 fn param_ok(t: &Tables, ty: Ty) -> bool {
     match ty {
-        Ty::Struct(s) => t.strukt(s).fields.iter().all(|f| simple(f.ty) || plain(t, f.ty) || plain_seq(t, f.ty, true)),
+        Ty::Struct(s) => {
+            // A `GpuHandle` field is only usable in a built-in module's structs (`resolve_type` refuses it elsewhere).
+            t.strukt(s).fields.iter().all(|f| simple(f.ty) || f.ty == Ty::Gpu || plain(t, f.ty) || plain_seq(t, f.ty, true))
+        }
         Ty::Enum(e) => t.enm(e).variants.iter().all(|v| v.fields.is_empty()),
         Ty::Array(_) => plain_seq(t, ty, false),
         other => simple(other),
@@ -95,7 +98,8 @@ fn param_ok(t: &Tables, ty: Ty) -> bool {
 
 fn result_ok(t: &Tables, ty: Ty) -> bool {
     match ty {
-        Ty::Struct(_) => plain(t, ty),
+        // A built-in module's struct that holds a GPU object, like `Texture`.
+        Ty::Struct(s) => t.strukt(s).fields.iter().all(|f| plain(t, f.ty) || f.ty == Ty::Gpu),
         other => simple(other) && other != Ty::Str,
     }
 }

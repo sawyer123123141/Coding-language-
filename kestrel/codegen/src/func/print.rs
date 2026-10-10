@@ -94,6 +94,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             | KTy::List(_)
             | KTy::Map(..)
             | KTy::Arena
+            | KTy::Gpu
             | KTy::Optional(_) => {
                 unreachable!("aggregates are printed from memory")
             }
@@ -107,6 +108,11 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let kir = self.shared.kir;
         match ty {
             KTy::Arena => self.print_text("Arena"),
+            KTy::Gpu => {
+                let id = self.b.ins().load(types::I64, MemFlags::trusted(), addr, offset);
+                self.call_id(self.shared.rt.print_i64, &[id]);
+                Ok(())
+            }
             KTy::Optional(el) => {
                 let tag = self.b.ins().load(types::I8, MemFlags::trusted(), addr, offset);
                 let (some, none, done) = (self.b.create_block(), self.b.create_block(), self.b.create_block());

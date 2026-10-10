@@ -1,0 +1,5 @@
+struct Mine {
+    h: GpuHandle
+}
+main() {}
+// error 2: `GpuHandle` is only for Kestrel's built-in modules

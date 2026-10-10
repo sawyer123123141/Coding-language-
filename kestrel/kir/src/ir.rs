@@ -26,6 +26,8 @@ pub enum KTy {
     List(ElemIdx),
     /// A pointer to a runtime arena (null until created).
     Arena,
+    /// A GPU object's id (an `i64`; 0 is none), owned like an arena.
+    Gpu,
     /// `T?`: a u8 tag (0 = `none`) at offset 0, then the value.
     Optional(ElemIdx),
     /// `map[K, V]`: a 64-byte header (see `MapLayout`) over entries and an
@@ -44,6 +46,7 @@ impl KTy {
                 | KTy::List(_)
                 | KTy::Map(..)
                 | KTy::Arena
+                | KTy::Gpu
                 | KTy::Optional(_)
         )
     }
@@ -208,6 +211,8 @@ pub enum Stmt {
     PopArena { free: bool },
     /// Frees the arena at a place (dropping it) and nulls the place.
     FreeArena(Place),
+    /// Hands the GPU object at a place to the runtime's drop hook and zeroes the place.
+    DropGpu(Place),
     /// Gives the array, list, map or string at a place its own copy of its
     /// elements (a string's bytes), in the current arena (a list's capacity
     /// becomes its length).

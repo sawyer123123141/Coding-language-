@@ -54,6 +54,17 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         Ok(())
     }
 
+    /// Hands the GPU object at `place` to the runtime's drop hook and zeroes the place, so
+    /// dropping again does nothing.
+    pub(crate) fn drop_gpu(&mut self, place: &Place) -> Result<(), String> {
+        let addr = self.place_addr(place)?;
+        let id = self.b.ins().load(types::I64, MemFlags::trusted(), addr, 0);
+        self.call_id(self.shared.rt.gpu_drop, &[id]);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        self.b.ins().store(MemFlags::trusted(), zero, addr, 0);
+        Ok(())
+    }
+
     /// Moves an owning aggregate out of `place` into `dest`, zeroing `place`.
     pub(crate) fn move_into(&mut self, place: &Place, ty: KTy, dest: Value) -> Result<(), String> {
         let src = self.place_addr(place)?;
@@ -78,6 +89,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             kir::Stmt::PushArena(p) => self.push_arena(p.as_ref())?,
             kir::Stmt::PopArena { free } => self.pop_arena(*free),
             kir::Stmt::FreeArena(p) => self.free_arena(p)?,
+            kir::Stmt::DropGpu(p) => self.drop_gpu(p)?,
             other => unreachable!("{other:?} isn't an arena statement"),
         }
         Ok(())

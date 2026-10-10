@@ -88,7 +88,8 @@ pub fn compile_as(path: &str, src: &str, style: DiagStyle, needs_main: bool) -> 
     if diags.iter().any(Diagnostic::is_error) {
         return (None, report(&files, &diags, style));
     }
-    let (program, link_diags) = link(modules);
+    let (mut program, link_diags) = link(modules);
+    program.builtin_ranges = builtin_ranges(&files);
     diags.extend(link_diags);
     let tables = if diags.iter().any(Diagnostic::is_error) {
         None
@@ -170,6 +171,12 @@ fn same_file(a: &Path, b: &Path) -> bool {
     a == b || matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(a), Ok(b)) if a == b)
 }
 
+/// The span offsets of the built-in modules' source, which may name types (like `GpuHandle`)
+/// that the user's own files can't.
+fn builtin_ranges(files: &[File]) -> Vec<std::ops::Range<u32>> {
+    files.iter().filter(|f| f.builtin).map(|f| f.base..f.base + f.src.len() as u32).collect()
+}
+
 /// Adds a file after the last one in the shared span space.
 fn push_file(files: &mut Vec<File>, path: String, src: String, builtin: bool) {
     let last = files.last().expect("the entry file");
@@ -214,4 +221,21 @@ fn report(files: &[File], diags: &[Diagnostic], style: DiagStyle) -> String {
         out.push_str(&format!("{errors} error{}\n", if errors == 1 { "" } else { "s" }));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{builtin_ranges, push_file, File};
+
+    #[test]
+    fn built_in_ranges_cover_exactly_the_built_in_files_source() {
+        let mut files = vec![File { path: "main.kes".into(), src: "use draw\n".into(), base: 0, builtin: false }];
+        push_file(&mut files, "<builtin>/draw.kes".into(), "pub f()\n".into(), true);
+        push_file(&mut files, "geom.kes".into(), "pub g()\n".into(), false);
+        push_file(&mut files, "<builtin>/input.kes".into(), "pub h()\n".into(), true);
+        // Each file starts one past the end of the one before it.
+        assert_eq!(files.iter().map(|f| f.base).collect::<Vec<_>>(), [0, 10, 19, 28]);
+        assert_eq!(builtin_ranges(&files), [10..18, 28..36]);
+        assert!(builtin_ranges(&files[..1]).is_empty());
+    }
 }
