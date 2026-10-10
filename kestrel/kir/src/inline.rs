@@ -131,7 +131,7 @@ impl Inliner<'_> {
             Stmt::Call(_, args) => self.args(args, depth),
             Stmt::Print(parts) | Stmt::Write(parts) => self.print(parts, depth),
             Stmt::Bind(_, p) | Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::PushArena(Some(p)) => self.place(p, depth),
-            Stmt::MapSet(p, k, v) => {
+            Stmt::MapSet(p, k, v, _) => {
                 self.place(p, depth);
                 self.expr(k, depth);
                 self.expr(v, depth);

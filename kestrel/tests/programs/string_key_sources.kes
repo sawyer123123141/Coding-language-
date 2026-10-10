@@ -1,0 +1,108 @@
+// expect: {"aa": 1}
+// expect: {"bb": 2}
+// expect: {"key number 5": 1}
+// expect: {"key number 4": 2}
+// expect: {"key number 3": 1}
+// expect: 14 273 3 39 -1
+enum Pick {
+    A
+    B
+}
+
+struct Holder {
+    mem: Arena = Arena()
+    m: map[string, int] = {}
+}
+
+// Writes over the memory that earlier `arena { }` blocks gave back.
+churn() {
+    for r from 0 to 20 {
+        arena {
+            let junk = "XXXXXXXXXXX{r % 10}"
+        }
+    }
+}
+
+main() {
+    // A key that is a literal in each branch of an `if` or `match` lives in
+    // read-only data, so an arena block can store it in a longer-lived map.
+    var m = map[string, int]()
+    let c = true
+    arena {
+        m[if c { "aa" } else { "bb" }] = 1
+    }
+    churn()
+    print(m)
+
+    var m2 = map[string, int]()
+    let pick = Pick.B
+    arena {
+        m2[match pick {
+            A { "aa" }
+            else { "bb" }
+        }] = 2
+    }
+    churn()
+    print(m2)
+
+    // An `if` with a variable in one branch copies it when it adds the entry.
+    var h = Holder()
+    arena {
+        let k = "key number {5}"
+        in h.mem {
+            h.m[if c { k } else { "bb" }] = 1
+        }
+    }
+    churn()
+    print(h.m)
+
+    // A key removed and added again is a new entry, and gets its own bytes.
+    var h2 = Holder()
+    arena {
+        let k = "key number {4}"
+        in h2.mem {
+            h2.m[k] = 1
+        }
+    }
+    h2.m.remove("key number 4")
+    arena {
+        let k = "key number {4}"
+        in h2.mem {
+            h2.m[k] = 2
+        }
+    }
+    churn()
+    print(h2.m)
+
+    // A map literal with a key read from a variable.
+    var h3 = Holder()
+    arena {
+        let k = "key number {3}"
+        in h3.mem {
+            h3.m = {k: 1}
+        }
+    }
+    churn()
+    print(h3.m)
+
+    // Many adds and removes (two keys in three), so the table makes room by
+    // dropping removed entries.
+    var h4 = Holder()
+    for i from 0 to 40 {
+        arena {
+            let k = "key {i}"
+            in h4.mem {
+                h4.m[k] = i
+            }
+        }
+        if i % 3 != 0 {
+            h4.m.remove("key {i}")
+        }
+    }
+    churn()
+    var total = 0
+    for k, v in h4.m {
+        total += v
+    }
+    print(h4.m.len, total, h4.m.get("key 3", -1), h4.m.get("key 39", -1), h4.m.get("key 38", -1))
+}

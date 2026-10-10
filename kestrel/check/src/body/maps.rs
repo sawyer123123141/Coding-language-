@@ -87,7 +87,8 @@ impl<'a> BodyChecker<'a> {
             return;
         }
         self.check_element(value, Some(v));
-        // A new entry's string key is copied into the current arena, so it is stored like a value.
+        // A string key read from a place is copied into the current arena when it adds an entry
+        // (see `Stmt::MapSet`), so it is stored like a value; a fresh key already is in the current arena.
         if let ExprKind::Index { index, .. } = &target.kind {
             self.check_store(target, index);
         }

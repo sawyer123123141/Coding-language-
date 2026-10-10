@@ -46,6 +46,7 @@ Startup: Kestrel 9 ms, .NET 59–66 ms. Checks barely matter here; the work is i
   - `let w = words[...]` in the loop now copies the word (a runtime call and a few bytes of arena, 10M times).
   - The key in `counts[w] = ...` costs almost nothing: the copy happens only when the key is new (64 times here), found by comparing the map's live count before and after the insert.
 - Both builds print the same result.
+- Re-checked after the copy decision moved into lowering (a flag on the map set): string keys 423–452 ms against 318–332 ms before, so unchanged. The integer rows were noisy that day (275–464 ms) and carry no signal.
 
 ## Reproduce
 

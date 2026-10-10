@@ -101,3 +101,14 @@ fn a_loop_over_a_map_that_cant_change_doesnt_lock_it() {
     assert!(!map_ops(&f.body).contains(&MapOp::Lock), "{:#?}", f.body);
     assert!(!all_stmts(&f.body).iter().any(|s| matches!(s, Stmt::MapUnlock(..))));
 }
+
+#[test]
+fn only_string_keys_that_may_be_place_reads_are_flagged_for_copying() {
+    let m = lower_src(
+        "main() {\n var m = map[string, int]()\n var im = map[int, int]()\n let k = \"x\"\n let c = true\n m[k] = 1\n m[\"lit\"] = 2\n m[\"a{c}\"] = 3\n m[if c { \"p\" } else { \"q\" }] = 4\n m[if c { k } else { \"q\" }] = 5\n let lit = {\"a\": 1}\n let by_var = {k: 1}\n im[7] = 1\n}\n",
+    );
+    let main = func(&m, "main");
+    let flags: Vec<bool> = all_stmts(&main.body).into_iter().filter_map(|s| if let Stmt::MapSet(.., copy) = s { Some(*copy) } else { None }).collect();
+    // A variable or an `if` with one in a branch is copied when it adds an entry; literals, interpolations, `if`s of literals and integer keys are not.
+    assert_eq!(flags, [true, false, false, false, true, false, true, false], "{:#?}", main.body);
+}

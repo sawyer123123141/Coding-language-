@@ -30,7 +30,8 @@ impl<'a> FnLowerer<'a> {
         for (k, v) in entries {
             let key = self.expr(k);
             let value = self.value(v);
-            stmts.push(Stmt::MapSet(Place::local(tmp), key, value));
+            let copy_key = Self::reads_place(&key);
+            stmts.push(Stmt::MapSet(Place::local(tmp), key, value, copy_key));
         }
         ExprKind::Seq(stmts, Box::new(Expr { kind: ExprKind::Move(Place::local(tmp)), ty, line }))
     }
@@ -114,7 +115,8 @@ impl<'a> FnLowerer<'a> {
         let map = self.place_or_temp(base, out, true);
         let key = self.expr(key);
         let value = self.value(value);
-        out.push(Stmt::MapSet(map, key, value));
+        let copy_key = Self::reads_place(&key);
+        out.push(Stmt::MapSet(map, key, value, copy_key));
     }
 
     /// `for k, v in m` / `for k in m`: a counted loop over the entries,

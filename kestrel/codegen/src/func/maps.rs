@@ -153,11 +153,12 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         }
     }
 
-    /// `m[key] = value`: the key, then the value, then the entry. A string key
-    /// added as a new entry (not a literal, nor built just now) gets its own copy
-    /// of its bytes in the current arena, like any string stored somewhere new; a
-    /// key already there keeps the bytes the map owns.
-    pub(crate) fn map_set(&mut self, map: &Place, key: &kir::Expr, value: &kir::Expr, line: u32) -> Result<(), String> {
+    /// `m[key] = value`: the key, then the value, then the entry. With
+    /// `copy_key` (a string that may be a read of a place), a key that adds a
+    /// new entry gets its own copy of its bytes in the current arena, like any
+    /// string stored somewhere new; a key already there keeps the bytes the
+    /// map owns.
+    pub(crate) fn map_set(&mut self, map: &Place, key: &kir::Expr, value: &kir::Expr, copy_key: bool, line: u32) -> Result<(), String> {
         let l = self.map_layout_of(self.place_ty(map));
         let k = self.key_slot(key)?;
         let v = if value.ty.is_aggregate() {
@@ -172,7 +173,6 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let size = self.b.ins().iconst(types::I64, l.entry_size as i64);
         let align = self.b.ins().iconst(types::I64, l.entry_align as i64);
         let line = self.b.ins().iconst(types::I32, line as i64);
-        let copy_key = key.ty == KTy::Str && !matches!(key.kind, kir::ExprKind::StrLit(_) | kir::ExprKind::Format(_));
         let count = if copy_key { Some(self.load_i64(header, COUNT)) } else { None };
         let entry = self.call_id(self.shared.rt.map_insert, &[header, k, kind, size, align, line]).expect("returns a pointer");
         if let Some(before) = count {

@@ -207,10 +207,12 @@ pub enum Stmt {
     /// becomes its length).
     Dup(Place),
     /// `m[key] = value`: adds the key or replaces its value. The key, then
-    /// the value, are evaluated first. A string key that adds an entry gets
-    /// its own copy of its bytes in the current arena (unless it is a literal
-    /// or a `Format`, which are fresh); a key already there keeps its bytes.
-    MapSet(Place, Expr, Expr),
+    /// the value, are evaluated first. The flag says the key is a string that
+    /// may be a read of an existing place (see `FnLowerer::reads_place`): when
+    /// it adds an entry, the entry gets its own copy of the key's bytes in the
+    /// current arena. A key already there keeps its bytes, and a fresh key
+    /// (a literal, an interpolation, a call's result) is never copied.
+    MapSet(Place, Expr, Expr, bool),
     /// Ends a loop over the map: its lock count goes back to `saved`.
     MapUnlock(Place, Expr),
     /// `par for`: runs `func` (a `par_bodies` entry) over `0..count` on

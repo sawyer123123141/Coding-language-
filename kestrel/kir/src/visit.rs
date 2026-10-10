@@ -36,7 +36,7 @@ fn stmt<'a>(s: &'a Stmt, f: &mut impl FnMut(Node<'a>)) {
             place(p, true, f);
         }
         Stmt::Bind(_, p) => place(p, false, f),
-        Stmt::MapSet(p, k, v) => {
+        Stmt::MapSet(p, k, v, _) => {
             expr(k, f);
             expr(v, f);
             place(p, true, f);

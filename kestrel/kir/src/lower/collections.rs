@@ -223,6 +223,19 @@ impl<'a> FnLowerer<'a> {
         Expr { kind, ty, line }
     }
 
+    /// Whether `v` is a string that may be a read of an existing place: the
+    /// values `owned` copies, looking through `if` and `Seq` the way it does.
+    /// A map key like that is copied when it adds an entry (see `MapSet`).
+    pub(crate) fn reads_place(v: &Expr) -> bool {
+        match &v.kind {
+            _ if v.ty != KTy::Str => false,
+            ExprKind::Load(_) | ExprKind::FieldOf(..) => !Self::fresh(&v.kind),
+            ExprKind::Seq(_, inner) => Self::reads_place(inner),
+            ExprKind::If { then_val, else_val, .. } => [then_val, else_val].into_iter().flatten().any(|v| Self::reads_place(v)),
+            _ => false,
+        }
+    }
+
     /// Whether `kind` builds a new value rather than reading an existing one.
     fn fresh(kind: &ExprKind) -> bool {
         match kind {
