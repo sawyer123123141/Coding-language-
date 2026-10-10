@@ -13,19 +13,29 @@ enum Operand {
     Scalar(Expr),
 }
 
+/// Whether a place can be read again and again: nothing in its path (an
+/// index, a map key) is an expression that would be evaluated again.
+fn rereadable(p: &Place) -> bool {
+    p.path.iter().all(|step| step.at().is_none())
+}
+
 impl<'a> FnLowerer<'a> {
+    /// `v` as something to read components from. A place whose path computes
+    /// an index or key (`vs[f()]`) is copied to a temporary first, so that
+    /// expression runs once, now, and not again for every component.
     fn operand(&mut self, v: Expr, pre: &mut Vec<Stmt>) -> Operand {
         if v.ty.is_aggregate() {
             return match v.kind {
-                ExprKind::Load(p) => Operand::Vector(p),
+                ExprKind::Load(p) if rereadable(&p) => Operand::Vector(p),
                 _ => {
                     let ExprKind::Load(p) = self.spill(v, pre).kind else { unreachable!("spill loads its temporary") };
                     Operand::Vector(p)
                 }
             };
         }
-        match v.kind {
-            ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Load(_) => Operand::Scalar(v),
+        match &v.kind {
+            ExprKind::Int(_) | ExprKind::Float(_) => Operand::Scalar(v),
+            ExprKind::Load(p) if rereadable(p) => Operand::Scalar(v),
             _ => Operand::Scalar(self.spill(v, pre)),
         }
     }

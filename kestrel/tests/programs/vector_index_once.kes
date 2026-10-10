@@ -1,0 +1,59 @@
+// expect: eval 1
+// expect: 5
+// expect: eval 0
+// expect: vec2(x: 0.6, y: 0.8)
+// expect: eval 1
+// expect: eval 0
+// expect: 50
+// expect: eval 1
+// expect: eval 0
+// expect: 5
+// expect: eval 1
+// expect: vec2(x: 4, y: 3)
+// expect: eval 0
+// expect: eval 1
+// expect: vec2(x: 9, y: 12)
+// expect: eval 1
+// expect: vec2(x: -3, y: -4)
+// expect: eval 1
+// expect: vec2(x: 5, y: 5)
+// expect: 140 1
+// expect: vec2(x: 16, y: 18) 1
+noisy(n: int) -> int {
+    print("eval", n)
+    n
+}
+
+// Changes the index its caller already used.
+bumpi(var i: int) -> vec2 {
+    i += 1
+    vec2(10, 10)
+}
+
+main() {
+    let vs = [vec2(6, 8), vec2(3, 4)]
+    let fs = [1.5, 2.5]
+    let len = vs[noisy(1)].length()
+    print(len)
+    let unit = vs[noisy(0)].normalized()
+    print(unit)
+    let dot = vs[noisy(1)].dot(vs[noisy(0)])
+    print(dot)
+    let far = vs[noisy(1)].distance_to(vs[noisy(0)])
+    print(far)
+    let swapped = vs[noisy(1)].yx
+    print(swapped)
+    let sum = vs[noisy(0)] + vs[noisy(1)]
+    print(sum)
+    let flipped = -vs[noisy(1)]
+    print(flipped)
+    let scaled = vec2(2, 2) * fs[noisy(1)]
+    print(scaled)
+    // The index is read, and the element with it, before `bumpi` runs.
+    var i = 0
+    let d = vs[i].dot(bumpi(var i))
+    print(d, i)
+    i = 0
+    let s = vs[i] + bumpi(var i)
+    print(s, i)
+}

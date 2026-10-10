@@ -88,7 +88,9 @@ impl<'a> BodyChecker<'a> {
         for a in args {
             self.check_value(&a.value, Some(receiver_ty));
         }
-        // The receiver is read after the values are computed.
+        // A receiver that is a plain place (`p.pos`) is read after the values
+        // are computed, so they must not change it. (One that computes an
+        // index, like `vs[i]`, is copied first, in order.)
         let later: Vec<&Expr> = args.iter().map(|a| &a.value).collect();
         self.check_changed_later(&[receiver], &later);
         self.t.res.insert(e.id, Res::Builtin(b));

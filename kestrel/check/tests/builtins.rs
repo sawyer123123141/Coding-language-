@@ -177,6 +177,10 @@ fn builtin_errors() {
             "bump(var v: vec2) -> vec2 {\n v = vec2(0, 0)\n v\n}\nmain() {\n var v = vec2(1, 2)\n print(v.dot(bump(var v)))\n}\n",
             "`v` is passed here, but a later argument changes it",
         ),
+        (
+            "struct P {\n pos: vec2\n}\nshift(var p: P) -> vec2 {\n p.pos = vec2(0, 0)\n vec2(1, 1)\n}\nmain() {\n var p = P(pos: vec2(3, 4))\n print(p.pos.dot(shift(var p)))\n}\n",
+            "`p` is passed here, but a later argument changes it",
+        ),
         // Typed by a later task.
         ("main() {\n print(randf())\n}\n", "`randf` isn't available yet"),
         ("main() {\n print(randi_range(1, 2))\n}\n", "`randi_range` isn't available yet"),
