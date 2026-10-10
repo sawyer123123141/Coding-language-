@@ -76,7 +76,7 @@ struct Mesh {
 
     // One square face, corners a b c d in Godot's front-face order
     // (clockwise seen from outside), as two triangles.
-    quad(var self, n: vec3, a: vec3, b: vec3, c: vec3, d: vec3) {
+    pure quad(var self, n: vec3, a: vec3, b: vec3, c: vec3, d: vec3) {
         let base = self.vertices.len
         self.vertices.add(a); self.vertices.add(b); self.vertices.add(c); self.vertices.add(d)
         for k from 0 to 4 { self.normals.add(n) }
@@ -87,7 +87,7 @@ struct Mesh {
 
 // The mesh of chunk (cx, cy, cz): a face for each solid block side that
 // touches air.
-pub mesh(cx: int, cy: int, cz: int, seed: int) -> Mesh {
+pub pure mesh(cx: int, cy: int, cz: int, seed: int) -> Mesh {
     let solid = solids(cx, cy, cz, seed)
     var m = Mesh()
     for y from 0 to SIZE {
@@ -123,7 +123,7 @@ pub mesh(cx: int, cy: int, cz: int, seed: int) -> Mesh {
 
 // Builds chunk (cx, cy, cz) and returns its face count. The mesh lives in
 // a temporary arena, freed when the block ends.
-pub chunk_faces(cx: int, cy: int, cz: int, seed: int) -> int {
+pub pure chunk_faces(cx: int, cy: int, cz: int, seed: int) -> int {
     var faces = 0
     arena {
         faces = mesh(cx, cy, cz, seed).indices.len / 6

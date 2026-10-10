@@ -76,7 +76,7 @@ fn errors_are_reported() {
         ("let A = B\nlet B = 1\nmain() {}\n", "unknown name `B`"),
         ("f(x: vec9) {}\nmain() {}\n", "unknown type `vec9`"),
         ("main() {\n let n = 1\n let s = \"n = {n}\"\n}\n", "string interpolation only works directly inside `print(...)` for now"),
-        ("pure f(var x: int) {}\nmain() {}\n", "pure functions can't take `var` parameters"),
+        ("pure f(var x: int) {\n print(x)\n}\nmain() {}\n", "pure functions can't call `print`"),
         ("f(x: int) {\n x = 1\n}\nmain() {}\n", "can't change parameter `x`"),
         ("main() {\n let u: u8 = 1\n let n = -u\n}\n", "can't negate a u8"),
         ("main() {}\nmain() {}\n", "`main` is defined twice"),

@@ -1,0 +1,31 @@
+// expect: 3 [1, 2, 3]
+// expect: Counter(n: 2)
+// `pure` functions may change what they're handed as `var`.
+struct Counter {
+    n: int = 0
+
+    pure bump(var self) {
+        self.n += 1
+    }
+}
+
+pure push_twice(var xs: list[int], v: int) {
+    xs.add(v)
+    xs.add(v + 1)
+}
+
+pure build() -> list[int] {
+    var out = list[int]()
+    out.add(1)
+    push_twice(var out, 2)
+    out
+}
+
+main() {
+    let xs = build()
+    print(xs.len, xs)
+    var c = Counter()
+    c.bump()
+    c.bump()
+    print(c)
+}

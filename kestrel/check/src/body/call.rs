@@ -52,7 +52,8 @@ impl<'a> BodyChecker<'a> {
     pub(crate) fn check_discarded_call(&mut self, e: &Expr) -> Ty {
         let ty = self.check_expr(e, None);
         match self.t.res.get(&e.id).copied() {
-            Some(Res::Fn(f)) if self.t.fns[f.0 as usize].is_pure => {
+            // A pure function changes nothing but its `var` arguments.
+            Some(Res::Fn(f)) if self.t.fns[f.0 as usize].is_pure && !self.t.fns[f.0 as usize].params.iter().any(|p| p.is_var) => {
                 let name = self.t.fns[f.0 as usize].name.clone();
                 self.error(e.span, format!("the result of pure function `{name}` is unused, so this line does nothing"));
             }

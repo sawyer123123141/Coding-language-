@@ -256,9 +256,6 @@ fn add_enum_members(e: &EnumDecl, item_idx: usize, id: EnumId, t: &mut Tables, d
 fn add_fn(f: &FnDecl, item_idx: usize, method: Option<(usize, &str)>, t: &mut Tables, diags: &mut Vec<Diagnostic>) -> FnId {
     let mut params = Vec::new();
     for p in &f.params {
-        if f.is_pure && p.is_var {
-            diags.push(Diagnostic::error(p.bind.span, "pure functions can't take `var` parameters"));
-        }
         let ty = resolve_type(&p.ty, t, diags);
         params.push(ParamSig { name: p.bind.name.clone(), ty, is_var: p.is_var });
     }
