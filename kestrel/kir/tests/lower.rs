@@ -263,3 +263,20 @@ fn interpolation_anywhere_is_a_format_and_copying_a_string_dups_it() {
     // Inside `print` an interpolation stays a list of pieces.
     assert!(matches!(&main.body[3], Stmt::Print(args) if matches!(&args[..], [PrintArg::Interp(_)])));
 }
+
+#[test]
+fn a_block_value_spilled_before_its_drops_is_moved_out_and_a_literal_is_not_copied() {
+    let m = lower_src(
+        "struct Own {\n mem: Arena = Arena()\n name: string = \"\"\n}\nmain() {\n let c = true\n let s = if c {\n let o = Own()\n \"lit\"\n } else {\n \"x\"\n }\n print(s)\n}\n",
+    );
+    let main = func(&m, "main");
+    let value = main.body.iter().find_map(|s| match s {
+        Stmt::Let(_, Expr { kind: ExprKind::If { then_val, then_body, .. }, .. }) => Some((then_val.as_deref(), then_body)),
+        _ => None,
+    });
+    let (then_val, then_body) = value.unwrap_or_else(|| panic!("{:#?}", main.body));
+    // The literal goes into a temporary before the local is dropped, and leaves it by a move: no `Dup`.
+    assert!(matches!(then_val, Some(Expr { kind: ExprKind::Move(_), ty: KTy::Str, .. })), "{then_val:#?}");
+    assert!(then_body.iter().any(|s| matches!(s, Stmt::Let(_, Expr { kind: ExprKind::StrLit(l), .. }) if l == "lit")), "{then_body:#?}");
+    assert!(!then_body.iter().any(|s| matches!(s, Stmt::Dup(_))), "{then_body:#?}");
+}

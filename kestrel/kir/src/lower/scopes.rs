@@ -3,7 +3,7 @@
 
 use kestrel_syntax::ast;
 
-use super::helpers::owning;
+use super::helpers::{has_heap, owning};
 use super::FnLowerer;
 use crate::ir::*;
 
@@ -102,10 +102,17 @@ impl<'a> FnLowerer<'a> {
         if cleanup.is_empty() {
             return (stmts, value);
         }
-        // The value may read what's about to be dropped, so compute it first.
+        // The value may read what's about to be dropped, so compute it first:
+        // a read of a place is copied here, into the current arena, and a fresh
+        // value (a literal, say) is not. The temporary is read once, so a value
+        // with heap memory moves out of it, which the caller sees as fresh too.
         let value = value.map(|v| {
             let v = self.owned(v, false);
-            self.spill(v, &mut stmts)
+            let spilled = self.spill(v, &mut stmts);
+            match spilled.kind {
+                ExprKind::Load(place) if has_heap(spilled.ty, self.t) => Expr { kind: ExprKind::Move(place), ..spilled },
+                _ => spilled,
+            }
         });
         stmts.extend(cleanup);
         (stmts, value)

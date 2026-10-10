@@ -1,0 +1,22 @@
+struct Own {
+    mem: Arena = Arena()
+    name: string = ""
+}
+
+main() {
+    var s = "start"
+    let c = true
+    arena {
+        s = if c {
+            var o = Own()
+            in o.mem {
+                o.name = "n{1}"
+            }
+            o.name
+        } else {
+            "x"
+        }
+    }
+    print(s)
+}
+// error 10: this memory is freed at the end of the `arena { }` block, but `s` lives longer

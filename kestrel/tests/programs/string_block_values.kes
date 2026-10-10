@@ -1,0 +1,120 @@
+// expect: lit
+// expect: {"key": 1}
+// expect: bb
+// expect: {"zz": 2}
+// expect: n1
+// expect: {"k2": 1}
+// expect: x
+// expect: f3
+enum Pick {
+    A
+    B
+}
+
+struct Own {
+    mem: Arena = Arena()
+    name: string = ""
+}
+
+// A function body is a block too: its tail is copied out before `o` is dropped.
+label() -> string {
+    var o = Own()
+    in o.mem {
+        o.name = "f{3}"
+    }
+    o.name
+}
+
+// Writes over the memory that earlier `arena { }` blocks gave back.
+churn() {
+    for r from 0 to 20 {
+        arena {
+            let junk = "XXXXXXXXXXX{r % 10}"
+        }
+    }
+}
+
+main() {
+    let c = true
+    let pick = Pick.B
+
+    // A branch that declares an owning local still yields a literal that
+    // lives in read-only data, so an arena block can store it outside.
+    var s = "start"
+    var m = map[string, int]()
+    var w = "start"
+    var m2 = map[string, int]()
+    arena {
+        s = if c {
+            let o = Own()
+            "lit"
+        } else {
+            "other"
+        }
+        m[if c {
+            let o = Own()
+            "key"
+        } else {
+            "other"
+        }] = 1
+        w = match pick {
+            A {
+                let o = Own()
+                "aa"
+            }
+            else {
+                let o = Own()
+                "bb"
+            }
+        }
+        m2[match pick {
+            A {
+                let o = Own()
+                "yy"
+            }
+            else {
+                let o = Own()
+                "zz"
+            }
+        }] = 2
+    }
+    churn()
+    print(s)
+    print(m)
+    print(w)
+    print(m2)
+
+    // A tail that reads a field of the owning local is copied before the
+    // local's arena is dropped at the end of the branch.
+    let t = if c {
+        var o = Own()
+        in o.mem {
+            o.name = "n{1}"
+        }
+        o.name
+    } else {
+        "other"
+    }
+    var m3 = map[string, int]()
+    m3[if c {
+        var o = Own()
+        in o.mem {
+            o.name = "k{2}"
+        }
+        o.name
+    } else {
+        "other"
+    }] = 1
+    let u = if not c {
+        "other"
+    } else {
+        let o = Own()
+        "x"
+    }
+    let l = label()
+    churn()
+    print(t)
+    print(m3)
+    print(u)
+    print(l)
+}
