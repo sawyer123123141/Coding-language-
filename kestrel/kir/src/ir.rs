@@ -153,6 +153,9 @@ pub struct Func {
     pub mutates_params: bool,
     /// `pub` and in the entry file: a host (the Godot add-on) may call it.
     pub exported: bool,
+    /// For a `native` function: the symbol it imports (see `native_symbol`).
+    /// It has no body; Rust implements it with Kestrel's calling convention.
+    pub native: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

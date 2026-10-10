@@ -21,6 +21,7 @@ fn keywords_and_identifiers() {
         toks("pure let var par square self"),
         vec![Tok::Pure, Tok::Let, Tok::Var, Tok::Par, id("square"), Tok::SelfKw, Tok::Eof]
     );
+    assert_eq!(toks("pure native natives"), vec![Tok::Pure, Tok::Native, id("natives"), Tok::Eof]);
 }
 
 #[test]

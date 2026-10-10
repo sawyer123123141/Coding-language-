@@ -85,6 +85,8 @@ pub struct FnInfo {
     /// For a method: its index in its struct's or enum's `methods`.
     pub method: Option<usize>,
     pub is_pure: bool,
+    /// Declared `native`: Rust implements it, so there is no body to check.
+    pub is_native: bool,
     pub params: Vec<ParamSig>,
     pub ret: Ty,
     pub span: Span,

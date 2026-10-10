@@ -186,6 +186,7 @@ impl Helpers {
             io: false,
             mutates_params: true,
             exported: false,
+            native: None,
         };
         idx
     }
@@ -227,6 +228,7 @@ impl Helpers {
             io: false,
             mutates_params: false,
             exported: false,
+            native: None,
         };
         self.funcs.push(placeholder);
         idx
@@ -275,6 +277,7 @@ impl Helpers {
             io: false,
             mutates_params: true,
             exported: false,
+            native: None,
         };
         idx
     }
@@ -310,6 +313,7 @@ impl Helpers {
             io: true,
             mutates_params: false,
             exported: false,
+            native: None,
         };
         idx
     }

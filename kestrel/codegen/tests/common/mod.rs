@@ -27,3 +27,23 @@ pub fn call1(p: &JitProgram, name: &str, x: i32) -> i32 {
     let f: extern "C" fn(i32) -> i32 = unsafe { std::mem::transmute(p.fn_ptr(name).expect(name)) };
     f(x)
 }
+
+/// Like `jit_with`, giving the JIT the addresses of Rust functions that the
+/// program's `native` declarations import.
+pub fn jit_natives(src: &str, extra: &[(&str, *const u8)]) -> Result<JitProgram, String> {
+    let (p, d) = parse(src);
+    assert!(d.is_empty(), "parse: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
+    let (t, d) = kestrel_check::check(&p);
+    assert!(d.is_empty(), "check: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
+    let mut m = kestrel_kir::lower(&p, &t.unwrap(), &LineIndex::new(src));
+    kestrel_kir::inline::inline_small(&mut m);
+    JitProgram::compile_with(&m, Options::default(), extra)
+}
+
+/// Runs the program's `main` on this thread and returns what it printed.
+/// (`run_main` uses another thread, whose output can't be captured here.)
+pub fn run_captured(p: &JitProgram) -> String {
+    kestrel_runtime::print::capture_output();
+    call0::<()>(p, "main");
+    String::from_utf8(kestrel_runtime::print::take_output()).expect("print writes UTF-8")
+}

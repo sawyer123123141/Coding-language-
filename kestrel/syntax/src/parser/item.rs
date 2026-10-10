@@ -1,6 +1,7 @@
 use super::{PResult, Parser};
 use crate::ast::{
-    ConstDecl, EnumDecl, FieldDecl, FnDecl, Item, Param, StructDecl, TypeExpr, TypeKind, UseClause, UseDecl, VariantDecl,
+    Block, ConstDecl, EnumDecl, FieldDecl, FnDecl, Item, Param, StructDecl, TypeExpr, TypeKind, UseClause, UseDecl,
+    VariantDecl,
 };
 use crate::span::Span;
 use crate::token::Tok;
@@ -34,7 +35,15 @@ impl Parser {
             Tok::Let => self.const_decl(is_pub, start),
             Tok::Pure => {
                 self.bump();
-                self.fn_decl(is_pub, true, start)
+                if self.eat(&Tok::Native) {
+                    self.native_decl(is_pub, true, start)
+                } else {
+                    self.fn_decl(is_pub, true, start)
+                }
+            }
+            Tok::Native => {
+                self.bump();
+                self.native_decl(is_pub, false, start)
             }
             Tok::Struct => self.struct_decl(is_pub, start),
             Tok::Ident(name) if name == "fn" => {
@@ -109,6 +118,15 @@ impl Parser {
         start: Span,
         owner: Option<&str>,
     ) -> PResult<FnDecl> {
+        let (params, ret, _) = self.signature(owner)?;
+        let body = self.block()?;
+        let span = start.to(body.span);
+        Ok(FnDecl { name, name_span, is_pure, is_pub, is_native: false, params, ret, body, span })
+    }
+
+    /// `(params) -> Type`, the return type being optional. Also gives the span
+    /// of the signature's last token.
+    fn signature(&mut self, owner: Option<&str>) -> PResult<(Vec<Param>, Option<TypeExpr>, Span)> {
         self.expect(&Tok::LParen, "`(`")?;
         let mut params = Vec::new();
         while !self.at(&Tok::RParen) {
@@ -117,11 +135,37 @@ impl Parser {
                 break;
             }
         }
-        self.expect(&Tok::RParen, "`)` or `,`")?;
-        let ret = if self.eat(&Tok::Arrow) { Some(self.type_expr()?) } else { None };
-        let body = self.block()?;
-        let span = start.to(body.span);
-        Ok(FnDecl { name, name_span, is_pure, is_pub, params, ret, body, span })
+        let mut end = self.expect(&Tok::RParen, "`)` or `,`")?;
+        let ret = if self.eat(&Tok::Arrow) {
+            let ty = self.type_expr()?;
+            end = ty.span;
+            Some(ty)
+        } else {
+            None
+        };
+        Ok((params, ret, end))
+    }
+
+    /// `native name(params) -> Type`, after `native`: a function Rust implements,
+    /// so it has no block. Its body is an empty block at the end of the signature.
+    fn native_decl(&mut self, is_pub: bool, is_pure: bool, start: Span) -> PResult<Item> {
+        let (name, name_span) = self.expect_ident("a function name")?;
+        let (params, ret, end) = self.signature(None)?;
+        if self.at(&Tok::LBrace) {
+            self.error_here("native functions have no body; remove the `{ }`");
+            return Err(());
+        }
+        let body = Block { stmts: Vec::new(), span: Span { start: end.end, end: end.end } };
+        Ok(Item::Fn(FnDecl { name, name_span, is_pure, is_pub, is_native: true, params, ret, body, span: start.to(end) }))
+    }
+
+    /// Natives are top-level only: inside a struct or enum, `native` is an error.
+    fn reject_native_method(&mut self) -> PResult<()> {
+        if self.at(&Tok::Native) {
+            self.error_here("native functions can't be methods");
+            return Err(());
+        }
+        Ok(())
     }
 
     fn param(&mut self, index: usize, owner: Option<&str>) -> PResult<Param> {
@@ -194,10 +238,11 @@ impl Parser {
     /// One variant (`Name` or `Name { field: Type, ... }`) or one method.
     fn enum_member(&mut self, owner: &str, variants: &mut Vec<VariantDecl>, methods: &mut Vec<FnDecl>) -> PResult<()> {
         let start = self.span();
-        let is_method = matches!(self.peek(), Tok::Pub | Tok::Pure) || self.peek_at(1) == &Tok::LParen;
+        let is_method = matches!(self.peek(), Tok::Pub | Tok::Pure | Tok::Native) || self.peek_at(1) == &Tok::LParen;
         if is_method {
             let is_pub = self.eat(&Tok::Pub);
             let is_pure = self.eat(&Tok::Pure);
+            self.reject_native_method()?;
             let (name, name_span) = self.expect_ident("a method name")?;
             methods.push(self.fn_rest(name, name_span, is_pub, is_pure, start, Some(owner))?);
             return Ok(());
@@ -246,6 +291,7 @@ impl Parser {
         let start = self.span();
         let is_pub = self.eat(&Tok::Pub);
         let is_pure = self.eat(&Tok::Pure);
+        self.reject_native_method()?;
         let (name, name_span) = self.expect_ident("a field or method name")?;
         if self.at(&Tok::LParen) {
             methods.push(self.fn_rest(name, name_span, is_pub, is_pure, start, Some(owner))?);

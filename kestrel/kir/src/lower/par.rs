@@ -86,6 +86,7 @@ impl<'a> FnLowerer<'a> {
             io: false,
             mutates_params: true,
             exported: false,
+            native: None,
         });
         let args = captured.into_iter().map(|c| Arg::Ref(Place::local(c))).collect();
         let count = Expr { kind: ExprKind::Len(list), ty: KTy::I64, line };

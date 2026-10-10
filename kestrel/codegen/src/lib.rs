@@ -1,6 +1,7 @@
 pub mod export;
 mod func;
 mod isa;
+mod native;
 mod par_thunk;
 pub mod jit;
 pub mod object;
@@ -32,24 +33,27 @@ pub(crate) fn symbol(name: &str) -> String {
     format!("k_{name}")
 }
 
-/// Declares and defines every function of `m` in `module`.
-/// Returns their ids, indexed by `FuncIdx`.
+/// Declares every function of `m` in `module` and defines the ones with bodies
+/// (natives are imports under their own symbols). Returns their ids, indexed
+/// by `FuncIdx`.
 pub(crate) fn define_module<M: Module>(module: &mut M, m: &kir::Module, opts: Options) -> Result<Vec<FuncId>, String> {
     let cc = module.isa().default_call_conv();
     let ptr = module.target_config().pointer_type();
     let rt = rt::RtFuncs::declare(module)?;
     let mut ids = Vec::with_capacity(m.funcs.len());
     for f in &m.funcs {
-        let sig = func::signature(f, cc, ptr);
-        let id = module.declare_function(&symbol(&f.name), Linkage::Local, &sig).map_err(|e| e.to_string())?;
-        ids.push(id);
+        let id = match &f.native {
+            Some(import) => module.declare_function(import, Linkage::Import, &native::signature(f, cc, ptr)),
+            None => module.declare_function(&symbol(&f.name), Linkage::Local, &func::signature(f, cc, ptr)),
+        };
+        ids.push(id.map_err(|e| e.to_string())?);
     }
     let par_thunks = par_thunk::define_par_thunks(module, m, &ids)?;
     let shared = func::Shared { funcs: &ids, par_thunks: &par_thunks, rt: &rt, opts, kir: m };
     let mut strings = func::Strings::default();
     let mut ctx = module.make_context();
     let mut fb_ctx = FunctionBuilderContext::new();
-    for (f, &id) in m.funcs.iter().zip(&ids) {
+    for (f, &id) in m.funcs.iter().zip(&ids).filter(|(f, _)| f.native.is_none()) {
         ctx.func = Function::with_name_signature(Default::default(), func::signature(f, cc, ptr));
         func::lower_func(module, &mut strings, &shared, &mut ctx.func, &mut fb_ctx, f)?;
         module

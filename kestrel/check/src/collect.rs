@@ -146,6 +146,7 @@ pub(crate) fn collect(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnos
         }
     }
     check_self_containment(t, diags);
+    crate::natives::check_natives(program, t, diags);
     if t.main.is_none() && needs_main {
         diags.push(Diagnostic::error(Span::new(0, 0), "program needs a `main()` function"));
     }
@@ -277,11 +278,13 @@ fn add_fn(f: &FnDecl, item_idx: usize, method: Option<(usize, &str)>, t: &mut Ta
         item: item_idx,
         method: method.map(|(mi, _)| mi),
         is_pure: f.is_pure,
+        is_native: f.is_native,
         params,
         ret,
         span: f.name_span,
         locals: Vec::new(),
-        io: false,
+        // A native may do anything; only `pure` ones promise not to.
+        io: f.is_native && !f.is_pure,
         mutates_params: false,
     });
     id

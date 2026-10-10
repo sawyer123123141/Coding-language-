@@ -33,6 +33,10 @@ pub fn inline_small(m: &mut Module) {
 /// directly recursive, and with no `return` except a final one (so the body
 /// can be spliced in place of the call).
 fn inlinable(idx: FuncIdx, f: &Func) -> Option<usize> {
+    // A native's body is empty, but the call does something: it stays a call.
+    if f.native.is_some() {
+        return None;
+    }
     let (init, last) = match f.body.split_last() {
         Some((Stmt::Return(Some(_)), init)) => (init, true),
         _ => (&f.body[..], false),

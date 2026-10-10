@@ -18,6 +18,7 @@ use kestrel_syntax::ast::{self, Program};
 use kestrel_syntax::{LineIndex, Span};
 
 use crate::ir::*;
+use crate::native::native_symbol;
 use helpers::Helpers;
 
 /// Lowers a checked program. `t` must come from a `check` with no errors.
@@ -102,7 +103,9 @@ impl<'a> FnLowerer<'a> {
         }
         let params = (0..info.params.len()).map(|i| LocalIdx(i as u32)).collect();
         let ret = if info.ret == Ty::Unit { None } else { Some(kty(info.ret)) };
-        let body = if ret.is_some() {
+        let body = if info.is_native {
+            Vec::new()
+        } else if ret.is_some() {
             let (mut stmts, tail) = self.block_value(&decl.body);
             if let Some(v) = tail {
                 let v = self.owned(v, true);
@@ -122,7 +125,8 @@ impl<'a> FnLowerer<'a> {
             io: info.io,
             mutates_params: info.mutates_params,
             // Items of other modules are named `module.name`.
-            exported: decl.is_pub && info.method.is_none() && !info.name.contains('.'),
+            exported: decl.is_pub && info.method.is_none() && !info.name.contains('.') && !info.is_native,
+            native: info.is_native.then(|| native_symbol(&info.name)),
         }
     }
 

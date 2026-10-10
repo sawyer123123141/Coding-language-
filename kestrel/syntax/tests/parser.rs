@@ -278,3 +278,30 @@ fn use_declarations() {
     let modules: Vec<&str> = u.clauses[1..].iter().map(|c| c.module.as_str()).collect();
     assert_eq!(modules, ["vectors", "colors"]);
 }
+
+#[test]
+fn native_functions_have_no_body() {
+    let p = ok("pub native f(x: int) -> int\npure native g()\nnative h(a: string, b: vec2)\nmain() {}\n");
+    let f = fn_decl(&p, 0);
+    assert!(f.is_native && f.is_pub && !f.is_pure);
+    assert!(f.ret.is_some() && f.params.len() == 1);
+    assert!(f.body.stmts.is_empty());
+    let g = fn_decl(&p, 1);
+    assert!(g.is_native && g.is_pure && !g.is_pub);
+    let h = fn_decl(&p, 2);
+    assert!(h.is_native && !h.is_pure && h.params.len() == 2 && h.ret.is_none());
+    assert!(!fn_decl(&p, 3).is_native, "ordinary functions are not native");
+    // The empty body sits at the end of the signature, inside the declaration's span.
+    assert_eq!((f.body.span.start, f.body.span.end), (f.span.end, f.span.end));
+    assert_eq!(f.span.end as usize, "pub native f(x: int) -> int".len());
+}
+
+#[test]
+fn native_errors() {
+    assert_eq!(errs("struct A {\n    x: int\n    native f()\n}\nmain() {}"), vec!["native functions can't be methods"]);
+    assert_eq!(errs("struct A {\n    pub pure native f(self)\n}\nmain() {}"), vec!["native functions can't be methods"]);
+    assert_eq!(errs("enum E {\n    X\n    native f()\n}\nmain() {}"), vec!["native functions can't be methods"]);
+    assert_eq!(errs("native h() { }\nmain() {}"), vec!["native functions have no body; remove the `{ }`"]);
+    assert_eq!(errs("native h() -> int {\n    1\n}\nmain() {}"), vec!["native functions have no body; remove the `{ }`"]);
+    assert_eq!(errs("native\nmain() {}"), vec!["expected a function name, found end of line"]);
+}

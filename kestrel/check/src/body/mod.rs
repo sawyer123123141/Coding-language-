@@ -59,10 +59,15 @@ pub(crate) fn check_fn(program: &Program, fn_id: FnId, t: &mut Tables, diags: &m
     let info = &t.fns[fn_id.0 as usize];
     let decl = info.decl(program);
     let (ret, is_pure, params) = (info.ret, info.is_pure, info.params.clone());
+    let is_native = info.is_native;
     let mut bc = BodyChecker::new(t, diags, Some(fn_id), ret, is_pure);
     bc.scopes.push(HashMap::new());
     for (p, sig) in decl.params.iter().zip(&params) {
         bc.declare(&p.bind, sig.ty, p.is_var, true, p.is_var);
+    }
+    // A native has no body; its parameters are declared so calls and codegen see them.
+    if is_native {
+        return;
     }
     let expect = if ret == Ty::Unit { Expect::Discard } else { Expect::Value(Some(ret)) };
     let body = bc.check_block(&decl.body, expect);

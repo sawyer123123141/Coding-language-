@@ -1,6 +1,7 @@
 mod body;
 mod builtins;
 mod collect;
+mod natives;
 pub mod tables;
 pub mod ty;
 

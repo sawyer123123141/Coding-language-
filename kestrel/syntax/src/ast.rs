@@ -81,6 +81,9 @@ pub struct FnDecl {
     pub name_span: Span,
     pub is_pure: bool,
     pub is_pub: bool,
+    /// `native name(params)`: implemented in Rust, with no body. `body` is
+    /// then empty, spanned at the end of the signature.
+    pub is_native: bool,
     pub params: Vec<Param>,
     pub ret: Option<TypeExpr>,
     pub body: Block,
