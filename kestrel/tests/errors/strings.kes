@@ -1,4 +1,4 @@
-// error 8: string interpolation only works directly inside `print(...)` for now
+// line 8 builds a string, which is allowed now
 // error 9: `+` needs numbers, found string and string
 // error 10: expected string, found int
 // error 11: this has no value to print

@@ -1,7 +1,8 @@
 //! Functions generated during lowering, one per type that needs them: deep
-//! copies and printing of arrays and lists. Structs and enums are handled
-//! inline; collections always go through a call, so types that contain
-//! themselves through a collection (`struct Node { kids: [Node] }`) work.
+//! copies and printing of arrays and lists (a string copies in place with
+//! `Stmt::Dup`). Structs and enums are handled inline; collections always go
+//! through a call, so types that contain themselves through a collection
+//! (`struct Node { kids: [Node] }`) work.
 
 use std::collections::HashMap;
 
@@ -10,11 +11,12 @@ use kestrel_check::Tables;
 use super::kty;
 use crate::ir::*;
 
-/// Whether a value of `ty` holds arrays or lists (directly or in fields).
-/// Strings are immutable, so copies share them and they don't count.
+/// Whether a value of `ty` holds arrays, lists, maps or strings (directly or
+/// in fields). Strings may live in an arena (interpolation builds them
+/// there), so copies copy their bytes, like arrays.
 pub(crate) fn has_heap(ty: KTy, t: &Tables) -> bool {
     match ty {
-        KTy::Array(_) | KTy::List(_) | KTy::Map(..) => true,
+        KTy::Str | KTy::Array(_) | KTy::List(_) | KTy::Map(..) => true,
         KTy::Optional(e) => has_heap(kty(t.elems[e.0 as usize]), t),
         KTy::Struct(s) => t.structs[s.0 as usize].fields.iter().any(|f| has_heap(kty(f.ty), t)),
         KTy::Enum(e) => t.enums[e.0 as usize].variants.iter().flat_map(|v| &v.fields).any(|f| has_heap(kty(f.ty), t)),
@@ -89,10 +91,11 @@ impl Helpers {
     }
 
     /// Statements that give the value at `place`, just copied byte for
-    /// byte, its own copy of every array and list inside it.
+    /// byte, its own copy of every string, array and list inside it.
     pub(crate) fn fixup(&mut self, place: Place, ty: KTy, t: &Tables) -> Vec<Stmt> {
         let mut out = Vec::new();
         match ty {
+            KTy::Str => out.push(Stmt::Dup(place)),
             KTy::Array(_) | KTy::List(_) => out.push(Stmt::Call(self.copy_fn(ty, t), vec![Arg::Ref(place)])),
             KTy::Map(..) => out.push(Stmt::Call(self.map_copy_fn(ty, t), vec![Arg::Ref(place)])),
             KTy::Optional(e) => {

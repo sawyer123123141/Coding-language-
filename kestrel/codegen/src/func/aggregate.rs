@@ -52,6 +52,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 self.b.ins().store(MemFlags::trusted(), p, dest, 0);
                 self.b.ins().store(MemFlags::trusted(), n, dest, 8);
             }
+            ExprKind::Format(parts) => self.format(parts, dest)?,
             ExprKind::FieldOf(base, i) => {
                 let src = self.field_addr(base, *i)?;
                 self.copy_aggregate(dest, src, e.ty);

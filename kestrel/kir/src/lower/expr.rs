@@ -46,7 +46,7 @@ impl<'a> FnLowerer<'a> {
             ast::ExprKind::Bool(b) => ExprKind::Bool(*b),
             ast::ExprKind::None => ExprKind::NoneLit,
             ast::ExprKind::Str(s) => ExprKind::StrLit(s.clone()),
-            ast::ExprKind::Interp(_) => unreachable!("checker allows interpolation only inside print"),
+            ast::ExprKind::Interp(parts) => ExprKind::Format(self.interp_parts(parts)),
             ast::ExprKind::Ident(_) => match self.t.res[&e.id] {
                 Res::Local(_) if self.t.moves.contains(&e.id) => ExprKind::Move(self.place(e).expect("a local is a place")),
                 Res::Local(_) => ExprKind::Load(self.place(e).expect("a local is a place")),

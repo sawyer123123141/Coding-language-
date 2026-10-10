@@ -2,6 +2,39 @@
 
 use crate::ir::*;
 
+/// The tag (u8, offset 0) says which variant is stored; each variant's
+/// fields start at the same payload offset, so they share memory.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnumLayout {
+    pub name: String,
+    pub variants: Vec<VariantLayout>,
+    pub size: u32,
+    pub align: u32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct VariantLayout {
+    pub name: String,
+    /// Offsets are from the start of the enum value.
+    pub fields: Vec<FieldLayout>,
+}
+
+/// Fields in declaration order at natural alignment (like C).
+#[derive(Clone, Debug, PartialEq)]
+pub struct StructLayout {
+    pub name: String,
+    pub fields: Vec<FieldLayout>,
+    pub size: u32,
+    pub align: u32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FieldLayout {
+    pub name: String,
+    pub ty: KTy,
+    pub offset: u32,
+}
+
 impl Module {
     pub fn layout(&self, s: StructIdx) -> &StructLayout {
         &self.structs[s.0 as usize]

@@ -3,6 +3,8 @@
 
 use std::collections::HashMap;
 
+use crate::layout::{EnumLayout, StructLayout};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum KTy {
     Bool,
@@ -86,39 +88,6 @@ pub struct Module {
     pub par_bodies: Vec<FuncIdx>,
     /// `None` for a library (see `kestrel_check::check_with`).
     pub main: Option<FuncIdx>,
-}
-
-/// The tag (u8, offset 0) says which variant is stored; each variant's
-/// fields start at the same payload offset, so they share memory.
-#[derive(Clone, Debug, PartialEq)]
-pub struct EnumLayout {
-    pub name: String,
-    pub variants: Vec<VariantLayout>,
-    pub size: u32,
-    pub align: u32,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct VariantLayout {
-    pub name: String,
-    /// Offsets are from the start of the enum value.
-    pub fields: Vec<FieldLayout>,
-}
-
-/// Fields in declaration order at natural alignment (like C).
-#[derive(Clone, Debug, PartialEq)]
-pub struct StructLayout {
-    pub name: String,
-    pub fields: Vec<FieldLayout>,
-    pub size: u32,
-    pub align: u32,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct FieldLayout {
-    pub name: String,
-    pub ty: KTy,
-    pub offset: u32,
 }
 
 /// A memory location: a local, or a path of fields and elements inside one.
@@ -233,8 +202,9 @@ pub enum Stmt {
     PopArena { free: bool },
     /// Frees the arena at a place (dropping it) and nulls the place.
     FreeArena(Place),
-    /// Gives the array, list or map at a place its own copy of its
-    /// elements, in the current arena (a list's capacity becomes its length).
+    /// Gives the array, list, map or string at a place its own copy of its
+    /// elements (a string's bytes), in the current arena (a list's capacity
+    /// becomes its length).
     Dup(Place),
     /// `m[key] = value`: adds the key or replaces its value. The key, then
     /// the value, are evaluated first.
@@ -252,6 +222,7 @@ pub enum PrintArg {
     Value(Expr),
     Str(String),
     /// An interpolated string: its parts print with nothing between them.
+    /// Only in `Print` and `Write`; inside a `Format` the parts are flattened.
     Interp(Vec<PrintArg>),
 }
 
@@ -270,6 +241,11 @@ pub enum ExprKind {
     Bool(bool),
     /// A string literal; the bytes live in read-only data.
     StrLit(String),
+    /// An interpolated string `"hp {hp}"`: its parts printed as `print` would
+    /// print them, built into a string in the current arena. The parts are
+    /// only `PrintArg::Value` and `PrintArg::Str`, since lowering flattens a
+    /// nested interpolation into its parent.
+    Format(Vec<PrintArg>),
     /// `array[T](n)`: `n` zeroed elements in the current arena.
     ArrayNew(Box<Expr>),
     /// `[a, b]`: an array, or a list when `ty` is a list.

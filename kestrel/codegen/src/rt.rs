@@ -38,9 +38,7 @@ pub(crate) struct RtFuncs {
     pub rand_int: FuncId,
     #[expect(dead_code)]
     pub rand_seed: FuncId,
-    #[expect(dead_code)]
     pub str_begin: FuncId,
-    #[expect(dead_code)]
     pub str_end: FuncId,
 }
 

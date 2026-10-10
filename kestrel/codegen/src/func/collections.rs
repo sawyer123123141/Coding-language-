@@ -1,5 +1,6 @@
 //! Arrays (`{ptr, len}`) and lists (`{ptr, len, cap, arena}`): creation,
-//! appending and copying. Memory comes from the runtime's arenas.
+//! appending and copying. Memory comes from the runtime's arenas. A string
+//! (`{ptr, len}`) copies like an array of bytes.
 
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::{types, InstBuilder, MemFlags, Value};
@@ -15,6 +16,10 @@ const ARENA: i32 = 24;
 
 impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     fn elem_size_align(&self, ty: KTy) -> (i64, i64) {
+        // A string's elements are its bytes.
+        if ty == KTy::Str {
+            return (1, 1);
+        }
         let (KTy::Array(el) | KTy::List(el)) = ty else { unreachable!("{ty:?} has no elements") };
         let kir = self.shared.kir;
         let (size, align) = kir.size_align(kir.elem(el));
@@ -118,7 +123,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         Ok(())
     }
 
-    /// Gives the collection at `p` its own copy of its elements.
+    /// Gives the collection (or string) at `p` its own copy of its elements.
     pub(crate) fn dup(&mut self, p: &Place) -> Result<(), String> {
         let ty = self.place_ty(p);
         if let KTy::Map(..) = ty {

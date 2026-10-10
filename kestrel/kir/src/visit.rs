@@ -116,6 +116,7 @@ fn expr<'a>(e: &'a Expr, f: &mut impl FnMut(Node<'a>)) {
             }
             place(p, matches!(op, MapOp::Remove | MapOp::Lock), f);
         }
+        ExprKind::Format(parts) => print_args(parts, f),
         ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) => place(p, false, f),
         ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) => expr(x, f),
         ExprKind::Binary(_, a, b) | ExprKind::And(a, b) | ExprKind::Or(a, b) => {

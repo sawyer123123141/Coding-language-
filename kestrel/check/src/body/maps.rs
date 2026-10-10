@@ -87,6 +87,10 @@ impl<'a> BodyChecker<'a> {
             return;
         }
         self.check_element(value, Some(v));
+        // The key is stored too: a string key's bytes must outlive the map.
+        if let ExprKind::Index { index, .. } = &target.kind {
+            self.check_store(target, index);
+        }
         self.check_store(target, value);
     }
 

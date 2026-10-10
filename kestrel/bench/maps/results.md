@@ -32,6 +32,21 @@ Startup: Kestrel 9 ms, .NET 59–66 ms. Checks barely matter here; the work is i
 - The first runtime compared keys as byte slices (a `memcmp` call per compare) and probed twice per insert. Reading integers directly and reusing the first probe's slot took in-order integer keys from 1.8 s to 1.06 s.
 - Both of those numbers were inflated: a code review was building and running tests on the same machine at the time. The table above is from a quiet machine, so how much each fix saved on its own isn't known.
 
+**2026-10-10: strings became heap values.** Copying a string place now copies its bytes into the current arena, like an array.
+- Kestrel only (C# not re-measured), median of 5 with startup subtracted, `kestrel.exe` built from the commit before and after, two passes each, run back to back. This machine was faster than for the table above, so compare only within this table.
+
+| Workload | Before (checks on / `--release`) | After (checks on / `--release`) |
+|---|---:|---:|
+| Integer keys in order | 300–326 / 296–312 ms | 280–324 / 296–302 ms |
+| Integer keys scattered | 350–358 / 314–328 ms | 325–326 / 321–338 ms |
+| String keys | 320–321 / 324–326 ms | 430–437 / 430–435 ms |
+
+- **Integer keys: unchanged.**
+- **String keys: about 35% slower.**
+  - `let w = words[...]` in the loop now copies the word (a runtime call and a few bytes of arena, 10M times).
+  - The key in `counts[w] = ...` isn't copied: the checker checks its arena instead (see `check_map_set`).
+- Both builds print the same result.
+
 ## Reproduce
 
 ```powershell

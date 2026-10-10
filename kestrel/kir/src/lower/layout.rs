@@ -1,7 +1,8 @@
 use kestrel_check::{FieldInfo, Tables};
 
 use super::kty;
-use crate::ir::{EnumLayout, FieldLayout, KTy, StructLayout, VariantLayout};
+use crate::ir::KTy;
+use crate::layout::{EnumLayout, FieldLayout, StructLayout, VariantLayout};
 
 /// Lays out every struct and enum. Fields go in declaration order at
 /// natural alignment; an enum is a u8 tag followed by a shared payload.

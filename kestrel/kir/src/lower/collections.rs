@@ -184,9 +184,10 @@ impl<'a> FnLowerer<'a> {
     }
 
     /// Makes `v` safe to store. Every variable owns its data, so reading a
-    /// place whose value holds arrays or lists copies them. With `moving`
-    /// (a returned value), reads of locals aren't copied: they're about to
-    /// die. Parameters belong to the caller, so they're copied regardless.
+    /// place whose value holds strings, arrays or lists copies them. With
+    /// `moving` (a returned value), reads of locals aren't copied: they're
+    /// about to die. Parameters belong to the caller, so they're copied
+    /// regardless.
     pub(crate) fn owned(&mut self, v: Expr, moving: bool) -> Expr {
         if !has_heap(v.ty, self.t) {
             return v;

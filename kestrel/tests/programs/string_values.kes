@@ -1,0 +1,49 @@
+// expect: hp 3/10
+// expect: ["a0", "a1", "a2"]
+// expect: Ann 2: 7 hp
+// expect: true
+// expect: 5
+// expect: temp 3
+// expect: v = vec2(x: 1.5, y: 2)
+// expect: n7
+// expect: start
+struct Player {
+    name: string
+    hp: int
+}
+
+label(p: Player) -> string {
+    "{p.name}: {p.hp} hp"
+}
+
+pure tag(n: int) -> string {
+    "n{n}"
+}
+
+main() {
+    let hp = 3
+    let s = "hp {hp}/10"
+    print(s)
+    var names = list[string]()
+    for i from 0 to 3 {
+        names.add("a{i}")
+    }
+    print(names)
+    let p = Player(name: "Ann {1 + 1}", hp: 7)
+    print(label(p))
+    print("{s}!" == "hp 3/10!")
+    var scores = map[string, int]()
+    scores["p{hp}"] = 5
+    print(scores.get("p3", 0))
+    arena {
+        let tmp = "temp {hp}"
+        print(tmp)
+    }
+    let v = vec2(1.5, 2)
+    print("v = {v}")
+    print(tag(7))
+    var kept = "start"
+    let copy = kept
+    kept = "changed"
+    print(copy)
+}

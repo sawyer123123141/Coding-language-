@@ -122,6 +122,10 @@ impl<'a> BodyChecker<'a> {
         }
         match &e.kind {
             ExprKind::None => 0,
+            // Literals live in read-only data and belong to no arena. A string
+            // constant is a literal, built again at each use.
+            ExprKind::Str(_) => 0,
+            ExprKind::Ident(_) if ty == Ty::Str && matches!(self.t.res.get(&e.id), Some(Res::Const(_))) => 0,
             // An empty list still remembers the current arena, to grow in.
             ExprKind::ArrayLit(items) if items.is_empty() => {
                 if matches!(ty, Ty::List(_)) {

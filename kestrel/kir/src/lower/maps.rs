@@ -35,8 +35,8 @@ impl<'a> FnLowerer<'a> {
         ExprKind::Seq(stmts, Box::new(Expr { kind: ExprKind::Move(Place::local(tmp)), ty, line }))
     }
 
-    /// `m[k]`: an optional holding the value. When it holds arrays or
-    /// lists, they're shared with the map, like a list element read from
+    /// `m[k]`: an optional holding the value. When it holds strings, arrays
+    /// or lists, they're shared with the map, like a list element read from
     /// its place: storing the value copies it (see `owned`). A caller's map
     /// (a parameter or loop element) is copied from right away, since
     /// `owned` wouldn't know the value isn't this function's to hand out.

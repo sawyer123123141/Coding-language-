@@ -181,6 +181,7 @@ impl Inliner<'_> {
                 let value = value.expect("a value call's callee ends in `return value`");
                 e.kind = if body.is_empty() { value.kind } else { ExprKind::Seq(body, Box::new(value)) };
             }
+            ExprKind::Format(parts) => self.print(parts, depth),
             ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::Move(p) => self.place(p, depth),
             ExprKind::Map(_, p, xs) => {
                 self.place(p, depth);

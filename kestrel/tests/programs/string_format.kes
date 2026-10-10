@@ -1,0 +1,89 @@
+// expect: noisy
+// expect: v=4
+// expect: a:yes 1:c
+// expect: outer no end
+// expect: []
+// expect: 1.5 true 2
+// expect: true false
+// expect: ["p1", "q2"] ["z", "q2"]
+// expect: Tagged(name: "t1", tags: ["u1", "u2"]) Tagged(name: "other", tags: ["u1", "u2"])
+// expect: yes 1 no
+// expect: hello n1
+// expect: lbl 7
+// expect: 1000
+// expect: opt 3
+// expect: one 1 uno
+let GREETING = "hello"
+
+struct Tagged {
+    name: string
+    tags: [string]
+}
+
+struct Label {
+    mem: Arena = Arena()
+    text: string = ""
+}
+
+noisy() -> int {
+    print("noisy")
+    4
+}
+
+pick(flag: bool) -> string {
+    if flag { "yes {1}" } else { "no" }
+}
+
+main() {
+    // Output from a call inside a part goes to the program, not into the string.
+    let s = "v={noisy()}"
+    print(s)
+    // A string built by a call, shown inside another string.
+    print("a:{pick(true)}:c")
+    let nested = "outer {pick(false)} end"
+    print(nested)
+    // The empty string, and a copy of it.
+    let e = ""
+    let blank = "{e}"
+    let blank_copy = blank
+    print("[{blank_copy}]")
+    print("{1.5} {true} {2.0}")
+    print("a{1}" == "a{1}", "a{1}" != "a{1}")
+    // Copies are deep: strings inside arrays and structs get their own bytes.
+    let a = ["p{1}", "q{2}"]
+    var b = a
+    b[0] = "z"
+    print(a, b)
+    let t = Tagged(name: "t{1}", tags: ["u{1}", "u{2}"])
+    var u = t
+    u.name = "other"
+    print(t, u)
+    print(pick(true), pick(false))
+    // A constant is a literal, so it can leave an arena block.
+    var kept = "kept"
+    arena {
+        let inner = "n{1}"
+        kept = GREETING
+        print(kept, inner)
+    }
+    var l = Label()
+    in l.mem {
+        l.text = "lbl {7}"
+    }
+    print(l.text)
+    var total = 0
+    for i from 0 to 1000 {
+        arena {
+            let item = "item {i} of {total}"
+            total += 1
+        }
+    }
+    print(total)
+    let o: string? = "opt {3}"
+    print(o)
+    var names = map[int, string]()
+    names[1] = "one {1}"
+    var more = names
+    more[1] = "uno"
+    print(names.get(1, ""), more.get(1, ""))
+}

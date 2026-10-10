@@ -40,15 +40,14 @@ impl<'a> BodyChecker<'a> {
                 }
             },
             ExprKind::Str(_) => Ty::Str,
+            // Built in the current arena, from parts that print the way `print` shows them.
             ExprKind::Interp(parts) => {
-                // Building a new string needs memory to put it in; that comes with arenas.
-                self.error(e.span, "string interpolation only works directly inside `print(...)` for now");
                 for part in parts {
                     if let InterpPart::Expr(x) = part {
-                        self.check_expr(x, None);
+                        self.check_printable(x);
                     }
                 }
-                Ty::Error
+                Ty::Str
             }
             ExprKind::Ident(name) => self.ident(e, name),
             ExprKind::Unary { op, expr } => self.unary(*op, expr, want),

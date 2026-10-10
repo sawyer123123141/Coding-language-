@@ -227,11 +227,13 @@ impl Tables {
         self.elems[id.0 as usize]
     }
 
-    /// Whether a value of `ty` points at arena memory: arrays and lists,
-    /// directly or in fields. (An `Arena` itself doesn't.)
+    /// Whether a value of `ty` points at arena memory: strings, arrays,
+    /// lists and maps, directly or in fields. (An `Arena` itself doesn't.)
+    /// Strings may live in an arena (interpolation builds them there), so
+    /// copies copy their bytes, like arrays.
     pub fn has_heap(&self, ty: Ty) -> bool {
         match ty {
-            Ty::Array(_) | Ty::List(_) | Ty::Map(..) => true,
+            Ty::Str | Ty::Array(_) | Ty::List(_) | Ty::Map(..) => true,
             Ty::Optional(e) => self.has_heap(self.elem(e)),
             Ty::Struct(s) => self.strukt(s).fields.iter().any(|f| self.has_heap(f.ty)),
             Ty::Enum(e) => self.enm(e).variants.iter().flat_map(|v| &v.fields).any(|f| self.has_heap(f.ty)),

@@ -9,20 +9,37 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// `print(...)` (`line`: spaces between arguments, then a newline), or
     /// a generated printer's `Write` (neither).
     pub(crate) fn print(&mut self, args: &[kir::PrintArg], line: bool) -> Result<(), String> {
-        // Arguments are separated by spaces; an interpolated string's parts aren't.
-        let mut pieces = Vec::with_capacity(args.len());
-        for (i, a) in args.iter().enumerate() {
-            let space = line && i > 0;
-            match a {
-                kir::PrintArg::Interp(parts) => pieces.extend(parts.iter().enumerate().map(|(j, p)| (p, space && j == 0))),
-                _ => pieces.push((a, space)),
-            }
+        let pieces = pieces(args, line);
+        let vals = self.eval_pieces(&pieces)?;
+        self.write_pieces(&pieces, &vals)?;
+        if line {
+            self.call_id(self.shared.rt.print_newline, &[]);
         }
-        // Evaluate everything before writing anything, so output (or a panic)
-        // inside an argument can't interleave with this line. Aggregates are
-        // copied out so a later argument can't change them first.
+        Ok(())
+    }
+
+    /// An interpolated string `"hp {hp}"` into the string at `dest`. Its
+    /// pieces are evaluated first, so output from a call inside one goes to
+    /// the program's output and not into the string. Then the print code
+    /// writes them into a runtime buffer, which `str_end` copies into the
+    /// current arena.
+    pub(crate) fn format(&mut self, parts: &[kir::PrintArg], dest: Value) -> Result<(), String> {
+        let pieces = pieces(parts, false);
+        let vals = self.eval_pieces(&pieces)?;
+        let rt = self.shared.rt;
+        self.call_id(rt.str_begin, &[]);
+        self.write_pieces(&pieces, &vals)?;
+        self.call_id(rt.str_end, &[dest]);
+        Ok(())
+    }
+
+    /// Evaluates every piece before anything is written, so output (or a
+    /// panic) inside one can't interleave with the rest. Aggregates are
+    /// copied out so a later piece can't change them first. A text piece has
+    /// no value.
+    pub(crate) fn eval_pieces(&mut self, pieces: &[(&kir::PrintArg, bool)]) -> Result<Vec<Option<Value>>, String> {
         let mut vals = Vec::with_capacity(pieces.len());
-        for &(a, _) in &pieces {
+        for &(a, _) in pieces {
             vals.push(match a {
                 kir::PrintArg::Value(e) if e.ty.is_aggregate() => {
                     let tmp = self.temp_addr(e.ty);
@@ -34,8 +51,14 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 kir::PrintArg::Interp(_) => unreachable!("interpolations don't nest"),
             });
         }
+        Ok(vals)
+    }
+
+    /// Prints pieces already evaluated by `eval_pieces`, each after a space
+    /// if its flag is set.
+    pub(crate) fn write_pieces(&mut self, pieces: &[(&kir::PrintArg, bool)], vals: &[Option<Value>]) -> Result<(), String> {
         let rt = self.shared.rt;
-        for ((a, space), val) in pieces.into_iter().zip(vals) {
+        for (&(a, space), &val) in pieces.iter().zip(vals) {
             if space {
                 self.call_id(rt.print_space, &[]);
             }
@@ -45,9 +68,6 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 (kir::PrintArg::Str(s), _) => self.print_text(s)?,
                 _ => unreachable!("value pieces are evaluated above"),
             }
-        }
-        if line {
-            self.call_id(rt.print_newline, &[]);
         }
         Ok(())
     }
@@ -198,4 +218,19 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let n = self.b.ins().iconst(types::I64, s.len() as i64);
         Ok((p, n))
     }
+}
+
+/// What `print` writes, flattened: each piece with whether a space goes before
+/// it. Arguments are separated by spaces (when `line`); an interpolated
+/// string's parts aren't.
+fn pieces(args: &[kir::PrintArg], line: bool) -> Vec<(&kir::PrintArg, bool)> {
+    let mut pieces = Vec::with_capacity(args.len());
+    for (i, a) in args.iter().enumerate() {
+        let space = line && i > 0;
+        match a {
+            kir::PrintArg::Interp(parts) => pieces.extend(parts.iter().enumerate().map(|(j, p)| (p, space && j == 0))),
+            _ => pieces.push((a, space)),
+        }
+    }
+    pieces
 }

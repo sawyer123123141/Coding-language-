@@ -1,0 +1,9 @@
+main() {
+    var s = "start"
+    let n = 1
+    arena {
+        s = "n {n}"
+    }
+    print(s)
+}
+// error 5: this memory is freed at the end of the `arena { }` block, but `s` lives longer

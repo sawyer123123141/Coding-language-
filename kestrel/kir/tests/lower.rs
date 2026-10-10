@@ -238,3 +238,28 @@ fn variants_are_built_in_declaration_order() {
     }
     assert!(matches!(&main.body[3], Stmt::Let(_, Expr { kind: ExprKind::VariantLit(EnumIdx(0), 2, fields), .. }) if fields.is_empty()));
 }
+
+#[test]
+fn interpolation_anywhere_is_a_format_and_copying_a_string_dups_it() {
+    let m = lower_src("main() {\n let hp = 3\n let s = \"hp {hp}!\"\n let c = s\n print(\"{c}\")\n}\n");
+    let main = func(&m, "main");
+    match &main.body[1] {
+        Stmt::Let(LocalIdx(1), Expr { kind: ExprKind::Format(parts), ty: KTy::Str, .. }) => {
+            assert!(matches!(
+                &parts[..],
+                [PrintArg::Str(a), PrintArg::Value(Expr { kind: ExprKind::Load(_), ty: KTy::I32, .. }), PrintArg::Str(b)]
+                    if a == "hp " && b == "!"
+            ));
+        }
+        other => panic!("{other:?}"),
+    }
+    // Reading `s` into `c` copies its bytes: a temporary, then `Dup`.
+    match &main.body[2] {
+        Stmt::Let(LocalIdx(2), Expr { kind: ExprKind::Seq(pre, _), ty: KTy::Str, .. }) => {
+            assert!(matches!(&pre[..], [Stmt::Let(LocalIdx(3), _), Stmt::Dup(Place { root: LocalIdx(3), .. })]));
+        }
+        other => panic!("{other:?}"),
+    }
+    // Inside `print` an interpolation stays a list of pieces.
+    assert!(matches!(&main.body[3], Stmt::Print(args) if matches!(&args[..], [PrintArg::Interp(_)])));
+}

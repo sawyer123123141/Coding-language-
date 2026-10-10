@@ -104,6 +104,7 @@ fn rename_print(parts: &mut [PrintArg], subst: &[Subst]) {
 
 pub(crate) fn rename_expr(e: &mut Expr, subst: &[Subst]) {
     match &mut e.kind {
+        ExprKind::Format(parts) => rename_print(parts, subst),
         ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::Move(p) => rename_place(p, subst),
         ExprKind::Map(_, p, xs) => {
             rename_place(p, subst);

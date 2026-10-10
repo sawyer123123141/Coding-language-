@@ -36,6 +36,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             ExprKind::StructLit(..)
             | ExprKind::VariantLit(..)
             | ExprKind::StrLit(_)
+            | ExprKind::Format(_)
             | ExprKind::ArrayNew(_)
             | ExprKind::ArrayLit(_)
             | ExprKind::ListNew

@@ -271,21 +271,30 @@ impl<'a> FnLowerer<'a> {
     fn print_arg(&mut self, e: &ast::Expr) -> PrintArg {
         match &e.kind {
             ast::ExprKind::Str(s) => PrintArg::Str(s.clone()),
-            ast::ExprKind::Interp(parts) => PrintArg::Interp(
-                parts
-                    .iter()
-                    .map(|p| match p {
-                        ast::InterpPart::Lit(s) => PrintArg::Str(s.clone()),
-                        ast::InterpPart::Expr(x) => self.print_arg(x),
-                    })
-                    .collect(),
-            ),
+            ast::ExprKind::Interp(parts) => PrintArg::Interp(self.interp_parts(parts)),
             _ => {
                 let v = self.expr(e);
                 self.helpers.ensure_print(v.ty, self.t);
                 PrintArg::Value(v)
             }
         }
+    }
+
+    /// The pieces of an interpolated string, in order. An interpolation
+    /// inside another is flattened into it, so the result has only
+    /// `PrintArg::Value` and `PrintArg::Str`.
+    fn interp_parts(&mut self, parts: &[ast::InterpPart]) -> Vec<PrintArg> {
+        let mut out = Vec::with_capacity(parts.len());
+        for part in parts {
+            match part {
+                ast::InterpPart::Lit(s) => out.push(PrintArg::Str(s.clone())),
+                ast::InterpPart::Expr(x) => match self.print_arg(x) {
+                    PrintArg::Interp(inner) => out.extend(inner),
+                    piece => out.push(piece),
+                },
+            }
+        }
+        out
     }
 }
 

@@ -1,0 +1,9 @@
+main() {
+    var m = map[string, int]()
+    let n = 1
+    arena {
+        m["k{n}"] = 1
+    }
+    print(m.len)
+}
+// error 5: this memory is freed at the end of the `arena { }` block, but `m` lives longer
