@@ -136,3 +136,56 @@ fn values_made_and_kept_inside_a_block_are_fine() {
         assert!(errs.is_empty(), "{errs:?}\n{body}");
     }
 }
+
+/// The help lines of the errors in `src`.
+fn helps(src: &str) -> Vec<Option<String>> {
+    let (p, d) = parse(src);
+    assert!(d.is_empty(), "parse errors: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
+    check(&p).1.into_iter().map(|d| d.help).collect()
+}
+
+#[test]
+fn escape_help_names_a_fix_that_exists() {
+    let cases = [
+        // The arena field is named as the struct spells it.
+        (
+            "struct Bucket {\n pool: Arena = Arena()\n ids: [int] = []\n}\nfill(var b: Bucket) {\n b.ids = [1]\n}\nmain() {}\n",
+            "allocate it with `in b.pool { }`",
+        ),
+        // No arena field: say to add one.
+        (
+            "struct Tag {\n ids: [int] = []\n}\nfill(var t: Tag) {\n t.ids = [1]\n}\nmain() {}\n",
+            "give `Tag` an `Arena` field, and build it inside `in t.<that field> { }`",
+        ),
+        // An element of a list parameter is named as the loop spells it.
+        (
+            "fill(var cs: list[Chunk]) {\n for c in cs {\n  c.heights = [1]\n }\n}\nmain() {}\n",
+            "allocate it with `in c.mem { }`",
+        ),
+        // A `match` arm's binding is a variant: name the variant, not the enum.
+        (
+            "enum Msg {
+ Say { text: string }
+ Quit
+}
+say(var m: Msg, n: int) {
+ match m {
+  Say s { s.text = \"n{n}\" }
+  Quit { }
+ }
+}
+main() {}
+",
+            "give the `Say` variant an `Arena` field, and build it inside `in s.<that field> { }`",
+        ),
+        // A list has no fields: its owner needs the arena.
+        (
+            "add(var xs: list[[int]]) {\n xs.add([1])\n}\nmain() {}\n",
+            "build it in the caller, or give the owner of `xs` an `Arena` field and build it inside `in <owner>.<that field> { }`",
+        ),
+    ];
+    for (body, expected) in cases {
+        let found = helps(&format!("{CHUNK}{body}"));
+        assert_eq!(found, vec![Some(expected.to_string())], "source:\n{body}");
+    }
+}

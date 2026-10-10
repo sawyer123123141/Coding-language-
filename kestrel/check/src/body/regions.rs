@@ -176,6 +176,28 @@ impl<'a> BodyChecker<'a> {
         }
     }
 
+    /// What to do about memory in the caller's current arena that is stored
+    /// into `name`, a variable of type `ty`: build it in an arena that `name`
+    /// owns, which takes an `Arena` field on its type.
+    fn caller_memory_help(&self, name: &str, ty: Ty) -> String {
+        let (owner, fields) = match ty {
+            Ty::Struct(s) => (format!("`{}`", self.t.strukt(s).name), &self.t.strukt(s).fields),
+            Ty::Variant(e, v) => {
+                let variant = &self.t.enm(e).variants[v as usize];
+                (format!("the `{}` variant", variant.name), &variant.fields)
+            }
+            _ => {
+                return format!(
+                    "build it in the caller, or give the owner of `{name}` an `Arena` field and build it inside `in <owner>.<that field> {{ }}`"
+                )
+            }
+        };
+        match fields.iter().find(|f| f.ty == Ty::Arena) {
+            Some(arena) => format!("allocate it with `in {name}.{} {{ }}`", arena.name),
+            None => format!("give {owner} an `Arena` field, and build it inside `in {name}.<that field> {{ }}`"),
+        }
+    }
+
     /// Checks that the memory `value` points into lives at least as long as
     /// the place `target` it's stored into.
     pub(crate) fn check_store(&mut self, target: &Expr, value: &Expr) {
@@ -184,7 +206,8 @@ impl<'a> BodyChecker<'a> {
         let path = self.path_key(target);
         let info = self.t.local(root);
         // Name the variable as written (a loop element, not its collection).
-        let name = path.as_ref().map_or(info.name.clone(), |p| self.t.local(p.root).name.clone());
+        let written = self.t.local(path.as_ref().map_or(root, |p| p.root));
+        let (name, written_ty) = (written.name.clone(), written.ty);
         // Parameters outlive the function, so `None`.
         let decl = if info.is_param { None } else { self.local_ctx.get(&root).map(|&(c, _)| c) };
         for i in (0..self.ctxs.len()).filter(|&i| r & bit(i) != 0) {
@@ -192,7 +215,7 @@ impl<'a> BodyChecker<'a> {
                 Ctx::Function => (
                     self.is_main() || decl.is_some(),
                     format!("this memory is in the caller's current arena, which may not live as long as `{name}`"),
-                    format!("allocate it with `in {name}.mem {{ }}`"),
+                    self.caller_memory_help(&name, written_ty),
                 ),
                 Ctx::Scoped => (
                     decl.is_some_and(|d| d >= i),
