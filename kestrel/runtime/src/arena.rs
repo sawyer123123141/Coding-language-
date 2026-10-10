@@ -101,7 +101,7 @@ pub extern "C" fn kestrel_rt_current_arena() -> *mut Arena {
 }
 
 /// The program arena, which lives until the program ends.
-fn program_arena() -> *mut Arena {
+pub(crate) fn program_arena() -> *mut Arena {
     STACK.with_borrow_mut(|s| &mut **s.program.get_or_insert_with(Box::default) as *mut Arena)
 }
 
