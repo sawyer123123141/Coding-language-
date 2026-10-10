@@ -128,6 +128,11 @@ impl Kestrel {
         if !diagnostics.is_empty() {
             godot_warn!("{diagnostics}");
         }
+        // Those modules need Kestrel's own window, which Godot already has.
+        if !compiled.builtins.is_empty() {
+            godot_error!("window, draw and input can't be used inside Godot");
+            return false;
+        }
         match JitProgram::compile(&compiled.module, Options { checked_arith: self.checks }) {
             Ok(program) => {
                 let exports = program.exports();

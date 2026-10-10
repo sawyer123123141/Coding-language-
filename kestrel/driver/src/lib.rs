@@ -2,6 +2,8 @@
 //! checks, lowers and inlines. Shared by the `kestrel` command and the Godot
 //! add-on.
 
+mod builtin;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -39,14 +41,22 @@ impl SourceFile {
     }
 }
 
+/// Built-in modules live inside the compiler, so they never change.
 fn modified(path: &Path) -> Option<SystemTime> {
+    if builtin::is_path(path) {
+        return None;
+    }
     std::fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
 pub struct Compiled {
     pub module: kestrel_kir::Module,
-    /// The entry file first, then each module it uses.
+    /// The entry file first, then each module it uses. A built-in module's
+    /// path is `<builtin>/name.kes`, and it has no modification time.
     pub files: Vec<SourceFile>,
+    /// The built-in modules (`window`, `draw`, `input`) the program uses, in
+    /// the order they were loaded. They need the window library to run.
+    pub builtins: Vec<&'static str>,
 }
 
 /// One source file of the program, laid out at `base` in a shared span space.
@@ -54,6 +64,16 @@ struct File {
     path: String,
     src: String,
     base: u32,
+    /// Embedded in the compiler (see `builtin`), not written by the user.
+    builtin: bool,
+}
+
+/// What `load` read: every file, and the modules parsed from them.
+struct Loaded {
+    files: Vec<File>,
+    modules: Vec<Module>,
+    diags: Vec<Diagnostic>,
+    builtins: Vec<&'static str>,
 }
 
 /// Compiles the program whose entry file is `path` (with text `src`). The
@@ -64,7 +84,7 @@ pub fn compile(path: &str, src: &str, style: DiagStyle) -> (Option<Compiled>, St
 
 /// Like `compile`; with `needs_main` false it compiles a library (no `main`).
 pub fn compile_as(path: &str, src: &str, style: DiagStyle, needs_main: bool) -> (Option<Compiled>, String) {
-    let (files, modules, mut diags) = load(path, src);
+    let Loaded { files, modules, mut diags, builtins } = load(path, src);
     if diags.iter().any(Diagnostic::is_error) {
         return (None, report(&files, &diags, style));
     }
@@ -83,7 +103,7 @@ pub fn compile_as(path: &str, src: &str, style: DiagStyle, needs_main: bool) -> 
     let mut module = kestrel_kir::lower(&program, &tables, &LineIndex::for_files(&parts));
     kestrel_kir::inline::inline_small(&mut module);
     let files = files.iter().map(|f| SourceFile::new(Path::new(&f.path))).collect();
-    (Some(Compiled { module, files }), text)
+    (Some(Compiled { module, files, builtins }), text)
 }
 
 /// Reads `path` and compiles it (as a library when `needs_main` is false).
@@ -95,39 +115,68 @@ pub fn compile_file(path: &Path, style: DiagStyle, needs_main: bool) -> (Option<
 }
 
 /// Parses the entry file and, transitively, every module it uses. A module
-/// `m` is `m.kes` next to the file that uses it; each file is parsed once.
-fn load(path: &str, src: &str) -> (Vec<File>, Vec<Module>, Vec<Diagnostic>) {
-    let mut files = vec![File { path: path.to_string(), src: src.to_string(), base: 0 }];
+/// `m` is `m.kes` next to the file that uses it, unless `m` is a built-in
+/// module; each file is parsed once.
+fn load(path: &str, src: &str) -> Loaded {
+    let mut files = vec![File { path: path.to_string(), src: src.to_string(), base: 0, builtin: false }];
     let mut by_name: HashMap<String, usize> = HashMap::from([(stem(path), 0)]);
-    let (mut modules, mut diags) = (Vec::new(), Vec::new());
+    let (mut modules, mut diags, mut builtins) = (Vec::new(), Vec::new(), Vec::new());
     let (mut next_expr, mut next_bind) = (0, 0);
     let mut i = 0;
     while i < files.len() {
         let (program, file_diags) = parse_at(&files[i].src, files[i].base, next_expr, next_bind);
         (next_expr, next_bind) = (program.expr_count, program.bind_count);
         diags.extend(file_diags);
+        if !files[i].builtin {
+            diags.extend(user_natives(&program.items));
+        }
         let dir = Path::new(&files[i].path).parent().map(Path::to_path_buf).unwrap_or_default();
         for item in &program.items {
             let Item::Use(u) = item else { continue };
             for c in &u.clauses {
+                if let Some((name, text)) = builtin::find(&c.module) {
+                    // A built-in module wins over a file of the same name; say so rather than
+                    // quietly ignoring the file.
+                    if !files[i].builtin && dir.join(format!("{name}.kes")).exists() {
+                        diags.push(Diagnostic::error(c.module_span, builtin::shadowed(name)));
+                    }
+                    if !builtins.contains(&name) {
+                        builtins.push(name);
+                        by_name.insert(name.to_string(), files.len());
+                        push_file(&mut files, builtin::path(name), text.to_string(), true);
+                    }
+                    continue;
+                }
                 if by_name.contains_key(&c.module) {
                     continue;
                 }
                 // A missing file is reported by `link`, which knows where it was named.
                 let file = dir.join(format!("{}.kes", c.module));
                 if let Ok(text) = std::fs::read_to_string(&file) {
-                    let last = files.last().expect("the entry file");
-                    let base = last.base + last.src.len() as u32 + 1;
                     by_name.insert(c.module.clone(), files.len());
-                    let src = without_bom(&text).to_string();
-                    files.push(File { path: file.to_string_lossy().into_owned(), src, base });
+                    push_file(&mut files, file.to_string_lossy().into_owned(), without_bom(&text).to_string(), false);
                 }
             }
         }
         modules.push(Module { name: stem(&files[i].path), program });
         i += 1;
     }
-    (files, modules, diags)
+    Loaded { files, modules, diags, builtins }
+}
+
+/// Adds a file after the last one in the shared span space.
+fn push_file(files: &mut Vec<File>, path: String, src: String, builtin: bool) {
+    let last = files.last().expect("the entry file");
+    let base = last.base + last.src.len() as u32 + 1;
+    files.push(File { path, src, base, builtin });
+}
+
+/// An error for each `native` declaration: only built-in modules have them.
+fn user_natives(items: &[Item]) -> impl Iterator<Item = Diagnostic> + '_ {
+    items.iter().filter_map(|item| match item {
+        Item::Fn(f) if f.is_native => Some(Diagnostic::error(f.name_span, builtin::USER_NATIVE)),
+        _ => None,
+    })
 }
 
 /// Source text without a leading UTF-8 byte order mark, which editors on Windows add.

@@ -61,5 +61,9 @@ func _init() -> void:
 	var vertices: PackedVector3Array = voxels.run("vertices", [0, 0, 1337])
 	var normals: PackedVector3Array = voxels.run("normals", [0, 0, 1337])
 	check("vertices and normals match", vertices.size() == normals.size() and vertices.size() > 0, true)
+	# window, draw and input open Kestrel's own window, so the add-on won't load them.
+	var windowed := Kestrel.new()
+	check("a program using the window modules is refused", windowed.load("res://tests/builtin_test.kes"), false)
+	check("and nothing is loaded", windowed.run("answer", []), null)
 	print("%d failure(s)" % failures)
 	quit(failures)

@@ -1,0 +1,40 @@
+// expect: Color(r: 1, g: 0, b: 0, a: 1) Color(r: 0.2, g: 0.2, b: 0.2, a: 1) Color(r: 0, g: 0, b: 0, a: 0.5)
+// expect: Color(r: 0.5, g: 0, b: 0, a: 1) Color(r: 1, g: 0, b: 0, a: 1)
+// expect: vec2(x: 0, y: 3) vec2(x: 0, y: 1) vec3(x: 0, y: -1, z: 0)
+// expect: Sprite(tint: Color(r: 1, g: 1, b: 1, a: 1), at: vec2(x: 0, y: 1))
+// expect: 1.4142135 0.5
+struct Color {
+    r: float
+    g: float
+    b: float
+    a: float = 1
+}
+
+struct Sprite {
+    tint: Color = Color(1, 1, 1)
+    at: vec2 = vec2(0, 1)
+}
+
+let RED = Color(1, 0, 0)
+let BG = Color(0.2, 0.2, 0.2)
+let GHOST = Color(0, 0, 0, a: 0.5)
+let ROOT2 = Color(0, 0, sqrt(2))
+let ALIAS = RED
+let UP = vec2(0, 1)
+let DOWN = vec3(0, -1, 0)
+let SPAWN = UP * 3
+
+pure faded(c: Color) -> Color {
+    Color(c.r, c.g, c.b, a: c.a / 2)
+}
+
+main() {
+    print(ALIAS, BG, GHOST)
+    // Every use of a constant is a fresh value, so changing a copy leaves the constant alone.
+    var c = RED
+    c.r = 0.5
+    print(c, RED)
+    print(SPAWN, UP, DOWN)
+    print(Sprite())
+    print(ROOT2.b, faded(RED).a)
+}

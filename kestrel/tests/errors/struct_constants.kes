@@ -1,0 +1,21 @@
+struct Color {
+    r: float
+    g: float
+    b: float
+    a: float = 1
+}
+
+helper() -> float { 1 }
+
+let OK = Color(1, 2, sqrt(2))
+let ALSO_OK = Color(PI, 0, 0)
+let BAD = Color(1, 2, helper())
+let WORSE = vec2(1, randf())
+let FINE = vec2(1, 2) * 3
+
+main() {
+    print(OK, ALSO_OK, BAD, WORSE, FINE)
+}
+
+// error 12: constants can only use literals, operators and earlier constants
+// error 13: constants can only use literals, operators and earlier constants

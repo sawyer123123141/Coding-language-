@@ -20,7 +20,7 @@ pub(crate) fn check_field_defaults(program: &Program, t: &mut Tables, diags: &mu
             let Some(field) = t.structs[sid].fields.iter().find(|g| g.name == f.name) else { continue };
             let ty = field.ty;
             let mut bc = BodyChecker::new(t, diags, None, Ty::Unit, false);
-            if is_const_expr(default) {
+            if is_const_expr(default, bc.t) {
                 bc.check_value(default, Some(ty));
             } else {
                 bc.error(default.span, "field defaults can only use literals, operators and constants");

@@ -36,7 +36,7 @@ func _process(_delta: float) -> void:
 - `refresh()` recompiles if a file changed and returns whether a new version is loaded. If an edit has errors, they're printed and the old version keeps running.
 - `functions()` lists the functions `run` can call.
 
-A `.kes` file loaded by Godot is a library: it doesn't need `main()`.
+A `.kes` file loaded by Godot is a library: it doesn't need `main()`. It can't `use window`, `use draw` or `use input`, which are for Kestrel programs that open their own window; `load` prints an error and returns `false`.
 
 ## Types
 

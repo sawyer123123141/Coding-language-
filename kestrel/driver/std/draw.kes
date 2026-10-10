@@ -1,0 +1,28 @@
+// Drawing in window pixels: origin top-left, y down. The colour is always last.
+pub struct Color {
+    r: float
+    g: float
+    b: float
+    a: float = 1
+}
+
+pub let WHITE = Color(1, 1, 1)
+pub let BLACK = Color(0, 0, 0)
+pub let GRAY = Color(0.745098, 0.745098, 0.745098)
+pub let RED = Color(1, 0, 0)
+pub let GREEN = Color(0, 1, 0)
+pub let BLUE = Color(0, 0, 1)
+pub let YELLOW = Color(1, 1, 0)
+pub let ORANGE = Color(1, 0.647059, 0)
+pub let PURPLE = Color(0.627451, 0.12549, 0.941176)
+pub let TRANSPARENT = Color(1, 1, 1, 0)
+
+pub native clear(color: Color)
+pub native rect(pos: vec2, size: vec2, color: Color)
+pub native rect_outline(pos: vec2, size: vec2, width: float, color: Color)
+pub native circle(center: vec2, radius: float, color: Color)
+pub native circle_outline(center: vec2, radius: float, width: float, color: Color)
+pub native line(a: vec2, b: vec2, width: float, color: Color)
+pub native triangle(a: vec2, b: vec2, c: vec2, color: Color)
+pub native text(text: string, pos: vec2, size: float, color: Color)
+pub native text_width(text: string, size: float) -> float

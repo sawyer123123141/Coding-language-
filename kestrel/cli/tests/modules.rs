@@ -111,3 +111,81 @@ fn runtime_errors_report_the_line_in_their_own_file() {
     // `xs[i]` is on line 24 of geom.kes.
     assert!(String::from_utf8_lossy(&out.stderr).contains("index 5 out of bounds for length 2 on line 24"));
 }
+
+const SHADE: &str = "pub struct Tint {
+    r: float
+    g: float
+    a: float = 1
+}
+
+pub let DARK = Tint(0.25, 0.5)
+pub let CLEAR = Tint(0, 0, 0)
+pub let ORIGIN = vec2(0, 0)
+";
+
+#[test]
+fn constants_can_hold_structs_from_modules() {
+    let main = "use shade
+use { Tint, DARK from shade }
+let BG = shade.DARK
+let SKY = Tint(0.5, 1, a: 0.25)
+let HOME = shade.ORIGIN
+main() {
+    print(BG, DARK, SKY, HOME, shade.CLEAR)
+}
+";
+    let dir = project("modules_struct_consts", &[("main.kes", main), ("shade.kes", SHADE)]);
+    let out = kestrel(&["run"], &dir.join("main.kes"));
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let want = "Tint(r: 0.25, g: 0.5, a: 1) Tint(r: 0.25, g: 0.5, a: 1) Tint(r: 0.5, g: 1, a: 0.25) vec2(x: 0, y: 0) Tint(r: 0, g: 0, a: 0)\n";
+    assert_eq!(String::from_utf8_lossy(&out.stdout), want);
+}
+
+#[test]
+fn a_file_named_like_a_built_in_module_is_refused() {
+    let dir = project("modules_shadow", &[("main.kes", "use draw\nmain() {}\n"), ("draw.kes", "pub f() -> int { 1 }\n")]);
+    let out = kestrel(&["check", "--diagnostics=short"], &dir.join("main.kes"));
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr).replace("\r\n", "\n");
+    assert_eq!(err, "1:5: error: `draw` is a built-in module, so draw.kes can't be used as a module; rename the file\n");
+}
+
+#[test]
+fn natives_in_programs_are_errors_not_crashes() {
+    let main = "use geom\nnative beep()\nmain() {\n    beep()\n}\n";
+    let dir = project("modules_natives", &[("main.kes", main), ("geom.kes", "pub native twice(x: int) -> int\n")]);
+    for command in ["check", "run", "build"] {
+        let out = kestrel(&[command, "--diagnostics=short"], &dir.join("main.kes"));
+        let err = String::from_utf8_lossy(&out.stderr).replace("\r\n", "\n");
+        assert_eq!(out.status.code(), Some(1), "{command}: {err}");
+        assert_eq!(err.matches("only Kestrel's built-in modules can declare native functions").count(), 2, "{command}: {err}");
+    }
+}
+
+#[test]
+fn the_built_in_modules_check() {
+    let main = "use window
+use draw
+use input
+use { Color from draw }
+let BG = draw.BLACK
+let ACCENT = Color(1, 0.5, 0)
+main() {
+    window.open(800, 600, \"demo\")
+    while window.frame() {
+        draw.clear(BG)
+        draw.rect(vec2(10, 10), window.size() * 0.5, ACCENT)
+        draw.text(\"fps {window.fps()}\", vec2(4, 4), 16, draw.WHITE)
+        if input.pressed(input.Key.Escape) {
+            window.close()
+        }
+        let dx = input.axis(input.Key.Left, input.Key.Right)
+        draw.circle(input.mouse() + vec2(dx, 0), 5, draw.TRANSPARENT)
+    }
+}
+";
+    let dir = project("modules_builtin_check", &[("main.kes", main)]);
+    let out = kestrel(&["check"], &dir.join("main.kes"));
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(out.stderr.is_empty(), "{}", String::from_utf8_lossy(&out.stderr));
+}

@@ -1,0 +1,3 @@
+// Uses a built-in module, which the add-on refuses to load.
+use draw
+pub pure answer() -> int { 42 }

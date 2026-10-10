@@ -1,0 +1,11 @@
+native beep()
+pub native twice(x: int) -> int
+pure native shaped(x: float) -> float
+
+main() {
+    beep()
+}
+
+// error 1: only Kestrel's built-in modules can declare native functions
+// error 2: only Kestrel's built-in modules can declare native functions
+// error 3: only Kestrel's built-in modules can declare native functions

@@ -184,7 +184,9 @@ impl Rewriter<'_> {
 
     fn func(&mut self, f: &mut FnDecl) {
         for p in &mut f.params {
-            if !p.is_self {
+            // A native has no body, so its parameter names are only labels and hide nothing:
+            // `draw.text(text: string, ...)` may name its parameter `text`.
+            if !p.is_self && !f.is_native {
                 self.binding(&p.bind);
             }
             self.ty(&mut p.ty);

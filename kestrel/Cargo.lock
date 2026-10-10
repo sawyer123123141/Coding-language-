@@ -313,7 +313,9 @@ name = "kestrel-driver"
 version = "0.1.0"
 dependencies = [
  "kestrel-check",
+ "kestrel-codegen",
  "kestrel-kir",
+ "kestrel-runtime",
  "kestrel-syntax",
 ]
 

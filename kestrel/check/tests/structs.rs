@@ -104,3 +104,62 @@ fn struct_errors() {
 fn scalar_reads_alongside_var_are_allowed() {
     ok("struct P {\n x: int\n add(var self, n: int) {\n self.x += n\n }\n}\nbump(var a: int, b: int) {\n a += b\n}\nmain() {\n var p = P(1)\n p.add(p.x)\n var n = 1\n bump(var n, n)\n}\n");
 }
+
+const COLOR: &str = "struct Color {
+    r: float
+    g: float
+    b: float
+    a: float = 1
+}
+";
+
+#[test]
+fn constants_can_hold_struct_values() {
+    ok(&format!(
+        "{COLOR}let RED = Color(1, 0, 0)
+let TINT = Color(1, 2, sqrt(2), a: 0.5)
+let SHADE = Color(PI, 0, 0)
+let UP = vec2(0, 1)
+let FLOOR = vec3(0, -1, 0)
+let SPAWN = vec2(0, 2) * 3
+let ALIAS = RED
+main() {{
+    print(RED, TINT, SHADE, UP, FLOOR, SPAWN, ALIAS)
+}}
+"
+    ));
+}
+
+#[test]
+fn field_defaults_can_construct_structs() {
+    ok(&format!("{COLOR}struct Sprite {{\n tint: Color = Color(1, 1, 1)\n at: vec2 = vec2(0, 0)\n}}\nmain() {{\n print(Sprite())\n}}\n"));
+}
+
+#[test]
+fn struct_constants_need_constant_arguments() {
+    let msg = "constants can only use literals, operators and earlier constants";
+    let cases = [
+        format!("{COLOR}f() -> float {{ 1 }}\nlet X = Color(1, 2, f())\nmain() {{}}\n"),
+        format!("{COLOR}let X = Color(1, 2, randf())\nmain() {{}}\n"),
+        format!("{COLOR}let X = Color(1, 2, Color(1, 2, 3).r)\nmain() {{}}\n"),
+        "let X = vec2(1, randf())\nmain() {}\n".to_string(),
+    ];
+    for src in cases {
+        assert_eq!(run(&src).1, vec![msg.to_string()], "source:\n{src}");
+    }
+    // A field default is held to the same rule, with its own message.
+    let src = format!("{COLOR}f() -> float {{ 1 }}\nstruct S {{\n c: Color = Color(1, 2, f())\n}}\nmain() {{}}\n");
+    assert_eq!(run(&src).1, vec!["field defaults can only use literals, operators and constants".to_string()]);
+}
+
+#[test]
+fn struct_constants_are_type_checked() {
+    let cases = [
+        (format!("{COLOR}let X = Color(1, 2)\nmain() {{}}\n"), "missing field `b` for `Color`"),
+        (format!("{COLOR}let X = Color(1, 2, true)\nmain() {{}}\n"), "expected float, found bool"),
+        (format!("{COLOR}let X: vec2 = Color(1, 2, 3)\nmain() {{}}\n"), "expected vec2, found Color"),
+    ];
+    for (src, expected) in cases {
+        assert_eq!(run(&src).1, vec![expected.to_string()], "source:\n{src}");
+    }
+}

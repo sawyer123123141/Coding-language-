@@ -7,3 +7,7 @@ edition.workspace = true
 kestrel-syntax.workspace = true
 kestrel-check.workspace = true
 kestrel-kir.workspace = true
+
+[dev-dependencies]
+kestrel-codegen.workspace = true
+kestrel-runtime.workspace = true

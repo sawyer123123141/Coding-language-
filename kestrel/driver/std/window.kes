@@ -1,0 +1,9 @@
+// The window: opening it, the frame loop, and time.
+pub native open(width: int, height: int, title: string)
+pub native frame() -> bool
+pub native close()
+pub native delta() -> float
+pub native time() -> float
+pub native size() -> vec2
+pub native fps() -> int
+pub native screenshot(path: string)
