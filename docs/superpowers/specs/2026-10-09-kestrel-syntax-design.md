@@ -138,6 +138,21 @@ main() {
   `var chunk.generate()`.
 - Program entry point: `main()`.
 
+### Native functions
+
+```
+[pub] [pure] native name(params) [-> Type]
+```
+
+- `native` declares a function whose body the runtime supplies, so it has no block (`pub native circle(center: vec2, radius: float, color: Color)`). It is a keyword, and it comes after `pub` and `pure`: `pub pure native`.
+- Only Kestrel's built-in modules can declare natives (decided 2026-10-10). A native in a user file is an error: "only Kestrel's built-in modules can declare native functions". A native can't be a method.
+- A native's parameters and result are limited to what Rust can read from memory. Details: `2026-10-10-window-design.md` ("Built-in modules and `native`").
+- A native that isn't `pure` has effects, like `print`, so `pure` functions and `par for` bodies can't call it.
+
+### Built-in modules
+
+`window`, `draw` and `input` are modules that ship inside the compiler. `use draw` loads the embedded file, and a `draw.kes` next to the program is an error. They are ordinary Kestrel (structs, enums, constants, functions) plus `native` functions, so `use { Color, RED from draw }` and `draw.circle(...)` work like any module. They open a window, draw 2D shapes and text, and read the keyboard and mouse. They are only available in the standalone `kestrel` command, not in the Godot add-on. The full API and the design are in `2026-10-10-window-design.md`.
+
 ### Methods
 
 Declared inside a `struct` or `enum` body. First parameter is `self`
@@ -381,7 +396,7 @@ let tex = load("grass.png") else { return }
 ```
 file      := (use | decl)*
 decl      := 'pub'? (func | struct | enum | 'let' binding | 'var' binding)
-func      := 'pure'? IDENT '(' params? ')' ('->' type)? block
+func      := 'pure'? 'native'? IDENT '(' params? ')' ('->' type)? block?
 params    := param (',' param)*
 param     := 'var'? (IDENT ':' type | 'self')
 struct    := 'struct' IDENT '{' (field | func)* '}'
@@ -400,6 +415,8 @@ in        := 'in' expr block
 match     := 'match' expr '{' (pattern block)* '}'
 pattern   := IDENT IDENT? | 'else'
 ```
+
+A `native` function has no block, and every other function has one. `native` is only allowed at the top level of a built-in module.
 
 ## Out of scope (later specs)
 

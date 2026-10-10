@@ -46,6 +46,49 @@ Done in 2b-i: labelled arguments evaluate in source order; `func/mod.rs` split; 
 - **Cost of the trig and exponential functions.** `round` is a short inline instruction sequence. `sin cos tan asin acos atan atan2 exp log pow` call `kestrel_rt_math`, so a hot loop full of `sin` pays for the call.
 - **The random generator is per thread.** `rand_seed` seeds the calling thread only. Random calls are an error in `pure` functions and `par for` bodies, so this only matters if they are ever allowed there (say, one stream per iteration for repeatable parallel noise).
 
+## Found while building the window (2026-10-10)
+
+From plan 2's reviews and the particles demo. The window spec is `docs/superpowers/specs/2026-10-10-window-design.md`; the demo numbers are in `kestrel/demos/particles/results.md`.
+
+### Next steps
+
+- **Textures, 3D and the voxel viewer** are the next spec (the window spec's "Not in this spec" list also has audio, gamepads, fonts and a windowed exe).
+- **Bulk drawing.** The demo's draw time is one native call per particle (about 150-190 ns each: 8.7 ms for 50,000 and 30 ms for 200,000). It is the bottleneck, not `par for`. A call that takes a whole list (`draw.rects(positions, size, color)`) would skip the per-call work, and a textured batch would be the real answer.
+
+### Platforms and build
+
+- **Only Windows is built.** raylib's `build.rs` and the `kestrel build` link line name Windows libraries. On another platform the window crate fails with C compile errors, and a window program's link fails with undefined symbols, instead of a plain sentence. Say so up front.
+- **The window must move to the main thread for macOS.** The window runs on the CLI's big-stack thread, which GLFW allows on Windows only.
+- **raylib compiles twice on a cold build.** `cli/build.rs` builds the two staticlibs in a nested cargo build with its own target directory, so raylib is compiled there and again for the workspace's own `kestrel-window` build. Build it once, or share the directory.
+- **A missing window library error is only unit-tested.** `kestrel build` of a window program without `kestrel_window.lib` has a plain message; nothing runs it end to end.
+
+### Language and checker
+
+- **Natives' runtime errors don't name the line**, only the function ("draw.circle was called before window.open"). The call site's line isn't passed to the native.
+- **Module-to-module constant order.** A module's constants are checked before the entry file's, so `let BG = draw.BLACK` works in a program. A constant in one module that uses another module's constant depends on the order of the `use` lines.
+- **`struct Node { next: Node? = none }` overflows the compiler's stack** in KIR layout (exit 127). The checker accepts it. It should be a "contains itself" error. Mutual optional cycles (`A { b: B? }`, `B { a: A? }`) do the same, and KIR's own `has_heap` has no cycle guard.
+- **Struct-valued field defaults are unavailable** (`tint: Color = RED` is an error: "field defaults can't use struct values yet; set the field when you build it"). Constants may construct structs, and field defaults may construct only `vec2` and `vec3`. The check is conservative: `name: string? = NAME` is rejected too, though it would be safe.
+- **A native's type-error help text overstates the allowed struct fields.** It says "a struct of those", but a struct field may not be an enum.
+- **A field or variant called `native`** reports "native functions can't be methods", which doesn't say what is wrong. (`native` is a keyword, so the name can't be used; the message should say that.)
+
+### Window runtime
+
+- **Negative-size rectangles vanish.** `draw.rect` and `draw.rect_outline` with a negative width or height draw nothing, because raylib culls the winding. Triangles are already normalised; do the same for rectangles.
+- **`window.time()` is a `float`**, so its resolution drops as the program runs: under 1 ms for about 2 hours, 4 ms after 10 hours. Fine for frame times; a long-running clock wants an `f64` version.
+- **Headless strings aren't escaped.** A string containing `"` or a newline prints a line that is hard to read back.
+- **`print` is buffered until the program ends.** `window.frame()` now flushes it, so a frame loop shows its lines live. A window program that prints from a long computation before its first frame still shows nothing until it ends. Flushing when stdout is a terminal would fix that too.
+- **raylib keeps the window title pointer after `InitWindow`** (`CORE.Window.title`), but the title's `CString` is dropped after the call. It is benign in raylib 6.0, which reads the title only inside `glfwCreateWindow`, but the `SAFETY` comment doesn't say why, and a raylib upgrade could break it.
+- **`headless::QUIET` is a second thread-local** that has to follow `state::STATE`. Both are set in `window.open`; keep them together if either moves.
+- **The `real` and `state` modules call each other.** `real::init` needs only the `hidden` flag; passing it would remove the cycle.
+- **`png_pixel` (a test helper) logs raylib INFO lines to stdout.** Call `SetTraceLogLevel(LOG_ERROR)` first. It also doesn't handle non-ASCII paths.
+
+### Tests
+
+- **The program-test harness isn't hermetic.** It passes through the `KESTREL_*` variables of the process that runs `cargo test`, and a window test that is missing `// env: KESTREL_HEADLESS=...` opens a real window and hangs the suite. Remove `KESTREL_*` from the child's environment first, then apply the file's `// env:` lines.
+- **Smoke test.** The visible fallback runs on any failure, not only on a wrong centre pixel (tighten it). It doesn't check the screenshot is exactly 64×64, and its scratch directories aren't unique per run or removed.
+- **Native argument coverage.** No unit test shows that `i8` native parameters are zero-extended, and no codegen test passes a struct with `u8`, `bool`, `i64` and `string` fields to a native.
+- **The Godot refusal test** can't tell the refusal of a built-in module from another load error. Check the message.
+
 ## Maps (built 2026-10-09)
 
 - **Not yet:**

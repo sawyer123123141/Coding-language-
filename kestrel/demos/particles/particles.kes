@@ -1,0 +1,129 @@
+// Particles: thousands of dots pulled toward the mouse.
+//
+//   kestrel run --release demos/particles/particles.kes
+//
+// Move the mouse to pull the dots. Space adds 1,000 more.
+//
+// The dots move in a `par for`, so every core steps its share of them. Drawing
+// is one `draw.rect` call per dot, on the one thread that owns the window.
+// Once a second the demo prints a line with the average times, for measuring.
+use window
+use draw
+use input
+use { Color from draw }
+use { Key from input }
+
+let WIDTH = 1280
+let HEIGHT = 720
+let START_COUNT = 50000
+let ADD_COUNT = 1000
+
+let BACKGROUND = Color(0.05, 0.05, 0.09)
+let DOT = Color(1, 0.65, 0.2)
+let TEXT = Color(0.9, 0.9, 0.95)
+let DOT_SIZE = vec2(2, 2)
+
+// How hard the mouse pulls (pixels per second, every second), how much speed a
+// dot keeps each second, and how much speed a bounce keeps.
+let PULL = 900.0
+let KEEP = 0.5
+let BOUNCE = 0.7
+
+// Seconds between the printed lines.
+let REPORT = 1.0
+
+struct Particle {
+    pos: vec2
+    vel: vec2
+
+    // Pulls toward `target`, slows a little, and bounces off the window edges.
+    pure step(var self, dt: float, target: vec2) {
+        self.vel += (target - self.pos).normalized() * PULL * dt
+        self.vel *= pow(KEEP, dt)
+        self.pos += self.vel * dt
+        if self.pos.x < 0 {
+            self.pos.x = 0
+            self.vel.x = abs(self.vel.x) * BOUNCE
+        } else if self.pos.x > WIDTH {
+            self.pos.x = WIDTH
+            self.vel.x = -abs(self.vel.x) * BOUNCE
+        }
+        if self.pos.y < 0 {
+            self.pos.y = 0
+            self.vel.y = abs(self.vel.y) * BOUNCE
+        } else if self.pos.y > HEIGHT {
+            self.pos.y = HEIGHT
+            self.vel.y = -abs(self.vel.y) * BOUNCE
+        }
+    }
+}
+
+// Not `pure`: random numbers change the generator, so this can't run in a `par for`.
+spawn(var parts: list[Particle], count: int) {
+    for i from 0 to count {
+        let pos = vec2(randf_range(0, WIDTH), randf_range(0, HEIGHT))
+        let vel = vec2(randf_range(-200, 200), randf_range(-200, 200))
+        parts.add(Particle(pos: pos, vel: vel))
+    }
+}
+
+// Rounds to two decimals for printing.
+pure two(x: float) -> float {
+    round(x * 100) / 100
+}
+
+main() {
+    window.open(WIDTH, HEIGHT, "Kestrel particles")
+    var parts = list[Particle]()
+    spawn(var parts, START_COUNT)
+
+    // Sums over the current report interval, and the averages the last one printed.
+    var frames = 0
+    var update_sum = 0.0
+    var draw_sum = 0.0
+    var interval_start = 0.0
+    var update_ms = 0.0
+    var draw_ms = 0.0
+    var frame_ms = 0.0
+    var fps = 0.0
+
+    while window.frame() {
+        let dt = window.delta()
+        let target = input.mouse()
+        if input.pressed(Key.Space) {
+            spawn(var parts, ADD_COUNT)
+        }
+
+        let update_start = window.time()
+        par for p in parts {
+            p.step(dt, target)
+        }
+        let draw_start = window.time()
+
+        draw.clear(BACKGROUND)
+        for p in parts {
+            draw.rect(p.pos, DOT_SIZE, DOT)
+        }
+        let draw_end = window.time()
+
+        draw.text("{two(fps)} fps   {parts.len} particles", vec2(10, 10), 20, TEXT)
+        draw.text("update {two(update_ms)} ms   draw {two(draw_ms)} ms   frame {two(frame_ms)} ms", vec2(10, 36), 20, TEXT)
+        draw.text("move the mouse to pull   space adds {ADD_COUNT}", vec2(10, HEIGHT - 28), 20, TEXT)
+
+        frames += 1
+        update_sum += draw_start - update_start
+        draw_sum += draw_end - draw_start
+        let elapsed = window.time() - interval_start
+        if elapsed >= REPORT {
+            update_ms = update_sum / frames * 1000
+            draw_ms = draw_sum / frames * 1000
+            frame_ms = elapsed / frames * 1000
+            fps = frames / elapsed
+            print("particles {parts.len} update {two(update_ms)} ms draw {two(draw_ms)} ms frame {two(frame_ms)} ms fps {two(fps)}")
+            frames = 0
+            update_sum = 0.0
+            draw_sum = 0.0
+            interval_start += elapsed
+        }
+    }
+}
