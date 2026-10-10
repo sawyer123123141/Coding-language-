@@ -12,7 +12,7 @@ mod place;
 mod regions;
 mod structs;
 
-pub(crate) use consts::{check_consts, is_const_expr};
+pub(crate) use consts::{check_consts, is_const_expr, uses_struct_constant};
 pub(crate) use structs::check_field_defaults;
 
 use std::collections::{HashMap, HashSet};

@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use kestrel_syntax::ast::{EnumDecl, ExprKind, FieldDecl, FnDecl, Item, Program, StructDecl, TypeExpr, TypeKind};
+use kestrel_syntax::ast::{EnumDecl, Expr, ExprKind, FieldDecl, FnDecl, Item, Program, StructDecl, TypeExpr, TypeKind};
 use kestrel_syntax::{Diagnostic, Span};
 
 use crate::builtins::Builtin;
@@ -145,6 +145,7 @@ pub(crate) fn collect(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnos
             Item::Use(_) => {}
         }
     }
+    mark_default_allocation(program, t);
     check_self_containment(t, diags);
     crate::natives::check_natives(program, t, diags);
     if t.main.is_none() && needs_main {
@@ -195,14 +196,41 @@ fn fields_of(owner: &str, decls: &[FieldDecl], t: &mut Tables, diags: &mut Vec<D
             continue;
         }
         let ty = resolve_type(&f.ty, t, diags);
-        let default_allocates = match f.default.as_ref().map(|d| &d.kind) {
-            Some(ExprKind::ArrayLit(items)) => !items.is_empty() || matches!(ty, Ty::List(_)),
-            Some(ExprKind::TypeCall { .. } | ExprKind::MapLit(_)) => true,
-            _ => false,
-        };
-        fields.push(FieldInfo { name: f.name.clone(), ty, span: f.name_span, has_default: f.default.is_some(), default_allocates });
+        // `mark_default_allocation` fills in `default_allocates` once every field type is known.
+        fields.push(FieldInfo { name: f.name.clone(), ty, span: f.name_span, has_default: f.default.is_some(), default_allocates: false });
     }
     fields
+}
+
+/// Sets `FieldInfo::default_allocates` for every struct field with a default. It needs all
+/// field types (a struct's heap memory depends on its fields), so it runs after they are collected.
+fn mark_default_allocation(program: &Program, t: &mut Tables) {
+    let mut struct_id = BUILTIN_STRUCTS as usize;
+    for item in &program.items {
+        let Item::Struct(s) = item else { continue };
+        for decl in &s.fields {
+            let Some(default) = &decl.default else { continue };
+            let Some(i) = t.structs[struct_id].fields.iter().position(|f| f.name == decl.name) else { continue };
+            let ty = t.structs[struct_id].fields[i].ty;
+            t.structs[struct_id].fields[i].default_allocates = default_allocates(default, ty, t);
+        }
+        struct_id += 1;
+    }
+}
+
+/// Whether building `default` as a value of type `ty` puts memory in the current arena. Anything
+/// that holds heap memory does, except the cases that point at no arena: `none`, a string literal
+/// (or a string constant, which is one), and an empty array (an empty list still grows in its arena).
+fn default_allocates(default: &Expr, ty: Ty, t: &Tables) -> bool {
+    if !t.has_heap(ty) {
+        return false;
+    }
+    match &default.kind {
+        ExprKind::None | ExprKind::Str(_) => false,
+        ExprKind::Ident(name) if ty == Ty::Str => !t.consts.iter().any(|c| &c.name == name),
+        ExprKind::ArrayLit(items) if items.is_empty() => matches!(ty, Ty::List(_)),
+        _ => true,
+    }
 }
 
 /// Registers methods; `taken` names (fields or variants) can't be reused.

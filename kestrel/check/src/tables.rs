@@ -140,7 +140,8 @@ pub struct FieldInfo {
     pub ty: Ty,
     pub span: Span,
     pub has_default: bool,
-    /// The default allocates (`[1, 2]`, `array[T](n)`, a list).
+    /// The default puts memory in the arena the struct is built in (`[1, 2]`, `array[T](n)`, a
+    /// list, a constant that holds one). Only set for struct fields.
     pub default_allocates: bool,
 }
 
@@ -237,11 +238,24 @@ impl Tables {
     /// Strings may live in an arena (interpolation builds them there), so
     /// copies copy their bytes, like arrays.
     pub fn has_heap(&self, ty: Ty) -> bool {
+        self.has_heap_below(ty, &mut Vec::new())
+    }
+
+    /// `has_heap`, skipping the types in `seen`: a struct that contains itself is an
+    /// error reported elsewhere, and looking into it again would never end.
+    fn has_heap_below(&self, ty: Ty, seen: &mut Vec<Ty>) -> bool {
         match ty {
             Ty::Str | Ty::Array(_) | Ty::List(_) | Ty::Map(..) => true,
-            Ty::Optional(e) => self.has_heap(self.elem(e)),
-            Ty::Struct(s) => self.strukt(s).fields.iter().any(|f| self.has_heap(f.ty)),
-            Ty::Enum(e) => self.enm(e).variants.iter().flat_map(|v| &v.fields).any(|f| self.has_heap(f.ty)),
+            Ty::Optional(e) => self.has_heap_below(self.elem(e), seen),
+            Ty::Struct(_) | Ty::Enum(_) if seen.contains(&ty) => false,
+            Ty::Struct(s) => {
+                seen.push(ty);
+                self.strukt(s).fields.iter().any(|f| self.has_heap_below(f.ty, seen))
+            }
+            Ty::Enum(e) => {
+                seen.push(ty);
+                self.enm(e).variants.iter().flat_map(|v| &v.fields).any(|f| self.has_heap_below(f.ty, seen))
+            }
             _ => false,
         }
     }

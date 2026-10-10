@@ -189,3 +189,49 @@ main() {}
         assert_eq!(found, vec![Some(expected.to_string())], "source:\n{body}");
     }
 }
+
+#[test]
+fn a_default_that_holds_memory_is_built_in_the_current_arena() {
+    let freed = "this memory is freed at the end of the `arena { }` block, but `keep` lives longer";
+    let build_in_arena = "main() {\n var keep = S()\n arena {\n  keep = S()\n }\n}\n";
+    // Memory from a constant (`XS`) is copied into the arena that builds the struct, like `[1, 2, 3]`.
+    for defaults in [
+        "let XS = [1, 2, 3]
+struct S {
+ xs: [int] = XS
+}
+",
+        "struct S {
+ xs: [int] = [1, 2, 3]
+}
+",
+        "struct S {
+ xs: list[int] = []
+}
+",
+        "let BY_ID = {1: 2}
+struct S {
+ m: map[int, int] = BY_ID
+}
+",
+    ] {
+        assert_eq!(run(&format!("{defaults}{build_in_arena}")).1, vec![freed.to_string()], "{defaults}");
+    }
+    // Literals, `none` and an empty array point at no arena, so these defaults are fine anywhere.
+    let fine = "let NAME = \"anon\"
+struct S {
+    name: string = \"anon\"
+    tag: string = NAME
+    next: S? = none
+    ids: [int] = []
+}
+main() {
+    var keep = S()
+    arena {
+        keep = S()
+    }
+    print(keep)
+}
+";
+    assert_eq!(run(fine).1, Vec::<String>::new());
+}

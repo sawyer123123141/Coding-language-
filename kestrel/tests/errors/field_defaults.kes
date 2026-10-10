@@ -1,0 +1,35 @@
+struct Inner {
+    xs: list[int] = [1, 2, 3]
+}
+
+struct Outer {
+    inner: Inner = Inner()
+}
+
+struct Node {
+    kids: list[Node] = [Node()]
+}
+
+struct Tree {
+    kids: [Tree] = KIDS
+}
+
+let KIDS = [Tree()]
+let XS = [1, 2, 3]
+
+struct Shared {
+    xs: [int] = XS
+}
+
+main() {
+    var keep = Shared()
+    arena {
+        keep = Shared()
+    }
+    print(keep.xs)
+}
+
+// error 6: field defaults can only use literals, operators and constants
+// error 10: field defaults can only use literals, operators and constants
+// error 14: field defaults can't use struct values yet; set the field when you build it
+// error 27: this memory is freed at the end of the `arena { }` block, but `keep` lives longer

@@ -131,10 +131,27 @@ main() {{
 }
 
 #[test]
-fn field_defaults_can_construct_structs() {
-    ok(&format!("{COLOR}struct Sprite {{\n tint: Color = Color(1, 1, 1)\n at: vec2 = vec2(0, 0)\n}}\nmain() {{\n print(Sprite())\n}}\n"));
+fn field_defaults_may_use_vectors_and_constants() {
+    ok(&format!(
+        "{COLOR}let UP = vec2(0, 1)
+let LIMIT = 10
+let NAME = \"anon\"
+let TINT = Color(1, 1, 1)
+struct Sprite {{
+    at: vec2 = vec2(0, 1)
+    dir: vec2 = UP
+    lift: vec3 = vec3(0, 1, 0) * 2
+    limit: int = LIMIT
+    name: string = NAME
+    ids: [int] = []
+    parent: Sprite? = none
+}}
+main() {{
+    print(Sprite(), TINT)
+}}
+"
+    ));
 }
-
 #[test]
 fn struct_constants_need_constant_arguments() {
     let msg = "constants can only use literals, operators and earlier constants";
@@ -161,5 +178,82 @@ fn struct_constants_are_type_checked() {
     ];
     for (src, expected) in cases {
         assert_eq!(run(&src).1, vec![expected.to_string()], "source:\n{src}");
+    }
+}
+
+#[test]
+fn field_defaults_cant_build_structs() {
+    // A default is built again at every construction, so one that builds a struct could build itself
+    // forever, and one that holds memory could outlive the arena it was built in.
+    let msg = "field defaults can only use literals, operators and constants";
+    let cases = [
+        format!("{COLOR}struct Sprite {{
+ tint: Color = Color(1, 1, 1)
+}}
+main() {{}}
+"),
+        "struct Inner {
+ xs: list[int] = [1, 2, 3]
+}
+struct Outer {
+ inner: Inner = Inner()
+}
+main() {}
+".to_string(),
+        "struct Node {
+ next: Node? = Node()
+}
+main() {}
+".to_string(),
+        "struct Node {
+ kids: list[Node] = [Node()]
+}
+main() {}
+".to_string(),
+        "struct Node {
+ kids: [Node] = [Node(), Node()]
+}
+main() {}
+".to_string(),
+    ];
+    for src in cases {
+        assert_eq!(run(&src).1, vec![msg.to_string()], "source:
+{src}");
+    }
+}
+
+#[test]
+fn field_defaults_cant_use_constants_that_hold_structs() {
+    let msg = "field defaults can't use struct values yet; set the field when you build it";
+    let cases = [
+        // A cycle through a constant: `N` is a `Node`, whose default is `N`.
+        "struct Node {
+ next: Node? = N
+}
+let N = Node(none)
+main() {}
+".to_string(),
+        format!("{COLOR}let RED = Color(1, 0, 0)
+struct Sprite {{
+ tint: Color = RED
+}}
+main() {{}}
+"),
+        format!("{COLOR}let TINTS = [Color(1, 0, 0)]
+struct Palette {{
+ all: [Color] = TINTS
+}}
+main() {{}}
+"),
+        format!("{COLOR}let RED = Color(1, 0, 0)
+struct Palette {{
+ all: [Color] = [RED, RED]
+}}
+main() {{}}
+"),
+    ];
+    for src in cases {
+        assert_eq!(run(&src).1, vec![msg.to_string()], "source:
+{src}");
     }
 }

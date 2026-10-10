@@ -2,12 +2,13 @@ use kestrel_syntax::ast::{Arg, Expr, ExprKind, Item, Program};
 use kestrel_syntax::Diagnostic;
 
 use super::place::Immutable;
-use super::{is_const_expr, BodyChecker};
+use super::{is_const_expr, uses_struct_constant, BodyChecker};
 use crate::builtins::Builtin;
 use crate::tables::{LocalId, Res, StructId, Tables, BUILTIN_STRUCTS};
 use crate::ty::Ty;
 
-/// Field defaults are constant expressions of the field's type.
+/// Field defaults are constant expressions of the field's type. They may not
+/// build or use structs of the program's own (see `is_const_expr`).
 pub(crate) fn check_field_defaults(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
     let structs = program.items.iter().filter_map(|it| match it {
         Item::Struct(s) => Some(s),
@@ -20,8 +21,11 @@ pub(crate) fn check_field_defaults(program: &Program, t: &mut Tables, diags: &mu
             let Some(field) = t.structs[sid].fields.iter().find(|g| g.name == f.name) else { continue };
             let ty = field.ty;
             let mut bc = BodyChecker::new(t, diags, None, Ty::Unit, false);
-            if is_const_expr(default, bc.t) {
+            if is_const_expr(default, bc.t, false) {
                 bc.check_value(default, Some(ty));
+                if uses_struct_constant(default, bc.t) {
+                    bc.error(default.span, "field defaults can't use struct values yet; set the field when you build it");
+                }
             } else {
                 bc.error(default.span, "field defaults can only use literals, operators and constants");
             }
