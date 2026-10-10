@@ -1,0 +1,22 @@
+// expect: 2 5
+// expect: 5 5
+// expect: Span(min: 3, length: 6)
+// expect: 3 5
+// Field names that are also built-in function or method names stay usable,
+// next to the calls they share a name with.
+struct Span {
+    min: int
+    length: int
+}
+
+main() {
+    let s = Span(min: 2, length: 5)
+    print(s.min, s.length)
+    let v = vec2(3, 4)
+    print(v.length(), s.length)
+    var t = Span(min: 1, length: 1)
+    t.min += s.min
+    t.length += s.length
+    print(t)
+    print(min(s.min + 1, 9), max(s.length, v.length()))
+}

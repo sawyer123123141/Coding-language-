@@ -1,0 +1,49 @@
+// expect: true
+// expect: true true true
+// expect: true true true
+// Edges of the random numbers: the `float` draw stays below 1 even for a seed
+// whose f64 draw rounds up to 1, and integer ranges that span the sign bit
+// of their type (u8 around 255, i64 beyond 32 bits) stay in range.
+main() {
+    rand_seed(63433462)
+    print(randf() < 1)
+
+    rand_seed(5)
+    let lo: u8 = 250
+    let hi: u8 = 255
+    var in_range = true
+    var saw_lo = false
+    var saw_hi = false
+    for i from 0 to 2000 {
+        let d = randi_range(lo, hi)
+        if d < lo or d > hi {
+            in_range = false
+        }
+        if d == lo {
+            saw_lo = true
+        }
+        if d == hi {
+            saw_hi = true
+        }
+    }
+    print(in_range, saw_lo, saw_hi)
+
+    let low: i64 = -4000000000
+    let high: i64 = 4000000000
+    var wide = true
+    var saw_neg = false
+    var saw_big = false
+    for i from 0 to 2000 {
+        let d = randi_range(low, high)
+        if d < low or d > high {
+            wide = false
+        }
+        if d < -2147483648 {
+            saw_neg = true
+        }
+        if d > 2147483647 {
+            saw_big = true
+        }
+    }
+    print(wide, saw_neg, saw_big)
+}
