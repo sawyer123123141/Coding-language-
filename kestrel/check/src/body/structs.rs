@@ -2,7 +2,7 @@ use kestrel_syntax::ast::{Arg, Expr, ExprKind, Item, Program};
 use kestrel_syntax::Diagnostic;
 
 use super::place::Immutable;
-use super::{is_const_expr, uses_struct_constant, BodyChecker};
+use super::{builds_user_struct, is_const_expr, uses_struct_constant, BodyChecker};
 use crate::builtins::Builtin;
 use crate::tables::{LocalId, Res, StructId, Tables, BUILTIN_STRUCTS};
 use crate::ty::Ty;
@@ -26,6 +26,9 @@ pub(crate) fn check_field_defaults(program: &Program, t: &mut Tables, diags: &mu
                 if uses_struct_constant(default, bc.t) {
                     bc.error(default.span, "field defaults can't use struct values yet; set the field when you build it");
                 }
+            } else if builds_user_struct(default, bc.t) {
+                // The usual try is `tint: Color = Color(1, 1, 1)`; say what is allowed instead.
+                bc.error(default.span, "field defaults can only use literals, operators and constants (the one struct a default may build is a vec2 or vec3)");
             } else {
                 bc.error(default.span, "field defaults can only use literals, operators and constants");
             }

@@ -5,16 +5,17 @@ const STACK_SIZE: usize = 256 * 1024 * 1024;
 fn run_entry(entry: extern "C" fn()) {
     entry();
     crate::print::flush();
-    // The program arena belongs to this thread, so it is measured here.
-    if let Some(report) = arena_report(std::env::var("KESTREL_ARENA_REPORT").ok().as_deref(), crate::arena::program_bytes()) {
+    // The program arena belongs to this thread, so it is measured here (and only when asked).
+    if let Some(report) = arena_report(std::env::var("KESTREL_ARENA_REPORT").ok().as_deref(), crate::arena::program_bytes) {
         eprintln!("{report}");
     }
 }
 
 /// The line `KESTREL_ARENA_REPORT=1` asks for once `main` has returned. Tests use it to
-/// tell a program that frees its temporary memory from one that doesn't.
-fn arena_report(setting: Option<&str>, bytes: usize) -> Option<String> {
-    (setting == Some("1")).then(|| format!("kestrel: program arena {bytes} bytes"))
+/// tell a program that frees its temporary memory from one that doesn't. `bytes` measures the
+/// arena, and runs only when the report is on.
+fn arena_report(setting: Option<&str>, bytes: impl FnOnce() -> usize) -> Option<String> {
+    (setting == Some("1")).then(|| format!("kestrel: program arena {} bytes", bytes()))
 }
 
 /// Runs a compiled Kestrel `main` on a large stack, then flushes output.
@@ -45,10 +46,17 @@ mod tests {
 
     #[test]
     fn the_arena_report_is_on_only_for_one() {
-        assert_eq!(arena_report(Some("1"), 65536).as_deref(), Some("kestrel: program arena 65536 bytes"));
-        assert_eq!(arena_report(Some("0"), 1), None);
-        assert_eq!(arena_report(Some("yes"), 1), None);
-        assert_eq!(arena_report(None, 1), None);
+        assert_eq!(arena_report(Some("1"), || 65536).as_deref(), Some("kestrel: program arena 65536 bytes"));
+        assert_eq!(arena_report(Some("0"), || 1), None);
+        assert_eq!(arena_report(Some("yes"), || 1), None);
+        assert_eq!(arena_report(None, || 1), None);
+    }
+
+    #[test]
+    fn the_arena_is_not_measured_unless_the_report_is_on() {
+        for setting in [None, Some("0"), Some("true")] {
+            assert_eq!(arena_report(setting, || panic!("measured with {setting:?}")), None);
+        }
     }
 
     static RAN: AtomicBool = AtomicBool::new(false);

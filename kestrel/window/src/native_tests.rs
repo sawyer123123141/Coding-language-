@@ -197,7 +197,8 @@ fn symbols_cover_every_native_the_modules_declare() {
         ("input", include_str!("../../driver/std/input.kes")),
     ] {
         for line in source.lines() {
-            if let Some(rest) = line.strip_prefix("pub native ") {
+            // `pub native f(...)` or `pub pure native f(...)`.
+            if let Some(rest) = line.strip_prefix("pub native ").or_else(|| line.strip_prefix("pub pure native ")) {
                 let name = rest.split('(').next().unwrap();
                 declared.insert(format!("kestrel_{module}_{name}"));
             }

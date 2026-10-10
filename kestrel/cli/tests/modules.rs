@@ -153,6 +153,22 @@ fn a_file_named_like_a_built_in_module_is_refused() {
 }
 
 #[test]
+fn a_program_named_like_a_built_in_module_is_told_to_rename_the_program() {
+    // The clashing file is the program itself, whichever file uses the module.
+    for (name, files) in [
+        ("modules_shadow_entry", vec![("window.kes", "use window\nmain() {}\n")]),
+        ("modules_shadow_entry_via_module", vec![("window.kes", "use geom\nmain() {}\n"), ("geom.kes", "use window\npub f() -> int { 1 }\n")]),
+    ] {
+        let dir = project(name, &files);
+        let out = kestrel(&["check", "--diagnostics=short"], &dir.join("window.kes"));
+        assert_eq!(out.status.code(), Some(1), "{name}");
+        let err = String::from_utf8_lossy(&out.stderr).replace("\r\n", "\n");
+        assert!(err.contains("`window` is a built-in module, so a program can't be called window.kes; rename the program\n"), "{name}: {err}");
+        assert!(!err.contains("rename the file"), "{name}: {err}");
+    }
+}
+
+#[test]
 fn natives_in_programs_are_errors_not_crashes() {
     let main = "use geom\nnative beep()\nmain() {\n    beep()\n}\n";
     let dir = project("modules_natives", &[("main.kes", main), ("geom.kes", "pub native twice(x: int) -> int\n")]);

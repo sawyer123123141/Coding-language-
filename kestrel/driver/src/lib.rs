@@ -136,13 +136,14 @@ fn load(path: &str, src: &str) -> Loaded {
             for c in &u.clauses {
                 if let Some((name, text)) = builtin::find(&c.module) {
                     // A built-in module wins over a file of the same name; say so rather than
-                    // quietly ignoring the file.
-                    if !files[i].builtin && dir.join(format!("{name}.kes")).exists() {
-                        diags.push(Diagnostic::error(c.module_span, builtin::shadowed(name)));
+                    // quietly ignoring the file. (The file may be the program itself.)
+                    let clash = dir.join(format!("{name}.kes"));
+                    if !files[i].builtin && clash.exists() {
+                        let is_program = same_file(&clash, Path::new(&files[0].path));
+                        diags.push(Diagnostic::error(c.module_span, builtin::shadowed(name, is_program)));
                     }
                     if !builtins.contains(&name) {
                         builtins.push(name);
-                        by_name.insert(name.to_string(), files.len());
                         push_file(&mut files, builtin::path(name), text.to_string(), true);
                     }
                     continue;
@@ -162,6 +163,11 @@ fn load(path: &str, src: &str) -> Loaded {
         i += 1;
     }
     Loaded { files, modules, diags, builtins }
+}
+
+/// Whether `a` and `b` are the same file on disk.
+fn same_file(a: &Path, b: &Path) -> bool {
+    a == b || matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(a), Ok(b)) if a == b)
 }
 
 /// Adds a file after the last one in the shared span space.

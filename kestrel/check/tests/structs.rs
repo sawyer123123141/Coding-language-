@@ -167,7 +167,7 @@ fn struct_constants_need_constant_arguments() {
     }
     // A field default is held to the same rule, with its own message.
     let src = format!("{COLOR}f() -> float {{ 1 }}\nstruct S {{\n c: Color = Color(1, 2, f())\n}}\nmain() {{}}\n");
-    assert_eq!(run(&src).1, vec!["field defaults can only use literals, operators and constants".to_string()]);
+    assert_eq!(run(&src).1, vec![FIELD_DEFAULT_STRUCT.to_string()]);
 }
 
 #[test]
@@ -182,11 +182,15 @@ fn struct_constants_are_type_checked() {
     }
 }
 
+/// What a default that builds a struct of the program's own is told.
+const FIELD_DEFAULT_STRUCT: &str =
+    "field defaults can only use literals, operators and constants (the one struct a default may build is a vec2 or vec3)";
+
 #[test]
 fn field_defaults_cant_build_structs() {
     // A default is built again at every construction, so one that builds a struct could build itself
     // forever, and one that holds memory could outlive the arena it was built in.
-    let msg = "field defaults can only use literals, operators and constants";
+    let msg = FIELD_DEFAULT_STRUCT;
     let cases = [
         format!("{COLOR}struct Sprite {{
  tint: Color = Color(1, 1, 1)

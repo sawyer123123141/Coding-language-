@@ -161,6 +161,20 @@ pub(crate) fn is_const_expr(e: &Expr, t: &Tables, user_structs: bool) -> bool {
     }
 }
 
+/// Whether `e` builds a struct of the program's own (`Color(1, 1, 1)`), anywhere inside it.
+pub(crate) fn builds_user_struct(e: &Expr, t: &Tables) -> bool {
+    let any = |args: &[Arg]| args.iter().any(|a| builds_user_struct(&a.value, t));
+    match &e.kind {
+        ExprKind::Call { name, args, .. } => t.struct_by_name.get(name).is_some_and(|s| s.0 >= BUILTIN_STRUCTS) || any(args),
+        ExprKind::TypeCall { args, .. } => any(args),
+        ExprKind::Unary { expr, .. } => builds_user_struct(expr, t),
+        ExprKind::Binary { lhs, rhs, .. } => builds_user_struct(lhs, t) || builds_user_struct(rhs, t),
+        ExprKind::ArrayLit(items) => items.iter().any(|i| builds_user_struct(i, t)),
+        ExprKind::MapLit(entries) => entries.iter().any(|(k, v)| builds_user_struct(k, t) || builds_user_struct(v, t)),
+        _ => false,
+    }
+}
+
 /// Whether the constant expression `e` names a constant that is, or holds, a
 /// struct of the program's own (not a vector).
 pub(crate) fn uses_struct_constant(e: &Expr, t: &Tables) -> bool {

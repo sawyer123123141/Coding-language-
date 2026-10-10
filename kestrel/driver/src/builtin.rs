@@ -30,9 +30,14 @@ pub(crate) fn is_path(path: &Path) -> bool {
     path.starts_with(DIR)
 }
 
-/// The error for a file `name.kes` that sits where a `use name` would find it.
-pub(crate) fn shadowed(name: &str) -> String {
-    format!("`{name}` is a built-in module, so {name}.kes can't be used as a module; rename the file")
+/// The error for a file `name.kes` that sits where a `use name` would find it. When that file
+/// is the program itself (`is_program`), it is the program that has to be renamed.
+pub(crate) fn shadowed(name: &str, is_program: bool) -> String {
+    if is_program {
+        format!("`{name}` is a built-in module, so a program can't be called {name}.kes; rename the program")
+    } else {
+        format!("`{name}` is a built-in module, so {name}.kes can't be used as a module; rename the file")
+    }
 }
 
 /// The error for a `native` declaration in a file the user wrote.
@@ -42,7 +47,7 @@ pub(crate) const USER_NATIVE: &str = "only Kestrel's built-in modules can declar
 mod tests {
     use std::path::Path;
 
-    use super::{find, is_path, path};
+    use super::{find, is_path, path, shadowed};
 
     #[test]
     fn every_module_is_found_by_name() {
@@ -52,6 +57,12 @@ mod tests {
             assert!(src.starts_with("//"), "{name} starts with a comment");
         }
         assert!(find("geom").is_none());
+    }
+
+    #[test]
+    fn the_shadowing_error_says_which_file_to_rename() {
+        assert!(shadowed("draw", false).ends_with("draw.kes can't be used as a module; rename the file"));
+        assert!(shadowed("draw", true).ends_with("a program can't be called draw.kes; rename the program"));
     }
 
     #[test]
