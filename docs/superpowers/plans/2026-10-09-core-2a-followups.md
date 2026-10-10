@@ -31,6 +31,11 @@ Done in 2b-i: labelled arguments evaluate in source order; `func/mod.rs` split; 
 - **Runtime errors don't name the file** in multi-file programs, only the line.
 - **The Godot add-on is built and tested on Windows only.** The `.gdextension` file lists Linux and macOS library names, but they've never been built.
 
+## Found while building strings anywhere (2026-10-10)
+
+- **A `T` used as a `T?` isn't copied** (use-after-free). Lowering wraps it as `Some(Load(..))`, and `owned` treats `Some` as a fresh value. So `in h.mem { h.s = k }`, with `s: string?` or `a: [int]?`, keeps pointing into the arena `k` came from. This predates strings in arenas, which widen its reach. Fix: copy the payload of a `Some(Load(..))`.
+- **Read-only copies of strings copy their bytes.** `let w = words[i]` copies, which makes `bench/maps` string keys about 35% slower. A copy that is only read could share the bytes, once the escape check models it.
+
 ## Maps (built 2026-10-09)
 
 - **Not yet:**
