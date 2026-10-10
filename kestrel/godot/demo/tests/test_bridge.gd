@@ -23,6 +23,7 @@ func _init() -> void:
 	check("u8 and bool", k.run("over", [4]), true)
 	check("i64", k.run("big", [3000000]), 3000000000000)
 	check("string", k.run("same", ["héllo"]), "héllo")
+	check("a built string comes back", k.run("label", [7]), "hp 7")
 	check("[int] in", k.run("sum", [PackedInt32Array([1, 2, 3, 4])]), 10)
 	check("[vec3] in and out", k.run("scale", [PackedVector3Array([Vector3(1, 2, 3)]), 2.0]), PackedVector3Array([Vector3(2, 4, 6)]))
 	check("vec3", k.run("up", [Vector3(1, 1, 1)]), Vector3(1, 2, 1))

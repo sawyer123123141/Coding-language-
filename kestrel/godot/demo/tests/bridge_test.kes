@@ -7,6 +7,7 @@ pub pure add(a: int, b: float) -> float { float(a) + b }
 pub pure over(x: u8) -> bool { x > 3 }
 pub pure big(x: i64) -> i64 { x * 1000000 }
 pub pure same(name: string) -> string { name }
+pub label(hp: int) -> string { "hp {hp}" }
 pub pure sum(xs: [int]) -> int {
     var s = 0
     for x in xs { s += x }

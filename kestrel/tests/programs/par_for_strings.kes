@@ -1,0 +1,48 @@
+// expect: item 0
+// expect: item 63
+// expect: 64 of 64
+// expect: 64 of 64
+// A string built in a `par for` body and stored in the item belongs to the
+// loop's memory, which outlives the loop; arena churn afterwards must not
+// touch it.
+struct Item {
+    n: int = 0
+    name: string = ""
+    tag: string? = none
+}
+
+// Writes over the memory that earlier `arena { }` blocks gave back.
+churn() {
+    for r from 0 to 20 {
+        arena {
+            let junk = "XXXXXXXXXXXX{r % 10}"
+        }
+    }
+}
+
+main() {
+    var items = list[Item]()
+    for i from 0 to 64 {
+        items.add(Item(n: i))
+    }
+    par for it in items {
+        it.name = "item {it.n}"
+        it.tag = "tag {it.n}"
+    }
+    churn()
+    print(items[0].name)
+    print(items[63].name)
+    var good = 0
+    var tagged = 0
+    for it in items {
+        if it.name == "item {it.n}" {
+            good += 1
+        }
+        let t = it.tag else { continue }
+        if t == "tag {it.n}" {
+            tagged += 1
+        }
+    }
+    print(good, "of", items.len)
+    print(tagged, "of", items.len)
+}

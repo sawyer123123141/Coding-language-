@@ -1,0 +1,68 @@
+struct Player {
+    name: string
+}
+
+enum Msg {
+    Say { text: string }
+    Quit
+}
+
+list_add() {
+    var names = list[string]()
+    let n = 1
+    arena {
+        names.add("n{n}")
+    }
+}
+
+field_store() {
+    var p = Player(name: "a")
+    let n = 1
+    arena {
+        p.name = "n{n}"
+    }
+}
+
+element_store() {
+    var xs = ["a", "b"]
+    let n = 1
+    arena {
+        xs[0] = "n{n}"
+    }
+}
+
+constructor_store() {
+    var p = Player(name: "a")
+    let n = 1
+    arena {
+        p = Player(name: "n{n}")
+    }
+}
+
+binding_store() {
+    var m = Msg.Say(text: "a")
+    let n = 1
+    match m {
+        Say s {
+            arena {
+                s.text = "n{n}"
+            }
+        }
+        Quit { }
+    }
+}
+
+return_string() -> string {
+    let n = 1
+    arena {
+        return "n{n}"
+    }
+}
+
+main() { }
+// error 14: this memory is freed at the end of the `arena { }` block, but `names` lives longer
+// error 22: this memory is freed at the end of the `arena { }` block, but `p` lives longer
+// error 30: this memory is freed at the end of the `arena { }` block, but `xs` lives longer
+// error 38: this memory is freed at the end of the `arena { }` block, but `p` lives longer
+// error 48: this memory is freed at the end of the `arena { }` block, but `s` lives longer
+// error 58: can't return memory from an `arena { }` block: it's freed at the block's end
