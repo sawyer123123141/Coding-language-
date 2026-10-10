@@ -6,12 +6,59 @@
 // Naming the crate makes rustc link it, so its `kestrel_rt_*` exports land in
 // this crate's staticlib.
 pub use kestrel_runtime;
+mod abi;
+mod headless;
+mod keys;
+mod natives_draw;
+mod natives_input;
+mod natives_window;
 pub mod raylib;
+mod state;
+#[cfg(test)]
+mod native_tests;
 
 use std::ffi::CString;
 use std::path::Path;
 
 use raylib::{GetImageColor, LoadImage, UnloadImage};
+
+/// The native functions, as `(symbol, address)` pairs: what the JIT needs to
+/// link a program that uses `window`, `draw` or `input`. A built program finds
+/// the same symbols in this crate's staticlib.
+pub fn symbols() -> Vec<(&'static str, *const u8)> {
+    use natives_draw::*;
+    use natives_input::*;
+    use natives_window::*;
+
+    // Names come from the identifiers, so a symbol can't drift from its function.
+    macro_rules! table {
+        ($($native:ident),* $(,)?) => { vec![$((stringify!($native), $native as *const u8)),*] };
+    }
+    table![
+        kestrel_window_open,
+        kestrel_window_frame,
+        kestrel_window_close,
+        kestrel_window_delta,
+        kestrel_window_time,
+        kestrel_window_size,
+        kestrel_window_fps,
+        kestrel_window_screenshot,
+        kestrel_draw_clear,
+        kestrel_draw_rect,
+        kestrel_draw_rect_outline,
+        kestrel_draw_circle,
+        kestrel_draw_circle_outline,
+        kestrel_draw_line,
+        kestrel_draw_triangle,
+        kestrel_draw_text,
+        kestrel_draw_text_width,
+        kestrel_input_held,
+        kestrel_input_pressed,
+        kestrel_input_released,
+        kestrel_input_mouse,
+        kestrel_input_wheel,
+    ]
+}
 
 /// Reads the pixel at `(x, y)` of the image file at `path` as `[r, g, b, a]`.
 /// No window is needed. Gives `None` if the file can't be read as an image or
