@@ -30,7 +30,7 @@ pub fn places(stmts: &[Stmt], f: &mut impl FnMut(&Place, bool)) {
 fn stmt<'a>(s: &'a Stmt, f: &mut impl FnMut(Node<'a>)) {
     f(Node::Stmt(s));
     match s {
-        Stmt::Let(_, e) | Stmt::Return(Some(e)) => expr(e, f),
+        Stmt::Let(_, e) | Stmt::Return(Some(e)) | Stmt::RandSeed(e) => expr(e, f),
         Stmt::Assign(p, e) | Stmt::ListAdd(p, e) => {
             expr(e, f);
             place(p, true, f);
@@ -108,7 +108,8 @@ fn expr<'a>(e: &'a Expr, f: &mut impl FnMut(Node<'a>)) {
         | ExprKind::ListNew
         | ExprKind::MapNew
         | ExprKind::NewArena
-        | ExprKind::NoneLit => {}
+        | ExprKind::NoneLit
+        | ExprKind::RandFloat => {}
         ExprKind::Move(p) => place(p, true, f),
         ExprKind::Map(op, p, xs) => {
             for x in xs {
@@ -119,7 +120,7 @@ fn expr<'a>(e: &'a Expr, f: &mut impl FnMut(Node<'a>)) {
         ExprKind::Format(parts) => print_args(parts, f),
         ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) => place(p, false, f),
         ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) => expr(x, f),
-        ExprKind::Binary(_, a, b) | ExprKind::And(a, b) | ExprKind::Or(a, b) => {
+        ExprKind::Binary(_, a, b) | ExprKind::And(a, b) | ExprKind::Or(a, b) | ExprKind::RandInt(a, b) => {
             expr(a, f);
             expr(b, f);
         }

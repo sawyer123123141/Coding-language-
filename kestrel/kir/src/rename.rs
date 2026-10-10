@@ -38,7 +38,7 @@ pub(crate) fn rename_stmts(stmts: &mut [Stmt], subst: &[Subst]) {
                 rename_local(l, subst);
                 rename_expr(e, subst);
             }
-            Stmt::Return(Some(e)) => rename_expr(e, subst),
+            Stmt::Return(Some(e)) | Stmt::RandSeed(e) => rename_expr(e, subst),
             Stmt::Assign(p, e) | Stmt::ListAdd(p, e) => {
                 rename_place(p, subst);
                 rename_expr(e, subst);
@@ -113,7 +113,7 @@ pub(crate) fn rename_expr(e: &mut Expr, subst: &[Subst]) {
             }
         }
         ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) => rename_expr(x, subst),
-        ExprKind::Binary(_, a, b) | ExprKind::And(a, b) | ExprKind::Or(a, b) => {
+        ExprKind::Binary(_, a, b) | ExprKind::And(a, b) | ExprKind::Or(a, b) | ExprKind::RandInt(a, b) => {
             rename_expr(a, subst);
             rename_expr(b, subst);
         }
@@ -142,6 +142,7 @@ pub(crate) fn rename_expr(e: &mut Expr, subst: &[Subst]) {
         | ExprKind::ListNew
         | ExprKind::MapNew
         | ExprKind::NewArena
-        | ExprKind::NoneLit => {}
+        | ExprKind::NoneLit
+        | ExprKind::RandFloat => {}
     }
 }

@@ -110,6 +110,21 @@ fn builtins_are_pure_and_constants_may_use_them() {
 }
 
 #[test]
+fn random_numbers_have_their_types_and_count_as_io() {
+    let src = "roll() -> int {\n randi_range(1, 6)\n}\nseed() {\n rand_seed(1)\n}\nquiet() -> int {\n 1\n}\nmain() {\n let small: u8 = 7\n let w: f64 = 2\n let a = randf()\n let b = randf_range(1, 2)\n let c = randf_range(1, w)\n let d = randi_range(1, 6)\n let e = randi_range(small, 9)\n let f = randi_range(1, i64(9))\n rand_seed(3)\n rand_seed(small)\n randf()\n randi_range(1, 2)\n print(a, b, c, d, e, f, quiet())\n}\n";
+    let (t, errs) = run(src);
+    assert!(errs.is_empty(), "{errs:?}");
+    let t = t.unwrap();
+    let expected = [("a", Ty::Float), ("b", Ty::Float), ("c", Ty::F64), ("d", Ty::Int), ("e", Ty::U8), ("f", Ty::I64)];
+    for (name, ty) in expected {
+        assert_eq!(local_ty(&t, name), ty, "type of `{name}`");
+    }
+    let io = |name: &str| t.fns.iter().find(|f| f.name == name).unwrap_or_else(|| panic!("no function {name}")).io;
+    assert!(io("roll") && io("seed"), "random numbers make a function do I/O, like `print`");
+    assert!(!io("quiet"));
+}
+
+#[test]
 fn builtin_tables_agree() {
     for &name in Builtin::GLOBAL_NAMES {
         let b = Builtin::global(name).unwrap_or_else(|| panic!("`{name}` is listed but not found"));
@@ -181,9 +196,28 @@ fn builtin_errors() {
             "struct P {\n pos: vec2\n}\nshift(var p: P) -> vec2 {\n p.pos = vec2(0, 0)\n vec2(1, 1)\n}\nmain() {\n var p = P(pos: vec2(3, 4))\n print(p.pos.dot(shift(var p)))\n}\n",
             "`p` is passed here, but a later argument changes it",
         ),
-        // Typed by a later task.
-        ("main() {\n print(randf())\n}\n", "`randf` isn't available yet"),
-        ("main() {\n print(randi_range(1, 2))\n}\n", "`randi_range` isn't available yet"),
+        ("main() {\n print(randf(1))\n}\n", "`randf` takes no values"),
+        ("main() {\n print(randf_range(1))\n}\n", "`randf_range` takes two values"),
+        ("main() {\n print(randf_range(\"a\", 1))\n}\n", "`randf_range` needs a number here, found string"),
+        ("main() {\n print(randi_range(1.5, 2))\n}\n", "`randi_range` needs integers, found float"),
+        ("main() {\n print(randi_range(1, \"a\"))\n}\n", "`randi_range` needs integers, found string"),
+        ("main() {\n print(randi_range(1))\n}\n", "`randi_range` takes two values"),
+        ("main() {\n rand_seed(1.5)\n}\n", "`rand_seed` needs an integer, found float"),
+        ("main() {\n rand_seed()\n}\n", "`rand_seed` takes one value"),
+        ("main() {\n let x = rand_seed(1)\n}\n", "this expression has no value to store"),
+        ("main() {\n let x: int = randf()\n}\n", "expected int, found float"),
+        (
+            "pure roll() -> int {\n randi_range(1, 6)\n}\nmain() {}\n",
+            "pure functions can't use random numbers: each call changes the generator",
+        ),
+        (
+            "pure seed() {\n rand_seed(1)\n}\nmain() {}\n",
+            "pure functions can't use random numbers: each call changes the generator",
+        ),
+        (
+            "main() {\n var xs = [1.0]\n par for x in xs {\n x = randf()\n }\n}\n",
+            "`par for` bodies can't use random numbers: iterations run at the same time",
+        ),
     ];
     for (src, expected) in cases {
         assert_eq!(run(src).1, vec![expected.to_string()], "source:\n{src}");

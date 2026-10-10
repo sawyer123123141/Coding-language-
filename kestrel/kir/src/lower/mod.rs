@@ -245,6 +245,7 @@ impl<'a> FnLowerer<'a> {
         };
         match self.t.res[&e.id] {
             Res::Print => out.push(Stmt::Print(args.iter().map(|a| self.print_arg(&a.value)).collect())),
+            Res::Builtin(b) => self.builtin_stmt(b, e, args, out),
             Res::MapRemove => {
                 let (receiver, name) = match &e.kind {
                     ast::ExprKind::MethodCall { receiver, name, .. } => (receiver, name),

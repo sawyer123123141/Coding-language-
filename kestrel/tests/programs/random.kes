@@ -1,0 +1,32 @@
+// expect: true
+// expect: true
+// expect: true
+// expect: true
+main() {
+    rand_seed(7)
+    let a = randi_range(1, 6)
+    let x = randf()
+    let r = randf_range(-1, 1)
+    rand_seed(7)
+    print(a == randi_range(1, 6) and x == randf() and r == randf_range(-1, 1))
+    var seen = array[bool](7)
+    var in_range = true
+    for i from 0 to 1000 {
+        let d = randi_range(1, 6)
+        if d < 1 or d > 6 {
+            in_range = false
+        } else {
+            seen[d] = true
+        }
+    }
+    print(in_range)
+    print(seen[1] and seen[2] and seen[3] and seen[4] and seen[5] and seen[6])
+    var ok = true
+    for i from 0 to 1000 {
+        let f = randf_range(2, 3)
+        if f < 2 or f > 3 {
+            ok = false
+        }
+    }
+    print(ok)
+}

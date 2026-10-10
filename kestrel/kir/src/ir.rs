@@ -191,6 +191,8 @@ pub enum Stmt {
     Print(Vec<PrintArg>),
     /// Prints with no separators and no newline (used by generated printers).
     Write(Vec<PrintArg>),
+    /// `rand_seed(n)`: makes the random numbers repeat from this integer.
+    RandSeed(Expr),
     /// Appends a value to the list at a place, growing it if it's full.
     ListAdd(Place, Expr),
     /// Points a reference local at a place (a `for ... in` element, found
@@ -283,6 +285,10 @@ pub enum ExprKind {
     Cast(Box<Expr>),
     /// A float operation (see `MathOp`); integer `abs`/`min`/`max` lower to `If`.
     Math(MathOp, Vec<Expr>),
+    /// A float from 0 up to (not including) 1, of this expression's type.
+    RandFloat,
+    /// An integer between the two operands, both included, of this expression's type.
+    RandInt(Box<Expr>, Box<Expr>),
     Call(FuncIdx, Vec<Arg>),
     /// A struct with every field given, in declaration order.
     StructLit(StructIdx, Vec<Expr>),

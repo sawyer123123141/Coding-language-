@@ -20,16 +20,10 @@ fn count_words(n: usize) -> &'static str {
     }
 }
 
-/// The functions that take floats and give a float (`sqrt`...`round`).
+/// The functions that take floats and give a float (`sqrt`...`round`, `randf_range`).
 fn is_float_function(b: Builtin) -> bool {
     use Builtin::*;
-    matches!(b, Sqrt | Sin | Cos | Tan | Asin | Acos | Atan | Atan2 | Exp | Log | Pow | Floor | Ceil | Round)
-}
-
-/// The functions that work on any number (`abs`...`lerp`).
-fn is_generic_function(b: Builtin) -> bool {
-    use Builtin::*;
-    matches!(b, Abs | Sign | Min | Max | Clamp | Lerp)
+    matches!(b, Sqrt | Sin | Cos | Tan | Asin | Acos | Atan | Atan2 | Exp | Log | Pow | Floor | Ceil | Round | RandfRange)
 }
 
 /// What is wrong with the values written in a built-in call, if anything.
@@ -53,12 +47,12 @@ impl<'a> BodyChecker<'a> {
 
     /// A call to a global built-in function.
     pub(crate) fn check_builtin_call(&mut self, e: &Expr, b: Builtin, args: &[Arg]) -> Ty {
+        if !b.is_pure() {
+            self.check_random_use(e);
+        }
         let name = b.name();
         let problem = if b.is_constant() {
             Some((e.span, format!("`{name}` is a constant; write it without `(...)`")))
-        } else if !is_float_function(b) && !is_generic_function(b) {
-            // Typed by a later task.
-            Some((e.span, format!("`{name}` isn't available yet")))
         } else {
             args_problem(e, b, args)
         };
@@ -68,12 +62,29 @@ impl<'a> BodyChecker<'a> {
             self.check_loose_args(args);
             return Ty::Error;
         }
-        if is_float_function(b) {
-            self.check_float_args(e, b, args)
-        } else if b == Builtin::Lerp {
-            self.check_lerp(e, args)
-        } else {
-            self.check_number_args(e, b, args)
+        match b {
+            Builtin::Lerp => self.check_lerp(e, args),
+            Builtin::Randf => {
+                self.t.res.insert(e.id, Res::Builtin(b));
+                Ty::Float
+            }
+            Builtin::RandiRange | Builtin::RandSeed => self.check_integer_args(e, b, args),
+            _ if is_float_function(b) => self.check_float_args(e, b, args),
+            _ => self.check_met_args(e, b, args, Self::number_arg),
+        }
+    }
+
+    /// The random numbers read and change the generator, so no `pure` function
+    /// and no `par for` body may use them. Like `print`, they make the
+    /// enclosing function do I/O.
+    fn check_random_use(&mut self, e: &Expr) {
+        if self.is_pure {
+            self.error(e.span, "pure functions can't use random numbers: each call changes the generator");
+        } else if !self.par.is_empty() {
+            self.error(e.span, "`par for` bodies can't use random numbers: iterations run at the same time");
+        }
+        if let Some(f) = self.fn_id {
+            self.t.fns[f.0 as usize].io = true;
         }
     }
 
@@ -119,6 +130,19 @@ impl<'a> BodyChecker<'a> {
         self.require_number(b, &a.value, ty)
     }
 
+    /// An argument that must be an integer; its type (`Error` if it isn't one).
+    fn integer_arg(&mut self, b: Builtin, a: &Arg, hint: Option<Ty>) -> Ty {
+        let ty = self.check_expr(&a.value, hint);
+        let ty = self.reject_never(&a.value, ty);
+        if ty.is_int() || ty == Ty::Error {
+            return ty;
+        }
+        let what = if b == Builtin::RandSeed { "an integer" } else { "integers" };
+        let msg = format!("`{}` needs {what}, found {}", b.name(), self.tn(ty));
+        self.error(a.value.span, msg);
+        Ty::Error
+    }
+
     /// Converts every argument to the type they all meet at, which is the result's.
     /// `tys` are their types, all numbers.
     fn meet_args(&mut self, e: &Expr, b: Builtin, args: &[Arg], tys: &[Ty]) -> Ty {
@@ -148,14 +172,15 @@ impl<'a> BodyChecker<'a> {
         self.meet_args(e, b, args, &tys)
     }
 
-    /// `abs`, `sign`, `min`, `max`, `clamp`: every argument is a number, and
-    /// they meet at one type (like `+`, where a literal takes the type of the
-    /// value before it), which is the result's.
-    fn check_number_args(&mut self, e: &Expr, b: Builtin, args: &[Arg]) -> Ty {
+    /// Checks each argument with `arg` (a literal takes the type of the value
+    /// before it, like `+`) and converts them to the type they all meet at,
+    /// which is the result's. `abs`, `sign`, `min`, `max` and `clamp` use this
+    /// with numbers.
+    fn check_met_args(&mut self, e: &Expr, b: Builtin, args: &[Arg], arg: fn(&mut Self, Builtin, &Arg, Option<Ty>) -> Ty) -> Ty {
         let mut tys = Vec::with_capacity(args.len());
         let mut met: Option<Ty> = None;
         for a in args {
-            let ty = self.number_arg(b, a, met);
+            let ty = arg(self, b, a, met);
             met = Some(met.and_then(|m| Ty::common(m, ty)).unwrap_or(ty)).filter(|t| t.is_numeric());
             tys.push(ty);
         }
@@ -163,6 +188,17 @@ impl<'a> BodyChecker<'a> {
             return Ty::Error;
         }
         self.meet_args(e, b, args, &tys)
+    }
+
+    /// `randi_range(lo, hi)`: integers that meet at one type, which is the
+    /// result's. `rand_seed(n)`: any integer, and it gives nothing.
+    fn check_integer_args(&mut self, e: &Expr, b: Builtin, args: &[Arg]) -> Ty {
+        let ty = self.check_met_args(e, b, args, Self::integer_arg);
+        if b == Builtin::RandSeed && ty != Ty::Error {
+            Ty::Unit
+        } else {
+            ty
+        }
     }
 
     /// `lerp(a, b, t)`: two numbers (the result is a float, even for integers)

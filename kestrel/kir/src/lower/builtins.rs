@@ -83,12 +83,32 @@ impl<'a> FnLowerer<'a> {
             Builtin::Ceil => MathOp::Ceil,
             Builtin::Round => MathOp::Round,
             Builtin::Lerp => return self.lerp(args, ty, line),
+            Builtin::Randf => return ExprKind::RandFloat,
+            Builtin::RandfRange => return self.randf_range(args, ty, line),
+            Builtin::RandiRange => {
+                let [lo, hi] = values(args.iter().map(|a| self.expr(&a.value)).collect());
+                return ExprKind::RandInt(Box::new(lo), Box::new(hi));
+            }
             Builtin::Abs | Builtin::Sign | Builtin::Min | Builtin::Max | Builtin::Clamp => {
                 return self.number_call(b, args, ty, line);
             }
-            other => unreachable!("the checker doesn't accept {other:?} yet"),
+            other => unreachable!("{other:?} isn't a function that gives a value"),
         };
         ExprKind::Math(op, args.iter().map(|a| self.expr(&a.value)).collect())
+    }
+
+    /// A call to a global built-in whose value is discarded. Only the random
+    /// numbers can be: the rest are pure, which the checker rejects.
+    pub(crate) fn builtin_stmt(&mut self, b: Builtin, e: &ast::Expr, args: &[ast::Arg], out: &mut Vec<Stmt>) {
+        if b == Builtin::RandSeed {
+            let seed = self.expr(&args[0].value);
+            out.push(Stmt::RandSeed(seed));
+        } else {
+            // The number is thrown away, but drawing it still moves the generator on.
+            let v = self.expr(e);
+            let tmp = self.temp(v.ty);
+            out.push(Stmt::Let(tmp, v));
+        }
     }
 
     /// `v` evaluated once, in order: a literal can be repeated, anything else goes through a temporary.
@@ -170,6 +190,19 @@ impl<'a> FnLowerer<'a> {
             }
             other => unreachable!("{other:?} isn't a plain number function"),
         }
+    }
+
+    /// `randf_range(lo, hi)`: `lo + (hi - lo) * RandFloat`. Both ends are
+    /// evaluated once, in order, before the number is drawn.
+    fn randf_range(&mut self, args: &[ast::Arg], ty: KTy, line: u32) -> ExprKind {
+        let mut pre = Vec::new();
+        let vals: Vec<Expr> = args.iter().map(|a| self.expr(&a.value)).collect();
+        let vals = vals.into_iter().map(|v| self.once(v, &mut pre)).collect();
+        let [lo, hi] = values(vals);
+        let width = binary(BinOp::Sub, &hi, &lo, ty, line);
+        let drawn = node(ExprKind::RandFloat, ty, line);
+        let offset = binary(BinOp::Mul, &width, &drawn, ty, line);
+        Self::with_pre(pre, ExprKind::Binary(BinOp::Add, Box::new(lo), Box::new(offset)), ty, line)
     }
 
     /// `lerp(a, b, t)`: `a + (b - a) * t` for numbers, component by component

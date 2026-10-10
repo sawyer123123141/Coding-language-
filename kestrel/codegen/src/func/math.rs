@@ -1,6 +1,7 @@
 //! Float operations. `sqrt`, `floor`, `ceil`, `abs`, `min`, `max` and
 //! `round` are Cranelift instructions; the rest call the runtime's
-//! `kestrel_rt_math`, which works in `f64`.
+//! `kestrel_rt_math`, which works in `f64`. The random numbers call the
+//! runtime's generator.
 
 use cranelift_codegen::ir::condcodes::FloatCC;
 use cranelift_codegen::ir::{types, InstBuilder, Value};
@@ -8,7 +9,7 @@ use cranelift_module::Module;
 use kestrel_kir::{self as kir, KTy, MathOp};
 use kestrel_runtime::math as rt_op;
 
-use super::FuncLowerer;
+use super::{cl_type, FuncLowerer};
 
 impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// `op` over `args`, evaluated in order. Operands and result have type `ty`.
@@ -37,6 +38,41 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             MathOp::Log => self.runtime_math(rt_op::LOG, &vals, ty),
             MathOp::Pow => self.runtime_math(rt_op::POW, &vals, ty),
         })
+    }
+
+    /// A float from 0 up to (not including) 1.
+    pub(crate) fn rand_float(&mut self, ty: KTy) -> Value {
+        let r = self.call_id(self.shared.rt.rand_float, &[]).expect("kestrel_rt_rand_float returns a value");
+        if ty != KTy::F32 {
+            return r;
+        }
+        // Rounding to the nearest f32 turns a value just below 1 into 1, so
+        // pull that back to the largest f32 below 1.
+        let r = self.b.ins().fdemote(types::F32, r);
+        let one = self.b.ins().f32const(1.0);
+        let below_one = self.b.ins().f32const(f32::from_bits(1.0f32.to_bits() - 1));
+        let reached_one = self.b.ins().fcmp(FloatCC::GreaterThanOrEqual, r, one);
+        self.b.ins().select(reached_one, below_one, r)
+    }
+
+    /// An integer between `lo` and `hi`, both included, of type `ty`. The
+    /// runtime works in `i64`; the result is within the operands, so
+    /// narrowing it back is safe.
+    pub(crate) fn rand_int(&mut self, lo: &kir::Expr, hi: &kir::Expr, ty: KTy) -> Result<Value, String> {
+        let lo_v = self.expr(lo)?;
+        let hi_v = self.expr(hi)?;
+        let lo_v = self.widen_i64(lo_v, lo.ty);
+        let hi_v = self.widen_i64(hi_v, hi.ty);
+        let r = self.call_id(self.shared.rt.rand_int, &[lo_v, hi_v]).expect("kestrel_rt_rand_int returns a value");
+        Ok(if ty == KTy::I64 { r } else { self.b.ins().ireduce(cl_type(ty), r) })
+    }
+
+    /// `rand_seed(n)`: the same seed makes the same sequence.
+    pub(crate) fn rand_seed(&mut self, n: &kir::Expr) -> Result<(), String> {
+        let v = self.expr(n)?;
+        let v = self.widen_i64(v, n.ty);
+        self.call_id(self.shared.rt.rand_seed, &[v]);
+        Ok(())
     }
 
     fn fconst(&mut self, ty: KTy, v: f64) -> Value {

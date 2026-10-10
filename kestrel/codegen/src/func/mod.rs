@@ -236,6 +236,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             }
             kir::Stmt::Print(args) => self.print(args, true)?,
             kir::Stmt::Write(args) => self.print(args, false)?,
+            kir::Stmt::RandSeed(n) => self.rand_seed(n)?,
             kir::Stmt::ListAdd(list, value) => self.list_add(list, value)?,
             kir::Stmt::Dup(p) => self.dup(p)?,
             kir::Stmt::MapSet(map, key, value, copy_key) => self.map_set(map, key, value, *copy_key, key.line)?,

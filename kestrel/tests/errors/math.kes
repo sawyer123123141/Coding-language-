@@ -19,6 +19,16 @@ other() {
     print(vec2(1, 1).dot(b: vec2(1, 1)))
     print(lerp(vec2(1, 1), vec2(2, 2), 0.5).length())
 }
+pure roll() -> int {
+    randi_range(1, 6)
+}
+dice() {
+    var xs = [1, 2, 3]
+    par for x in xs {
+        x = randi_range(1, 6)
+    }
+    print(randi_range(1.5, 2))
+}
 // error 2: `min` is a built-in name; pick another
 // error 3: `sqrt` needs a number here, found string
 // error 4: `sqrt` takes one value
@@ -35,3 +45,6 @@ other() {
 // error 17: `vec2` has no method `foo`
 // error 18: the result of `length` is unused, so this line does nothing
 // error 19: built-in functions take plain values, not labels or `var`
+// error 23: pure functions can't use random numbers: each call changes the generator
+// error 28: `par for` bodies can't use random numbers: iterations run at the same time
+// error 30: `randi_range` needs integers, found float

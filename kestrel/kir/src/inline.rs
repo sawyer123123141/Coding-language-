@@ -109,7 +109,7 @@ impl Inliner<'_> {
 
     fn stmt(&mut self, s: &mut Stmt, depth: u32) {
         match s {
-            Stmt::Let(_, e) | Stmt::Return(Some(e)) => self.expr(e, depth),
+            Stmt::Let(_, e) | Stmt::Return(Some(e)) | Stmt::RandSeed(e) => self.expr(e, depth),
             Stmt::Assign(p, e) | Stmt::ListAdd(p, e) => {
                 self.place(p, depth);
                 self.expr(e, depth);
@@ -190,7 +190,7 @@ impl Inliner<'_> {
                 }
             }
             ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) => self.expr(x, depth),
-            ExprKind::Binary(_, a, b) | ExprKind::And(a, b) | ExprKind::Or(a, b) => {
+            ExprKind::Binary(_, a, b) | ExprKind::And(a, b) | ExprKind::Or(a, b) | ExprKind::RandInt(a, b) => {
                 self.expr(a, depth);
                 self.expr(b, depth);
             }
@@ -219,7 +219,8 @@ impl Inliner<'_> {
             | ExprKind::ListNew
             | ExprKind::MapNew
             | ExprKind::NewArena
-            | ExprKind::NoneLit => {}
+            | ExprKind::NoneLit
+            | ExprKind::RandFloat => {}
         }
     }
 
