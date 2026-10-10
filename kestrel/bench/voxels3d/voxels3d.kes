@@ -4,7 +4,7 @@
 // side of a solid block that touches air.
 let SIZE = 32
 let PAD = SIZE + 2       // solid flags include a one-block border
-let LAYERS = 4           // chunks stacked vertically
+pub let LAYERS = 4           // chunks stacked vertically
 let HEIGHT = LAYERS * SIZE
 
 pure hash(x: int, y: int, z: int, seed: int) -> int {

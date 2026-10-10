@@ -121,4 +121,19 @@ public static class Voxels3dCs
                     faces += ChunkFaces(cx, cy, cz, seed);
         return faces;
     }
+
+    /// Same as `par_bench` in parallel.kes: every chunk on any core.
+    public static long ParBench(int seed, int width)
+    {
+        int n = width * Layers * width;
+        var faces = new int[n];
+        System.Threading.Tasks.Parallel.For(0, n, i =>
+        {
+            int cx = i / (Layers * width), cy = i / width % Layers, cz = i % width;
+            faces[i] = ChunkFaces(cx, cy, cz, seed);
+        });
+        long total = 0;
+        foreach (int f in faces) total += f;
+        return total;
+    }
 }

@@ -14,6 +14,8 @@ function Check([string]$what) { if ($LASTEXITCODE -ne 0) { throw "$what failed" 
 
 & $kestrel build main.kes -o k_voxels3d.exe; Check "kestrel build"
 & $kestrel build main.kes -o kr_voxels3d.exe --release; Check "kestrel build --release"
+& $kestrel build main_par.kes -o k_par.exe; Check "kestrel build (par)"
+& $kestrel build main_par.kes -o kr_par.exe --release; Check "kestrel build --release (par)"
 & $kestrel build main0.kes -o k_empty.exe; Check "kestrel build (empty world)"
 dotnet build cs -c Release -o cs\bin\out | Out-Null; Check "dotnet build"
 $cs = ".\cs\bin\out\Voxels3dBench.exe"
@@ -22,6 +24,11 @@ $variants = [ordered]@{
     "Kestrel exe (checks on)" = @({ & .\k_voxels3d.exe }, { & .\k_empty.exe })
     "Kestrel exe (--release, checks off)" = @({ & .\kr_voxels3d.exe }, { & .\k_empty.exe })
     "C# .NET 9" = @({ & $cs 8 }, { & $cs 0 })
+    "Kestrel par for, 1 thread (checks on)" = @({ $env:KESTREL_THREADS = "1"; & .\k_par.exe; $env:KESTREL_THREADS = $null }, { & .\k_empty.exe })
+    "Kestrel par for, 1 thread (--release)" = @({ $env:KESTREL_THREADS = "1"; & .\kr_par.exe; $env:KESTREL_THREADS = $null }, { & .\k_empty.exe })
+    "Kestrel par for, all threads (checks on)" = @({ & .\k_par.exe }, { & .\k_empty.exe })
+    "Kestrel par for, all threads (--release)" = @({ & .\kr_par.exe }, { & .\k_empty.exe })
+    "C# .NET 9 Parallel.For" = @({ & $cs 8 par }, { & $cs 0 })
 }
 $expected = (& $cs 8) -join ""
 foreach ($name in $variants.Keys) {

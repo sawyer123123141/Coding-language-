@@ -1,0 +1,31 @@
+struct C {
+    x: int
+    ys: list[int] = list[int]()
+}
+
+struct W {
+    cs: list[C] = list[C]()
+    table: [int] = []
+}
+
+main() {
+    var cs = list[C]()
+    for a in cs {
+        par for c in cs {
+            c.x = a.x + 1
+        }
+    }
+    var w = W()
+    par for c in w.cs {
+        c.x = w.table[w.cs[0].x]
+    }
+    par for c in cs {
+        par for y in cs[0].ys {
+            y = 1
+        }
+    }
+}
+
+// error 15: this reads `cs`, whose items other iterations are changing; use the loop's item (`c`)
+// error 20: this reads `w.cs`, whose items other iterations are changing; use the loop's item (`c`)
+// error 24: `par for` iterations run at the same time, so this can't change `y`; only the loop's item (`c`) and the body's own variables can change

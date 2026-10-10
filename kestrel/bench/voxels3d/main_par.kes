@@ -1,0 +1,8 @@
+// Builds the 3D world (8x4x8 chunks) with par for and prints its face count.
+use { par_bench from parallel }
+
+let WIDTH = 8
+
+main() {
+    print(par_bench(1337, WIDTH))
+}

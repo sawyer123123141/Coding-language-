@@ -1,0 +1,64 @@
+// expect: 101001 20000
+// expect: 60000 3
+// Lists and maps made inside a `par for` keep growing afterwards, in this
+// loop's threads' memory, and from another `par for`.
+struct Item {
+    n: int = 0
+    vals: list[int] = list[int]()
+    m: map[int, int] = {}
+}
+
+pure total(m: map[int, int]) -> int {
+    var t = 0
+    for k, v in m {
+        t += v
+    }
+    t
+}
+
+main() {
+    var items = list[Item]()
+    for i from 0 to 64 {
+        items.add(Item())
+    }
+    par for it in items {
+        it.vals = list[int]()
+        it.vals.add(1)
+        it.m = {}
+        it.m[0] = 1
+    }
+    for it in items {
+        for j from 0 to 100000 {
+            it.vals.add(j)
+        }
+        for j from 1 to 20000 {
+            it.m[j] = j
+        }
+    }
+    par for it in items {
+        for j from 0 to 1000 {
+            it.vals.add(j)
+        }
+    }
+    print(items[0].vals.len, items[63].m.len)
+
+    // Many iterations read the same map at once; it can still change after.
+    var m = {1: 1, 2: 2}
+    var many = list[Item]()
+    for i from 0 to 20000 {
+        many.add(Item())
+    }
+    par for it in many {
+        for k, v in m {
+            it.n += v
+        }
+        it.n -= total(m)
+        it.n += total(m)
+    }
+    m[1000] = 1
+    var sum = 0
+    for it in many {
+        sum += it.n
+    }
+    print(sum, m.len)
+}

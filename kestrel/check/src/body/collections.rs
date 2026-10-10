@@ -225,7 +225,7 @@ impl<'a> BodyChecker<'a> {
         self.note_view(v, iter);
         if par {
             let collection = self.path_key(iter);
-            self.par.push(super::par::ParBody::new(v, collection, first_local, self.loop_breaks.len() + 1));
+            self.par.push(super::par::ParBody::new(v, collection, root, first_local, self.loop_breaks.len() + 1));
         }
         self.loop_breaks.push(false);
         self.check_block(body, Expect::Discard);

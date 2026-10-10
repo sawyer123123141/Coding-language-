@@ -134,6 +134,9 @@ impl<'a> BodyChecker<'a> {
     pub(crate) fn check_map_for_in(&mut self, iter: &Expr, (k, v): (Ty, Ty), key: Option<&Binding>, var: &Binding, body: &Block) {
         let root = self.place_root(iter);
         let changeable = root.is_some_and(|r| self.immutable(r).is_none());
+        if changeable && self.par_owns(iter) {
+            self.t.locked_map_loops.insert(iter.id);
+        }
         self.scopes.push(HashMap::new());
         match key {
             Some(key) => {

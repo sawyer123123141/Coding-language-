@@ -118,8 +118,9 @@ impl<'a> FnLowerer<'a> {
     }
 
     /// `for k, v in m` / `for k in m`: a counted loop over the entries,
-    /// skipping removed ones, with the map locked so keys can't come or go.
-    /// `v` stands for the entry's value like a list loop's element.
+    /// skipping removed ones. When the map could gain keys meanwhile, it's
+    /// locked, so it can't. `v` stands for the entry's value like a list
+    /// loop's element.
     pub(crate) fn map_for_in(
         &mut self,
         key: Option<&ast::Binding>,
@@ -130,8 +131,11 @@ impl<'a> FnLowerer<'a> {
     ) {
         let line = self.line(iter.span);
         let map = self.place_or_temp(iter, out, true);
+        let locked = self.t.locked_map_loops.contains(&iter.id);
         let saved = self.temp(KTy::I64);
-        out.push(Stmt::Let(saved, map_expr(MapOp::Lock, map.clone(), Vec::new(), KTy::I64, line)));
+        if locked {
+            out.push(Stmt::Let(saved, map_expr(MapOp::Lock, map.clone(), Vec::new(), KTy::I64, line)));
+        }
         let i = self.temp(KTy::I64);
         let at = load(i, KTy::I64, line);
         let (key, value) = match key {
@@ -152,7 +156,7 @@ impl<'a> FnLowerer<'a> {
             stmts.push(Stmt::Bind(ptr, with(&map, Proj::MapValue { at: at.clone(), checked: false })));
             (ptr, checked)
         });
-        let body_stmts = self.locked(map.clone(), saved, |l| l.loop_block(body));
+        let body_stmts = if locked { self.locked(map.clone(), saved, |l| l.loop_block(body)) } else { self.loop_block(body) };
         stmts.extend(body_stmts);
         if let Some((ptr, checked)) = value_ref {
             if self.may_move(&stmts, &map) {
@@ -168,6 +172,8 @@ impl<'a> FnLowerer<'a> {
         let start = Expr { kind: ExprKind::Int(0), ty: KTy::I64, line };
         let end = map_expr(MapOp::Used, map.clone(), Vec::new(), KTy::I64, line);
         out.push(Stmt::ForRange { var: i, start, end, body: vec![Stmt::If { cond: live, then_body: stmts, else_body: Vec::new() }] });
-        out.push(Stmt::MapUnlock(map, load(saved, KTy::I64, line)));
+        if locked {
+            out.push(Stmt::MapUnlock(map, load(saved, KTy::I64, line)));
+        }
     }
 }

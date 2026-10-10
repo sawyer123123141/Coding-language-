@@ -17,6 +17,8 @@ pub(crate) struct ParBody {
     pub(crate) item: LocalId,
     /// The collection, when it's a place.
     collection: Option<PathKey>,
+    /// The variable the collection belongs to, aliases followed.
+    collection_root: Option<LocalId>,
     /// Locals from this id on are the body's own (one per iteration).
     first_local: u32,
     /// Views into the item: inner loop elements and `match` bindings.
@@ -24,13 +26,15 @@ pub(crate) struct ParBody {
     /// The loop depth (`loop_breaks.len()`) of the `par for` itself.
     pub(crate) depth: usize,
     changes_item: bool,
-    /// Places read in the body that share the collection's root.
-    collection_reads: Vec<(Span, PathKey)>,
+    /// Places read in the body that may be the collection's: same root,
+    /// or (`true`) reached through an alias of what it belongs to.
+    collection_reads: Vec<(Span, PathKey, bool)>,
 }
 
 impl ParBody {
-    pub(crate) fn new(item: LocalId, collection: Option<PathKey>, first_local: u32, depth: usize) -> Self {
-        ParBody { item, collection, first_local, item_views: HashSet::new(), depth, changes_item: false, collection_reads: Vec::new() }
+    pub(crate) fn new(item: LocalId, collection: Option<PathKey>, collection_root: Option<LocalId>, first_local: u32, depth: usize) -> Self {
+        let item_views = HashSet::new();
+        ParBody { item, collection, collection_root, first_local, item_views, depth, changes_item: false, collection_reads: Vec::new() }
     }
 }
 
@@ -50,7 +54,8 @@ impl<'a> BodyChecker<'a> {
             return;
         }
         let Some(key) = self.path_key(e) else { return };
-        if self.par.iter().all(|p| self.owned_by(p, key.root)) {
+        let refused = self.par.iter().position(|p| !self.owned_by(p, key.root));
+        if refused.is_none() {
             for p in &mut self.par {
                 if key.root == p.item || p.item_views.contains(&key.root) {
                     p.changes_item = true;
@@ -58,7 +63,8 @@ impl<'a> BodyChecker<'a> {
             }
             return;
         }
-        let item = self.t.local(self.par.last().expect("checked above").item).name.clone();
+        // Name the loop whose iterations would share it.
+        let item = self.t.local(self.par[refused.expect("checked above")].item).name.clone();
         let msg = format!(
             "`par for` iterations run at the same time, so this can't change `{}`; only the loop's item (`{item}`) and the body's own variables can change",
             self.path_name(&key)
@@ -83,10 +89,26 @@ impl<'a> BodyChecker<'a> {
             return;
         }
         let Some(key) = self.path_key(e) else { return };
-        for p in &mut self.par {
-            if p.collection.as_ref().is_some_and(|c| c.root == key.root) {
-                p.collection_reads.push((e.span, key.clone()));
+        let resolved = self.place_root(e);
+        for i in 0..self.par.len() {
+            let p = &self.par[i];
+            if key.root == p.item || p.item_views.contains(&key.root) {
+                continue;
             }
+            let same_root = p.collection.as_ref().is_some_and(|c| c.root == key.root);
+            // An alias (a loop element, a `match` binding) of what the collection belongs to.
+            let aliased = !same_root && resolved.is_some() && resolved == p.collection_root;
+            if same_root || aliased {
+                self.par[i].collection_reads.push((e.span, key.clone(), aliased));
+            }
+        }
+    }
+
+    /// Whether every enclosing `par for` lets the body change `e`'s place.
+    pub(crate) fn par_owns(&self, e: &Expr) -> bool {
+        match self.path_key(e) {
+            Some(key) => self.par.iter().all(|p| self.owned_by(p, key.root)),
+            None => true,
         }
     }
 
@@ -98,9 +120,10 @@ impl<'a> BodyChecker<'a> {
         let (Some(collection), true) = (&par.collection, par.changes_item) else { return };
         let (name, item) = (self.path_name(collection), self.t.local(par.item).name.clone());
         let reads = &par.collection_reads;
-        for (span, key) in reads {
-            let inner = reads.iter().any(|(s, _)| s != span && s.start <= span.start && span.end <= s.end);
-            if !inner && key.overlaps(collection) {
+        for (span, key, aliased) in reads {
+            // Part of a longer read of the same place (`w` in `w.cs[0].x`).
+            let inner = reads.iter().any(|(s, k, _)| s != span && s.start <= span.start && span.end <= s.end && k.extends(key));
+            if !inner && (*aliased || key.overlaps(collection)) {
                 let msg = format!("this reads `{name}`, whose items other iterations are changing; use the loop's item (`{item}`)");
                 self.error(*span, msg);
             }

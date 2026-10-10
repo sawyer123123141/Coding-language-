@@ -14,6 +14,10 @@ pub struct Arena {
     /// Free space in the newest small block: `next..end`.
     next: usize,
     end: usize,
+    /// Arenas handed over by `par for` threads, freed with this one. Boxed:
+    /// lists and maps point at them, so they must never move.
+    #[allow(clippy::vec_box)]
+    children: Vec<Box<Arena>>,
 }
 
 impl Default for Arena {
@@ -24,7 +28,7 @@ impl Default for Arena {
 
 impl Arena {
     pub fn new() -> Self {
-        Arena { blocks: Vec::new(), next: 0, end: 0 }
+        Arena { blocks: Vec::new(), next: 0, end: 0, children: Vec::new() }
     }
 
     /// `size` zeroed bytes aligned to `align` (a power of two).
@@ -61,10 +65,11 @@ impl Arena {
         start as *mut u8
     }
 
-    /// Takes over `other`'s blocks: what was allocated there now lives as
-    /// long as `self` (a `par for` thread's arena joining the caller's).
-    pub fn absorb(&mut self, other: &mut Arena) {
-        self.blocks.append(&mut other.blocks);
+    /// Keeps `child` (a `par for` thread's arena) alive as long as `self`.
+    /// Lists and maps made in it still point at it to grow, so the arena
+    /// itself must live on, not just its blocks.
+    pub fn adopt(&mut self, child: Box<Arena>) {
+        self.children.push(child);
     }
 
     /// A block of at least `size` bytes, and how big it really is.

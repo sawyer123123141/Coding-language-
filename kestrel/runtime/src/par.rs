@@ -83,10 +83,11 @@ fn pool() -> &'static Pool {
 }
 
 impl Pool {
-    /// Asks `helpers` pool threads to join `job`, starting threads as needed.
-    fn run(&self, job: &Arc<Job>, helpers: usize) {
+    /// Starts pool threads until `wanted` are alive, if the system allows.
+    /// Returns how many helpers a job can count on.
+    fn reserve(&self, wanted: usize) -> usize {
         let _g = self.spawning.lock().unwrap_or_else(|e| e.into_inner());
-        while self.live.load(Ordering::Acquire) < helpers {
+        while self.live.load(Ordering::Acquire) < wanted {
             let rx = Arc::clone(&self.receiver);
             let started = std::thread::Builder::new().name("kestrel-par".into()).stack_size(STACK_SIZE).spawn(move || serve(rx));
             if started.is_err() {
@@ -94,10 +95,31 @@ impl Pool {
             }
             self.live.fetch_add(1, Ordering::AcqRel);
         }
+        wanted.min(self.live.load(Ordering::Acquire))
+    }
+
+    /// Asks `helpers` pool threads to join `job`.
+    fn send(&self, job: &Arc<Job>, helpers: usize) {
         let tickets = self.tickets.lock().unwrap_or_else(|e| e.into_inner());
         for _ in 0..helpers {
             let _ = tickets.send(Arc::clone(job));
         }
+    }
+}
+
+/// Reports a participant as done even if it stops by panicking (a bug in
+/// the runtime), so the caller never waits forever.
+struct Done<'a> {
+    job: &'a Job,
+    arena: Option<*mut Arena>,
+}
+
+impl Drop for Done<'_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            self.job.fail("a `par for` thread stopped unexpectedly");
+        }
+        self.job.finish(self.arena);
     }
 }
 
@@ -115,6 +137,7 @@ fn serve(rx: Arc<Mutex<Receiver<Arc<Job>>>>) {
 fn participate(job: &Arc<Job>, pool_thread: bool) {
     CURRENT.with_borrow_mut(|c| *c = Some((Arc::clone(job), pool_thread)));
     let a = arena::kestrel_rt_arena_new();
+    let mut done = Done { job, arena: None };
     arena::kestrel_rt_arena_push(a);
     while !job.failed.load(Ordering::Acquire) {
         let start = job.next.fetch_add(job.chunk, Ordering::Relaxed);
@@ -125,7 +148,7 @@ fn participate(job: &Arc<Job>, pool_thread: bool) {
     }
     arena::kestrel_rt_arena_pop();
     CURRENT.with_borrow_mut(|c| *c = None);
-    job.finish(Some(a));
+    done.arena = Some(a);
 }
 
 /// How many threads a `par for` uses: `KESTREL_THREADS`, else one per
@@ -148,7 +171,9 @@ pub(crate) fn run_job(count: i64, body: Body, env: *const u8, threads: usize) ->
         }
         return Ok(());
     }
-    let threads = threads.min(count as usize);
+    // Fewer threads than asked for when the system can't start more.
+    let helpers = pool().reserve(threads.min(count as usize) - 1);
+    let threads = helpers + 1;
     let job = Arc::new(Job {
         body,
         env: env as usize,
@@ -162,7 +187,7 @@ pub(crate) fn run_job(count: i64, body: Body, env: *const u8, threads: usize) ->
         state: Mutex::new((threads, Vec::new())),
         done: Condvar::new(),
     });
-    pool().run(&job, threads - 1);
+    pool().send(&job, helpers);
     participate(&job, false);
     let mut s = job.state.lock().unwrap_or_else(|e| e.into_inner());
     while s.0 > 0 {
@@ -178,9 +203,9 @@ pub(crate) fn run_job(count: i64, body: Body, env: *const u8, threads: usize) ->
     for a in arenas {
         // SAFETY: each came from `kestrel_rt_arena_new`, is no longer pushed
         // anywhere, and is handed over exactly once; `current` is live.
-        let mut other = unsafe { Box::from_raw(a as *mut Arena) };
+        let child = unsafe { Box::from_raw(a as *mut Arena) };
         // SAFETY: `current` is the live current arena.
-        unsafe { (*current).absorb(&mut other) };
+        unsafe { (*current).adopt(child) };
     }
     Ok(())
 }

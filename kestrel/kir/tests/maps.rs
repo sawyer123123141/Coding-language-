@@ -63,7 +63,7 @@ fn literals_sets_and_reads_lower_to_map_operations() {
 #[test]
 fn a_loop_over_a_map_locks_it_and_unlocks_it_on_every_way_out() {
     let m = lower_src(
-        "f(m: map[int, int]) -> int {\n for k, v in m {\n if v > 3 { return k }\n if v > 2 { break }\n }\n 0\n}\nmain() {}\n",
+        "f(var m: map[int, int]) -> int {\n for k, v in m {\n if v > 3 { return k }\n if v > 2 { break }\n }\n 0\n}\nmain() {}\n",
     );
     let f = func(&m, "f");
     let all = all_stmts(&f.body);
@@ -91,4 +91,13 @@ fn copying_a_map_dups_it_and_copies_heap_values() {
 fn printing_a_map_gets_a_printer() {
     let m = lower_src("main() {\n let a = {1: \"x\"}\n print(a)\n}\n");
     assert!(m.print_fns.keys().any(|k| matches!(k, KTy::Map(..))));
+}
+
+#[test]
+fn a_loop_over_a_map_that_cant_change_doesnt_lock_it() {
+    // Many `par for` iterations may read one map at once; nothing to lock.
+    let m = lower_src("f(m: map[int, int]) -> int {\n var t = 0\n for k, v in m {\n t += v\n }\n t\n}\nmain() {}\n");
+    let f = func(&m, "f");
+    assert!(!map_ops(&f.body).contains(&MapOp::Lock), "{:#?}", f.body);
+    assert!(!all_stmts(&f.body).iter().any(|s| matches!(s, Stmt::MapUnlock(..))));
 }

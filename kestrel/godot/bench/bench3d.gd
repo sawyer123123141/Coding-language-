@@ -9,6 +9,7 @@ extends SceneTree
 const SEED := 1337
 const WIDTH := 8
 const SOURCE := "res://../../bench/voxels3d/voxels3d.kes"
+const PAR_SOURCE := "res://../../bench/voxels3d/parallel.kes"
 
 
 func median_ms(runs: int, work: Callable) -> float:
@@ -35,6 +36,9 @@ func _init() -> void:
 	var fast := Kestrel.new()
 	fast.checks = false
 	fast.load(SOURCE)
+	var par := Kestrel.new()
+	par.checks = false
+	par.load(PAR_SOURCE)
 	var cs: Object = load("res://Voxels3dGodot.cs").new()
 	var gd: Object = load("res://voxels3d_gd.gd").new()
 	var columns := {
@@ -47,6 +51,8 @@ func _init() -> void:
 		"Kestrel": func(): return k.run("bench", [SEED, WIDTH]),
 		"Kestrel (checks off)": func(): return fast.run("bench", [SEED, WIDTH]),
 		"C#": func(): return cs.Bench(SEED, WIDTH),
+		"Kestrel par for (checks off)": func(): return par.run("par_bench", [SEED, WIDTH]),
+		"C# Parallel.For": func(): return cs.ParBench(SEED, WIDTH),
 	}
 
 	# Same output first.
@@ -68,16 +74,18 @@ func _init() -> void:
 		cs.ChunkFaces(0, 1, 0, SEED)
 	OS.delay_msec(500)
 
-	var names := ["Kestrel", "Kestrel (checks off)", "C#", "GDScript"]
+	var names := ["Kestrel", "Kestrel (checks off)", "C#", "GDScript", "Kestrel par for (checks off)", "C# Parallel.For"]
 	var world_ms := {}
 	var column_ms := {}
 	for name in names:
-		column_ms[name] = median_ms(3 if name == "GDScript" else 9, columns[name])
+		if name in columns:
+			column_ms[name] = median_ms(3 if name == "GDScript" else 9, columns[name])
 		if name in worlds:
 			world_ms[name] = median_ms(5, worlds[name])
 	print("| | Whole world (256 chunks) | One column (4 chunks) |")
 	print("|---|---:|---:|")
 	for name in names:
 		var world := "%.0f ms" % world_ms[name] if name in world_ms else "~%.0f ms (column x 64)" % (column_ms[name] * 64.0)
-		print("| %s | %s | %.1f ms |" % [name, world, column_ms[name]])
+		var col := "%.1f ms" % column_ms[name] if name in column_ms else ""
+		print("| %s | %s | %s |" % [name, world, col])
 	quit()

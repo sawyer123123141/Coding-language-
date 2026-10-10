@@ -36,6 +36,12 @@ impl PathKey {
 
     /// Whether `self` is `p` or inside it. An index in `p` matches nothing,
     /// since two indexes may differ.
+    /// Whether `self` is `p` with more steps after (or `p` itself), steps
+    /// compared as written.
+    pub(crate) fn extends(&self, p: &PathKey) -> bool {
+        self.root == p.root && p.steps.len() <= self.steps.len() && p.steps.iter().zip(&self.steps).all(|(a, b)| a == b)
+    }
+
     fn starts_with(&self, p: &PathKey) -> bool {
         self.root == p.root
             && p.steps.len() <= self.steps.len()

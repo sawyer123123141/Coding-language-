@@ -182,6 +182,11 @@ pub struct Tables {
     /// Every map type written or inferred, with where; their value types
     /// are checked once it's known which types own an arena.
     pub map_types: Vec<(Ty, Span)>,
+    /// `for ... in` loops over maps that could gain keys while they run (by
+    /// their iterated expression), which lock the map. Loops over maps that
+    /// can't change there (a `let`, a read-only parameter, anything shared
+    /// in a `par for` body) don't, so many threads may read one at once.
+    pub locked_map_loops: HashSet<ExprId>,
     pub elem_ids: HashMap<Ty, ElemId>,
     pub fn_by_name: HashMap<String, FnId>,
     pub const_by_name: HashMap<String, ConstId>,

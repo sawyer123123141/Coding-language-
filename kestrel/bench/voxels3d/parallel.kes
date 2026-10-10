@@ -1,0 +1,34 @@
+// The 3D world (see voxels3d.kes) built with `par for`: chunks don't
+// depend on each other, so each builds its own mesh on any core.
+use { chunk_faces, LAYERS from voxels3d }
+
+struct Chunk {
+    x: int
+    y: int
+    z: int
+    faces: int = 0
+
+    pure build(var self, seed: int) {
+        self.faces = chunk_faces(self.x, self.y, self.z, seed)
+    }
+}
+
+// Same as `bench` in voxels3d.kes, across all cores.
+pub par_bench(seed: int, width: int) -> int {
+    var chunks = list[Chunk]()
+    for cx from 0 to width {
+        for cy from 0 to LAYERS {
+            for cz from 0 to width {
+                chunks.add(Chunk(x: cx, y: cy, z: cz))
+            }
+        }
+    }
+    par for c in chunks {
+        c.build(seed)
+    }
+    var faces = 0
+    for c in chunks {
+        faces += c.faces
+    }
+    faces
+}
