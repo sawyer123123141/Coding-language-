@@ -3,6 +3,8 @@
 // env: KESTREL_HEADLESS=3
 // expect: window.open 64 64 "t"
 // expect: draw.text "fps 60" vec2(x: 0, y: 0) 10 Color(r: 1, g: 1, b: 1, a: 1)
+// expect: draw.text "value 1" vec2(x: 0, y: 0) 10 Color(r: 1, g: 1, b: 1, a: 1)
+// expect: draw.text "local tag 1" vec2(x: 0, y: 0) 10 Color(r: 1, g: 1, b: 1, a: 1)
 // expect: draw.text_width "n=1" 10
 // expect: draw.text_width "early 1" 10
 // expect: width 15 35
@@ -10,9 +12,13 @@
 // expect: draw.text "stop 1" vec2(x: 0, y: 0) 10 Color(r: 1, g: 1, b: 1, a: 1)
 // expect: end of frame 1
 // expect: draw.text "fps 60" vec2(x: 0, y: 0) 10 Color(r: 1, g: 1, b: 1, a: 1)
+// expect: draw.text "value 1" vec2(x: 0, y: 0) 10 Color(r: 1, g: 1, b: 1, a: 1)
+// expect: draw.text "local tag 2" vec2(x: 0, y: 0) 10 Color(r: 1, g: 1, b: 1, a: 1)
 // expect: draw.text_width "n=2" 10
 // expect: width 15 -1
 // expect: draw.text "fps 60" vec2(x: 0, y: 0) 10 Color(r: 1, g: 1, b: 1, a: 1)
+// expect: draw.text "value 1" vec2(x: 0, y: 0) 10 Color(r: 1, g: 1, b: 1, a: 1)
+// expect: draw.text "local tag 3" vec2(x: 0, y: 0) 10 Color(r: 1, g: 1, b: 1, a: 1)
 // expect: draw.text_width "n=3" 10
 // expect: draw.text_width "early 3" 10
 // expect: width 15 35
@@ -20,6 +26,10 @@
 // expect: left the loop at 3
 use window
 use draw
+
+tag(n: int) -> string {
+    return "tag {n}"
+}
 
 early(i: int) -> int {
     let w = draw.text_width("early {if i == 2 { return -1 } else { i }}", 10)
@@ -32,6 +42,9 @@ main() {
     while window.frame() {
         n += 1
         draw.text("fps {window.fps()}", vec2(0, 0), 10, draw.WHITE)
+        // A block that only computes a value, and one whose own variable holds memory made inside the call.
+        draw.text("value {if n > 0 { 1 } else { 2 }}", vec2(0, 0), 10, draw.WHITE)
+        draw.text("local {if n > 0 { let t = tag(n); t } else { tag(0) }}", vec2(0, 0), 10, draw.WHITE)
         print("width", draw.text_width("n={n}", 10), early(n))
         draw.text("skip {if n == 2 { continue } else { n }}", vec2(0, 0), 10, draw.WHITE)
         draw.text("stop {if n == 3 { break } else { n }}", vec2(0, 0), 10, draw.WHITE)

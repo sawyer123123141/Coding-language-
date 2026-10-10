@@ -2,8 +2,10 @@ use kestrel_syntax::ast::{Arg, Expr, ExprKind};
 use kestrel_syntax::Span;
 
 use super::place::Immutable;
+use super::regions::Ctx;
 use super::BodyChecker;
 use crate::builtins::Builtin;
+use crate::natives::wants_scratch;
 use crate::tables::{FnId, LocalId, ParamSig, Res};
 use crate::ty::Ty;
 
@@ -151,6 +153,9 @@ impl<'a> BodyChecker<'a> {
     ) -> Ty {
         let info = &self.t.fns[fid.0 as usize];
         let (params, ret, fname) = (info.params[skip..].to_vec(), info.ret, info.name.clone());
+        // Text built for a native's arguments is freed when the call returns (see `wants_scratch`),
+        // so memory made while checking them can't be kept past the call.
+        let scratch = wants_scratch(info, args);
         let names: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
         let (slots, mut ok) = self.bind_args(&fname, &names, args, "parameter");
         if ok {
@@ -160,6 +165,9 @@ impl<'a> BodyChecker<'a> {
                     ok = false;
                 }
             }
+        }
+        if scratch {
+            self.ctxs.push(Ctx::Scratch(fname.clone()));
         }
         for (pi, slot) in slots.iter().enumerate() {
             let Some(ai) = *slot else { continue };
@@ -179,6 +187,9 @@ impl<'a> BodyChecker<'a> {
             if !slots.contains(&Some(ai)) {
                 self.check_expr(&a.value, None);
             }
+        }
+        if scratch {
+            self.ctxs.pop();
         }
         self.check_exclusive(args, &var_roots);
         // Arguments run in source order; one passed by pointer earlier must

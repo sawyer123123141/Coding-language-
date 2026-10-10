@@ -17,6 +17,10 @@ pub(crate) enum Ctx {
     Scoped,
     /// `in x.mem { }`: belongs to `x`, as written.
     Owned(PathKey),
+    /// The arguments of a call to this native (a display name like `draw.text`),
+    /// when one is an interpolated string: built in a scratch arena freed
+    /// when the call returns.
+    Scratch(String),
 }
 
 /// A place as written: its root variable (an alias stays itself) and its
@@ -222,6 +226,11 @@ impl<'a> BodyChecker<'a> {
                     format!("this memory is freed at the end of the `arena {{ }}` block, but `{name}` lives longer"),
                     "build it outside the block, or store it in a variable declared inside".to_string(),
                 ),
+                Ctx::Scratch(callee) => (
+                    decl.is_some_and(|d| d >= i),
+                    format!("this memory is freed when the call to `{callee}` returns, but `{name}` lives longer"),
+                    "build it before the call, or store it in a variable declared inside the argument".to_string(),
+                ),
                 Ctx::Owned(p) => {
                     let owner = self.path_name(p);
                     (
@@ -320,6 +329,7 @@ impl<'a> BodyChecker<'a> {
         let Some(i) = (1..self.ctxs.len()).find(|&i| r & bit(i) != 0) else { return };
         let msg = match &self.ctxs[i] {
             Ctx::Owned(p) => format!("can't return memory allocated with `in`: it belongs to `{}`", self.path_name(p)),
+            Ctx::Scratch(callee) => format!("can't return memory from inside a call to `{callee}`: it's freed when the call returns"),
             _ => "can't return memory from an `arena { }` block: it's freed at the block's end".to_string(),
         };
         self.error(value.span, msg);

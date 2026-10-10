@@ -110,12 +110,10 @@ impl<'a> FnLowerer<'a> {
         (pre, FuncIdx(f.0), lowered)
     }
 
-    /// Whether a call to `f` builds text in a scratch arena: `f` is a native, which only
-    /// reads its arguments during the call, and some argument is directly an interpolated
-    /// string. So `draw.text("fps {fps}", ...)` in a frame loop frees its text every frame
-    /// instead of growing the arena it runs in. Text kept in a variable first is not covered.
+    /// Whether a call to `f` builds text in a scratch arena (see `wants_scratch` in the
+    /// checker, which also treats the arguments as memory freed at the call's end).
     pub(crate) fn wants_scratch(&self, f: FnId, args: &[ast::Arg]) -> bool {
-        self.t.func(f).is_native && args.iter().any(|a| matches!(a.value.kind, ast::ExprKind::Interp(_)))
+        kestrel_check::wants_scratch(self.t.func(f), args)
     }
 
     /// The pieces of a call to native `f` made inside a scratch arena: the statements

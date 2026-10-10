@@ -1,0 +1,26 @@
+// Text built for a native's argument is freed when the call returns, so nothing made
+// while the arguments run may be kept past the call.
+use draw
+
+tag(n: int) -> string {
+    return "kept outside the call, number {n}"
+}
+
+label(c: bool, n: int) -> string {
+    draw.text("a{if c { return tag(n) } else { 2 }}", vec2(0, 0), 10, draw.WHITE)
+    return "no"
+}
+
+main() {
+    var last = ""
+    var names = list[string]()
+    let n = 1
+    draw.text("a{if n > 0 { last = tag(n); 1 } else { 2 }}", vec2(0, 0), 10, draw.WHITE)
+    draw.text("b{if n > 0 { names.add(tag(n)); 1 } else { 2 }}", vec2(0, 0), 10, draw.WHITE)
+    draw.text("c{n}", vec2(if n > 0 { last = tag(n); 1 } else { 2 }, 0), 10, draw.WHITE)
+    print(last, names, label(true, n))
+}
+// error 10: can't return memory from inside a call to `draw.text`: it's freed when the call returns
+// error 18: this memory is freed when the call to `draw.text` returns, but `last` lives longer
+// error 19: this memory is freed when the call to `draw.text` returns, but `names` lives longer
+// error 20: this memory is freed when the call to `draw.text` returns, but `last` lives longer

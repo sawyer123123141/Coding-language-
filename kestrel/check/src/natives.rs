@@ -1,10 +1,10 @@
 //! The types a `native` function may use. Rust reads its arguments straight
 //! from memory, so they are limited to values with a plain layout.
 
-use kestrel_syntax::ast::Program;
+use kestrel_syntax::ast::{Arg, ExprKind, Program};
 use kestrel_syntax::Diagnostic;
 
-use crate::tables::{Tables, VEC2, VEC3};
+use crate::tables::{FnInfo, Tables, VEC2, VEC3};
 use crate::ty::Ty;
 
 const BAD_TYPE: &str = "native functions can only take numbers, bools, strings, vectors, and enums or structs of those";
@@ -12,6 +12,19 @@ const BAD_TYPE_HELP: &str = concat!(
     "use int, i64, u8, float, f64, bool, string, vec2, vec3, an enum with no fields, or a struct of those; ",
     "a native may return only nothing, a number, a bool, vec2 or vec3"
 );
+
+/// Whether a call to `f` with these arguments builds its text in a scratch arena that is
+/// freed when the call returns: `f` is a native, which only reads its arguments during the
+/// call, and some argument is directly an interpolated string. So `draw.text("fps {fps}", ...)`
+/// in a frame loop frees its text every frame instead of growing the arena it runs in. Text
+/// kept in a variable first is not covered.
+///
+/// The checker (which treats the call's arguments as a region that is freed at the call's
+/// end, like an `arena { }` block) and KIR lowering (which pushes and pops the arena) both
+/// ask this, so they always agree on where the memory goes.
+pub fn wants_scratch(f: &FnInfo, args: &[Arg]) -> bool {
+    f.is_native && args.iter().any(|a| matches!(a.value.kind, ExprKind::Interp(_)))
+}
 
 /// Checks every native's parameters and result. Run once all types are
 /// collected, since a native may name a struct declared after it.

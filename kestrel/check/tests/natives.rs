@@ -150,3 +150,36 @@ fn calls_to_natives_are_checked_like_any_call() {
     let e = errors("native f(x: int) -> int\nmain() {\n let y: string = f(1)\n f(\"no\")\n}\n");
     assert_eq!(e, vec!["expected string, found int", "expected int, found string"]);
 }
+
+const SCRATCH: &str = "native show(s: string, n: int)
+native peek(n: int) -> int
+tag(n: int) -> string { return \"tag {n}\" }
+";
+
+#[test]
+fn text_built_for_a_native_call_is_freed_at_the_call_so_it_cannot_be_kept() {
+    // `show` has an interpolated argument, so everything its arguments make is freed when it returns.
+    let src = format!("{SCRATCH}main() {{\n var kept = \"\"\n let n = 1\n show(\"a{{n}}\", if n > 0 {{ kept = tag(n); 1 }} else {{ 2 }})\n print(kept)\n}}\n");
+    assert_eq!(errors(&src), ["this memory is freed when the call to `show` returns, but `kept` lives longer"]);
+}
+
+#[test]
+fn a_native_call_with_no_interpolated_argument_frees_nothing() {
+    // The same stores are fine when no argument is an interpolated string: no scratch arena exists.
+    let src = format!(
+        "{SCRATCH}main() {{\n var kept = \"\"\n let n = 1\n show(\"plain\", if n > 0 {{ kept = tag(n); 1 }} else {{ 2 }})\n show(kept, peek(n))\n}}\n"
+    );
+    assert_eq!(errors(&src), Vec::<String>::new());
+}
+
+#[test]
+fn memory_declared_inside_the_arguments_may_be_used_there() {
+    let src = format!("{SCRATCH}main() {{\n let n = 1\n show(\"a{{n}}\", if n > 0 {{ let t = tag(n); peek(n) }} else {{ 2 }})\n}}\n");
+    assert_eq!(errors(&src), Vec::<String>::new());
+}
+
+#[test]
+fn leaving_a_function_from_a_native_argument_cannot_return_memory_made_there() {
+    let src = format!("{SCRATCH}f(n: int) -> string {{\n show(\"a{{n}}\", if n > 0 {{ return tag(n) }} else {{ 2 }})\n return \"no\"\n}}\nmain() {{}}\n");
+    assert_eq!(errors(&src), ["can't return memory from inside a call to `show`: it's freed when the call returns"]);
+}
