@@ -1,0 +1,29 @@
+// env: KESTREL_HEADLESS=2
+// expect: window.open 320 200 "hi"
+// expect: frame 1 0.016666668 true
+// expect: draw.clear Color(r: 0, g: 0, b: 0, a: 1)
+// expect: draw.rect vec2(x: 1, y: 2) vec2(x: 3, y: 4) Color(r: 1, g: 0, b: 0, a: 1)
+// expect: draw.text "n 1" vec2(x: 5, y: 5) 10 Color(r: 1, g: 1, b: 1, a: 0.5)
+// expect: frame 2 0.016666668 true
+// expect: draw.clear Color(r: 0, g: 0, b: 0, a: 1)
+// expect: draw.rect vec2(x: 1, y: 2) vec2(x: 3, y: 4) Color(r: 1, g: 0, b: 0, a: 1)
+// expect: draw.text "n 2" vec2(x: 5, y: 5) 10 Color(r: 1, g: 1, b: 1, a: 0.5)
+// expect: done 2 vec2(x: 320, y: 200) 60 false vec2(x: 0, y: 0) 0 0
+use window
+use draw
+use input
+use { Color, RED from draw }
+use { Key from input }
+
+main() {
+    window.open(320, 200, "hi")
+    var n = 0
+    while window.frame() {
+        n += 1
+        print("frame", n, window.delta(), input.held(Key.Space) == false)
+        draw.clear(draw.BLACK)
+        draw.rect(vec2(1, 2), vec2(3, 4), RED)
+        draw.text("n {n}", vec2(5, 5), 10, Color(1, 1, 1, 0.5))
+    }
+    print("done", n, window.size(), window.fps(), input.pressed(Key.A), input.mouse(), input.wheel(), input.axis(Key.Left, Key.Right))
+}

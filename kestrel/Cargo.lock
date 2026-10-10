@@ -290,6 +290,7 @@ dependencies = [
  "kestrel-driver",
  "kestrel-kir",
  "kestrel-syntax",
+ "kestrel-window",
 ]
 
 [[package]]

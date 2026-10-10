@@ -12,6 +12,7 @@ kestrel-syntax = { path = "syntax" }
 kestrel-check = { path = "check" }
 kestrel-kir = { path = "kir" }
 kestrel-runtime = { path = "runtime" }
+kestrel-window = { path = "window" }
 kestrel-codegen = { path = "codegen" }
 kestrel-driver = { path = "driver" }
 cranelift-codegen = "0.116"

@@ -3,9 +3,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Builds kestrel-runtime as a staticlib (which `cargo test` doesn't do for
-/// workspace members), exports its path as KESTREL_RUNTIME_LIB, and copies it
-/// next to the `kestrel` binary where `kestrel build` looks first.
+/// Builds kestrel-runtime and kestrel-window as staticlibs (which `cargo test` doesn't do
+/// for workspace members), exports their paths as KESTREL_RUNTIME_LIB and
+/// KESTREL_WINDOW_LIB, and copies them next to the `kestrel` binary where `kestrel build`
+/// looks first. Programs that use `window`, `draw` or `input` link the window library
+/// (which carries the runtime as well); every other program links the runtime library.
 fn main() {
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
     let workspace = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("..");
@@ -15,7 +17,7 @@ fn main() {
 
     let mut cmd = Command::new(env::var("CARGO").unwrap());
     cmd.current_dir(&workspace)
-        .args(["build", "-p", "kestrel-runtime", "--lib", "--target-dir"])
+        .args(["build", "-p", "kestrel-runtime", "-p", "kestrel-window", "--lib", "--target-dir"])
         .arg(&target_dir);
     if release {
         cmd.arg("--release");
@@ -27,21 +29,32 @@ fn main() {
         }
     }
     cmd.env_remove("RUSTFLAGS");
-    let status = cmd.status().expect("start cargo for kestrel-runtime");
-    assert!(status.success(), "building kestrel-runtime failed");
+    let status = cmd.status().expect("start cargo for kestrel-runtime and kestrel-window");
+    assert!(status.success(), "building kestrel-runtime and kestrel-window failed");
 
-    let file = if windows { "kestrel_runtime.lib" } else { "libkestrel_runtime.a" };
-    let lib = target_dir.join(if release { "release" } else { "debug" }).join(file);
-    assert!(lib.exists(), "runtime staticlib missing at {}", lib.display());
-    println!("cargo:rustc-env=KESTREL_RUNTIME_LIB={}", lib.display());
-    println!("cargo:rerun-if-changed=../runtime/src");
-    println!("cargo:rerun-if-changed=../runtime/Cargo.toml");
-
-    // Best effort: `kestrel build` falls back to the path above if this is skipped or fails.
-    if let Some(dir) = binary_dir(&out) {
-        if let Err(e) = install_beside(&lib, &dir.join(file)) {
-            println!("cargo:warning=couldn't copy the runtime library next to the kestrel binary: {e}");
+    let profile_dir = target_dir.join(if release { "release" } else { "debug" });
+    // Best effort: `kestrel build` falls back to the paths below if installing is skipped or fails.
+    let beside = binary_dir(&out);
+    for (var, krate) in [("KESTREL_RUNTIME_LIB", "kestrel_runtime"), ("KESTREL_WINDOW_LIB", "kestrel_window")] {
+        let file = if windows { format!("{krate}.lib") } else { format!("lib{krate}.a") };
+        let lib = profile_dir.join(&file);
+        assert!(lib.exists(), "{krate} staticlib missing at {}", lib.display());
+        println!("cargo:rustc-env={var}={}", lib.display());
+        if let Some(dir) = &beside {
+            if let Err(e) = install_beside(&lib, &dir.join(&file)) {
+                println!("cargo:warning=couldn't copy {file} next to the kestrel binary: {e}");
+            }
         }
+    }
+    for path in [
+        "../runtime/src",
+        "../runtime/Cargo.toml",
+        "../window/src",
+        "../window/raylib",
+        "../window/build.rs",
+        "../window/Cargo.toml",
+    ] {
+        println!("cargo:rerun-if-changed={path}");
     }
 }
 

@@ -5,6 +5,7 @@ use std::process::ExitCode;
 
 use kestrel_driver::{without_bom, DiagStyle};
 use kestrel_codegen::{emit_object, JitProgram, Options};
+use link::Lib;
 
 const USAGE: &str = "usage: kestrel <run|check|build> <file.kes> [-o <exe>] [--release] [--diagnostics=short]";
 
@@ -82,12 +83,19 @@ fn run() -> ExitCode {
     }
     let (compiled, diagnostics) = kestrel_driver::compile(&args.path, src, args.style);
     eprint!("{diagnostics}");
-    let Some(module) = compiled.map(|c| c.module) else { return ExitCode::from(1) };
+    let Some(compiled) = compiled else { return ExitCode::from(1) };
     let opts = Options { checked_arith: !args.release };
     let result = match args.cmd.as_str() {
         "check" => return ExitCode::SUCCESS,
-        "run" => JitProgram::compile(&module, opts).map_err(internal_error).map(|p| p.run_main()),
-        _ => build(&module, opts, &args).map(|()| 0),
+        "run" => JitProgram::compile_with(&compiled.module, opts, &kestrel_window::symbols())
+            .map_err(internal_error)
+            .map(|p| p.run_main()),
+        _ => {
+            // Programs that use `window`, `draw` or `input` need the window library, which
+            // carries the runtime as well.
+            let lib = if compiled.builtins.is_empty() { Lib::Runtime } else { Lib::Window };
+            build(&compiled.module, opts, &args, lib).map(|()| 0)
+        }
     };
     match result {
         Ok(code) => ExitCode::from(code as u8),
@@ -120,12 +128,12 @@ fn check_output(args: &Args) -> Result<(), String> {
     Ok(())
 }
 
-fn build(module: &kestrel_kir::Module, opts: Options, args: &Args) -> Result<(), String> {
+fn build(module: &kestrel_kir::Module, opts: Options, args: &Args, lib: Lib) -> Result<(), String> {
     let exe = output_path(args)?;
     let bytes = emit_object(module, opts).map_err(internal_error)?;
     let obj = std::env::temp_dir().join(format!("kestrel-{}.o", std::process::id()));
     std::fs::write(&obj, bytes).map_err(|e| format!("can't write {}: {e}", obj.display()))?;
-    let linked = link::link(&obj, &exe);
+    let linked = link::link(&obj, &exe, lib);
     let _ = std::fs::remove_file(&obj);
     linked
 }

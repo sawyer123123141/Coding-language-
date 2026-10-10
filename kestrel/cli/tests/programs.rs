@@ -7,17 +7,27 @@ struct Expect {
     stdout: String,
     exit: i32,
     stderr: Vec<String>,
+    /// `// env: KEY=VALUE` lines: variables set for both the JIT run and the exe run.
+    env: Vec<(String, String)>,
 }
 
 /// Reads the directives of program `name`. Panics on a malformed or unknown
-/// `// expect...` line so a typo can't silently drop a check.
+/// `// expect...` or `// env:` line so a typo can't silently drop a check.
 fn expectations(name: &str, src: &str) -> Expect {
     let mut lines = Vec::new();
     let mut exit = 0;
     let mut stderr = Vec::new();
+    let mut env = Vec::new();
     for line in src.lines() {
         let line = line.trim();
-        if let Some(rest) = line.strip_prefix("// expect-exit:") {
+        if let Some(rest) = line.strip_prefix("// env:") {
+            let (key, value) = rest
+                .split_once('=')
+                .map(|(key, value)| (key.trim(), value.trim()))
+                .filter(|(key, _)| !key.is_empty())
+                .unwrap_or_else(|| panic!("{name}: bad env directive (expected KEY=VALUE): {line}"));
+            env.push((key.to_string(), value.to_string()));
+        } else if let Some(rest) = line.strip_prefix("// expect-exit:") {
             exit = rest.trim().parse().unwrap_or_else(|_| panic!("{name}: bad expect-exit number: {line}"));
         } else if let Some(rest) = line.strip_prefix("// expect-stderr:") {
             stderr.push(rest.trim().to_string());
@@ -28,7 +38,7 @@ fn expectations(name: &str, src: &str) -> Expect {
         }
     }
     let stdout = lines.iter().map(|l| format!("{l}\n")).collect();
-    Expect { stdout, exit, stderr }
+    Expect { stdout, exit, stderr, env }
 }
 
 pub fn programs() -> Vec<PathBuf> {
@@ -45,6 +55,13 @@ pub fn programs() -> Vec<PathBuf> {
 
 fn kestrel(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_kestrel")).args(args).output().expect("run kestrel")
+}
+
+/// Runs `kestrel <path>`'s program with the variables its `// env:` lines set.
+fn kestrel_run(path: &Path, exp: &Expect) -> Output {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_kestrel"));
+    cmd.args(["run", path.to_str().unwrap()]).envs(exp.env.iter().map(|(k, v)| (k, v)));
+    cmd.output().expect("run kestrel")
 }
 
 /// Compares one run against the program's expectations; describes any mismatch.
@@ -67,8 +84,9 @@ fn programs_run_via_jit() {
     for path in programs() {
         let src = fs::read_to_string(&path).unwrap();
         let name = path.file_name().unwrap().to_string_lossy().to_string();
-        let out = kestrel(&["run", path.to_str().unwrap()]);
-        failures.extend(compare(&name, "jit", &out, &expectations(&name, &src)));
+        let exp = expectations(&name, &src);
+        let out = kestrel_run(&path, &exp);
+        failures.extend(compare(&name, "jit", &out, &exp));
     }
     assert!(failures.is_empty(), "\n{}", failures.join("\n"));
 }
@@ -93,6 +111,19 @@ fn bad_expect_exit_number_panics() {
     expectations("typo.kes", "// expect-exit: one\nmain() {}\n");
 }
 
+#[test]
+fn env_directives_are_collected() {
+    let exp = expectations("env.kes", "// env: A=1\n// env:  B = two words \n// env: C=\nmain() {}\n");
+    let expected = [("A", "1"), ("B", "two words"), ("C", "")];
+    assert_eq!(exp.env, expected.map(|(k, v)| (k.to_string(), v.to_string())));
+}
+
+#[test]
+#[should_panic(expected = "typo.kes: bad env directive (expected KEY=VALUE): // env: KESTREL_HEADLESS")]
+fn env_directive_without_equals_panics() {
+    expectations("typo.kes", "// env: KESTREL_HEADLESS\nmain() {}\n");
+}
+
 fn build(path: &Path, exe: &Path, extra: &[&str]) -> Output {
     let mut args = vec!["build", path.to_str().unwrap(), "-o", exe.to_str().unwrap()];
     args.extend_from_slice(extra);
@@ -107,14 +138,15 @@ fn programs_run_as_executables() {
     for path in programs() {
         let src = fs::read_to_string(&path).unwrap();
         let name = path.file_name().unwrap().to_string_lossy().to_string();
+        let exp = expectations(&name, &src);
         let exe = out_dir.join(path.file_stem().unwrap()).with_extension(std::env::consts::EXE_EXTENSION);
         let built = build(&path, &exe, &[]);
         if !built.status.success() {
             failures.push(format!("{name} [build]: {}", String::from_utf8_lossy(&built.stderr)));
             continue;
         }
-        let out = Command::new(&exe).output().expect("run built exe");
-        failures.extend(compare(&name, "exe", &out, &expectations(&name, &src)));
+        let out = Command::new(&exe).envs(exp.env.iter().map(|(k, v)| (k, v))).output().expect("run built exe");
+        failures.extend(compare(&name, "exe", &out, &exp));
     }
     assert!(failures.is_empty(), "\n{}", failures.join("\n"));
 }

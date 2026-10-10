@@ -1,0 +1,11 @@
+// expect: Color(r: 1, g: 0, b: 0, a: 1) Color(r: 0.2, g: 0.2, b: 0.2, a: 1)
+// expect: Key.Space vec2(x: 0, y: 1)
+use draw
+use { Color, RED from draw }
+use { Key from input }
+let BG = Color(0.2, 0.2, 0.2)
+let UP = vec2(0, 1)
+main() {
+    print(RED, BG)
+    print(Key.Space, UP)
+}
