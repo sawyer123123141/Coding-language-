@@ -109,13 +109,17 @@ No import needed, like GDScript. They are built into the compiler, like `int()`,
 - `abs` of the smallest integer overflows: an error with checks on, like `-x`.
 - `round` rounds halves away from zero, like GDScript.
 - `clamp(x, lo, hi)` is `min(max(x, lo), hi)`, so `hi` wins when `lo > hi`.
+- `min`, `max` and `clamp` check each argument with the running common type as a hint, like the right side of `+`, so `min(small_u8, 7)` is a `u8`. The hint only flows left to right, and the call doesn't get the type its result is wanted as. So `min(7, small)` is an `int`, and `let b: u8 = min(7, small)` is an error while `let b: u8 = min(small, 7)` works.
+- `lerp`'s `t` is coerced to the result type, so `lerp(a_float, b_float, t_f64)` is an error.
+- `PI` and `TAU` are exact when they meet an `f64`. A named float constant is a `float`, so `let HALF = PI / 2` widens from `float` when it meets an `f64`.
 - Vectors get GDScript's methods: `v.length()`, `v.normalized()` (a zero vector stays zero, as in Godot), `a.dot(b)`, `a.distance_to(b)`, on `vec2` and `vec3`.
-- Random numbers, global like GDScript: `randf()` (0 to 1), `randf_range(lo, hi)`, `randi_range(lo, hi)` (both ends included, as in Godot). The generator is seeded from the clock at startup, like Godot 4; `rand_seed(n)` makes the sequence repeatable. They are not `pure`, because each call changes the generator.
-- These names are reserved, like `print`: a function, type, constant, variable or parameter with one of them is an error ("`min` is a built-in function; pick another name"). `seed` is not reserved, because programs already use it as a parameter name.
+- Random numbers, global like GDScript: `randf()` (0 up to but not including 1, so `int(randf() * n)` never indexes past the end), `randf_range(lo, hi)`, `randi_range(lo, hi)` (both ends included, as in Godot). The generator is seeded from the clock at startup, like Godot 4; `rand_seed(n)` makes the sequence repeatable. The generator is per thread. They are not `pure`, because each call changes the generator.
+- These names are reserved, like `print`, through the same check: a function, type, constant, variable or parameter with one of them is an error ("`min` is a built-in name; pick another", the message `print` and `Arena` already use). The vector method names (`length`, `normalized`, `dot`, `distance_to`) are not reserved, so a field can still be called `length`. `seed` is not reserved either, because programs already use it as a parameter name.
 
 ## String interpolation anywhere
 
 - `"hp {hp}"` is now a `string` value anywhere, not only in `print`: `let label = "hp {hp}"`. It formats exactly as `print` does and is built in the current arena, like a list.
+- Strings are heap values now, like arrays. Copying a string place copies its bytes into the current arena, literals stay in read-only data and belong to no arena, and the arena escape check covers strings. So storing a non-literal string into a longer-lived place needs `in x.mem { }`, for example `self.name = n` through `var self`. A map copies a string key when the key adds an entry.
 - An interpolated string passed straight to a `native` function's `string` parameter is built in scratch memory that is freed after the call. So `draw.text("fps {window.fps()}", ...)` in the frame loop doesn't grow memory every frame.
 - A `let label = "..."` inside the frame loop does allocate every frame. Wrap the loop body in `arena { }` when it builds strings or lists; the demo shows this.
 
@@ -157,7 +161,7 @@ No import needed, like GDScript. They are built into the compiler, like `int()`,
 - **Codegen:**
   - Natives are imports with Kestrel's own convention: scalars in registers, aggregates (`vec2`, structs) by pointer, strings as pointer and length, enums as their tag.
   - `sqrt floor ceil abs min max` use Cranelift instructions, and `round` is built from `trunc` (Cranelift's `nearest` rounds halves to even). `sin cos tan asin acos atan atan2 exp log pow` call the runtime.
-  - Format expressions reuse the print path: the runtime's output sink becomes a stack, `kestrel_rt_str_begin` pushes a buffer, the existing print calls write into it, and `kestrel_rt_str_end` copies it into the current arena.
+  - Format expressions reuse the print path: the runtime keeps a separate per-thread stack of string buffers in `runtime/src/print.rs`. The print sink is not part of it and is unchanged. `kestrel_rt_str_begin` pushes a buffer, the existing print calls write into the top one while any is open (and into the sink otherwise), and `kestrel_rt_str_end` pops it and copies it into the current arena. Buffers nest, so an interpolated string inside another one works.
 - The JIT gets the native table from the CLI, so the runtime's own list of symbols doesn't grow by one entry per native.
 
 ### Runtime behaviour

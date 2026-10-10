@@ -34,7 +34,18 @@ Done in 2b-i: labelled arguments evaluate in source order; `func/mod.rs` split; 
 ## Found while building strings anywhere (2026-10-10)
 
 - **A `T` used as a `T?` isn't copied** (use-after-free). Lowering wraps it as `Some(Load(..))`, and `owned` treats `Some` as a fresh value. So `in h.mem { h.s = k }`, with `s: string?` or `a: [int]?`, keeps pointing into the arena `k` came from. This predates strings in arenas, which widen its reach. Fix: copy the payload of a `Some(Load(..))`.
-- **Read-only copies of strings copy their bytes.** `let w = words[i]` copies, which makes `bench/maps` string keys about 35% slower. A copy that is only read could share the bytes, once the escape check models it.
+- **Read-only copies of strings copy their bytes.** `let w = words[i]` copies, which makes `bench/maps` string keys about 35% slower. A copy that is only read could share the bytes, once the escape check models it. This includes copies of literal-backed strings: a static-data check would skip them, since literals belong to no arena.
+- **A `return` inside `arena { }` can dangle.** The value is an `if` whose branch has an owning local, and the result reads a place declared outside the arena. `block_value` always uses `owned(v, false)`, but the checker's `region(.., moving = true)` assumes a returned local isn't copied. Example: `return if c { let o = Own(); x } else { "lit" }`. Fix: make the two agree on which values `block_value` copies.
+- **Binary vector operators don't evaluate operands in source order.** `p.pos + shift(var p)` reads `p.pos` after the call, and binary operators have no changed-later guard. Vector methods have the guard.
+- **A literal or plain-local index is still copied before a vector operation** (`vs[0].length()`). `operand` copies any indexed vector place so the index is evaluated once. This is safe but costs a copy for indexes that have no effects.
+- **Precision gotchas in the new builtins.**
+  - `let x: f64 = sqrt(2.0)` computes in `float`, then widens.
+  - An `i64` argument to a float builtin goes through `float`.
+  - Named float constants widen from `float` (`let HALF = PI / 2` is not exact against an `f64`).
+  - Builtin calls don't receive the expected type, so `let b: u8 = min(7, small)` fails while `min(small, 7)` works.
+- **Vector methods aren't allowed in `let` constants** (`let L = vec2(3, 4).length()`), while `sqrt`, `max` and `lerp` are.
+- **Cost of `round`, trig and `exp`.** `round` and the trigonometric and exponential functions go through `kestrel_rt_math` (a call) or a short instruction sequence, so a hot loop full of `sin` pays for the call.
+- **The random generator is per thread.** `rand_seed` seeds the calling thread only. Random calls are an error in `pure` functions and `par for` bodies, so this only matters if they are ever allowed there (say, one stream per iteration for repeatable parallel noise).
 
 ## Maps (built 2026-10-09)
 
@@ -59,7 +70,7 @@ Done in 2b-i: labelled arguments evaluate in source order; `func/mod.rs` split; 
 
 ## Do in 2c
 
-- **Strings (2b-ii scope).** String values are a pointer plus a length into read-only data, so only literals exist. `"{x}"` interpolation works only as a direct `print` argument, because building a new string needs memory, which comes with arenas. No `==`, length, indexing or concatenation yet; `"a" == "b"` reports "`==` needs numbers". Strings nested in a printed struct are quoted, but `"` inside them isn't escaped.
+- **Strings (2b-ii scope).** Interpolated strings work anywhere now and live in arenas (see "Found while building strings anywhere"). `==` works on strings. Still missing: length, indexing and concatenation. Strings nested in a printed struct are quoted, but `"` inside them isn't escaped.
 - **Exclusivity** only checks bare identifiers (`f(var a, a + 1)` passes; 3+ `var` uses of one local give duplicate diagnostics). Redesign it around place paths once aggregates are passed by pointer.
 - **Cleanup stack in codegen.** `break`/`continue`/`return` jump directly, but `arena { }` exits and scope-end drops need cleanup on every exit edge.
 - **Runtime stdout buffer is thread-local.** It must change before `par for` (sub-project 3).

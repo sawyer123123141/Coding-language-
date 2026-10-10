@@ -212,7 +212,7 @@ use {
 | `bool` | `true` / `false` |
 | `i8 i16 i64 u8 u16 u32 u64` | sized integers |
 | `f64` | 64-bit float |
-| `string` | text |
+| `string` | text, a heap value like an array: copying a string copies its bytes into the current arena (literals stay in read-only data and belong to no arena) |
 | `vec2 vec3 vec4` | float vectors, SIMD-backed |
 | `ivec2 ivec3 ivec4` | int vectors (voxel coordinates) |
 | `[T]` | array of `T`, fixed length once created (fast, arena/SIMD friendly) |
@@ -253,7 +253,30 @@ use {
 - **`if` is an expression:** `let n = if a { 1 } else { 2 }`.
 - **Indexing:** `a[i]`. **Field access:** `p.x`.
 - **Array literal:** `[1, 2, 3]`. Empty: `[]`.
-- **Interpolation:** `"hp = {hp}"`.
+- **Interpolation:** `"hp = {hp}"` works anywhere, not only in `print`
+  (`let label = "hp = {hp}"`). It formats as `print` does, and the string
+  is built in the current arena. Because strings are heap values, storing
+  a non-literal string into a longer-lived place needs `in x.mem { }`, the
+  same rule arrays have.
+
+## Built-in functions
+
+Built into the compiler, with no import, like `print` and `int()`. They
+can take several number types, which user functions can't. Their names
+are reserved: a function, type, constant, variable or parameter with one of
+them is an error ("`min` is a built-in name; pick another").
+
+- **Math:** `sqrt sin cos tan asin acos atan atan2 exp log pow floor ceil
+  round abs sign min max clamp lerp`, and the constants `PI` and `TAU`.
+  All are `pure`.
+- **Vector methods** (`vec2`, `vec3`): `v.length()`, `v.normalized()`,
+  `a.dot(b)`, `a.distance_to(b)`. These names are not reserved.
+- **Random numbers:** `randf()`, `randf_range(lo, hi)`,
+  `randi_range(lo, hi)`, `rand_seed(n)`. Not `pure`: each call changes the
+  generator.
+
+The full table of argument and result types is in
+`2026-10-10-window-design.md` ("Global math and random numbers").
 
 ## Statements
 
