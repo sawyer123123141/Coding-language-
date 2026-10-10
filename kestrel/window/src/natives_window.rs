@@ -34,6 +34,9 @@ pub unsafe fn open_with(settings: &Settings, width: i32, height: i32, title: *co
 
 #[no_mangle]
 pub extern "C" fn kestrel_window_frame() -> u8 {
+    // `print` is buffered until the program ends. A program that runs frames for
+    // minutes would show nothing meanwhile, so show it once per frame.
+    kestrel_runtime::print::flush();
     state::frame().unwrap_or_else(|msg| fail(&msg)) as u8
 }
 
