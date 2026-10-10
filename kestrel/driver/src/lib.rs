@@ -1,5 +1,10 @@
+//! Turns a program's entry file into KIR: loads the modules it uses, links,
+//! checks, lowers and inlines. Shared by the `kestrel` command and the Godot
+//! add-on.
+
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use kestrel_syntax::ast::Item;
 use kestrel_syntax::link::{link, Module};
@@ -11,6 +16,34 @@ pub enum DiagStyle {
     Short,
 }
 
+/// A file the program was built from, and when it last changed (for hot reload).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SourceFile {
+    pub path: PathBuf,
+    pub modified: Option<SystemTime>,
+}
+
+impl SourceFile {
+    fn new(path: &Path) -> Self {
+        SourceFile { path: path.to_path_buf(), modified: modified(path) }
+    }
+
+    /// Whether the file changed (or vanished) since it was read.
+    pub fn changed(&self) -> bool {
+        modified(&self.path) != self.modified
+    }
+}
+
+fn modified(path: &Path) -> Option<SystemTime> {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
+pub struct Compiled {
+    pub module: kestrel_kir::Module,
+    /// The entry file first, then each module it uses.
+    pub files: Vec<SourceFile>,
+}
+
 /// One source file of the program, laid out at `base` in a shared span space.
 struct File {
     path: String,
@@ -18,14 +51,12 @@ struct File {
     base: u32,
 }
 
-/// Parses, links, checks and lowers the program whose entry file is `path`
-/// (with text `src`), loading the modules it `use`s from the same folder.
-/// Prints every diagnostic to stderr and returns `None` when there are errors.
-pub fn compile(path: &str, src: &str, style: DiagStyle) -> Option<kestrel_kir::Module> {
+/// Compiles the program whose entry file is `path` (with text `src`). The
+/// second result is every diagnostic, rendered as text (empty when clean).
+pub fn compile(path: &str, src: &str, style: DiagStyle) -> (Option<Compiled>, String) {
     let (files, modules, mut diags) = load(path, src);
     if diags.iter().any(Diagnostic::is_error) {
-        report(&files, &diags, style);
-        return None;
+        return (None, report(&files, &diags, style));
     }
     let (program, link_diags) = link(modules);
     diags.extend(link_diags);
@@ -36,12 +67,21 @@ pub fn compile(path: &str, src: &str, style: DiagStyle) -> Option<kestrel_kir::M
         diags.extend(check_diags);
         tables
     };
-    report(&files, &diags, style);
-    let tables = tables?;
+    let text = report(&files, &diags, style);
+    let Some(tables) = tables else { return (None, text) };
     let parts: Vec<(u32, &str)> = files.iter().map(|f| (f.base, f.src.as_str())).collect();
     let mut module = kestrel_kir::lower(&program, &tables, &LineIndex::for_files(&parts));
     kestrel_kir::inline::inline_small(&mut module);
-    Some(module)
+    let files = files.iter().map(|f| SourceFile::new(Path::new(&f.path))).collect();
+    (Some(Compiled { module, files }), text)
+}
+
+/// Reads `path` and compiles it.
+pub fn compile_file(path: &Path, style: DiagStyle) -> (Option<Compiled>, String) {
+    match std::fs::read_to_string(path) {
+        Ok(src) => compile(&path.to_string_lossy(), src.strip_prefix('\u{feff}').unwrap_or(&src), style),
+        Err(e) => (None, format!("error: can't read {}: {e}\n", path.display())),
+    }
 }
 
 /// Parses the entry file and, transitively, every module it uses. A module
@@ -83,19 +123,24 @@ fn stem(path: &str) -> String {
     Path::new(path).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
-/// Prints each diagnostic against the file its span falls in.
-fn report(files: &[File], diags: &[Diagnostic], style: DiagStyle) {
+/// Renders each diagnostic against the file its span falls in.
+fn report(files: &[File], diags: &[Diagnostic], style: DiagStyle) -> String {
+    let mut out = String::new();
     for d in diags {
         let f = files.iter().rev().find(|f| f.base <= d.span.start).unwrap_or(&files[0]);
         let mut local = d.clone();
         local.span = Span { start: d.span.start - f.base, end: d.span.end.saturating_sub(f.base) };
         match style {
-            DiagStyle::Full => eprint!("{}", render(&f.src, &f.path, &local)),
-            DiagStyle::Short => eprintln!("{}", render_short(&f.src, &local)),
+            DiagStyle::Full => out.push_str(&render(&f.src, &f.path, &local)),
+            DiagStyle::Short => {
+                out.push_str(&render_short(&f.src, &local));
+                out.push('\n');
+            }
         }
     }
     let errors = diags.iter().filter(|d| d.is_error()).count();
     if errors > 0 && style == DiagStyle::Full {
-        eprintln!("{errors} error{}", if errors == 1 { "" } else { "s" });
+        out.push_str(&format!("{errors} error{}\n", if errors == 1 { "" } else { "s" }));
     }
+    out
 }

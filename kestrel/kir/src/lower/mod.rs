@@ -116,6 +116,8 @@ impl<'a> FnLowerer<'a> {
             is_pure: info.is_pure,
             io: info.io,
             mutates_params: info.mutates_params,
+            // Items of other modules are named `module.name`.
+            exported: decl.is_pub && info.method.is_none() && !info.name.contains('.'),
         }
     }
 

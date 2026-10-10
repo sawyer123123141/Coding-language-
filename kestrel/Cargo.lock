@@ -277,6 +277,7 @@ dependencies = [
  "find-msvc-tools",
  "kestrel-check",
  "kestrel-codegen",
+ "kestrel-driver",
  "kestrel-kir",
  "kestrel-syntax",
 ]
@@ -294,6 +295,15 @@ dependencies = [
  "kestrel-check",
  "kestrel-kir",
  "kestrel-runtime",
+ "kestrel-syntax",
+]
+
+[[package]]
+name = "kestrel-driver"
+version = "0.1.0"
+dependencies = [
+ "kestrel-check",
+ "kestrel-kir",
  "kestrel-syntax",
 ]
 

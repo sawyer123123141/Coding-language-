@@ -1,3 +1,4 @@
+pub mod export;
 mod func;
 mod isa;
 pub mod jit;
@@ -9,6 +10,7 @@ use cranelift_frontend::FunctionBuilderContext;
 use cranelift_module::{FuncId, Linkage, Module};
 use kestrel_kir as kir;
 
+pub use export::{ExportInfo, ExportTy};
 pub use jit::JitProgram;
 pub use object::emit_object;
 

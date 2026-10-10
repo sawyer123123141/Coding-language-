@@ -1,10 +1,9 @@
-mod driver;
 mod link;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use driver::DiagStyle;
+use kestrel_driver::DiagStyle;
 use kestrel_codegen::{emit_object, JitProgram, Options};
 
 const USAGE: &str = "usage: kestrel <run|check|build> <file.kes> [-o <exe>] [--release] [--diagnostics=short]";
@@ -86,7 +85,9 @@ fn run() -> ExitCode {
             return ExitCode::from(2);
         }
     }
-    let Some(module) = driver::compile(&args.path, src, args.style) else { return ExitCode::from(1) };
+    let (compiled, diagnostics) = kestrel_driver::compile(&args.path, src, args.style);
+    eprint!("{diagnostics}");
+    let Some(module) = compiled.map(|c| c.module) else { return ExitCode::from(1) };
     let opts = Options { checked_arith: !args.release };
     let result = match args.cmd.as_str() {
         "check" => return ExitCode::SUCCESS,

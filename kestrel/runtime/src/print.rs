@@ -2,8 +2,31 @@ use std::cell::RefCell;
 use std::fmt::Arguments;
 use std::io::{self, BufWriter, Stdout, Write};
 
+/// Where this thread's `print` output goes.
+enum Sink {
+    Stdout(BufWriter<Stdout>),
+    /// Kept for the host to collect (see `capture_output`).
+    Buffer(Vec<u8>),
+}
+
+impl Write for Sink {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        match self {
+            Sink::Stdout(w) => w.write(bytes),
+            Sink::Buffer(b) => b.write(bytes),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Sink::Stdout(w) => w.flush(),
+            Sink::Buffer(_) => Ok(()),
+        }
+    }
+}
+
 thread_local! {
-    static OUT: RefCell<BufWriter<Stdout>> = RefCell::new(BufWriter::new(io::stdout()));
+    static OUT: RefCell<Sink> = RefCell::new(Sink::Stdout(BufWriter::new(io::stdout())));
 }
 
 fn write_fmt(args: Arguments) {
@@ -22,6 +45,21 @@ pub fn flush() {
     OUT.with(|o| {
         let _ = o.borrow_mut().flush();
     });
+}
+
+/// From now on, this thread's `print` output is kept in memory instead of
+/// written to stdout; `take_output` collects it.
+pub fn capture_output() {
+    flush();
+    OUT.with(|o| *o.borrow_mut() = Sink::Buffer(Vec::new()));
+}
+
+/// The output captured on this thread since the last call (empty when not capturing).
+pub fn take_output() -> Vec<u8> {
+    OUT.with(|o| match &mut *o.borrow_mut() {
+        Sink::Buffer(b) => std::mem::take(b),
+        Sink::Stdout(_) => Vec::new(),
+    })
 }
 
 #[no_mangle]
@@ -63,4 +101,22 @@ pub extern "C" fn kestrel_rt_print_space() {
 #[no_mangle]
 pub extern "C" fn kestrel_rt_print_newline() {
     write_bytes(b"\n");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn captured_output_is_collected_per_call() {
+        std::thread::spawn(|| {
+            capture_output();
+            kestrel_rt_print_i64(42);
+            kestrel_rt_print_newline();
+            assert_eq!(take_output(), b"42\n");
+            assert_eq!(take_output(), b"");
+        })
+        .join()
+        .unwrap();
+    }
 }

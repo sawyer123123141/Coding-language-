@@ -171,6 +171,7 @@ impl Helpers {
             is_pure: true,
             io: false,
             mutates_params: true,
+            exported: false,
         };
         idx
     }
@@ -208,6 +209,7 @@ impl Helpers {
             is_pure: true,
             io: false,
             mutates_params: false,
+            exported: false,
         };
         self.funcs.push(placeholder);
         idx
@@ -255,6 +257,7 @@ impl Helpers {
             is_pure: true,
             io: false,
             mutates_params: true,
+            exported: false,
         };
         idx
     }
@@ -289,6 +292,7 @@ impl Helpers {
             is_pure: false,
             io: true,
             mutates_params: false,
+            exported: false,
         };
         idx
     }

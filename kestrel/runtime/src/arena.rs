@@ -69,9 +69,7 @@ impl Drop for Arena {
 }
 
 fn too_large() -> ! {
-    crate::print::flush();
-    eprintln!("kestrel: out of memory: allocation is too large");
-    std::process::exit(101);
+    crate::panic::fail("out of memory: allocation is too large");
 }
 
 struct Stack {

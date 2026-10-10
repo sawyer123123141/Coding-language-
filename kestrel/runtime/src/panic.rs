@@ -6,9 +6,22 @@ pub const PANIC_NARROW_U8: i32 = 4;
 /// `x << n` / `x >> n` with `n` negative or at least the type's width.
 pub const PANIC_SHIFT: i32 = 5;
 
-/// Flushes output, reports `msg` and exits with code 101.
+static FAILURE_HOOK: std::sync::OnceLock<fn(&str) -> !> = std::sync::OnceLock::new();
+
+/// Makes runtime failures (overflow, bad index, ...) call `hook` instead of
+/// ending the process: for hosts that embed Kestrel, like the Godot add-on.
+/// `hook` must not return. The first hook set stays.
+pub fn set_failure_hook(hook: fn(&str) -> !) {
+    let _ = FAILURE_HOOK.set(hook);
+}
+
+/// Flushes output, then hands `msg` to the failure hook, or reports it and
+/// exits with code 101.
 pub(crate) fn fail(msg: &str) -> ! {
     crate::print::flush();
+    if let Some(hook) = FAILURE_HOOK.get() {
+        hook(msg);
+    }
     eprintln!("kestrel: {msg}");
     std::process::exit(101);
 }

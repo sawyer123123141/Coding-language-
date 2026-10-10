@@ -12,6 +12,7 @@ kestrel-syntax.workspace = true
 kestrel-check.workspace = true
 kestrel-kir.workspace = true
 kestrel-codegen.workspace = true
+kestrel-driver.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 find-msvc-tools.workspace = true

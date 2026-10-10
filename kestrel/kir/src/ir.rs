@@ -200,6 +200,8 @@ pub struct Func {
     pub is_pure: bool,
     pub io: bool,
     pub mutates_params: bool,
+    /// `pub` and in the entry file: a host (the Godot add-on) may call it.
+    pub exported: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -2,6 +2,7 @@ use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::FuncId;
 use kestrel_kir as kir;
 
+use crate::export::{define_thunks, ExportInfo};
 use crate::{define_module, isa, rt, Options};
 
 /// A module compiled into this process's memory.
@@ -9,7 +10,11 @@ pub struct JitProgram {
     module: JITModule,
     main: FuncId,
     funcs: Vec<(String, FuncId)>,
+    exports: Vec<(ExportInfo, FuncId)>,
 }
+
+/// A host's way into an exported function: arguments in, result out (see `ExportInfo`).
+pub type Thunk = unsafe extern "C" fn(args: *const u8, ret: *mut u8);
 
 impl JitProgram {
     pub fn compile(m: &kir::Module, opts: Options) -> Result<Self, String> {
@@ -19,9 +24,20 @@ impl JitProgram {
         }
         let mut module = JITModule::new(builder);
         let ids = define_module(&mut module, m, opts)?;
+        let exports = define_thunks(&mut module, m, &ids)?;
         module.finalize_definitions().map_err(|e| e.to_string())?;
         let funcs = m.funcs.iter().zip(&ids).map(|(f, &id)| (f.name.clone(), id)).collect();
-        Ok(JitProgram { main: ids[m.main.0 as usize], module, funcs })
+        Ok(JitProgram { main: ids[m.main.0 as usize], module, funcs, exports })
+    }
+
+    /// The `pub` functions of the entry file, with the thunks that call them.
+    pub fn exports(&self) -> Vec<(ExportInfo, Thunk)> {
+        let thunk = |id: FuncId| {
+            let code = self.module.get_finalized_function(id);
+            // SAFETY: every thunk was defined with the `Thunk` signature.
+            unsafe { std::mem::transmute::<*const u8, Thunk>(code) }
+        };
+        self.exports.iter().map(|(info, id)| (info.clone(), thunk(*id))).collect()
     }
 
     /// Machine code address of a Kestrel function (tests call these directly).
