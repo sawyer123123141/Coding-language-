@@ -8,7 +8,7 @@ use kestrel_syntax::{parse, LineIndex};
 
 mod common;
 
-use common::{jit_natives, run_captured};
+use common::{jit_natives, jit_natives_with, run_captured};
 
 /// A string argument: a pointer to this 16-byte header.
 #[repr(C)]
@@ -228,4 +228,88 @@ main() {
     // `i` stops at 3: `break` leaves the loop on the third round, and every early exit
     // has popped its arena, so the current arena is the program's again.
     assert_eq!(run_captured(&p), "true true\ntrue true\ntrue vec2(x: 4, y: 2)\n1 0 true\n3 true\n");
+}
+
+/// Reads its argument as a whole 32-bit register, which is what a C function declared with an
+/// `unsigned`/`int` parameter does. Declared `u8` in Kestrel, so only the zero-extension the
+/// caller adds keeps the register's upper bits from showing.
+extern "C" fn k_wide(b: u32) -> i32 {
+    b as i32
+}
+
+#[test]
+fn small_arguments_are_zero_extended() {
+    // `u8(xs[i])` with checks off truncates, and nothing clears the register's upper bits (the
+    // values come from memory, so they can't be folded into constants): 74565 is 0x12345.
+    let src = "native wide(b: u8) -> int
+main() {
+    let xs = [74565, 74566, 255, 256]
+    var i = 0
+    while i < xs.len {
+        print(wide(u8(xs[i])))
+        i += 1
+    }
+}
+";
+    let release = Options { checked_arith: false };
+    let p = jit_natives_with(src, &[("kestrel_wide", k_wide as *const u8)], release).expect("codegen");
+    assert_eq!(run_captured(&p), "69\n70\n255\n0\n");
+}
+
+#[test]
+fn a_bool_argument_is_zero_extended_too() {
+    // `a != b` is a byte (0 or 1) that nothing else has widened.
+    let src = "native wide(b: bool) -> int
+main() {
+    let xs = [74565, 74566]
+    var i = 0
+    while i < xs.len {
+        print(wide(xs[i] != 74566), wide(xs[i] == 74566))
+        i += 1
+    }
+}
+";
+    let p = jit_natives_with(src, &[("kestrel_wide", k_wide as *const u8)], Options { checked_arith: false }).expect("codegen");
+    assert_eq!(run_captured(&p), "1 0\n0 1\n");
+}
+
+/// Kestrel's `Mix`, as C would lay it out: declaration order, natural alignment.
+#[repr(C)]
+struct Mix {
+    a: u8,
+    b: u8,
+    c: i64,
+    s: KStr,
+    v: [f32; 3],
+}
+
+/// A different decimal place for each field, so a wrong offset shows in the digits.
+extern "C" fn k_checksum(m: *const Mix) -> i64 {
+    // SAFETY: Kestrel passes a pointer to a live `Mix`, whose string points at `len` bytes.
+    let m = unsafe { &*m };
+    let bytes = unsafe { std::slice::from_raw_parts(m.s.ptr, m.s.len as usize) };
+    let byte_sum: i64 = bytes.iter().map(|&b| b as i64).sum();
+    let v = (m.v[0] + 10.0 * m.v[1] + 100.0 * m.v[2]) as i64;
+    m.a as i64 + 1_000 * m.b as i64 + 10_000 * m.s.len + 1_000_000 * byte_sum + 10_000_000_000 * v + m.c
+}
+
+#[test]
+fn a_struct_of_mixed_widths_has_the_layout_c_expects() {
+    let src = "struct Mix {
+    a: u8
+    b: bool
+    c: i64
+    s: string
+    v: vec3
+}
+native checksum(m: Mix) -> i64
+main() {
+    let big: i64 = 7000000000000000
+    let m = Mix(200, true, big, \"kes\", vec3(1, 2, 3))
+    print(checksum(m))
+}
+";
+    let p = jit_natives(src, &[("kestrel_checksum", k_checksum as *const u8)]).expect("codegen");
+    // a 200, b 1,000, the length 3 * 10,000, the bytes 323 * 1,000,000, v 321 * 10,000,000,000, c 7e15.
+    assert_eq!(run_captured(&p), "7003210323031200\n");
 }

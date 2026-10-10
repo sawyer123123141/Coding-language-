@@ -31,13 +31,18 @@ pub fn call1(p: &JitProgram, name: &str, x: i32) -> i32 {
 /// Like `jit_with`, giving the JIT the addresses of Rust functions that the
 /// program's `native` declarations import.
 pub fn jit_natives(src: &str, extra: &[(&str, *const u8)]) -> Result<JitProgram, String> {
+    jit_natives_with(src, extra, Options::default())
+}
+
+/// Like `jit_natives`, with the given options (`checked_arith: false` is `--release`).
+pub fn jit_natives_with(src: &str, extra: &[(&str, *const u8)], opts: Options) -> Result<JitProgram, String> {
     let (p, d) = parse(src);
     assert!(d.is_empty(), "parse: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
     let (t, d) = kestrel_check::check(&p);
     assert!(d.is_empty(), "check: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
     let mut m = kestrel_kir::lower(&p, &t.unwrap(), &LineIndex::new(src));
     kestrel_kir::inline::inline_small(&mut m);
-    JitProgram::compile_with(&m, Options::default(), extra)
+    JitProgram::compile_with(&m, opts, extra)
 }
 
 /// Runs the program's `main` on this thread and returns what it printed.
