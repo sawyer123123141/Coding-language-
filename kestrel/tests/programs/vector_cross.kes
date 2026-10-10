@@ -1,0 +1,17 @@
+// expect: vec3(x: 0, y: 0, z: 1)
+// expect: vec3(x: 0, y: 0, z: -1)
+// expect: vec3(x: -3, y: 6, z: -3)
+// expect: 0 0
+pure up_from(right: vec3, forward: vec3) -> vec3 {
+    forward.cross(right)
+}
+
+main() {
+    let x = vec3(1, 0, 0)
+    let y = vec3(0, 1, 0)
+    print(x.cross(y))
+    print(y.cross(x))
+    print(vec3(1, 2, 3).cross(vec3(4, 5, 6)))
+    let z = up_from(x, y)
+    print(z.dot(x), z.dot(y))
+}

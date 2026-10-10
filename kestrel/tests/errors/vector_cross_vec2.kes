@@ -1,0 +1,4 @@
+main() {
+    print(vec2(1, 0).cross(vec2(0, 1)))
+}
+// error 2: `cross` needs a vec3; vec2 has no cross product

@@ -88,8 +88,9 @@ impl<'a> FnLowerer<'a> {
         Self::with_pre(pre, ExprKind::StructLit(s, fields), ty, line)
     }
 
-    /// A `vec2` / `vec3` method (`length`, `normalized`, `dot`, `distance_to`),
-    /// with the receiver, then the argument, evaluated once, in that order.
+    /// A `vec2` / `vec3` method (`length`, `normalized`, `dot`, `distance_to`,
+    /// and `cross` on a `vec3`), with the receiver, then the argument,
+    /// evaluated once, in that order.
     pub(crate) fn vector_method(&mut self, b: Builtin, receiver: &ast::Expr, args: &[ast::Arg], ty: KTy, line: u32) -> ExprKind {
         let mut pre = Vec::new();
         let v = self.expr(receiver);
@@ -122,6 +123,18 @@ impl<'a> FnLowerer<'a> {
                 let unit = (0..dims).map(|i| binary(BinOp::Div, &Self::component(&o, i, line), &len, KTy::F32, line)).collect();
                 let zero = (0..dims).map(|_| number(0, KTy::F32, line)).collect();
                 select(positive, node(ExprKind::StructLit(s, unit), ty, line), node(ExprKind::StructLit(s, zero), ty, line))
+            }
+            Builtin::Cross => {
+                let l = self.operand(v, &mut pre);
+                let w = self.expr(&args[0].value);
+                let r = self.operand(w, &mut pre);
+                let c = |o: &Operand, i| Self::component(o, i, line);
+                let term = |i, j| {
+                    let ij = binary(BinOp::Mul, &c(&l, i), &c(&r, j), KTy::F32, line);
+                    let ji = binary(BinOp::Mul, &c(&l, j), &c(&r, i), KTy::F32, line);
+                    binary(BinOp::Sub, &ij, &ji, KTy::F32, line)
+                };
+                ExprKind::StructLit(s, vec![term(1, 2), term(2, 0), term(0, 1)])
             }
             other => unreachable!("{other:?} isn't a vector method"),
         };

@@ -34,6 +34,8 @@ pub enum Builtin {
     Normalized,
     Dot,
     DistanceTo,
+    /// `vec3` only.
+    Cross,
 }
 
 /// Every global function and constant. A new variant belongs here or in `METHODS`.
@@ -66,7 +68,7 @@ const GLOBALS: [Builtin; 26] = [
     Builtin::Tau,
 ];
 
-const METHODS: [Builtin; 4] = [Builtin::Length, Builtin::Normalized, Builtin::Dot, Builtin::DistanceTo];
+const METHODS: [Builtin; 5] = [Builtin::Length, Builtin::Normalized, Builtin::Dot, Builtin::DistanceTo, Builtin::Cross];
 
 const GLOBAL_NAME_LIST: [&str; GLOBALS.len()] = {
     let mut names = [""; GLOBALS.len()];
@@ -124,6 +126,7 @@ impl Builtin {
             Builtin::Normalized => "normalized",
             Builtin::Dot => "dot",
             Builtin::DistanceTo => "distance_to",
+            Builtin::Cross => "cross",
         }
     }
 
@@ -143,7 +146,7 @@ impl Builtin {
         match self {
             Pi | Tau | Randf | Length | Normalized => 0,
             Sqrt | Sin | Cos | Tan | Asin | Acos | Atan | Exp | Log | Floor | Ceil | Round | Abs | Sign | RandSeed | Dot
-            | DistanceTo => 1,
+            | DistanceTo | Cross => 1,
             Atan2 | Pow | Min | Max | RandfRange | RandiRange => 2,
             Clamp | Lerp => 3,
         }

@@ -88,8 +88,9 @@ impl<'a> BodyChecker<'a> {
         }
     }
 
-    /// A call to a `vec2` / `vec3` method (`length`, `normalized`, `dot`, `distance_to`).
-    /// Its values are vectors of the receiver's type.
+    /// A call to a `vec2` / `vec3` method (`length`, `normalized`, `dot`,
+    /// `distance_to`, and `cross` on a `vec3`). Its values are vectors of the
+    /// receiver's type.
     pub(crate) fn check_vector_method(&mut self, e: &Expr, b: Builtin, receiver: &Expr, receiver_ty: Ty, args: &[Arg]) -> Ty {
         if let Some((span, msg)) = args_problem(e, b, args) {
             self.error(span, msg);
@@ -99,13 +100,17 @@ impl<'a> BodyChecker<'a> {
         for a in args {
             self.check_value(&a.value, Some(receiver_ty));
         }
+        if b == Builtin::Cross && self.t.vec_dims(receiver_ty) != Some(3) {
+            self.error(e.span, "`cross` needs a vec3; vec2 has no cross product");
+            return Ty::Error;
+        }
         // A receiver that is a plain place (`p.pos`) is read after the values
         // are computed, so they must not change it. (One that computes an
         // index, like `vs[i]`, is copied first, in order.)
         let later: Vec<&Expr> = args.iter().map(|a| &a.value).collect();
         self.check_changed_later(&[receiver], &later);
         self.t.res.insert(e.id, Res::Builtin(b));
-        if b == Builtin::Normalized {
+        if matches!(b, Builtin::Normalized | Builtin::Cross) {
             receiver_ty
         } else {
             Ty::Float

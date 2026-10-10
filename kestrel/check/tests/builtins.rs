@@ -1,4 +1,4 @@
-use kestrel_check::{check, Builtin, Res, Tables, Ty, VEC2};
+use kestrel_check::{check, Builtin, Res, Tables, Ty, VEC2, VEC3};
 use kestrel_syntax::parse;
 
 fn run(src: &str) -> (Option<Tables>, Vec<String>) {
@@ -80,6 +80,15 @@ fn generic_functions_and_vector_methods_have_the_common_type() {
 }
 
 #[test]
+fn cross_gives_a_vec3() {
+    let (t, errs) = run("main() {\n let c = vec3(1, 0, 0).cross(vec3(0, 1, 0))\n print(c)\n}\n");
+    assert!(errs.is_empty(), "{errs:?}");
+    let t = t.unwrap();
+    assert_eq!(local_ty(&t, "c"), Ty::Struct(VEC3));
+    assert!(t.res.values().any(|r| matches!(r, Res::Builtin(Builtin::Cross))), "Cross should be resolved");
+}
+
+#[test]
 fn lerp_converts_an_integer_t_and_integer_ends_to_float() {
     // `lerp(vec2, vec2, 1)`: `t` goes to float. `lerp(0, 10, 1)`: all three go to float.
     let (t, errs) = run("main() {\n print(lerp(vec2(0, 0), vec2(1, 1), 1), lerp(0, 10, 1))\n}\n");
@@ -131,7 +140,7 @@ fn builtin_tables_agree() {
         assert_eq!(b.name(), name);
         assert!(Builtin::vector_method(name).is_none(), "`{name}` is both a global and a vector method");
     }
-    for name in ["length", "normalized", "dot", "distance_to"] {
+    for name in ["length", "normalized", "dot", "distance_to", "cross"] {
         let b = Builtin::vector_method(name).unwrap();
         assert_eq!(b.name(), name);
         assert!(Builtin::global(name).is_none(), "vector method `{name}` must not be a global name");
@@ -188,6 +197,10 @@ fn builtin_errors() {
         ("main() {\n print(vec2(1, 2).dot(other: vec2(1, 2)))\n}\n", "built-in functions take plain values, not labels or `var`"),
         ("main() {\n vec2(1, 2).length()\n}\n", "the result of `length` is unused, so this line does nothing"),
         ("main() {\n print(vec2(1, 2).foo())\n}\n", "`vec2` has no method `foo`"),
+        ("main() {\n print(vec3(1, 2, 3).cross())\n}\n", "`cross` takes one value"),
+        ("main() {\n print(vec3(1, 2, 3).cross(vec2(1, 2)))\n}\n", "expected vec3, found vec2"),
+        ("main() {\n print(vec2(1, 2).cross(vec2(1, 2)))\n}\n", "`cross` needs a vec3; vec2 has no cross product"),
+        ("main() {\n vec3(1, 2, 3).cross(vec3(1, 2, 3))\n}\n", "the result of `cross` is unused, so this line does nothing"),
         (
             "bump(var v: vec2) -> vec2 {\n v = vec2(0, 0)\n v\n}\nmain() {\n var v = vec2(1, 2)\n print(v.dot(bump(var v)))\n}\n",
             "`v` is passed here, but a later argument changes it",
