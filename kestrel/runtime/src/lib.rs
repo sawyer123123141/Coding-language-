@@ -5,6 +5,7 @@ pub mod arena;
 mod blocks;
 pub mod map;
 pub mod panic;
+pub mod par;
 pub mod print;
 pub mod start;
 

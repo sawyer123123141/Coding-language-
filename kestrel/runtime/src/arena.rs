@@ -61,6 +61,12 @@ impl Arena {
         start as *mut u8
     }
 
+    /// Takes over `other`'s blocks: what was allocated there now lives as
+    /// long as `self` (a `par for` thread's arena joining the caller's).
+    pub fn absorb(&mut self, other: &mut Arena) {
+        self.blocks.append(&mut other.blocks);
+    }
+
     /// A block of at least `size` bytes, and how big it really is.
     fn block(&mut self, size: usize, align: usize) -> (*mut u8, usize) {
         let (p, layout) = blocks::take(size, align);
@@ -102,6 +108,9 @@ pub extern "C" fn kestrel_rt_current_arena() -> *mut Arena {
 
 /// The program arena, which lives until the program ends.
 pub(crate) fn program_arena() -> *mut Arena {
+    if let Some(a) = crate::par::job_program_arena() {
+        return a;
+    }
     STACK.with_borrow_mut(|s| &mut **s.program.get_or_insert_with(Box::default) as *mut Arena)
 }
 
@@ -194,8 +203,9 @@ pub unsafe extern "C" fn kestrel_rt_list_grow(list: *mut List, elem_size: i64, a
     let cap = (l.cap * 2).max(4);
     let size = cap.checked_mul(elem_size).and_then(|s| usize::try_from(s).ok()).unwrap_or_else(|| too_large());
     // SAFETY: a list's arena outlives the list. Spare capacity is never read
-    // before it's written, so it needn't be zeroed.
-    let p = unsafe { (*l.arena).alloc_uninit(size, align as usize) };
+    // before it's written, so it needn't be zeroed. Inside a `par for`, other
+    // threads may be allocating in the same arena.
+    let p = crate::par::shared_growth(l.arena, || unsafe { (*l.arena).alloc_uninit(size, align as usize) });
     if l.len > 0 {
         // SAFETY: the old buffer holds `len` elements; the new one is fresh and bigger.
         unsafe { std::ptr::copy_nonoverlapping(l.ptr, p, (l.len * elem_size) as usize) };

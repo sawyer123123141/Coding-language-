@@ -175,8 +175,12 @@ impl Map {
         let slot_count = (cap as usize * 2).next_power_of_two();
         let bytes = cap.checked_mul(size).and_then(|b| usize::try_from(b).ok());
         let bytes = bytes.unwrap_or_else(|| fail("out of memory: a map is too large"));
-        // Entries are written before they're read; the table is filled by `rebuild`.
-        let entries = (*arena).alloc_uninit(bytes, align as usize);
+        // Entries are written before they're read; the table is filled by
+        // `rebuild`. Inside a `par for`, other threads may share `arena`.
+        let slot_bytes = slot_count * 4;
+        let (entries, slots) = crate::par::shared_growth(arena, || {
+            ((*arena).alloc_uninit(bytes, align as usize), (*arena).alloc_uninit(slot_bytes, 4) as *mut i32)
+        });
         let mut j = 0;
         for i in 0..self.used {
             let e = self.entry(i, size);
@@ -188,7 +192,7 @@ impl Map {
         self.entries = entries;
         self.used = j;
         self.cap = cap;
-        self.slots = (*arena).alloc_uninit(slot_count * 4, 4) as *mut i32;
+        self.slots = slots;
         self.slot_count = slot_count as i64;
     }
 
