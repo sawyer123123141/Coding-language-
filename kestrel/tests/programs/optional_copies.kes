@@ -1,0 +1,145 @@
+// expect: kept0
+// expect: [7, 8, 9]
+// expect: Player(name: "Ann1", nick: Ann1)
+// expect: Player(name: "Bo1", nick: Bo1)
+// expect: found3
+// expect: found3
+// expect: [4, 5, 6]
+// expect: branch3
+// expect: [1, 2]
+// A `T` used as a `T?` is copied like any other stored value: the optional
+// must not point into memory the source's arena gives back.
+struct Own {
+    mem: Arena = Arena()
+    name: string = ""
+    ids: [int] = []
+}
+
+struct Holder {
+    mem: Arena = Arena()
+    s: string? = none
+    ids: [int]? = none
+}
+
+struct Player {
+    name: string
+    nick: string?
+}
+
+struct World {
+    mem: Arena = Arena()
+    players: list[Player] = list[Player]()
+}
+
+// Writes over the memory that earlier `arena { }` blocks gave back.
+churn() {
+    for r from 0 to 20 {
+        arena {
+            let junk = "XXXXXXXXXXXX{r % 10}"
+            var more = array[int](8)
+            for i from 0 to 8 {
+                more[i] = 99999 + i
+            }
+        }
+    }
+}
+
+make(n: string) -> Player {
+    Player(name: n, nick: n)
+}
+
+found_tail() -> string? {
+    var o = Own()
+    in o.mem {
+        o.name = "found{1 + 2}"
+    }
+    o.name
+}
+
+found_return() -> string? {
+    var o = Own()
+    in o.mem {
+        o.name = "found{1 + 2}"
+    }
+    return o.name
+}
+
+ids_tail() -> [int]? {
+    var o = Own()
+    in o.mem {
+        o.ids = array[int](3)
+    }
+    for i from 0 to 3 {
+        o.ids[i] = 4 + i
+    }
+    o.ids
+}
+
+main() {
+    var h = Holder()
+    let n = 1
+    arena {
+        let k = "kept{n - 1}"
+        in h.mem {
+            h.s = k
+        }
+        var a = array[int](3)
+        for i from 0 to 3 {
+            a[i] = 7 + i
+        }
+        in h.mem {
+            h.ids = a
+        }
+    }
+    churn()
+    print(h.s)
+    print(h.ids)
+
+    var w = World()
+    arena {
+        let tmp = "Ann{n}"
+        in w.mem {
+            w.players.add(make(tmp))
+        }
+        let tmp2 = "Bo{n}"
+        in w.mem {
+            w.players.add(make(tmp2))
+        }
+    }
+    churn()
+    for p in w.players {
+        print(p)
+    }
+
+    let a = found_tail()
+    let b = found_return()
+    let c = ids_tail()
+    churn()
+    print(a)
+    print(b)
+    print(c)
+
+    let t: string? = if n == 1 {
+        var o = Own()
+        in o.mem {
+            o.name = "branch{1 + 2}"
+        }
+        o.name
+    } else {
+        none
+    }
+    let u: [int]? = if n == 1 {
+        var o = Own()
+        in o.mem {
+            o.ids = array[int](2)
+        }
+        o.ids[0] = 1
+        o.ids[1] = 2
+        o.ids
+    } else {
+        none
+    }
+    churn()
+    print(t)
+    print(u)
+}

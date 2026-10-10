@@ -217,6 +217,8 @@ impl<'a> FnLowerer<'a> {
                 else_body,
                 else_val: else_val.map(|v| Box::new(self.owned(*v, moving))),
             },
+            // A `T` used as a `T?`: the payload is a stored value like any other.
+            ExprKind::Some(inner) => ExprKind::Some(Box::new(self.owned(*inner, moving))),
             // Everything else builds a fresh value.
             other => other,
         };

@@ -33,7 +33,6 @@ Done in 2b-i: labelled arguments evaluate in source order; `func/mod.rs` split; 
 
 ## Found while building strings anywhere (2026-10-10)
 
-- **A `T` used as a `T?` isn't copied** (use-after-free). Lowering wraps it as `Some(Load(..))`, and `owned` treats `Some` as a fresh value. So `in h.mem { h.s = k }`, with `s: string?` or `a: [int]?`, keeps pointing into the arena `k` came from. This predates strings in arenas, which widen its reach. Fix: copy the payload of a `Some(Load(..))`.
 - **Read-only copies of strings copy their bytes.** `let w = words[i]` copies, which makes `bench/maps` string keys about 35% slower. A copy that is only read could share the bytes, once the escape check models it. This includes copies of literal-backed strings: a static-data check would skip them, since literals belong to no arena.
 - **A `return` inside `arena { }` can dangle.** The value is an `if` whose branch has an owning local, and the result reads a place declared outside the arena. `block_value` always uses `owned(v, false)`, but the checker's `region(.., moving = true)` assumes a returned local isn't copied. Example: `return if c { let o = Own(); x } else { "lit" }`. Fix: make the two agree on which values `block_value` copies.
 - **Binary vector operators don't evaluate operands in source order.** `p.pos + shift(var p)` reads `p.pos` after the call, and binary operators have no changed-later guard. Vector methods have the guard.
