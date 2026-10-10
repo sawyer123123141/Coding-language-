@@ -5,6 +5,7 @@ mod expr;
 mod maps;
 mod matching;
 mod nested;
+mod par;
 mod place;
 mod regions;
 mod structs;
@@ -47,6 +48,8 @@ pub(crate) struct BodyChecker<'a> {
     moved: HashSet<LocalId>,
     /// `match` arms whose bindings are reading a place right now.
     match_guards: Vec<regions::MatchGuard>,
+    /// Enclosing `par for` bodies, outermost first.
+    par: Vec<par::ParBody>,
 }
 
 pub(crate) fn check_consts(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
@@ -115,7 +118,8 @@ impl<'a> BodyChecker<'a> {
         let ctxs = vec![regions::Ctx::Function];
         let (local_ctx, views, moved) = (HashMap::new(), HashSet::new(), HashSet::new());
         let (scopes, loop_breaks, match_guards) = (Vec::new(), Vec::new(), Vec::new());
-        BodyChecker { t, diags, fn_id, scopes, loop_breaks, ret, is_pure, ctxs, local_ctx, views, moved, match_guards }
+        let par = Vec::new();
+        BodyChecker { t, diags, fn_id, scopes, loop_breaks, ret, is_pure, ctxs, local_ctx, views, moved, match_guards, par }
     }
 
     /// A type as it reads in messages.
@@ -310,8 +314,8 @@ impl<'a> BodyChecker<'a> {
                 self.scopes.pop();
                 Ty::Unit
             }
-            Stmt::ForIn { index, var, iter, body, .. } => {
-                self.check_for_in(index.as_ref(), var, iter, body);
+            Stmt::ForIn { par, index, var, iter, body, .. } => {
+                self.check_for_in(*par, index.as_ref(), var, iter, body);
                 Ty::Unit
             }
             // A block that always leaves (say, ends in `return`) never finishes.
@@ -324,6 +328,9 @@ impl<'a> BodyChecker<'a> {
             Stmt::In { arena, body, .. } => self.check_in(arena, body),
             Stmt::Break(span) | Stmt::Continue(span) => {
                 let is_break = matches!(s, Stmt::Break(_));
+                if is_break && self.par.last().is_some_and(|p| p.depth == self.loop_breaks.len()) {
+                    self.error(*span, "`break` can't stop a `par for`: iterations run at the same time");
+                }
                 match self.loop_breaks.last_mut() {
                     Some(broke) => *broke |= is_break,
                     None => {
@@ -334,6 +341,9 @@ impl<'a> BodyChecker<'a> {
                 Ty::Never
             }
             Stmt::Return { value, span } => {
+                if !self.par.is_empty() {
+                    self.error(*span, "`return` can't leave a `par for` body");
+                }
                 match (value, self.ret) {
                     (Some(v), Ty::Unit) => {
                         self.check_expr(v, None);

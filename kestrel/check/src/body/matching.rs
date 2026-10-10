@@ -64,6 +64,7 @@ impl<'a> BodyChecker<'a> {
                             }
                             let l = self.declare(b, Ty::Variant(id, v as u32), changeable, false, false);
                             self.t.locals[l.0 as usize].alias = root;
+                            self.note_view(l, scrutinee);
                             if let Some(root) = root {
                                 self.match_guards.push(super::regions::MatchGuard { root, path: path.clone(), binding: l });
                                 guarded = true;

@@ -23,11 +23,17 @@ pub(crate) enum Ctx {
 /// steps, `Some(field)` or `None` for an index.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct PathKey {
-    root: LocalId,
+    pub(crate) root: LocalId,
     steps: Vec<Option<String>>,
 }
 
 impl PathKey {
+    /// Whether `self` and `p` may name overlapping memory: one is inside
+    /// the other, with an index matching any index.
+    pub(crate) fn overlaps(&self, p: &PathKey) -> bool {
+        self.root == p.root && self.steps.iter().zip(&p.steps).all(|(a, b)| a.is_none() || b.is_none() || a == b)
+    }
+
     /// Whether `self` is `p` or inside it. An index in `p` matches nothing,
     /// since two indexes may differ.
     fn starts_with(&self, p: &PathKey) -> bool {
@@ -79,7 +85,7 @@ impl<'a> BodyChecker<'a> {
         }
     }
 
-    fn path_name(&self, p: &PathKey) -> String {
+    pub(crate) fn path_name(&self, p: &PathKey) -> String {
         let mut s = self.t.local(p.root).name.clone();
         for step in &p.steps {
             match step {
@@ -208,6 +214,7 @@ impl<'a> BodyChecker<'a> {
         let ctx = match (ty, owner) {
             (Ty::Arena, Some(p)) => {
                 self.check_changeable_arena(arena);
+                self.check_par_write(arena);
                 Some(Ctx::Owned(p))
             }
             (Ty::Arena, None) => {

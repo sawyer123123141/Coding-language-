@@ -93,6 +93,7 @@ impl<'a> BodyChecker<'a> {
             }
             None => {}
         }
+        self.check_par_write(target);
         if let ExprKind::Index { base, .. } = &target.kind {
             if let Some((_, v)) = self.map_of(self.t.ty(base.id)) {
                 return self.check_map_set(target, op, value, v);

@@ -192,10 +192,13 @@ impl<'a> BodyChecker<'a> {
 
     /// `for v in xs` / `for i, v in xs`. `v` aliases `xs[i]`, so it can
     /// change the collection when the collection can change.
-    pub(crate) fn check_for_in(&mut self, index: Option<&Binding>, var: &Binding, iter: &Expr, body: &Block) {
+    pub(crate) fn check_for_in(&mut self, par: bool, index: Option<&Binding>, var: &Binding, iter: &Expr, body: &Block) {
         let iter_ty = self.check_expr(iter, None);
         let iter_ty = self.reject_never(iter, iter_ty);
         if let Some(kv) = self.map_of(iter_ty) {
+            if par {
+                self.error(iter.span, "`par for` loops over an array or a list");
+            }
             return self.check_map_for_in(iter, kv, index, var, body);
         }
         let elem = match self.elem_of(iter_ty) {
@@ -211,15 +214,25 @@ impl<'a> BodyChecker<'a> {
         let root = self.place_root(iter);
         let changeable = root.is_some_and(|r| self.immutable(r).is_none());
         self.scopes.push(HashMap::new());
+        let first_local = self.t.locals.len() as u32;
         if let Some(i) = index {
             self.declare(i, Ty::Int, false, false, false);
         }
         let v = self.declare(var, elem, changeable, false, false);
         self.t.locals[v.0 as usize].alias = root;
         self.views.insert(v);
+        // An item of an inner `par for` is a view for the outer ones too.
+        self.note_view(v, iter);
+        if par {
+            let collection = self.path_key(iter);
+            self.par.push(super::par::ParBody::new(v, collection, first_local, self.loop_breaks.len() + 1));
+        }
         self.loop_breaks.push(false);
         self.check_block(body, Expect::Discard);
         self.loop_breaks.pop();
+        if par {
+            self.end_par();
+        }
         self.scopes.pop();
     }
 }

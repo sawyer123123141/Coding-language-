@@ -184,6 +184,7 @@ impl<'a> BodyChecker<'a> {
         let msg = match self.immutable(root) {
             None => {
                 self.mark_changed(root);
+                self.check_par_write(receiver);
                 return Some(root);
             }
             Some(Immutable::Let) => format!("can't call `{method}` on `{name}`: it changes `{name}`, which was declared with `let`"),

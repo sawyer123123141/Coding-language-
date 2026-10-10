@@ -1,0 +1,50 @@
+struct Chunk {
+    x: int
+    heights: [int] = []
+}
+
+struct World {
+    chunks: list[Chunk] = list[Chunk]()
+    score: int = 0
+}
+
+tick(var c: Chunk) {
+    c.x += 1
+}
+
+main() {
+    var w = World()
+    var total = 0
+    var m = {1: 2}
+    par for c in w.chunks {
+        w.score += 1
+        total += c.x
+        tick(var c)
+        print(c.x)
+        if c.x > 3 { break }
+        if c.x > 4 { return }
+        c.x = w.chunks.len
+    }
+    par for k, v in m {
+        v = 1
+    }
+    let shared = [1, 2, 3]
+    var other = [1, 2]
+    par for c in w.chunks {
+        for h in other {
+            h = 0
+        }
+        other[0] = c.x
+    }
+}
+
+// error 20: `par for` iterations run at the same time, so this can't change `w.score`; only the loop's item (`c`) and the body's own variables can change
+// error 21: `par for` iterations run at the same time, so this can't change `total`; only the loop's item (`c`) and the body's own variables can change
+// error 22: `par for` bodies can only call `pure` functions; `tick` isn't `pure`
+// error 23: `par for` bodies can't print: iterations run at the same time
+// error 24: `break` can't stop a `par for`: iterations run at the same time
+// error 25: `return` can't leave a `par for` body
+// error 26: this reads `w.chunks`, whose items other iterations are changing; use the loop's item (`c`)
+// error 28: `par for` loops over an array or a list
+// error 35: `par for` iterations run at the same time, so this can't change `h`; only the loop's item (`c`) and the body's own variables can change
+// error 37: `par for` iterations run at the same time, so this can't change `other[_]`; only the loop's item (`c`) and the body's own variables can change

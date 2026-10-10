@@ -15,6 +15,9 @@ impl<'a> BodyChecker<'a> {
     pub(crate) fn check_expr(&mut self, e: &Expr, want: Option<Ty>) -> Ty {
         let ty = self.expr_inner(e, want);
         self.t.expr_ty[e.id.0 as usize] = ty;
+        if matches!(e.kind, ExprKind::Ident(_) | ExprKind::Field { .. } | ExprKind::Index { .. }) {
+            self.note_par_read(e);
+        }
         ty
     }
 

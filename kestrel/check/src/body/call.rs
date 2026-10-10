@@ -72,6 +72,8 @@ impl<'a> BodyChecker<'a> {
         self.t.res.insert(e.id, Res::Print);
         if self.is_pure {
             self.error(e.span, "pure functions can't call `print`");
+        } else if !self.par.is_empty() {
+            self.error(e.span, "`par for` bodies can't print: iterations run at the same time");
         }
         if let Some(f) = self.fn_id {
             self.t.fns[f.0 as usize].io = true;
@@ -128,6 +130,8 @@ impl<'a> BodyChecker<'a> {
                 format!("pure functions can only call pure functions; `{name}` isn't pure"),
                 format!("mark `{name}` as `pure` if it has no effects"),
             );
+        } else if let (false, Some((msg, help))) = (info.is_pure, self.par_call_error(&info.name)) {
+            self.error_help(span, msg, help);
         }
     }
 
@@ -283,7 +287,10 @@ impl<'a> BodyChecker<'a> {
         };
         match problem {
             Some((msg, help)) => self.error_help(a.value.span, msg, help),
-            None => self.mark_changed(root),
+            None => {
+                self.mark_changed(root);
+                self.check_par_write(&a.value);
+            }
         }
         if ty != p.ty && ty != Ty::Error && p.ty != Ty::Error {
             let msg = format!("`var` parameter `{}` needs exactly {}, found {}", p.name, self.tn(p.ty), self.tn(ty));

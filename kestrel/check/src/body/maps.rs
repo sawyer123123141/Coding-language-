@@ -141,6 +141,7 @@ impl<'a> BodyChecker<'a> {
                 let value = self.declare(var, v, changeable, false, false);
                 self.t.locals[value.0 as usize].alias = root;
                 self.views.insert(value);
+                self.note_view(value, iter);
             }
             None => {
                 self.declare(var, k, false, false, false);
