@@ -214,7 +214,7 @@ use {
 | `ivec2 ivec3 ivec4` | int vectors (voxel coordinates) |
 | `[T]` | array of `T`, fixed length once created (fast, arena/SIMD friendly) |
 | `list[T]` | growable list |
-| `map[K, V]` | hash map: `m[k] = v`; `m[k]` is a `V?` (so `let v = m[k] else { ... }`); `m.has(k)`, `m.remove(k)`, `m.len`, `for k, v in m` (decided 2026-10-10) |
+| `map[K, V]` | hash map: `m[k] = v`; `m[k]` is a `V?` (so `let v = m[k] else { ... }`); `m.has(k)`, `m.remove(k)`, `m.len`, `for k, v in m` (decided 2026-10-10). Literal `{"a": 1, "b": 2}`, empty `{}`; `m.get(k, default)`; `for k in m` gives keys (decided 2026-10-09). Insertion order. Details: `2026-10-09-map-design.md` |
 | `T?` | a `T` or `none` |
 | `Arena` | a memory bucket |
 
