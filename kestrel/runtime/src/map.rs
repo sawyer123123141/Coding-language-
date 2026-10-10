@@ -22,7 +22,8 @@ pub struct Map {
     pub slots: *mut i32,
     /// A power of two, at least twice `cap`; 0 before the first key.
     pub slot_count: i64,
-    /// `for ... in` loops running over the map: keys can't come or go.
+    /// `for ... in` loops running over the map: no keys can be added
+    /// (that may move the entries). Removing only marks an entry dead.
     pub locks: i64,
     /// Where the map grows. Null (a zero-filled map) means the program arena.
     pub arena: *mut Arena,
@@ -250,24 +251,19 @@ pub unsafe extern "C" fn kestrel_rt_map_insert(
     e
 }
 
-/// Removes `key`: 1 when it was there. Removing a key while a loop runs
-/// over the map panics.
+/// Removes `key`: 1 when it was there. Entries never move here, so a loop
+/// over the map may remove keys; it skips the removed entries.
 ///
 /// # Safety
 /// As for `kestrel_rt_map_find`.
 #[no_mangle]
-pub unsafe extern "C" fn kestrel_rt_map_remove(map: *mut Map, key: *const u8, kind: i32, entry_size: i64, line: i32) -> i8 {
+pub unsafe extern "C" fn kestrel_rt_map_remove(map: *mut Map, key: *const u8, kind: i32, entry_size: i64) -> i8 {
     let m = &mut *map;
     if m.count == 0 {
         return 0;
     }
     let k = key_bytes(key, kind);
     let (s, true) = m.probe(k, kind, hash(k, kind), entry_size) else { return 0 };
-    if m.locks > 0 {
-        fail(&format!(
-            "can't remove a key from a map while looping over it (line {line}); collect the keys in a list and change the map after the loop"
-        ));
-    }
     let i = *m.slots.add(s);
     *m.slots.add(s) = REMOVED;
     *m.entry(i as i64, entry_size).add(LIVE) = 0;
@@ -347,7 +343,7 @@ mod tests {
     }
 
     fn remove(m: &mut Map, k: i32) -> i8 {
-        unsafe { kestrel_rt_map_remove(m, &k as *const i32 as *const u8, 1, SIZE, 1) }
+        unsafe { kestrel_rt_map_remove(m, &k as *const i32 as *const u8, 1, SIZE) }
     }
 
     /// Live keys in entry order.

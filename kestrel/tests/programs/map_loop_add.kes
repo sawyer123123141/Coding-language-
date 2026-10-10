@@ -1,0 +1,15 @@
+// expect: 1 2
+// expect-exit: 101
+// expect-stderr: can't add a key to a map while looping over it (line 13)
+main() {
+    var m = {1: 1}
+    for k, v in m {
+        m[k] = v + 1
+    }
+    let a = m.get(1, 0)
+    print(m.len, a)
+    for k, v in m {
+        // A new key may move the entries the loop is reading.
+        m[k + 10] = v
+    }
+}

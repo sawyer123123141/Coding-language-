@@ -25,13 +25,23 @@ pub enum KTy {
     Arena,
     /// `T?`: a u8 tag (0 = `none`) at offset 0, then the value.
     Optional(ElemIdx),
+    /// `map[K, V]`: a 64-byte header (see `MapLayout`) over entries and an
+    /// index table in the map's arena.
+    Map(ElemIdx, ElemIdx),
 }
 
 impl KTy {
     pub fn is_aggregate(self) -> bool {
         matches!(
             self,
-            KTy::Struct(_) | KTy::Enum(_) | KTy::Str | KTy::Array(_) | KTy::List(_) | KTy::Arena | KTy::Optional(_)
+            KTy::Struct(_)
+                | KTy::Enum(_)
+                | KTy::Str
+                | KTy::Array(_)
+                | KTy::List(_)
+                | KTy::Map(..)
+                | KTy::Arena
+                | KTy::Optional(_)
         )
     }
 
@@ -74,60 +84,6 @@ pub struct Module {
     pub print_fns: HashMap<KTy, FuncIdx>,
     /// `None` for a library (see `kestrel_check::check_with`).
     pub main: Option<FuncIdx>,
-}
-
-impl Module {
-    pub fn layout(&self, s: StructIdx) -> &StructLayout {
-        &self.structs[s.0 as usize]
-    }
-
-    pub fn enum_layout(&self, e: EnumIdx) -> &EnumLayout {
-        &self.enums[e.0 as usize]
-    }
-
-    pub fn elem(&self, e: ElemIdx) -> KTy {
-        self.elems[e.0 as usize]
-    }
-
-    /// Where the value inside an optional of `T` starts.
-    pub fn payload_offset(&self, e: ElemIdx) -> u32 {
-        let (size, align) = self.size_align(self.elem(e));
-        optional_layout(size, align).0
-    }
-}
-
-/// An optional of a value with this size and alignment: the payload's
-/// offset, then the optional's size and alignment.
-pub fn optional_layout(size: u32, align: u32) -> (u32, u32, u32) {
-    let align = align.max(1);
-    (align, (align + size).next_multiple_of(align), align)
-}
-
-impl Module {
-
-    /// Size and alignment in bytes.
-    pub fn size_align(&self, ty: KTy) -> (u32, u32) {
-        match ty {
-            KTy::Bool | KTy::U8 => (1, 1),
-            KTy::I32 | KTy::F32 => (4, 4),
-            KTy::I64 | KTy::F64 | KTy::Arena => (8, 8),
-            KTy::Str | KTy::Array(_) => (16, 8),
-            KTy::List(_) => (32, 8),
-            KTy::Optional(e) => {
-                let (size, align) = self.size_align(self.elem(e));
-                let (_, size, align) = optional_layout(size, align);
-                (size, align)
-            }
-            KTy::Struct(s) => {
-                let l = self.layout(s);
-                (l.size, l.align)
-            }
-            KTy::Enum(e) => {
-                let l = self.enum_layout(e);
-                (l.size, l.align)
-            }
-        }
-    }
 }
 
 /// The tag (u8, offset 0) says which variant is stored; each variant's
@@ -183,6 +139,28 @@ pub enum Proj {
     /// bounds-checked unless the compiler proved it in bounds (a `for ... in`
     /// loop's own index, when the body can't move the elements).
     Index { at: Expr, checked: bool },
+    /// The key of entry `at` of a map (its index in the entries, not a key).
+    MapKey { at: Expr },
+    /// The value of entry `at` of a map. Checked, it panics unless the
+    /// entry is still there (the loop body may have replaced the map).
+    MapValue { at: Expr, checked: bool },
+}
+
+impl Proj {
+    /// The index expression inside an element or entry projection.
+    pub fn at(&self) -> Option<&Expr> {
+        match self {
+            Proj::Index { at, .. } | Proj::MapKey { at } | Proj::MapValue { at, .. } => Some(at),
+            Proj::Field(_) | Proj::Variant(..) | Proj::Payload => None,
+        }
+    }
+
+    pub fn at_mut(&mut self) -> Option<&mut Expr> {
+        match self {
+            Proj::Index { at, .. } | Proj::MapKey { at } | Proj::MapValue { at, .. } => Some(at),
+            Proj::Field(_) | Proj::Variant(..) | Proj::Payload => None,
+        }
+    }
 }
 
 impl Place {
@@ -253,9 +231,14 @@ pub enum Stmt {
     PopArena { free: bool },
     /// Frees the arena at a place (dropping it) and nulls the place.
     FreeArena(Place),
-    /// Gives the array or list at a place its own copy of its elements, in
-    /// the current arena (a list's capacity becomes its length).
+    /// Gives the array, list or map at a place its own copy of its
+    /// elements, in the current arena (a list's capacity becomes its length).
     Dup(Place),
+    /// `m[key] = value`: adds the key or replaces its value. The key, then
+    /// the value, are evaluated first.
+    MapSet(Place, Expr, Expr),
+    /// Ends a loop over the map: its lock count goes back to `saved`.
+    MapUnlock(Place, Expr),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -287,6 +270,10 @@ pub enum ExprKind {
     ArrayLit(Vec<Expr>),
     /// `list[T]()`: empty, growing in the current arena.
     ListNew,
+    /// `map[K, V]()`: empty, growing in the current arena.
+    MapNew,
+    /// An operation on the map at a place; see `MapOp` for the arguments.
+    Map(MapOp, Place, Vec<Expr>),
     /// The length (i64) of the array or list at a place.
     Len(Place),
     /// `Arena()`: a new, empty arena.
@@ -326,6 +313,23 @@ pub enum ExprKind {
         else_body: Vec<Stmt>,
         else_val: Option<Box<Expr>>,
     },
+}
+
+/// What `ExprKind::Map` does with the map at its place.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MapOp {
+    /// `[key]`: an optional holding the value (bytes copied).
+    Get,
+    /// `[key]`: a bool.
+    Has,
+    /// `[key]`: removes the key; a bool, true when it was there.
+    Remove,
+    /// `[]`: the number of entries used, removed ones included (i64).
+    Used,
+    /// `[index]`: whether entry `index` is below `Used` and still there.
+    Live,
+    /// `[]`: starts a loop over the map; the old lock count (i64), for `MapUnlock`.
+    Lock,
 }
 
 #[derive(Clone, Debug, PartialEq)]

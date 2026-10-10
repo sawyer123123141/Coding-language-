@@ -29,7 +29,7 @@ impl<'a> FnLowerer<'a> {
     /// `p` again doesn't run them again.
     pub(crate) fn stabilize(&mut self, p: &mut Place, pre: &mut Vec<Stmt>) {
         for proj in &mut p.path {
-            if let Proj::Index { at, .. } = proj {
+            if let Some(at) = proj.at_mut() {
                 if !matches!(at.kind, ExprKind::Int(_)) {
                     *at = self.spill(at.clone(), pre);
                 }
@@ -69,6 +69,9 @@ impl<'a> FnLowerer<'a> {
         body: &ast::Block,
         out: &mut Vec<Stmt>,
     ) {
+        if let kestrel_check::Ty::Map(..) = self.t.ty(iter.id) {
+            return self.map_for_in(index, var, iter, body, out);
+        }
         let line = self.line(iter.span);
         let list = self.place_or_temp(iter, out, true);
         let i = match index {
@@ -106,7 +109,7 @@ impl<'a> FnLowerer<'a> {
     /// its elements), moving its elements: a write to `list` or to a place
     /// containing it. Element pointers are compared by what they point at,
     /// and any index may equal any other.
-    fn may_move(&self, stmts: &[Stmt], list: &Place) -> bool {
+    pub(crate) fn may_move(&self, stmts: &[Stmt], list: &Place) -> bool {
         let list = self.origin(list);
         let mut moved = false;
         crate::visit::places(stmts, &mut |p, written| {

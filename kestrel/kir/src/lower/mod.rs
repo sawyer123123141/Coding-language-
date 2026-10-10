@@ -3,6 +3,8 @@ mod collections;
 mod expr;
 mod helpers;
 mod layout;
+mod map_helpers;
+mod maps;
 mod matching;
 mod scopes;
 mod vector;
@@ -43,6 +45,7 @@ pub(crate) fn kty(ty: Ty) -> KTy {
         Ty::List(e) => KTy::List(ElemIdx(e.0)),
         Ty::Arena => KTy::Arena,
         Ty::Optional(e) => KTy::Optional(ElemIdx(e.0)),
+        Ty::Map(k, v) => KTy::Map(ElemIdx(k.0), ElemIdx(v.0)),
         other => panic!("type {other:?} has no runtime representation"),
     }
 }
@@ -165,6 +168,11 @@ impl<'a> FnLowerer<'a> {
                 out.push(Stmt::Let(idx, value));
                 return self.declared(idx);
             }
+            ast::Stmt::Assign { target: ast::Expr { kind: ast::ExprKind::Index { base, index }, .. }, value, .. }
+                if matches!(self.t.ty(base.id), Ty::Map(..)) =>
+            {
+                return self.map_set(base, index, value, out);
+            }
             ast::Stmt::Assign { target, value, .. } if helpers::owning(kty(self.t.ty(target.id)), self.t) => {
                 return self.assign_owning(target, value, out);
             }
@@ -235,6 +243,16 @@ impl<'a> FnLowerer<'a> {
         };
         match self.t.res[&e.id] {
             Res::Print => out.push(Stmt::Print(args.iter().map(|a| self.print_arg(&a.value)).collect())),
+            Res::MapRemove => {
+                let (receiver, name) = match &e.kind {
+                    ast::ExprKind::MethodCall { receiver, name, .. } => (receiver, name),
+                    _ => unreachable!("`remove` is a method"),
+                };
+                let line = self.line(e.span);
+                let kind = self.map_method(receiver, name, args, KTy::Bool, line);
+                let tmp = self.temp(KTy::Bool);
+                out.push(Stmt::Let(tmp, Expr { kind, ty: KTy::Bool, line }));
+            }
             Res::ListAdd => {
                 let v = self.value(&args[0].value);
                 let list = self.place(receiver.expect("`add` is a method")).expect("checker requires a place for `add`");

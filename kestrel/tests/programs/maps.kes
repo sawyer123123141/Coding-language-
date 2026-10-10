@@ -1,0 +1,91 @@
+// expect: 2 30 true false
+// expect: {"sword": 30, "bow": 12}
+// expect: 31 0
+// expect: true false 1
+// expect: sword 31
+// expect: {"sword": 62} {"sword": 31} {}
+// expect: 3 2 [1, 2] none
+// expect: 5000 4999 2499 false
+// expect: {"x": 3, "y": 2}
+// expect: Inv(items: {1: 10})
+// expect: true false true
+// expect: sword
+// expect: 3 {1: {2: 3}}
+// expect: yes {true: "yes", false: "no"}
+// expect: 100 99
+struct Inv {
+    items: map[int, int] = {}
+}
+
+pure tally(words: [string]) -> map[string, int] {
+    var m: map[string, int] = {}
+    for w in words {
+        m[w] = m.get(w, 0) + 1
+    }
+    m
+}
+
+main() {
+    var prices = {"sword": 30, "bow": 12}
+    print(prices.len, prices.get("sword", 0), prices.has("bow"), prices.has("axe"))
+    print(prices)
+    prices["sword"] = prices.get("sword", 0) + 1
+    print(prices.get("sword", 0), prices.get("axe", 0))
+    print(prices.remove("bow"), prices.remove("bow"), prices.len)
+    for k, v in prices {
+        print(k, v)
+    }
+    // A copy is independent; a loop's value changes the map it came from.
+    var copy = prices
+    for k, v in copy {
+        v = v * 2
+    }
+    var empty: map[string, int] = {}
+    print(copy, prices, empty)
+    var lists: map[i64, list[int]] = {}
+    lists[7] = [1, 2]
+    let got = lists[7] else { return }
+    let t = tally(["a", "b", "a", "c"])
+    print(t.len, t.get("a", 0), got, lists[8])
+    // Growth, removal and reuse past several thousand keys.
+    var big = map[int, int]()
+    for i from 0 to 5000 {
+        big[i] = i
+    }
+    for i from 0 to 5000 {
+        if i % 2 == 0 { big.remove(i) }
+    }
+    for i from 0 to 2500 {
+        big[10000 + i] = i
+    }
+    print(big.len, big.get(4999, 0), big.get(12499, -1), big.has(4998))
+    // Replacing keeps a key's place; removing and adding again moves it last.
+    var order: map[string, int] = {}
+    order["y"] = 0
+    order["x"] = 1
+    order.remove("y")
+    order["y"] = 2
+    order["x"] = 3
+    print(order)
+    var inv = Inv()
+    inv.items[1] = 10
+    print(inv)
+    print("ab" == "ab", "ab" == "abc", "" != "x")
+    for k in prices {
+        print(k)
+    }
+    var nested: map[int, map[int, int]] = {}
+    nested[1] = {2: 3}
+    let inner = nested[1] else { return }
+    print(inner.get(2, 0), nested)
+    var flags: map[bool, string] = {true: "yes"}
+    flags[false] = "no"
+    print(flags[true], flags)
+    arena {
+        var tmp: map[u8, int] = {}
+        for i from 0 to 100 {
+            tmp[u8(i)] = i
+        }
+        print(tmp.len, tmp.get(99, 0))
+    }
+}

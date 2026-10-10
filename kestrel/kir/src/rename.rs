@@ -18,10 +18,8 @@ fn rename_local(l: &mut LocalIdx, subst: &[Subst]) {
 }
 
 fn rename_place(p: &mut Place, subst: &[Subst]) {
-    for proj in &mut p.path {
-        if let Proj::Index { at, .. } = proj {
-            rename_expr(at, subst);
-        }
+    for at in p.path.iter_mut().filter_map(Proj::at_mut) {
+        rename_expr(at, subst);
     }
     match &subst[p.root.0 as usize] {
         Subst::Local(n) => p.root = *n,
@@ -67,6 +65,15 @@ pub(crate) fn rename_stmts(stmts: &mut [Stmt], subst: &[Subst]) {
                 rename_place(p, subst);
             }
             Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::PushArena(Some(p)) => rename_place(p, subst),
+            Stmt::MapSet(p, k, v) => {
+                rename_place(p, subst);
+                rename_expr(k, subst);
+                rename_expr(v, subst);
+            }
+            Stmt::MapUnlock(p, saved) => {
+                rename_place(p, subst);
+                rename_expr(saved, subst);
+            }
             Stmt::PushArena(None) | Stmt::PopArena { .. } | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
         }
     }
@@ -94,6 +101,12 @@ fn rename_print(parts: &mut [PrintArg], subst: &[Subst]) {
 pub(crate) fn rename_expr(e: &mut Expr, subst: &[Subst]) {
     match &mut e.kind {
         ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::Move(p) => rename_place(p, subst),
+        ExprKind::Map(_, p, xs) => {
+            rename_place(p, subst);
+            for x in xs {
+                rename_expr(x, subst);
+            }
+        }
         ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) => rename_expr(x, subst),
         ExprKind::Binary(_, a, b) | ExprKind::And(a, b) | ExprKind::Or(a, b) => {
             rename_expr(a, subst);
@@ -117,6 +130,13 @@ pub(crate) fn rename_expr(e: &mut Expr, subst: &[Subst]) {
                 rename_expr(v, subst);
             }
         }
-        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::StrLit(_) | ExprKind::ListNew | ExprKind::NewArena | ExprKind::NoneLit => {}
+        ExprKind::Int(_)
+        | ExprKind::Float(_)
+        | ExprKind::Bool(_)
+        | ExprKind::StrLit(_)
+        | ExprKind::ListNew
+        | ExprKind::MapNew
+        | ExprKind::NewArena
+        | ExprKind::NoneLit => {}
     }
 }

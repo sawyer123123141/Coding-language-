@@ -5,6 +5,7 @@ mod call;
 mod collections;
 mod divide;
 mod expr;
+mod maps;
 mod place;
 mod print;
 
@@ -31,7 +32,14 @@ pub(crate) fn cl_type(t: KTy) -> Type {
         KTy::I64 => types::I64,
         KTy::F32 => types::F32,
         KTy::F64 => types::F64,
-        KTy::Struct(_) | KTy::Enum(_) | KTy::Str | KTy::Array(_) | KTy::List(_) | KTy::Arena | KTy::Optional(_) => {
+        KTy::Struct(_)
+        | KTy::Enum(_)
+        | KTy::Str
+        | KTy::Array(_)
+        | KTy::List(_)
+        | KTy::Map(..)
+        | KTy::Arena
+        | KTy::Optional(_) => {
             unreachable!("aggregates live in memory, not registers")
         }
     }
@@ -226,6 +234,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             kir::Stmt::Write(args) => self.print(args, false)?,
             kir::Stmt::ListAdd(list, value) => self.list_add(list, value)?,
             kir::Stmt::Dup(p) => self.dup(p)?,
+            kir::Stmt::MapSet(map, key, value) => self.map_set(map, key, value, key.line)?,
+            kir::Stmt::MapUnlock(map, saved) => self.map_unlock(map, saved)?,
             kir::Stmt::PushArena(_) | kir::Stmt::PopArena { .. } | kir::Stmt::FreeArena(_) => self.arena_stmt(s)?,
             kir::Stmt::Bind(l, p) => {
                 let addr = self.place_addr(p)?;

@@ -14,7 +14,7 @@ use crate::ir::*;
 /// Strings are immutable, so copies share them and they don't count.
 pub(crate) fn has_heap(ty: KTy, t: &Tables) -> bool {
     match ty {
-        KTy::Array(_) | KTy::List(_) => true,
+        KTy::Array(_) | KTy::List(_) | KTy::Map(..) => true,
         KTy::Optional(e) => has_heap(kty(t.elems[e.0 as usize]), t),
         KTy::Struct(s) => t.structs[s.0 as usize].fields.iter().any(|f| has_heap(kty(f.ty), t)),
         KTy::Enum(e) => t.enums[e.0 as usize].variants.iter().flat_map(|v| &v.fields).any(|f| has_heap(kty(f.ty), t)),
@@ -47,7 +47,7 @@ fn elem_of(ty: KTy, t: &Tables) -> KTy {
     }
 }
 
-fn expr(kind: ExprKind, ty: KTy) -> Expr {
+pub(super) fn expr(kind: ExprKind, ty: KTy) -> Expr {
     Expr { kind, ty, line: 0 }
 }
 
@@ -58,7 +58,7 @@ fn tag_is(place: &Place, variant: u32) -> Expr {
     expr(ExprKind::Binary(BinOp::Eq, Box::new(tag), Box::new(v)), KTy::Bool)
 }
 
-fn with(place: &Place, proj: Proj) -> Place {
+pub(super) fn with(place: &Place, proj: Proj) -> Place {
     let mut p = place.clone();
     p.path.push(proj);
     p
@@ -66,9 +66,9 @@ fn with(place: &Place, proj: Proj) -> Place {
 
 pub(crate) struct Helpers {
     /// The index of the first helper: helpers follow the user's functions.
-    base: u32,
+    pub(super) base: u32,
     pub(crate) funcs: Vec<Func>,
-    copy: HashMap<KTy, FuncIdx>,
+    pub(super) copy: HashMap<KTy, FuncIdx>,
     drop: HashMap<KTy, FuncIdx>,
     pub(crate) print: HashMap<KTy, FuncIdx>,
 }
@@ -84,6 +84,7 @@ impl Helpers {
         let mut out = Vec::new();
         match ty {
             KTy::Array(_) | KTy::List(_) => out.push(Stmt::Call(self.copy_fn(ty, t), vec![Arg::Ref(place)])),
+            KTy::Map(..) => out.push(Stmt::Call(self.map_copy_fn(ty, t), vec![Arg::Ref(place)])),
             KTy::Optional(e) => {
                 let then_body = self.fixup(with(&place, Proj::Payload), kty(t.elems[e.0 as usize]), t);
                 if !then_body.is_empty() {
@@ -182,6 +183,9 @@ impl Helpers {
             KTy::Array(_) | KTy::List(_) => {
                 self.print_fn(ty, t);
             }
+            KTy::Map(..) => {
+                self.map_print_fn(ty, t);
+            }
             KTy::Optional(e) => self.ensure_print(kty(t.elems[e.0 as usize]), t),
             KTy::Struct(s) => {
                 for f in &t.structs[s.0 as usize].fields {
@@ -198,7 +202,7 @@ impl Helpers {
     }
 
     /// Reserves a slot for a helper, so a type can refer to its own helper.
-    fn reserve(&mut self) -> FuncIdx {
+    pub(super) fn reserve(&mut self) -> FuncIdx {
         let idx = FuncIdx(self.base + self.funcs.len() as u32);
         let placeholder = Func {
             name: String::new(),
@@ -216,7 +220,7 @@ impl Helpers {
     }
 
     /// Locals of a helper: the collection (by pointer) and a loop index.
-    fn locals(ty: KTy) -> Vec<Local> {
+    pub(super) fn locals(ty: KTy) -> Vec<Local> {
         vec![
             Local { name: "xs".into(), ty, kind: LocalKind::RefParam },
             Local { name: "i".into(), ty: KTy::I64, kind: LocalKind::Value },

@@ -20,6 +20,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             ExprKind::Bool(v) => self.b.ins().iconst(types::I8, *v as i64),
             ExprKind::Load(p) => self.load_place(p)?,
             ExprKind::Len(p) => self.len(p)?,
+            ExprKind::Map(op, p, args) => self.map_op(*op, p, args)?,
             ExprKind::FieldOf(base, i) => {
                 let addr = self.field_addr(base, *i)?;
                 self.b.ins().load(ty, MemFlags::trusted(), addr, 0)
@@ -38,6 +39,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             | ExprKind::ArrayNew(_)
             | ExprKind::ArrayLit(_)
             | ExprKind::ListNew
+            | ExprKind::MapNew
             | ExprKind::NewArena
             | ExprKind::Some(_)
             | ExprKind::NoneLit
@@ -59,6 +61,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                     self.int_arith(kir::BinOp::Sub, zero, v, e.ty, e.line)
                 }
             }
+            ExprKind::Binary(op, l, r) if l.ty == KTy::Str => self.str_compare(*op, l, r)?,
             ExprKind::Binary(op, l, r) => {
                 let a = self.expr(l)?;
                 let b = self.expr(r)?;

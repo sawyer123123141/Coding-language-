@@ -33,9 +33,10 @@ impl Layouts<'_> {
             KTy::I64 | KTy::F64 | KTy::Arena => (8, 8),
             KTy::Str | KTy::Array(_) => (16, 8),
             KTy::List(_) => (32, 8),
+            KTy::Map(..) => (64, 8),
             KTy::Optional(e) => {
                 let (size, align) = self.size_align(super::kty(self.t.elems[e.0 as usize]));
-                let (_, size, align) = crate::ir::optional_layout(size, align);
+                let (_, size, align) = crate::layout::optional_layout(size, align);
                 (size, align)
             }
             KTy::Struct(s) => {

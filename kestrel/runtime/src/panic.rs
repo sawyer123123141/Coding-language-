@@ -5,6 +5,8 @@ pub const PANIC_NARROW_INT: i32 = 3;
 pub const PANIC_NARROW_U8: i32 = 4;
 /// `x << n` / `x >> n` with `n` negative or at least the type's width.
 pub const PANIC_SHIFT: i32 = 5;
+/// A loop over a map found its entry gone: the body replaced the map.
+pub const PANIC_MAP_CHANGED: i32 = 6;
 
 static FAILURE_HOOK: std::sync::OnceLock<fn(&str) -> !> = std::sync::OnceLock::new();
 
@@ -39,6 +41,7 @@ pub extern "C" fn kestrel_rt_panic(kind: i32, line: i32) -> ! {
         PANIC_NARROW_INT => "value doesn't fit in int",
         PANIC_NARROW_U8 => "value doesn't fit in u8",
         PANIC_SHIFT => "shift amount out of range",
+        PANIC_MAP_CHANGED => "a map was replaced while looping over it",
         _ => "runtime error",
     };
     fail(&format!("{what} on line {line}"));

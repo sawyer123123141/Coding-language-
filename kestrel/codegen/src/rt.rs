@@ -22,6 +22,11 @@ pub(crate) struct RtFuncs {
     pub arena_free: FuncId,
     pub arena_push: FuncId,
     pub arena_pop: FuncId,
+    pub map_find: FuncId,
+    pub map_insert: FuncId,
+    pub map_remove: FuncId,
+    pub map_dup: FuncId,
+    pub str_eq: FuncId,
 }
 
 impl RtFuncs {
@@ -62,13 +67,18 @@ impl RtFuncs {
             arena_free: decl("kestrel_rt_arena_free", &[ptr], None)?,
             arena_push: decl("kestrel_rt_arena_push", &[ptr], None)?,
             arena_pop: decl("kestrel_rt_arena_pop", &[], Some(ptr))?,
+            map_find: decl("kestrel_rt_map_find", &[ptr, ptr, I32, I64], Some(ptr))?,
+            map_insert: decl("kestrel_rt_map_insert", &[ptr, ptr, I32, I64, I64, I32], Some(ptr))?,
+            map_remove: decl("kestrel_rt_map_remove", &[ptr, ptr, I32, I64], Some(I8))?,
+            map_dup: decl("kestrel_rt_map_dup", &[ptr, I64, I64], None)?,
+            str_eq: decl("kestrel_rt_str_eq", &[ptr, I64, ptr, I64], Some(I8))?,
         })
     }
 }
 
 /// Addresses of every runtime export, for registering with the JIT.
 pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
-    use kestrel_runtime::{arena, panic, print, start};
+    use kestrel_runtime::{arena, map, panic, print, start};
     vec![
         ("kestrel_rt_print_i64", print::kestrel_rt_print_i64 as *const u8),
         ("kestrel_rt_print_f32", print::kestrel_rt_print_f32 as *const u8),
@@ -90,6 +100,11 @@ pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
         ("kestrel_rt_arena_free", arena::kestrel_rt_arena_free as *const u8),
         ("kestrel_rt_arena_push", arena::kestrel_rt_arena_push as *const u8),
         ("kestrel_rt_arena_pop", arena::kestrel_rt_arena_pop as *const u8),
+        ("kestrel_rt_map_find", map::kestrel_rt_map_find as *const u8),
+        ("kestrel_rt_map_insert", map::kestrel_rt_map_insert as *const u8),
+        ("kestrel_rt_map_remove", map::kestrel_rt_map_remove as *const u8),
+        ("kestrel_rt_map_dup", map::kestrel_rt_map_dup as *const u8),
+        ("kestrel_rt_str_eq", map::kestrel_rt_str_eq as *const u8),
     ]
 }
 

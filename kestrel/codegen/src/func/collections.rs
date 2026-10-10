@@ -121,6 +121,9 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// Gives the collection at `p` its own copy of its elements.
     pub(crate) fn dup(&mut self, p: &Place) -> Result<(), String> {
         let ty = self.place_ty(p);
+        if let KTy::Map(..) = ty {
+            return self.map_dup(p);
+        }
         let (size, align) = self.elem_size_align(ty);
         let header = self.place_addr(p)?;
         let ptr = self.b.ins().load(self.ptr, MemFlags::trusted(), header, PTR);

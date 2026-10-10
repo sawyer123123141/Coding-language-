@@ -16,6 +16,9 @@ pub(crate) struct Scope {
     arena: Option<bool>,
     /// A loop body: `break` and `continue` leave it.
     is_loop: bool,
+    /// A loop over a map: leaving it unlocks the map, restoring the lock
+    /// count saved in the local.
+    unlock: Option<(Place, LocalIdx)>,
 }
 
 impl<'a> FnLowerer<'a> {
@@ -29,7 +32,21 @@ impl<'a> FnLowerer<'a> {
         if let Some(free) = s.arena {
             out.push(Stmt::PopArena { free });
         }
+        if let Some((map, saved)) = &s.unlock {
+            let saved = Expr { kind: ExprKind::Load(Place::local(*saved)), ty: KTy::I64, line: 0 };
+            out.push(Stmt::MapUnlock(map.clone(), saved));
+        }
         out
+    }
+
+    /// Lowers a loop over `map` with `lower`, so that `return` inside it
+    /// unlocks the map. The caller unlocks it after the loop, where the
+    /// loop's end and `break` both arrive.
+    pub(crate) fn locked(&mut self, map: Place, saved: LocalIdx, lower: impl FnOnce(&mut Self) -> Vec<Stmt>) -> Vec<Stmt> {
+        self.scopes.push(Scope { unlock: Some((map, saved)), ..Scope::default() });
+        let stmts = lower(self);
+        self.scopes.pop().expect("scopes balance");
+        stmts
     }
 
     /// Cleanups for jumping out of every scope up to the innermost loop
@@ -47,7 +64,7 @@ impl<'a> FnLowerer<'a> {
     }
 
     fn scoped_block(&mut self, block: &ast::Block, arena: Option<bool>, is_loop: bool) -> Vec<Stmt> {
-        self.scopes.push(Scope { owning: Vec::new(), arena, is_loop });
+        self.scopes.push(Scope { owning: Vec::new(), arena, is_loop, unlock: None });
         let mut out = Vec::new();
         for s in &block.stmts {
             self.stmt(s, &mut out);

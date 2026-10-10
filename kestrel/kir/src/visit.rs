@@ -36,6 +36,15 @@ fn stmt<'a>(s: &'a Stmt, f: &mut impl FnMut(Node<'a>)) {
             place(p, true, f);
         }
         Stmt::Bind(_, p) => place(p, false, f),
+        Stmt::MapSet(p, k, v) => {
+            expr(k, f);
+            expr(v, f);
+            place(p, true, f);
+        }
+        Stmt::MapUnlock(p, saved) => {
+            expr(saved, f);
+            place(p, true, f);
+        }
         Stmt::Dup(p) | Stmt::FreeArena(p) => place(p, true, f),
         Stmt::PushArena(Some(p)) => place(p, true, f),
         Stmt::PushArena(None) | Stmt::PopArena { .. } => {}
@@ -60,10 +69,8 @@ fn stmt<'a>(s: &'a Stmt, f: &mut impl FnMut(Node<'a>)) {
 }
 
 fn place<'a>(p: &'a Place, written: bool, f: &mut impl FnMut(Node<'a>)) {
-    for proj in &p.path {
-        if let Proj::Index { at, .. } = proj {
-            expr(at, f);
-        }
+    for at in p.path.iter().filter_map(Proj::at) {
+        expr(at, f);
     }
     f(Node::Place(p, written));
 }
@@ -90,8 +97,21 @@ fn print_args<'a>(parts: &'a [PrintArg], f: &mut impl FnMut(Node<'a>)) {
 fn expr<'a>(e: &'a Expr, f: &mut impl FnMut(Node<'a>)) {
     f(Node::Expr(e));
     match &e.kind {
-        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::StrLit(_) | ExprKind::ListNew | ExprKind::NewArena | ExprKind::NoneLit => {}
+        ExprKind::Int(_)
+        | ExprKind::Float(_)
+        | ExprKind::Bool(_)
+        | ExprKind::StrLit(_)
+        | ExprKind::ListNew
+        | ExprKind::MapNew
+        | ExprKind::NewArena
+        | ExprKind::NoneLit => {}
         ExprKind::Move(p) => place(p, true, f),
+        ExprKind::Map(op, p, xs) => {
+            for x in xs {
+                expr(x, f);
+            }
+            place(p, matches!(op, MapOp::Remove | MapOp::Lock), f);
+        }
         ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) => place(p, false, f),
         ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) => expr(x, f),
         ExprKind::Binary(_, a, b) | ExprKind::And(a, b) | ExprKind::Or(a, b) => {

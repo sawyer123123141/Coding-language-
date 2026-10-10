@@ -16,6 +16,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 (Proj::Variant(v, fi), KTy::Enum(e)) => kir.enum_layout(e).variants[*v as usize].fields[*fi as usize].ty,
                 (Proj::Index { .. }, KTy::Array(el) | KTy::List(el)) => kir.elem(el),
                 (Proj::Payload, KTy::Optional(el)) => kir.elem(el),
+                (Proj::MapKey { .. }, KTy::Map(k, _)) => kir.elem(k),
+                (Proj::MapValue { .. }, KTy::Map(_, v)) => kir.elem(v),
                 _ => unreachable!("place path doesn't match the type"),
             };
         }
@@ -47,6 +49,18 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                     ty = kir.elem(el);
                     addr = self.element_addr(header, at, *checked, ty)?;
                     offset = 0;
+                    continue;
+                }
+                (Proj::MapKey { at }, KTy::Map(k, _)) => {
+                    let header = self.offset(addr, offset);
+                    addr = self.entry_part(header, ty, at, false, false)?;
+                    (ty, offset) = (kir.elem(k), 0);
+                    continue;
+                }
+                (Proj::MapValue { at, checked }, KTy::Map(_, v)) => {
+                    let header = self.offset(addr, offset);
+                    addr = self.entry_part(header, ty, at, true, *checked)?;
+                    (ty, offset) = (kir.elem(v), 0);
                     continue;
                 }
                 _ => unreachable!("place path doesn't match the type"),

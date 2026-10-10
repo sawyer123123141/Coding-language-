@@ -67,7 +67,14 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             KTy::I64 => self.call_id(rt.print_i64, &[v]),
             KTy::F32 => self.call_id(rt.print_f32, &[v]),
             KTy::F64 => self.call_id(rt.print_f64, &[v]),
-            KTy::Struct(_) | KTy::Enum(_) | KTy::Str | KTy::Array(_) | KTy::List(_) | KTy::Arena | KTy::Optional(_) => {
+            KTy::Struct(_)
+            | KTy::Enum(_)
+            | KTy::Str
+            | KTy::Array(_)
+            | KTy::List(_)
+            | KTy::Map(..)
+            | KTy::Arena
+            | KTy::Optional(_) => {
                 unreachable!("aggregates are printed from memory")
             }
         };
@@ -99,7 +106,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 self.b.switch_to_block(done);
                 Ok(())
             }
-            KTy::Array(_) | KTy::List(_) => {
+            KTy::Array(_) | KTy::List(_) | KTy::Map(..) => {
                 let at = self.offset(addr, offset);
                 let id = self.shared.funcs[kir.print_fns[&ty].0 as usize];
                 self.call_id(id, &[at]);

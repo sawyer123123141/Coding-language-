@@ -11,7 +11,14 @@ fn bits(t: KTy) -> u32 {
         KTy::Bool | KTy::U8 => 8,
         KTy::I32 | KTy::F32 => 32,
         KTy::I64 | KTy::F64 => 64,
-        KTy::Struct(_) | KTy::Enum(_) | KTy::Str | KTy::Array(_) | KTy::List(_) | KTy::Arena | KTy::Optional(_) => {
+        KTy::Struct(_)
+        | KTy::Enum(_)
+        | KTy::Str
+        | KTy::Array(_)
+        | KTy::List(_)
+        | KTy::Map(..)
+        | KTy::Arena
+        | KTy::Optional(_) => {
             unreachable!("aggregates and arenas aren't numbers")
         }
     }

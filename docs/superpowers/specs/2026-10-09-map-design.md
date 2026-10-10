@@ -37,7 +37,7 @@ for name in prices { print(name) }        // keys only, like GDScript
 - **Order** is insertion order, like GDScript's `Dictionary`. Replacing a value keeps its place; removing a key and adding it again puts it last. `print` shows `{"sword": 30, "bow": 12}`, and `{}` when empty.
 - **Values are copied in and out**, like list elements: `m[k]` and `m.get` give a copy (a deep copy when `V` holds a list), and a whole map copies deeply on `let m2 = m`. To change a value in place, loop with `for k, v in m`, or read, change and write back.
 - **`m[k]` can't be changed in place**, since it may be missing. `m[k] += 1` and `m[k].hp -= 1` are errors that say to use `get` or read-change-write.
-- **Adding or removing keys while looping over that map panics** at the change: "can't add a key to a map while looping over it (line 12); collect the keys in a list and change the map after the loop". Replacing a value, `has`, `get` and reading are fine, and so is a change followed by `break` or `return`. The loop locks the map when it starts and unlocks it on every way out.
+- **Adding a key while looping over that map panics** at the change: "can't add a key to a map while looping over it (line 12); collect the keys in a list and change the map after the loop". Adding may move the entries; nothing else does. Removing keys is fine, including the current one (`for k, v in m { if v == 0 { m.remove(k) } }`), and later removed entries are skipped. Replacing a value, `has`, `get` and reading are fine too. The loop locks the map when it starts and unlocks it on every way out. (Ruled 2026-10-09 while implementing: the first draft also forbade removing, but removal only marks an entry dead, so forbidding it bought nothing.)
 - **Memory:** a map's memory lives in the arena that was current when it was made, like a list, and grows there. The escape check applies to what is stored in it. Removed entries are reclaimed in place, so a long-lived map with churn doesn't grow.
 - **`pure`** functions may make and change local maps.
 - **Not yet:** `==` on maps, maps across the Godot bridge (a clear load error), owning values, struct and enum keys.
@@ -71,7 +71,7 @@ Each call takes the key's address and kind (0: 1 byte, 1: 4 bytes, 2: 8 bytes, 3
 
 - `kestrel_rt_map_find(map, key, kind, entry_size) -> *mut u8`: the entry, or null.
 - `kestrel_rt_map_insert(map, key, kind, entry_size, entry_align, line) -> *mut u8`: the entry for `key`, adding a zeroed one when missing. It panics when the map is locked and the key is new.
-- `kestrel_rt_map_remove(map, key, kind, entry_size, line) -> i8`: 1 when removed. It panics when the map is locked and the key is there.
+- `kestrel_rt_map_remove(map, key, kind, entry_size) -> i8`: 1 when removed. It only marks the entry dead, so it works while the map is locked.
 - `kestrel_rt_map_dup(map, entry_size, entry_align)`: replaces the map's arrays with a compact copy in the current arena, and resets `locks` (a copy isn't being looped over).
 - `kestrel_rt_str_eq(a_ptr, a_len, b_ptr, b_len) -> i8`.
 
@@ -96,7 +96,7 @@ Hashes: integers are multiplied by a 64-bit odd constant and the high half is ke
   - `MapUsed(Place)`, `MapLive(Place, at)`: false when `at` is past `used`
   - `MapLock(Place)`: increments `locks`, returns the old value
 - New statements: `MapSet(Place, key, value)` and `MapUnlock(Place, saved)`.
-- New projections: `Proj::MapKey { at }` and `Proj::MapValue { at, checked }`. A checked value panics when the entry is gone; that happens only when the body replaced the whole map.
+- New projections: `Proj::MapKey { at }` and `Proj::MapValue { at, checked }`. A checked value panics when `at` is past `used`; that happens only when the body replaced the whole map with a smaller one.
 - `m.get(k, d)` lowers to a `MapGet` into a temporary and a tag test.
 - A for-in over a map lowers like one over a list:
   ```
@@ -116,7 +116,7 @@ Hashes: integers are multiplied by a 64-bit odd constant and the high half is ke
 ## Testing
 
 - `tests/programs/maps.kes` covers each operation, order, overwrite and re-add order, `get`, `remove`'s result, `print` (nested in lists and structs, string keys quoted), copies being independent, maps in struct fields, `pure` helpers, `arena { }`, and growth past several thousand keys with churn.
-- `tests/programs/map_loop_add.kes` and `map_loop_remove.kes` check the loop-lock panics and their lines; another test checks that `break` after a change is fine.
+- `tests/programs/map_loop_add.kes` checks the loop-lock panic and its line; `map_loops.kes` checks removing during a loop and replacing values.
 - `tests/errors/maps.kes` covers key and value type errors, `{}` without a type, `m[k] += 1`, `m[k].x = 1`, `var` misuse, the escape check, and string `==` type errors.
 - Unit tests: parser (map literals, multi-line), checker, KIR for-in shape, and runtime tests in `map.rs` (find, insert, remove, compaction keeping order, growth, string keys).
 - A small benchmark against C# `Dictionary` (int keys and string keys) records results honestly.

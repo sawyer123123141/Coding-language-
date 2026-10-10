@@ -131,15 +131,22 @@ impl Inliner<'_> {
             Stmt::Call(_, args) => self.args(args, depth),
             Stmt::Print(parts) | Stmt::Write(parts) => self.print(parts, depth),
             Stmt::Bind(_, p) | Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::PushArena(Some(p)) => self.place(p, depth),
+            Stmt::MapSet(p, k, v) => {
+                self.place(p, depth);
+                self.expr(k, depth);
+                self.expr(v, depth);
+            }
+            Stmt::MapUnlock(p, saved) => {
+                self.place(p, depth);
+                self.expr(saved, depth);
+            }
             Stmt::PushArena(None) | Stmt::PopArena { .. } | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
         }
     }
 
     fn place(&mut self, p: &mut Place, depth: u32) {
-        for proj in &mut p.path {
-            if let Proj::Index { at, .. } = proj {
-                self.expr(at, depth);
-            }
+        for at in p.path.iter_mut().filter_map(Proj::at_mut) {
+            self.expr(at, depth);
         }
     }
 
@@ -171,6 +178,12 @@ impl Inliner<'_> {
                 e.kind = if body.is_empty() { value.kind } else { ExprKind::Seq(body, Box::new(value)) };
             }
             ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::Move(p) => self.place(p, depth),
+            ExprKind::Map(_, p, xs) => {
+                self.place(p, depth);
+                for x in xs {
+                    self.expr(x, depth);
+                }
+            }
             ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) => self.expr(x, depth),
             ExprKind::Binary(_, a, b) | ExprKind::And(a, b) | ExprKind::Or(a, b) => {
                 self.expr(a, depth);
@@ -194,7 +207,14 @@ impl Inliner<'_> {
                     self.expr(v, depth);
                 }
             }
-            ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::StrLit(_) | ExprKind::ListNew | ExprKind::NewArena | ExprKind::NoneLit => {}
+            ExprKind::Int(_)
+            | ExprKind::Float(_)
+            | ExprKind::Bool(_)
+            | ExprKind::StrLit(_)
+            | ExprKind::ListNew
+            | ExprKind::MapNew
+            | ExprKind::NewArena
+            | ExprKind::NoneLit => {}
         }
     }
 
@@ -262,14 +282,12 @@ impl Inliner<'_> {
     /// `place` with its index expressions evaluated once, now, so the
     /// inlined body can use it many times.
     fn stable(&mut self, mut place: Place, pre: &mut Vec<Stmt>) -> Place {
-        for proj in &mut place.path {
-            if let Proj::Index { at, .. } = proj {
-                if !matches!(at.kind, ExprKind::Int(_)) {
-                    let tmp = self.temp("index".into(), at.ty, LocalKind::Value);
-                    let (ty, line) = (at.ty, at.line);
-                    let v = std::mem::replace(at, Expr { kind: ExprKind::Load(Place::local(tmp)), ty, line });
-                    pre.push(Stmt::Let(tmp, v));
-                }
+        for at in place.path.iter_mut().filter_map(Proj::at_mut) {
+            if !matches!(at.kind, ExprKind::Int(_)) {
+                let tmp = self.temp("index".into(), at.ty, LocalKind::Value);
+                let (ty, line) = (at.ty, at.line);
+                let v = std::mem::replace(at, Expr { kind: ExprKind::Load(Place::local(tmp)), ty, line });
+                pre.push(Stmt::Let(tmp, v));
             }
         }
         place

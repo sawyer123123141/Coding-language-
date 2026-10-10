@@ -95,6 +95,11 @@ impl<'a> FnLowerer<'a> {
                 }
                 other => unreachable!("{other:?} used as a value"),
             },
+            ast::ExprKind::MethodCall { receiver, name, args, .. }
+                if matches!(self.t.res.get(&e.id), Some(Res::MapRead | Res::MapRemove)) =>
+            {
+                self.map_method(receiver, name, args, ty, line)
+            }
             ast::ExprKind::MethodCall { receiver, args, .. } => match self.t.res[&e.id] {
                 Res::Fn(f) => {
                     let (pre, fi, a) = self.call_parts(e, f, args, Some(receiver));
@@ -106,13 +111,17 @@ impl<'a> FnLowerer<'a> {
                 }
                 other => unreachable!("method call resolved to {other:?}"),
             },
-            ast::ExprKind::Field { base, .. } if matches!(self.t.ty(base.id), Ty::Array(_) | Ty::List(_)) => {
+            ast::ExprKind::Field { base, .. } if matches!(self.t.ty(base.id), Ty::Array(_) | Ty::List(_) | Ty::Map(..)) => {
                 self.len_value(base, line)
+            }
+            ast::ExprKind::Index { base, index } if matches!(self.t.ty(base.id), Ty::Map(..)) => {
+                self.map_get(base, index, ty, line)
             }
             ast::ExprKind::Index { base, index } => self.index_value(e, base, index, ty, line),
             ast::ExprKind::ArrayLit(items) => ExprKind::ArrayLit(items.iter().map(|i| self.value(i)).collect()),
             ast::ExprKind::TypeCall { args, .. } => match ty {
                 KTy::Array(_) => ExprKind::ArrayNew(Box::new(self.expr(&args[0].value))),
+                KTy::Map(..) => ExprKind::MapNew,
                 _ => ExprKind::ListNew,
             },
             ast::ExprKind::Field { base, .. } if self.t.swizzles.contains_key(&e.id) => {
@@ -138,7 +147,7 @@ impl<'a> FnLowerer<'a> {
                     else_val: else_val.map(Box::new),
                 }
             }
-            ast::ExprKind::MapLit(_) => unreachable!("maps aren't lowered yet"),
+            ast::ExprKind::MapLit(entries) => self.map_lit(entries, ty, line),
         };
         Expr { kind, ty, line }
     }
