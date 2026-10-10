@@ -4,7 +4,7 @@ A compiled language for games (Rust + Cranelift). The compiler is the Cargo work
 
 ## Start here
 
-**Read `docs/superpowers/plans/2026-10-10-handoff.md` first.** It has the current status, the user's decisions and preferences, the next task (a standalone window, sub-project 4b), and environment gotchas.
+**Read `docs/superpowers/plans/2026-10-10-handoff.md` first.** It has the current status, the user's decisions and preferences, the next task (the 3D / textures spec, sub-project 4b part 2), and environment gotchas.
 
 ## Where things are
 

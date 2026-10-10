@@ -126,7 +126,7 @@ No import needed, like GDScript. They are built into the compiler, like `int()`,
 - Strings are heap values now, like arrays. Copying a string place copies its bytes into the current arena, literals stay in read-only data and belong to no arena, and the arena escape check covers strings. So storing a non-literal string into a longer-lived place needs `in x.mem { }`, for example `self.name = n` through `var self`. A map copies a string key when the key adds an entry.
 - An interpolated string passed straight to a `native` function's `string` parameter is built in scratch memory that is freed after the call. So `draw.text("fps {window.fps()}", ...)` in the frame loop doesn't grow memory every frame. (Measured: 100,000 frames of `draw.text("n {n}", ...)` grew the program arena by 0 bytes, against 720 KB before the scratch arena.)
 - The checker treats such a call's arguments as a region that is freed when the call returns, like an `arena { }` block. So storing something made in an argument into a longer-lived variable is an error: "this memory is freed when the call to `draw.text` returns, but `x` lives longer".
-- A `let label = "..."` inside the frame loop does allocate every frame. Wrap the loop body in `arena { }` when it builds strings or lists; the demo shows this.
+- A `let label = "..."` inside the frame loop does allocate every frame. Wrap the loop body in `arena { }` when it builds strings or lists with `let`. The particles demo needs no `arena { }`, because it builds its text only inside `draw.text` arguments.
 
 ## Built-in modules and `native`
 

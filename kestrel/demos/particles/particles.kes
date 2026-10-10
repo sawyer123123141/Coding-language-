@@ -106,6 +106,8 @@ main() {
         }
         let draw_end = window.time()
 
+        // The text is built inside the `draw.text` calls, in scratch memory that is freed
+        // after each call, so the loop body needs no `arena { }`.
         draw.text("{two(fps)} fps   {parts.len} particles", vec2(10, 10), 20, TEXT)
         draw.text("update {two(update_ms)} ms   draw {two(draw_ms)} ms   frame {two(frame_ms)} ms", vec2(10, 36), 20, TEXT)
         draw.text("move the mouse to pull   space adds {ADD_COUNT}", vec2(10, HEIGHT - 28), 20, TEXT)
