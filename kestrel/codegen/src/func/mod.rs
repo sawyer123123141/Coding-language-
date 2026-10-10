@@ -6,6 +6,7 @@ mod collections;
 mod divide;
 mod expr;
 mod maps;
+mod par;
 mod place;
 mod print;
 
@@ -80,6 +81,8 @@ enum Slot {
 
 pub(crate) struct Shared<'a> {
     pub funcs: &'a [FuncId],
+    /// The thunk of each `par for` body, by `FuncIdx`.
+    pub par_thunks: &'a HashMap<u32, FuncId>,
     pub rt: &'a RtFuncs,
     pub opts: Options,
     /// The whole program: struct layouts and callees' signatures.
@@ -236,7 +239,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             kir::Stmt::Dup(p) => self.dup(p)?,
             kir::Stmt::MapSet(map, key, value) => self.map_set(map, key, value, key.line)?,
             kir::Stmt::MapUnlock(map, saved) => self.map_unlock(map, saved)?,
-            kir::Stmt::ParFor { .. } => unreachable!("par for isn't generated yet"),
+            kir::Stmt::ParFor { func, args, count } => self.par_for(*func, args, count)?,
             kir::Stmt::PushArena(_) | kir::Stmt::PopArena { .. } | kir::Stmt::FreeArena(_) => self.arena_stmt(s)?,
             kir::Stmt::Bind(l, p) => {
                 let addr = self.place_addr(p)?;

@@ -27,6 +27,7 @@ pub(crate) struct RtFuncs {
     pub map_remove: FuncId,
     pub map_dup: FuncId,
     pub str_eq: FuncId,
+    pub par_for: FuncId,
 }
 
 impl RtFuncs {
@@ -72,13 +73,14 @@ impl RtFuncs {
             map_remove: decl("kestrel_rt_map_remove", &[ptr, ptr, I32, I64], Some(I8))?,
             map_dup: decl("kestrel_rt_map_dup", &[ptr, I64, I64], None)?,
             str_eq: decl("kestrel_rt_str_eq", &[ptr, I64, ptr, I64], Some(I8))?,
+            par_for: decl("kestrel_rt_par_for", &[I64, ptr, ptr], None)?,
         })
     }
 }
 
 /// Addresses of every runtime export, for registering with the JIT.
 pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
-    use kestrel_runtime::{arena, map, panic, print, start};
+    use kestrel_runtime::{arena, map, panic, par, print, start};
     vec![
         ("kestrel_rt_print_i64", print::kestrel_rt_print_i64 as *const u8),
         ("kestrel_rt_print_f32", print::kestrel_rt_print_f32 as *const u8),
@@ -105,6 +107,7 @@ pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
         ("kestrel_rt_map_remove", map::kestrel_rt_map_remove as *const u8),
         ("kestrel_rt_map_dup", map::kestrel_rt_map_dup as *const u8),
         ("kestrel_rt_str_eq", map::kestrel_rt_str_eq as *const u8),
+        ("kestrel_rt_par_for", par::kestrel_rt_par_for as *const u8),
     ]
 }
 

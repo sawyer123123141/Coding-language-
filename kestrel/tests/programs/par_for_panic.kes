@@ -1,0 +1,18 @@
+// expect-exit: 101
+// expect-stderr: index 8 out of bounds for length 8 on line 16
+// A failing iteration fails the program, like it would in a plain `for`.
+struct C {
+    x: int
+    cells: [int] = []
+}
+
+main() {
+    var cs = list[C]()
+    for i from 0 to 100 {
+        cs.add(C(x: i))
+    }
+    par for c in cs {
+        c.cells = array[int](8)
+        c.cells[c.x % 9] = 1
+    }
+}

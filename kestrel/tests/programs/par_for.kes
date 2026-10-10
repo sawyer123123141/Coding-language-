@@ -1,0 +1,129 @@
+// expect: 64 130816
+// expect: [24, 25, 26, 27, 28, 29, 30, 31]
+// expect: 1000 [0, 3, 0]
+// expect: 100000
+// expect: 180 328350
+// expect: 207
+// Each chunk changes only itself, so iterations can run at the same time.
+struct Chunk {
+    x: int
+    mem: Arena = Arena()
+    cells: [int] = []
+    faces: int = 0
+
+    pure build(var self, seed: int) {
+        in self.mem {
+            self.cells = array[int](8)
+        }
+        for i, c in self.cells {
+            c = self.x * 8 + i + seed
+        }
+        arena {
+            var tmp = list[int]()
+            for c in self.cells {
+                tmp.add(c)
+            }
+            self.faces = sum(tmp)
+        }
+    }
+}
+
+struct Item {
+    n: int
+    triple: [int] = []
+}
+
+// `values` is made in the program arena, so growing it from many threads
+// at once takes the job's lock.
+struct Row {
+    values: list[int] = list[int]()
+}
+
+pure sum(xs: list[int]) -> int {
+    var n = 0
+    for x in xs {
+        n += x
+    }
+    n
+}
+
+pure fill(var r: Row, n: int) {
+    for i from 0 to n {
+        r.values.add(i)
+    }
+}
+
+// Runs its own `par for`; called from inside another one, it runs in order.
+pure squares(n: int) -> int {
+    var xs = list[int]()
+    for i from 0 to n {
+        xs.add(i)
+    }
+    par for x in xs {
+        x = x * x
+    }
+    sum(xs)
+}
+
+main() {
+    var chunks = list[Chunk]()
+    for x from 0 to 64 {
+        chunks.add(Chunk(x: x))
+    }
+    par for c in chunks {
+        c.build(seed: 0)
+    }
+    var total = 0
+    for c in chunks {
+        total += c.faces
+    }
+    print(chunks.len, total)
+    print(chunks[3].cells)
+
+    // Memory the body makes outlives the loop, as after a plain `for`.
+    var items = list[Item]()
+    for i from 0 to 1000 {
+        items.add(Item(n: i))
+    }
+    par for it in items {
+        it.triple = array[int](3)
+        it.triple[1] = it.n * 3
+    }
+    print(items.len, items[1].triple)
+
+    var rows = list[Row]()
+    for i from 0 to 10000 {
+        rows.add(Row())
+    }
+    par for r in rows {
+        fill(var r, 10)
+    }
+    var count = 0
+    for r in rows {
+        count += r.values.len
+    }
+    print(count)
+
+    var ks = list[Item]()
+    for i from 0 to 36 {
+        ks.add(Item(n: i % 4 + 1))
+    }
+    par for k in ks {
+        k.n = squares(k.n)
+    }
+    var ksum = 0
+    for k in ks {
+        ksum += k.n
+    }
+    print(ksum, squares(100))
+
+    par for k in ks {
+        if k.n == 0 { continue }
+        k.n += 1
+    }
+    ksum = 0
+    for k in ks {
+        ksum += k.n
+    }
+    print(ksum)
+}
