@@ -2,6 +2,10 @@
 
 A compiled language for games (Rust + Cranelift). The compiler is the Cargo workspace in `kestrel/`. The old `kestrelc/` and `kestrel.js` implementations were removed in October 2026; they are in git history only.
 
+## Start here
+
+**Read `docs/superpowers/plans/2026-10-10-handoff.md` first.** It has the current status, the user's decisions and preferences, the next task (a heavier voxel benchmark, then `map`, then `par for`), and environment gotchas.
+
 ## Where things are
 
 - Language design: `docs/superpowers/specs/2026-10-09-kestrel-syntax-design.md`
