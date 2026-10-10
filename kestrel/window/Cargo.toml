@@ -1,0 +1,15 @@
+[package]
+name = "kestrel-window"
+version.workspace = true
+edition.workspace = true
+
+# A staticlib of this crate carries `kestrel-runtime`'s symbols and raylib, so
+# `kestrel build` links this one library instead of the runtime's.
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[dependencies]
+kestrel-runtime.workspace = true
+
+[build-dependencies]
+cc.workspace = true

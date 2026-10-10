@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 exclude = ["godot"]
-members = ["syntax", "check", "kir", "runtime", "codegen", "driver", "cli"]
+members = ["syntax", "check", "kir", "runtime", "window", "codegen", "driver", "cli"]
 
 [workspace.package]
 version = "0.1.0"
@@ -21,3 +21,4 @@ cranelift-jit = "0.116"
 cranelift-object = "0.116"
 cranelift-native = "0.116"
 find-msvc-tools = "0.1.9"
+cc = "1"
