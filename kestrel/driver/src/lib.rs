@@ -89,7 +89,7 @@ pub fn compile_as(path: &str, src: &str, style: DiagStyle, needs_main: bool) -> 
 /// Reads `path` and compiles it (as a library when `needs_main` is false).
 pub fn compile_file(path: &Path, style: DiagStyle, needs_main: bool) -> (Option<Compiled>, String) {
     match std::fs::read_to_string(path) {
-        Ok(src) => compile_as(&path.to_string_lossy(), src.strip_prefix('\u{feff}').unwrap_or(&src), style, needs_main),
+        Ok(src) => compile_as(&path.to_string_lossy(), without_bom(&src), style, needs_main),
         Err(e) => (None, format!("error: can't read {}: {e}\n", path.display())),
     }
 }
@@ -119,7 +119,8 @@ fn load(path: &str, src: &str) -> (Vec<File>, Vec<Module>, Vec<Diagnostic>) {
                     let last = files.last().expect("the entry file");
                     let base = last.base + last.src.len() as u32 + 1;
                     by_name.insert(c.module.clone(), files.len());
-                    files.push(File { path: file.to_string_lossy().into_owned(), src: text, base });
+                    let src = without_bom(&text).to_string();
+                    files.push(File { path: file.to_string_lossy().into_owned(), src, base });
                 }
             }
         }
@@ -127,6 +128,11 @@ fn load(path: &str, src: &str) -> (Vec<File>, Vec<Module>, Vec<Diagnostic>) {
         i += 1;
     }
     (files, modules, diags)
+}
+
+/// Source text without a leading UTF-8 byte order mark, which editors on Windows add.
+pub fn without_bom(src: &str) -> &str {
+    src.strip_prefix('\u{feff}').unwrap_or(src)
 }
 
 fn stem(path: &str) -> String {

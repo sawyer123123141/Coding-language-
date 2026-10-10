@@ -94,6 +94,15 @@ main() {
 }
 
 #[test]
+fn a_module_may_start_with_a_byte_order_mark() {
+    let geom = format!("\u{feff}{GEOM}");
+    let dir = project("modules_bom", &[("main.kes", "use { dist2, Point from geom }\nmain() {\n    print(dist2(Point(0, 0), Point(3, 4)))\n}\n"), ("geom.kes", &geom)]);
+    let out = kestrel(&["run"], &dir.join("main.kes"));
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "25\n");
+}
+
+#[test]
 fn runtime_errors_report_the_line_in_their_own_file() {
     let main = "use { at from geom }\nmain() {\n    print(at([1, 2], 5))\n}\n";
     let dir = project("modules_runtime", &[("main.kes", main), ("geom.kes", GEOM)]);

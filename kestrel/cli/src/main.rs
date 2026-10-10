@@ -3,7 +3,7 @@ mod link;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use kestrel_driver::DiagStyle;
+use kestrel_driver::{without_bom, DiagStyle};
 use kestrel_codegen::{emit_object, JitProgram, Options};
 
 const USAGE: &str = "usage: kestrel <run|check|build> <file.kes> [-o <exe>] [--release] [--diagnostics=short]";
@@ -51,11 +51,6 @@ fn main() -> ExitCode {
         // Couldn't reserve the stack; the default one still handles ordinary programs.
         Err(_) => run(),
     }
-}
-
-/// Source text without a leading UTF-8 byte order mark, which editors on Windows add.
-fn without_bom(src: &str) -> &str {
-    src.strip_prefix('\u{feff}').unwrap_or(src)
 }
 
 /// True when both paths name the same file (compared canonically when both exist).
