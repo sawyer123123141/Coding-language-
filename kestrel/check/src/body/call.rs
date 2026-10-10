@@ -250,6 +250,13 @@ impl<'a> BodyChecker<'a> {
             self.error_help(a.span, msg, help);
         }
         let ty = self.check_expr(&a.value, None);
+        if let ExprKind::Index { base, .. } = &a.value.kind {
+            if let Ty::Map(..) = self.t.ty(base.id) {
+                let msg = "a map entry can't be passed as `var`; read it, change it, and write it back with `m[k] = v`";
+                self.error(a.value.span, msg);
+                return None;
+            }
+        }
         let Some(root) = self.place_root(&a.value) else {
             if ty != Ty::Error {
                 self.error(a.value.span, "only a variable can be passed as `var`");

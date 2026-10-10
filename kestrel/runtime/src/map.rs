@@ -47,36 +47,56 @@ fn key_size(kind: i32) -> usize {
     }
 }
 
-/// The bytes that make up a key: an integer's own bytes, or a string's text.
+/// A key, read once: an integer's (or bool's) value, or a string's text.
+enum Key<'a> {
+    Int(u64),
+    Text(&'a [u8]),
+}
+
+/// The integer of `kind` at `p`, or the text of the string at `p`.
 ///
 /// # Safety
-/// `key` must point at a key of this kind; a string's text must be valid.
-unsafe fn key_bytes<'a>(key: *const u8, kind: i32) -> &'a [u8] {
-    if kind != STRING {
-        return std::slice::from_raw_parts(key, key_size(kind));
-    }
-    let ptr = *(key as *const *const u8);
-    let len = *(key.add(8) as *const i64);
-    if len <= 0 {
-        &[]
-    } else {
-        std::slice::from_raw_parts(ptr, len as usize)
+/// `p` must point at a key of this kind; a string's text must be valid.
+unsafe fn read_key<'a>(p: *const u8, kind: i32) -> Key<'a> {
+    match kind {
+        0 => Key::Int(*p as u64),
+        1 => Key::Int(std::ptr::read_unaligned(p as *const u32) as u64),
+        2 => Key::Int(std::ptr::read_unaligned(p as *const u64)),
+        STRING => {
+            let ptr = std::ptr::read_unaligned(p as *const *const u8);
+            let len = std::ptr::read_unaligned(p.add(8) as *const i64);
+            Key::Text(if len <= 0 { &[] } else { std::slice::from_raw_parts(ptr, len as usize) })
+        }
+        other => unreachable!("map key kind {other}"),
     }
 }
 
-fn hash(bytes: &[u8], kind: i32) -> u32 {
-    if kind == STRING {
-        // FNV-1a
-        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-        for &b in bytes {
-            h ^= b as u64;
-            h = h.wrapping_mul(0x0100_0000_01b3);
+impl Key<'_> {
+    fn hash(&self) -> u32 {
+        match self {
+            Key::Int(v) => (v.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 32) as u32,
+            Key::Text(bytes) => {
+                // FNV-1a
+                let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+                for &b in *bytes {
+                    h ^= b as u64;
+                    h = h.wrapping_mul(0x0100_0000_01b3);
+                }
+                (h ^ (h >> 32)) as u32
+            }
         }
-        (h ^ (h >> 32)) as u32
-    } else {
-        let mut v = [0u8; 8];
-        v[..bytes.len()].copy_from_slice(bytes);
-        (u64::from_le_bytes(v).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 32) as u32
+    }
+
+    /// Whether the key stored at `p` (of `kind`) is this one.
+    ///
+    /// # Safety
+    /// As for `read_key`.
+    unsafe fn is_at(&self, p: *const u8, kind: i32) -> bool {
+        match (self, read_key(p, kind)) {
+            (Key::Int(a), Key::Int(b)) => *a == b,
+            (Key::Text(a), Key::Text(b)) => *a == b,
+            _ => false,
+        }
     }
 }
 
@@ -92,7 +112,7 @@ impl Map {
     ///
     /// # Safety
     /// The map must have an index table, and entries of `size` bytes.
-    unsafe fn probe(&self, key: &[u8], kind: i32, h: u32, size: i64) -> (usize, bool) {
+    unsafe fn probe(&self, key: &Key, kind: i32, h: u32, size: i64) -> (usize, bool) {
         let mask = self.slot_count as usize - 1;
         let mut s = h as usize & mask;
         let mut free = None;
@@ -105,7 +125,7 @@ impl Map {
                 }
                 n => {
                     let e = self.entry(n as i64, size);
-                    if *(e.add(HASH) as *const u32) == h && key_bytes(e.add(KEY), kind) == key {
+                    if *(e.add(HASH) as *const u32) == h && key.is_at(e.add(KEY), kind) {
                         return (s, true);
                     }
                 }
@@ -201,8 +221,8 @@ pub unsafe extern "C" fn kestrel_rt_map_find(map: *const Map, key: *const u8, ki
     if m.count == 0 {
         return std::ptr::null_mut();
     }
-    let k = key_bytes(key, kind);
-    match m.probe(k, kind, hash(k, kind), entry_size) {
+    let k = read_key(key, kind);
+    match m.probe(&k, kind, k.hash(), entry_size) {
         (s, true) => m.entry(*m.slots.add(s) as i64, entry_size),
         _ => std::ptr::null_mut(),
     }
@@ -223,11 +243,13 @@ pub unsafe extern "C" fn kestrel_rt_map_insert(
     line: i32,
 ) -> *mut u8 {
     let m = &mut *map;
-    let k = key_bytes(key, kind);
-    let h = hash(k, kind);
+    let k = read_key(key, kind);
+    let h = k.hash();
+    let mut free = None;
     if m.slot_count > 0 {
-        if let (s, true) = m.probe(k, kind, h, entry_size) {
-            return m.entry(*m.slots.add(s) as i64, entry_size);
+        match m.probe(&k, kind, h, entry_size) {
+            (s, true) => return m.entry(*m.slots.add(s) as i64, entry_size),
+            (s, false) => free = Some(s),
         }
     }
     if m.locks > 0 {
@@ -237,6 +259,7 @@ pub unsafe extern "C" fn kestrel_rt_map_insert(
     }
     if m.used == m.cap {
         m.make_room(entry_size, entry_align);
+        free = None;
     }
     let i = m.used;
     let e = m.entry(i, entry_size);
@@ -246,7 +269,11 @@ pub unsafe extern "C" fn kestrel_rt_map_insert(
     std::ptr::copy_nonoverlapping(key, e.add(KEY), key_size(kind));
     m.used += 1;
     m.count += 1;
-    let (s, _) = m.probe(k, kind, h, entry_size);
+    let s = match free {
+        Some(s) => s,
+        // The table was rebuilt: find the new key's place again.
+        None => m.probe(&k, kind, h, entry_size).0,
+    };
     *m.slots.add(s) = i as i32;
     e
 }
@@ -262,8 +289,8 @@ pub unsafe extern "C" fn kestrel_rt_map_remove(map: *mut Map, key: *const u8, ki
     if m.count == 0 {
         return 0;
     }
-    let k = key_bytes(key, kind);
-    let (s, true) = m.probe(k, kind, hash(k, kind), entry_size) else { return 0 };
+    let k = read_key(key, kind);
+    let (s, true) = m.probe(&k, kind, k.hash(), entry_size) else { return 0 };
     let i = *m.slots.add(s);
     *m.slots.add(s) = REMOVED;
     *m.entry(i as i64, entry_size).add(LIVE) = 0;

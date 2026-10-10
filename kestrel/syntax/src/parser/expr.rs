@@ -250,7 +250,6 @@ impl Parser {
         Ok(self.expr_node(ExprKind::Call { name, name_span, args }, name_span.to(end)))
     }
 
-    /// `array[int](n)`: type arguments in brackets, then call arguments.
     /// `{k: v, ...}`. A `{` never starts a block expression, so here it's a
     /// map. Newlines inside it don't end anything.
     fn map_lit(&mut self, start: Span) -> PResult<Expr> {
@@ -272,6 +271,7 @@ impl Parser {
         Ok(self.expr_node(ExprKind::MapLit(entries), start.to(end)))
     }
 
+    /// `array[int](n)`: type arguments in brackets, then call arguments.
     fn type_call(&mut self, name: String, name_span: Span) -> PResult<Expr> {
         self.expect(&Tok::LBracket, "`[`")?;
         let mut type_args = Vec::new();

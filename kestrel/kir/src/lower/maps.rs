@@ -35,20 +35,35 @@ impl<'a> FnLowerer<'a> {
         ExprKind::Seq(stmts, Box::new(Expr { kind: ExprKind::Move(Place::local(tmp)), ty, line }))
     }
 
-    /// `m[k]`: an optional holding the value, with its own copy of any
-    /// arrays or lists inside (the map keeps its own).
+    /// `m[k]`: an optional holding the value. When it holds arrays or
+    /// lists, they're shared with the map, like a list element read from
+    /// its place: storing the value copies it (see `owned`). A caller's map
+    /// (a parameter or loop element) is copied from right away, since
+    /// `owned` wouldn't know the value isn't this function's to hand out.
     pub(crate) fn map_get(&mut self, base: &ast::Expr, key: &ast::Expr, ty: KTy, line: u32) -> ExprKind {
         let mut pre = Vec::new();
         let map = self.place_or_temp(base, &mut pre, true);
         let key = self.expr(key);
+        let borrowed = self.borrowed(&map);
         let get = map_expr(MapOp::Get, map, vec![key], ty, line);
         if !has_heap(ty, self.t) {
             return Self::with_pre(pre, get.kind, ty, line);
         }
         let tmp = self.temp(ty);
         pre.push(Stmt::Let(tmp, get));
-        pre.extend(self.helpers.fixup(Place::local(tmp), ty, self.t));
-        ExprKind::Seq(pre, Box::new(Expr { kind: ExprKind::Move(Place::local(tmp)), ty, line }))
+        let kind = if borrowed {
+            pre.extend(self.helpers.fixup(Place::local(tmp), ty, self.t));
+            ExprKind::Move(Place::local(tmp))
+        } else {
+            ExprKind::Load(Place::local(tmp))
+        };
+        ExprKind::Seq(pre, Box::new(Expr { kind, ty, line }))
+    }
+
+    /// Whether the map at `map` belongs to a caller (it's reached through a
+    /// parameter or a loop element).
+    fn borrowed(&self, map: &Place) -> bool {
+        self.locals[map.root.0 as usize].kind == LocalKind::RefParam
     }
 
     /// `m.get(k, d)`, `m.has(k)` and `m.remove(k)`, as values.
@@ -75,7 +90,11 @@ impl<'a> FnLowerer<'a> {
         let ty = default.ty;
         let default = self.spill(default, &mut pre);
         let opt = self.temp(opt_ty);
+        let borrowed = self.borrowed(&map);
         pre.push(Stmt::Let(opt, map_expr(MapOp::Get, map, vec![key], opt_ty, line)));
+        if borrowed && has_heap(opt_ty, self.t) {
+            pre.extend(self.helpers.fixup(Place::local(opt), opt_ty, self.t));
+        }
         let tag = Expr { kind: ExprKind::Tag(Place::local(opt)), ty: KTy::U8, line };
         let zero = Expr { kind: ExprKind::Int(0), ty: KTy::U8, line };
         let found = Expr { kind: ExprKind::Binary(BinOp::Ne, Box::new(tag), Box::new(zero)), ty: KTy::Bool, line };

@@ -27,6 +27,11 @@ main() {
     let pair: map[int] = {}
     fixed.remove("a")
     print(m.get("a"))
+    bump(var m["a"])
+}
+
+bump(var x: int?) {
+    x = 5
 }
 
 // error 10: map keys must be integers, bools or strings; `float` keys would be unreliable
@@ -48,3 +53,4 @@ main() {
 // error 28: can't call `remove` on `fixed`: it changes `fixed`, which was declared with `let`
 // error 29: `get` takes a key and a default value: `m.get(k, 0)`
 // error 11: maps can't hold values that own an arena yet (`Chunk` has one); keep them in a list and map keys to indexes
+// error 30: a map entry can't be passed as `var`; read it, change it, and write it back with `m[k] = v`

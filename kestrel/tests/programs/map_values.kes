@@ -1,0 +1,54 @@
+// expect: {"a": [1, 2, 3]} [99, 2, 3]
+// expect: {"a": [1, 2, 3]} [98, 2, 3]
+// expect: [1, 2, 3] [7777, 8888, 9999]
+// expect: {1: 1, 2: 2, 3: 3}
+// Values read out of a map are copies, wherever they end up.
+first(m: map[string, list[int]]) -> list[int] {
+    m.get("a", list[int]())
+}
+
+first_index(m: map[string, list[int]]) -> list[int] {
+    let v = m["a"] else { return list[int]() }
+    v
+}
+
+// The map lives outside the arena block, so its value may leave it.
+fetch() -> [int]? {
+    var m: map[int, [int]] = {}
+    m[1] = [1, 2, 3]
+    arena {
+        return m[1]
+    }
+    none
+}
+
+// Returning from inside a loop unlocks the map before it's handed back.
+build() -> map[int, int] {
+    var m: map[int, int] = {1: 1, 2: 2}
+    for k, v in m {
+        if k == 2 { return m }
+    }
+    m
+}
+
+main() {
+    var m: map[string, list[int]] = {}
+    m["a"] = [1, 2, 3]
+    var x = first(m)
+    x[0] = 99
+    print(m, x)
+    var y = first_index(m)
+    y[0] = 98
+    print(m, y)
+    let r = fetch()
+    arena {
+        var j = array[int](3)
+        j[0] = 7777
+        j[1] = 8888
+        j[2] = 9999
+        print(r, j)
+    }
+    var b = build()
+    b[3] = 3
+    print(b)
+}

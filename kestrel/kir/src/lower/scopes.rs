@@ -133,7 +133,11 @@ impl<'a> FnLowerer<'a> {
             let v = self.expr(v);
             self.owned(v, true)
         });
-        let cleanup = self.exit_cleanup(false);
+        // Unlocking only writes the maps' headers, so it goes first: a map
+        // returned from inside a loop over it must leave unlocked.
+        let (unlocks, cleanup): (Vec<Stmt>, Vec<Stmt>) =
+            self.exit_cleanup(false).into_iter().partition(|s| matches!(s, Stmt::MapUnlock(..)));
+        out.extend(unlocks);
         if !cleanup.is_empty() {
             v = v.map(|x| self.spill(x, out));
             out.extend(cleanup);
