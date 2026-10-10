@@ -1,0 +1,6 @@
+// expect-exit: 101
+// expect-stderr: integer overflow on line 5
+main() {
+    let x = -2147483647 - 1
+    print(abs(x))
+}

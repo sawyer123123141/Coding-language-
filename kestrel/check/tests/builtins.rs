@@ -1,4 +1,4 @@
-use kestrel_check::{check, Builtin, Res, Tables, Ty};
+use kestrel_check::{check, Builtin, Res, Tables, Ty, VEC2};
 use kestrel_syntax::parse;
 
 fn run(src: &str) -> (Option<Tables>, Vec<String>) {
@@ -35,6 +35,58 @@ fn float_functions_take_the_common_float_type() {
     for b in [Builtin::Sqrt, Builtin::Pow, Builtin::Atan2, Builtin::Floor, Builtin::Sin, Builtin::Pi, Builtin::Tau] {
         assert!(builtins.contains(&b), "{b:?} should be resolved");
     }
+}
+
+#[test]
+fn generic_functions_and_vector_methods_have_the_common_type() {
+    let src = "main() {\n let w: f64 = 2\n let small: u8 = 7\n let a = abs(-3)\n let b = sign(small)\n let c = min(3, 1.5)\n let d = max(2, w)\n let e = clamp(15, 0, w)\n let f = lerp(0, 10, 0.5)\n let g = lerp(w, 4, 0.5)\n let h = lerp(vec2(0, 0), vec2(1, 1), 1)\n let i = vec2(3, 4).length()\n let j = vec2(3, 4).normalized()\n let k = vec3(1, 2, 3).dot(vec3(1, 1, 1))\n let l = vec3(1, 2, 3).normalized().distance_to(vec3(0, 0, 0))\n let m = clamp(small, 1, 5)\n let n = abs(i64(-4))\n print(a, b, c, d, e, f, g, h, i, j, k, l, m, n)\n}\n";
+    let (t, errs) = run(src);
+    assert!(errs.is_empty(), "{errs:?}");
+    let t = t.unwrap();
+    let expected = [
+        ("a", Ty::Int),
+        ("b", Ty::U8),
+        ("c", Ty::Float),
+        ("d", Ty::F64),
+        ("e", Ty::F64),
+        ("f", Ty::Float),
+        ("g", Ty::F64),
+        ("h", Ty::Struct(VEC2)),
+        ("i", Ty::Float),
+        ("j", Ty::Struct(VEC2)),
+        ("k", Ty::Float),
+        ("l", Ty::Float),
+        ("m", Ty::U8),
+        ("n", Ty::I64),
+    ];
+    for (name, ty) in expected {
+        assert_eq!(local_ty(&t, name), ty, "type of `{name}`");
+    }
+    let builtins: Vec<Builtin> = t.res.values().filter_map(|r| if let Res::Builtin(b) = r { Some(*b) } else { None }).collect();
+    for b in [
+        Builtin::Abs,
+        Builtin::Sign,
+        Builtin::Min,
+        Builtin::Max,
+        Builtin::Clamp,
+        Builtin::Lerp,
+        Builtin::Length,
+        Builtin::Normalized,
+        Builtin::Dot,
+        Builtin::DistanceTo,
+    ] {
+        assert!(builtins.contains(&b), "{b:?} should be resolved");
+    }
+}
+
+#[test]
+fn lerp_converts_an_integer_t_and_integer_ends_to_float() {
+    // `lerp(vec2, vec2, 1)`: `t` goes to float. `lerp(0, 10, 1)`: all three go to float.
+    let (t, errs) = run("main() {\n print(lerp(vec2(0, 0), vec2(1, 1), 1), lerp(0, 10, 1))\n}\n");
+    assert!(errs.is_empty(), "{errs:?}");
+    let t = t.unwrap();
+    assert_eq!(t.coerce.values().filter(|&&ty| ty == Ty::Float).count(), 4, "{:?}", t.coerce);
+    assert!(!t.coerce.values().any(|&ty| ty == Ty::F64));
 }
 
 #[test]
@@ -98,9 +150,36 @@ fn builtin_errors() {
         ("main() {\n let f = sqrt\n}\n", "`sqrt` is a function; call it with `sqrt(...)`"),
         ("main() {\n let x = PI(1)\n}\n", "`PI` is a constant; write it without `(...)`"),
         ("let X = randf()\nmain() {}\n", "constants can only use literals, operators and earlier constants"),
+        ("main() {\n print(abs(\"x\"))\n}\n", "`abs` needs a number here, found string"),
+        ("main() {\n print(abs(1, 2))\n}\n", "`abs` takes one value"),
+        ("main() {\n print(min(1))\n}\n", "`min` takes two values"),
+        ("main() {\n print(max(1, true))\n}\n", "`max` needs a number here, found bool"),
+        ("main() {\n print(clamp(1, 2))\n}\n", "`clamp` takes three values"),
+        // Like `+`, a literal takes the type of the value before it.
+        ("main() {\n let small: u8 = 7\n print(max(small, 300))\n}\n", "`300` doesn't fit in u8"),
+        ("main() {\n print(sign(vec2(1, 2)))\n}\n", "`sign` needs a number here, found vec2"),
+        ("main() {\n print(lerp(1, 2))\n}\n", "`lerp` takes three values"),
+        ("main() {\n print(lerp(1, vec2(1, 2), 0.5))\n}\n", "`lerp` needs two numbers or two vectors of the same size, found int and vec2"),
+        ("main() {\n print(lerp(vec2(1, 2), vec3(1, 2, 3), 0.5))\n}\n", "`lerp` needs two numbers or two vectors of the same size, found vec2 and vec3"),
+        ("main() {\n print(lerp(\"a\", \"b\", 0.5))\n}\n", "`lerp` needs two numbers or two vectors of the same size, found string and string"),
+        ("main() {\n print(lerp(1, 2, vec2(1, 2)))\n}\n", "`lerp` needs a number here, found vec2"),
+        ("main() {\n let t: f64 = 0.5\n print(lerp(vec2(1, 2), vec2(3, 4), t))\n}\n", "expected float, found f64"),
+        ("main() {\n print(vec2(1, 2).length(1))\n}\n", "`length` takes no values"),
+        ("main() {\n print(vec2(1, 2).normalized(1))\n}\n", "`normalized` takes no values"),
+        ("main() {\n print(vec2(1, 2).dot())\n}\n", "`dot` takes one value"),
+        ("main() {\n print(vec2(1, 2).distance_to(1, 2))\n}\n", "`distance_to` takes one value"),
+        ("main() {\n print(vec3(1, 2, 3).dot(vec2(1, 2)))\n}\n", "expected vec3, found vec2"),
+        ("main() {\n print(vec2(1, 2).dot(2))\n}\n", "expected vec2, found int"),
+        ("main() {\n print(vec2(1, 2).dot(other: vec2(1, 2)))\n}\n", "built-in functions take plain values, not labels or `var`"),
+        ("main() {\n vec2(1, 2).length()\n}\n", "the result of `length` is unused, so this line does nothing"),
+        ("main() {\n print(vec2(1, 2).foo())\n}\n", "`vec2` has no method `foo`"),
+        (
+            "bump(var v: vec2) -> vec2 {\n v = vec2(0, 0)\n v\n}\nmain() {\n var v = vec2(1, 2)\n print(v.dot(bump(var v)))\n}\n",
+            "`v` is passed here, but a later argument changes it",
+        ),
         // Typed by a later task.
-        ("main() {\n print(abs(1))\n}\n", "`abs` isn't available yet"),
         ("main() {\n print(randf())\n}\n", "`randf` isn't available yet"),
+        ("main() {\n print(randi_range(1, 2))\n}\n", "`randi_range` isn't available yet"),
     ];
     for (src, expected) in cases {
         assert_eq!(run(src).1, vec![expected.to_string()], "source:\n{src}");

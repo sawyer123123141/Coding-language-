@@ -87,7 +87,7 @@ impl<'a> FnLowerer<'a> {
             ast::ExprKind::Call { args, .. } => match self.t.res[&e.id] {
                 Res::Convert(_) => ExprKind::Cast(Box::new(self.expr(&args[0].value))),
                 Res::NewArena => ExprKind::NewArena,
-                Res::Builtin(b) => self.builtin_call(b, args),
+                Res::Builtin(b) => self.builtin_call(b, args, ty, line),
                 Res::Fn(f) => {
                     let (pre, fi, a) = self.call_parts(e, f, args, None);
                     Self::with_pre(pre, ExprKind::Call(fi, a), ty, line)
@@ -112,6 +112,7 @@ impl<'a> FnLowerer<'a> {
                     let (pre, kind) = self.variant_construct(e, id, v, args);
                     Self::with_pre(pre, kind, ty, line)
                 }
+                Res::Builtin(b) => self.vector_method(b, receiver, args, ty, line),
                 other => unreachable!("method call resolved to {other:?}"),
             },
             ast::ExprKind::Field { base, .. } if matches!(self.t.ty(base.id), Ty::Array(_) | Ty::List(_) | Ty::Map(..)) => {

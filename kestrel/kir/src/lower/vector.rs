@@ -1,5 +1,7 @@
+use kestrel_check::Builtin;
 use kestrel_syntax::ast;
 
+use super::builtins::{binary, node, number, select};
 use super::{kty, FnLowerer};
 use crate::ir::*;
 
@@ -74,6 +76,57 @@ impl<'a> FnLowerer<'a> {
         let o = self.operand(v, &mut pre);
         let fields = comps.iter().map(|&i| Self::component(&o, i, line)).collect();
         Self::with_pre(pre, ExprKind::StructLit(s, fields), ty, line)
+    }
+
+    /// A `vec2` / `vec3` method (`length`, `normalized`, `dot`, `distance_to`),
+    /// with the receiver, then the argument, evaluated once, in that order.
+    pub(crate) fn vector_method(&mut self, b: Builtin, receiver: &ast::Expr, args: &[ast::Arg], ty: KTy, line: u32) -> ExprKind {
+        let mut pre = Vec::new();
+        let v = self.expr(receiver);
+        let vty = v.ty;
+        let KTy::Struct(s) = vty else { unreachable!("vector methods are called on vectors") };
+        let dims = self.dims(s);
+        let kind = match b {
+            Builtin::Length => {
+                let o = self.operand(v, &mut pre);
+                Self::length(&o, dims, line)
+            }
+            Builtin::Dot => {
+                let l = self.operand(v, &mut pre);
+                let w = self.expr(&args[0].value);
+                let r = self.operand(w, &mut pre);
+                Self::dot_sum(&l, &r, dims, line).kind
+            }
+            Builtin::DistanceTo => {
+                let w = self.expr(&args[0].value);
+                let diff = node(self.vec_combine(BinOp::Sub, v, w, vty, line), vty, line);
+                let d = self.operand(diff, &mut pre);
+                Self::length(&d, dims, line)
+            }
+            Builtin::Normalized => {
+                let o = self.operand(v, &mut pre);
+                let len = node(Self::length(&o, dims, line), KTy::F32, line);
+                let len = self.spill(len, &mut pre);
+                // A zero vector stays zero.
+                let positive = binary(BinOp::Gt, &len, &number(0, KTy::F32, line), KTy::Bool, line);
+                let unit = (0..dims).map(|i| binary(BinOp::Div, &Self::component(&o, i, line), &len, KTy::F32, line)).collect();
+                let zero = (0..dims).map(|_| number(0, KTy::F32, line)).collect();
+                select(positive, node(ExprKind::StructLit(s, unit), ty, line), node(ExprKind::StructLit(s, zero), ty, line))
+            }
+            other => unreachable!("{other:?} isn't a vector method"),
+        };
+        Self::with_pre(pre, kind, ty, line)
+    }
+
+    /// The sum of the products of the components of two vectors.
+    fn dot_sum(l: &Operand, r: &Operand, dims: u32, line: u32) -> Expr {
+        let product = |i| binary(BinOp::Mul, &Self::component(l, i, line), &Self::component(r, i, line), KTy::F32, line);
+        (0..dims).map(product).reduce(|sum, p| binary(BinOp::Add, &sum, &p, KTy::F32, line)).expect("vectors have components")
+    }
+
+    /// The length of a vector.
+    fn length(o: &Operand, dims: u32, line: u32) -> ExprKind {
+        ExprKind::Math(MathOp::Sqrt, vec![Self::dot_sum(o, o, dims, line)])
     }
 
     /// Component count of a vector struct.

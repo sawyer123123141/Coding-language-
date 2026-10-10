@@ -3,6 +3,7 @@ use kestrel_syntax::Diagnostic;
 
 use super::place::Immutable;
 use super::{is_const_expr, BodyChecker};
+use crate::builtins::Builtin;
 use crate::tables::{LocalId, Res, StructId, Tables, BUILTIN_STRUCTS};
 use crate::ty::Ty;
 
@@ -117,6 +118,9 @@ impl<'a> BodyChecker<'a> {
         }
         if let Ty::Map(..) = receiver_ty {
             return self.map_method(e, receiver, receiver_ty, args);
+        }
+        if let (Some(_), Some(b)) = (self.t.vec_dims(receiver_ty), Builtin::vector_method(name)) {
+            return self.check_vector_method(e, b, receiver, receiver_ty, args);
         }
         let found = match receiver_ty {
             Ty::Struct(sid) => {

@@ -139,17 +139,13 @@ impl Builtin {
 
     /// How many values a call takes (a method's receiver doesn't count).
     pub fn arity(self) -> usize {
+        use Builtin::*;
         match self {
-            Builtin::Pi | Builtin::Tau | Builtin::Randf | Builtin::Length | Builtin::Normalized => 0,
-            Builtin::Atan2
-            | Builtin::Pow
-            | Builtin::Min
-            | Builtin::Max
-            | Builtin::RandfRange
-            | Builtin::RandiRange => 2,
-            Builtin::Clamp | Builtin::Lerp => 3,
-            // The one-argument functions, `rand_seed`, and the `dot` / `distance_to` methods.
-            _ => 1,
+            Pi | Tau | Randf | Length | Normalized => 0,
+            Sqrt | Sin | Cos | Tan | Asin | Acos | Atan | Exp | Log | Floor | Ceil | Round | Abs | Sign | RandSeed | Dot
+            | DistanceTo => 1,
+            Atan2 | Pow | Min | Max | RandfRange | RandiRange => 2,
+            Clamp | Lerp => 3,
         }
     }
 }

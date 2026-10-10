@@ -1,0 +1,69 @@
+// expect: eval 5
+// expect: eval 1
+// expect: eval 3
+// expect: 3
+// expect: eval 4
+// expect: eval 2
+// expect: 2
+// expect: eval 6
+// expect: eval 7
+// expect: 7
+// expect: eval -8
+// expect: 8
+// expect: eval -9
+// expect: -1
+// expect: feval 9
+// expect: feval 1
+// expect: feval 5
+// expect: 5
+// expect: feval 2
+// expect: feval 6
+// expect: feval 1
+// expect: 4
+// expect: veval 0
+// expect: veval 10
+// expect: feval 1
+// expect: vec2(x: 15, y: 20)
+// expect: veval 3
+// expect: veval 1
+// expect: 10
+// expect: veval 3
+// expect: veval 2
+// expect: 150
+noisy(n: int) -> int {
+    print("eval", n)
+    n
+}
+
+fnoisy(n: int) -> float {
+    print("feval", n)
+    float(n)
+}
+
+vnoisy(n: int) -> vec2 {
+    print("veval", n)
+    vec2(3 * n, 4 * n)
+}
+
+main() {
+    let c = clamp(noisy(5), noisy(1), noisy(3))
+    print(c)
+    let lo = min(noisy(4), noisy(2))
+    print(lo)
+    let hi = max(noisy(6), noisy(7))
+    print(hi)
+    let a = abs(noisy(-8))
+    print(a)
+    let s = sign(noisy(-9))
+    print(s)
+    let fc = clamp(fnoisy(9), fnoisy(1), fnoisy(5))
+    print(fc)
+    let l = lerp(fnoisy(2), fnoisy(6), fnoisy(1) / 2)
+    print(l)
+    let vl = lerp(vnoisy(0), vnoisy(10), fnoisy(1) / 2)
+    print(vl)
+    let d = vnoisy(3).distance_to(vnoisy(1))
+    print(d)
+    let dot = vnoisy(3).dot(vnoisy(2))
+    print(dot)
+}

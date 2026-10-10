@@ -6,9 +6,32 @@ main() {
     print(atan2(1))
 }
 abs(x: int) -> int { x }
+other() {
+    print(lerp(vec2(1, 1), 2.0, 0.5))
+    print(vec2(1, 1).dot(vec3(1, 1, 1)))
+    print(vec2(1, 1).length(2))
+    print(min(1, "a"))
+    print(vec2(1, 1).dot())
+    print(lerp(1, 2, "t"))
+    print(clamp(1, 2))
+    print(vec2(1, 1).foo())
+    vec2(1, 1).length()
+    print(vec2(1, 1).dot(b: vec2(1, 1)))
+    print(lerp(vec2(1, 1), vec2(2, 2), 0.5).length())
+}
 // error 2: `min` is a built-in name; pick another
 // error 3: `sqrt` needs a number here, found string
 // error 4: `sqrt` takes one value
 // error 5: the result of `sqrt` is unused, so this line does nothing
 // error 6: `atan2` takes two values
 // error 8: `abs` is a built-in name; pick another
+// error 10: `lerp` needs two numbers or two vectors of the same size, found vec2 and float
+// error 11: expected vec2, found vec3
+// error 12: `length` takes no values
+// error 13: `min` needs a number here, found string
+// error 14: `dot` takes one value
+// error 15: `lerp` needs a number here, found string
+// error 16: `clamp` takes three values
+// error 17: `vec2` has no method `foo`
+// error 18: the result of `length` is unused, so this line does nothing
+// error 19: built-in functions take plain values, not labels or `var`

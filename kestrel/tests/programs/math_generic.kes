@@ -1,0 +1,19 @@
+// expect: 3 2.5 0 1 -1 1 0
+// expect: 1.5 9 10 0 7
+// expect: 2.5 5 vec2(x: 5, y: 10)
+// expect: 5 vec2(x: 0.6, y: 0.8) 11 5 vec2(x: 0, y: 0)
+// expect: 13 vec3(x: 0, y: 1, z: 0)
+pure speed(v: vec2) -> float {
+    v.length()
+}
+
+main() {
+    let small: u8 = 7
+    print(abs(-3), abs(-2.5), abs(0), sign(small), sign(-7), sign(2.5), sign(0.0))
+    print(min(3, 1.5), max(2, 9), clamp(15, 0, 10), clamp(-4, 0, 10), clamp(7, 0, 10))
+    print(lerp(0, 10, 0.25), lerp(0.0, 10.0, 0.5), lerp(vec2(0, 0), vec2(10, 20), 0.5))
+    let v = vec2(3, 4)
+    print(speed(v), v.normalized(), v.dot(vec2(1, 2)), v.distance_to(vec2(0, 0)), vec2(0, 0).normalized())
+    let w = vec3(3, 4, 12)
+    print(w.length(), vec3(0, 5, 0).normalized())
+}
