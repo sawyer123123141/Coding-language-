@@ -31,6 +31,20 @@ Done in 2b-i: labelled arguments evaluate in source order; `func/mod.rs` split; 
 - **Runtime errors don't name the file** in multi-file programs, only the line.
 - **The Godot add-on is built and tested on Windows only.** The `.gdextension` file lists Linux and macOS library names, but they've never been built.
 
+## Maps (built 2026-10-09)
+
+- **Not yet:**
+  - values that own an arena;
+  - struct, enum and vector keys (they need `==` first);
+  - `==` on maps;
+  - maps across the Godot bridge (a load error says so).
+- **Map constants are rebuilt at every use** (all constants are re-lowered at each use). A lookup-table constant used inside a hot function builds a fresh map each call: a review measured 616 MB for 2M calls. Hoist constants into the program arena, or build each once.
+- **Lookups are runtime calls.** Inlining the probe for integer keys into generated code would remove the call; on a map that fits in the cache, the call is most of the remaining cost.
+- **In-order integer keys miss the cache** where C#'s identity hash walks memory in order (2.5x behind in `kestrel/bench/maps`). The scattering hash is the safer default; probing that tolerates identity hashes (as Python's does) is the alternative.
+- **`print(m, m.remove(1), m)`** prints the first `m` after the removal: print arguments are evaluated first, and the first is a header copy sharing entries. Function calls reject this through `check_changed_later`; `print` isn't covered.
+- **`m.get(k, d)` copies a heap-holding default twice** (once as an argument, once when the result is stored), even when the key is found. Wasted arena memory, not wrong.
+- **A loop nested over the same map** makes the outer loop re-index its value on every use (`MapLock` counts as a write). Correct, but slower.
+
 ## Do in 2c
 
 - **Strings (2b-ii scope).** String values are a pointer plus a length into read-only data, so only literals exist. `"{x}"` interpolation works only as a direct `print` argument, because building a new string needs memory, which comes with arenas. No `==`, length, indexing or concatenation yet; `"a" == "b"` reports "`==` needs numbers". Strings nested in a printed struct are quoted, but `"` inside them isn't escaped.

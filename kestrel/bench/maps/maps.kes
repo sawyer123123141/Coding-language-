@@ -1,0 +1,60 @@
+// Map benchmark: integer keys (add, look up, remove, test) and string
+// keys (counting words). `cs/` is the same in C# with `Dictionary`.
+
+// Key `i` of round `r`: in order (`i * 7 + r`), or scattered over a
+// billion values (a multiplicative scramble, one-to-one), so that neither
+// side's hash gets to walk memory in order.
+pure key(i: int, r: int, scattered: bool) -> int {
+    if scattered { int(i64(i) * 2654435761 & 0x3FFFFFFF) + r } else { i * 7 + r }
+}
+
+// Adds `n` keys, reads them all back, removes every other one and tests
+// them all, `rounds` times; each round's map lives in an arena.
+pub int_keys(n: int, rounds: int, scattered: bool) -> i64 {
+    var total: i64 = 0
+    for r from 0 to rounds {
+        arena {
+            var m = map[int, int]()
+            for i from 0 to n {
+                m[key(i, r, scattered)] = i
+            }
+            for i from 0 to n {
+                total += m.get(key(i, r, scattered), 0)
+            }
+            for i from 0 to n {
+                if i % 2 == 0 { m.remove(key(i, r, scattered)) }
+            }
+            for i from 0 to n {
+                if m.has(key(i, r, scattered)) { total += 1 }
+            }
+            total += m.len
+        }
+    }
+    total
+}
+
+// Counts `ops` words picked pseudo-randomly from 64.
+pub word_count(ops: int) -> i64 {
+    let words = [
+        "sword", "bow", "axe", "shield", "potion", "arrow", "helmet", "boots",
+        "ring", "amulet", "staff", "wand", "scroll", "gem", "coin", "key",
+        "torch", "rope", "map", "lantern", "dagger", "spear", "mace", "hammer",
+        "cloak", "gloves", "belt", "bread", "apple", "cheese", "water", "wine",
+        "ore", "ingot", "plank", "stone", "brick", "glass", "cloth", "leather",
+        "feather", "bone", "skull", "egg", "milk", "honey", "salt", "pepper",
+        "iron", "gold", "silver", "copper", "tin", "lead", "ruby", "emerald",
+        "sapphire", "diamond", "pearl", "amber", "jade", "onyx", "quartz", "topaz",
+    ]
+    var counts: map[string, int] = {}
+    var x: i64 = 12345
+    for i from 0 to ops {
+        x = (x * 1103515245 + 12345) & 0x7FFFFFFF
+        let w = words[int(x >> 16) % words.len]
+        counts[w] = counts.get(w, 0) + 1
+    }
+    var total: i64 = counts.len
+    for w, c in counts {
+        total = total * 31 % 1000000007 + c
+    }
+    total
+}

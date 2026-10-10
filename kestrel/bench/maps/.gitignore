@@ -1,0 +1,4 @@
+*.exe
+*.pdb
+cs/bin/
+cs/obj/

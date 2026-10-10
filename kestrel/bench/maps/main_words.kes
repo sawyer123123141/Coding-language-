@@ -1,0 +1,6 @@
+// String keys: 10M words counted.
+use { word_count from maps }
+
+main() {
+    print(word_count(10000000))
+}

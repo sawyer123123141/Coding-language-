@@ -1,0 +1,6 @@
+// Scattered integer keys: 1M keys, 5 rounds.
+use { int_keys from maps }
+
+main() {
+    print(int_keys(1000000, 5, true))
+}
