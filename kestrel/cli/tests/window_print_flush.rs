@@ -12,6 +12,8 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
+mod common;
+
 const SOURCE: &str = "use window\n\nmain() {\n    window.open(64, 64, \"flush\")\n    print(\"running\")\n    while window.frame() {\n    }\n}\n";
 
 #[test]
@@ -21,12 +23,9 @@ fn print_output_shows_up_while_the_frame_loop_runs() {
     let source = dir.join("flush.kes");
     fs::write(&source, SOURCE).unwrap();
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_kestrel"))
-        .arg("run")
-        .arg(&source)
+    let mut child = common::hermetic(Command::new(env!("CARGO_BIN_EXE_kestrel")).arg("run").arg(&source))
         .env("KESTREL_HEADLESS", "4000000000")
         .env("KESTREL_HEADLESS_QUIET", "1")
-        .env_remove("KESTREL_HIDDEN")
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()

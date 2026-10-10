@@ -10,6 +10,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod common;
+
+use common::hermetic;
+
 const FEW_FRAMES: u32 = 1_000;
 const MANY_FRAMES: u32 = 100_000;
 
@@ -27,14 +31,14 @@ fn build(name: &str, src: &str) -> PathBuf {
     let source = dir.join(format!("{name}.kes"));
     fs::write(&source, src).unwrap();
     let exe = dir.join(name).with_extension(std::env::consts::EXE_EXTENSION);
-    let out = Command::new(env!("CARGO_BIN_EXE_kestrel")).arg("build").arg(&source).arg("-o").arg(&exe).output().unwrap();
+    let out = hermetic(Command::new(env!("CARGO_BIN_EXE_kestrel")).arg("build").arg(&source).arg("-o").arg(&exe)).output().unwrap();
     assert!(out.status.success(), "building {name}:\n{}", String::from_utf8_lossy(&out.stderr));
     exe
 }
 
 /// Runs `exe` headless for `frames` frames and gives the program arena's size it reported.
 fn arena_bytes(exe: &Path, frames: u32) -> u64 {
-    let out = Command::new(exe)
+    let out = hermetic(&mut Command::new(exe))
         .env("KESTREL_HEADLESS", frames.to_string())
         .env("KESTREL_HEADLESS_QUIET", "1")
         .env("KESTREL_ARENA_REPORT", "1")

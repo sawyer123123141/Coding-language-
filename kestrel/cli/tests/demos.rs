@@ -4,18 +4,16 @@
 use std::path::Path;
 use std::process::Command;
 
+mod common;
+
 #[test]
 fn the_particles_demo_runs_headless_and_reports_its_times() {
     let demo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../demos/particles/particles.kes");
     // The headless clock runs at 60 frames a second, and the demo prints a line once a second,
     // so 70 frames give exactly one line.
-    let out = Command::new(env!("CARGO_BIN_EXE_kestrel"))
-        .arg("run")
-        .arg("--release")
-        .arg(&demo)
+    let out = common::hermetic(Command::new(env!("CARGO_BIN_EXE_kestrel")).arg("run").arg("--release").arg(&demo))
         .env("KESTREL_HEADLESS", "70")
         .env("KESTREL_HEADLESS_QUIET", "1")
-        .env_remove("KESTREL_HIDDEN")
         .output()
         .unwrap();
     let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));

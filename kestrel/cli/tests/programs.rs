@@ -1,6 +1,11 @@
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+
+mod common;
+
+use common::{hermetic, scrub};
 
 /// What a test program declares about itself in `// expect...` comments.
 struct Expect {
@@ -37,8 +42,22 @@ fn expectations(name: &str, src: &str) -> Expect {
             panic!("{name}: unknown expect directive: {line}");
         }
     }
+    let headless = env.iter().any(|(key, value)| key == "KESTREL_HEADLESS" && !value.is_empty());
+    assert!(
+        headless || !opens_a_window(src),
+        "{name}: opens a window but has no `// env: KESTREL_HEADLESS=<frames>` line, so the test would open a real window and hang the suite"
+    );
     let stdout = lines.iter().map(|l| format!("{l}\n")).collect();
     Expect { stdout, exit, stderr, env }
+}
+
+/// Whether the program calls `window.open` (or `open` imported from `window`), which opens a
+/// real window unless `KESTREL_HEADLESS` says otherwise. A text check, not a parse: a comment
+/// is skipped, and a call hidden in a string would be a false alarm.
+fn opens_a_window(src: &str) -> bool {
+    src.lines().map(str::trim).filter(|l| !l.starts_with("//")).any(|l| {
+        l.contains("window.open(") || (l.starts_with("use ") && l.contains("open") && l.ends_with(" from window }"))
+    })
 }
 
 pub fn programs() -> Vec<PathBuf> {
@@ -54,13 +73,13 @@ pub fn programs() -> Vec<PathBuf> {
 }
 
 fn kestrel(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_kestrel")).args(args).output().expect("run kestrel")
+    hermetic(Command::new(env!("CARGO_BIN_EXE_kestrel")).args(args)).output().expect("run kestrel")
 }
 
 /// Runs `kestrel <path>`'s program with the variables its `// env:` lines set.
 fn kestrel_run(path: &Path, exp: &Expect) -> Output {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_kestrel"));
-    cmd.args(["run", path.to_str().unwrap()]).envs(exp.env.iter().map(|(k, v)| (k, v)));
+    hermetic(cmd.args(["run", path.to_str().unwrap()])).envs(exp.env.iter().map(|(k, v)| (k, v)));
     cmd.output().expect("run kestrel")
 }
 
@@ -124,6 +143,59 @@ fn env_directive_without_equals_panics() {
     expectations("typo.kes", "// env: KESTREL_HEADLESS\nmain() {}\n");
 }
 
+#[test]
+#[should_panic(expected = "win.kes: opens a window but has no `// env: KESTREL_HEADLESS=<frames>` line")]
+fn a_window_program_without_a_headless_line_panics() {
+    expectations("win.kes", "use window\nmain() {\n    window.open(64, 64, \"w\")\n}\n");
+}
+
+#[test]
+#[should_panic(expected = "win.kes: opens a window but has no `// env: KESTREL_HEADLESS=<frames>` line")]
+fn an_imported_open_counts_as_opening_a_window() {
+    expectations("win.kes", "use { open from window }\nmain() {\n    open(64, 64, \"w\")\n}\n");
+}
+
+#[test]
+#[should_panic(expected = "win.kes: opens a window but has no `// env: KESTREL_HEADLESS=<frames>` line")]
+fn hidden_alone_is_not_headless() {
+    expectations("win.kes", "// env: KESTREL_HIDDEN=1\nuse window\nmain() {\n    window.open(64, 64, \"w\")\n}\n");
+}
+
+#[test]
+fn headless_window_programs_and_programs_that_never_open_one_are_accepted() {
+    let headless = "// env: KESTREL_HEADLESS=3\nuse window\nmain() {\n    window.open(64, 64, \"w\")\n}\n";
+    assert_eq!(expectations("win.kes", headless).env, [("KESTREL_HEADLESS".to_string(), "3".to_string())]);
+    // Using the module without opening: the natives report the error.
+    expectations("early.kes", "use window\nmain() {\n    print(window.fps())\n}\n");
+    // A comment that mentions it is not a call.
+    expectations("note.kes", "// call window.open(1, 2, \"x\") first\nmain() {}\n");
+}
+
+#[test]
+fn the_childs_environment_loses_every_kestrel_variable() {
+    let mut cmd = Command::new("kestrel");
+    let names = ["KESTREL_HEADLESS", "kestrel_hidden", "KESTREL_X", "PATH", "KESTRELS", "MY_KESTREL_HEADLESS"];
+    scrub(&mut cmd, names.iter().map(OsString::from));
+    let mut removed: Vec<String> = cmd
+        .get_envs()
+        .map(|(key, value)| {
+            assert!(value.is_none(), "{key:?} is removed, not set");
+            key.to_string_lossy().into_owned()
+        })
+        .collect();
+    removed.sort();
+    assert_eq!(removed, ["KESTREL_HEADLESS", "KESTREL_X", "kestrel_hidden"]);
+}
+
+#[test]
+fn a_variable_set_after_the_scrub_wins() {
+    let mut cmd = Command::new("kestrel");
+    scrub(&mut cmd, [OsString::from("KESTREL_HEADLESS")].into_iter());
+    cmd.envs([("KESTREL_HEADLESS", "3")]);
+    let set: Vec<_> = cmd.get_envs().collect();
+    assert_eq!(set, [(OsStr::new("KESTREL_HEADLESS"), Some(OsStr::new("3")))]);
+}
+
 fn build(path: &Path, exe: &Path, extra: &[&str]) -> Output {
     let mut args = vec!["build", path.to_str().unwrap(), "-o", exe.to_str().unwrap()];
     args.extend_from_slice(extra);
@@ -145,7 +217,7 @@ fn programs_run_as_executables() {
             failures.push(format!("{name} [build]: {}", String::from_utf8_lossy(&built.stderr)));
             continue;
         }
-        let out = Command::new(&exe).envs(exp.env.iter().map(|(k, v)| (k, v))).output().expect("run built exe");
+        let out = hermetic(&mut Command::new(&exe)).envs(exp.env.iter().map(|(k, v)| (k, v))).output().expect("run built exe");
         failures.extend(compare(&name, "exe", &out, &exp));
     }
     assert!(failures.is_empty(), "\n{}", failures.join("\n"));
@@ -159,7 +231,7 @@ fn release_builds_wrap_on_overflow() {
         .with_extension(std::env::consts::EXE_EXTENSION);
     let built = build(&path, &exe, &["--release"]);
     assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
-    let out = Command::new(&exe).output().unwrap();
+    let out = hermetic(&mut Command::new(&exe)).output().unwrap();
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n"), "before\nafter\n");
 }
@@ -172,7 +244,7 @@ fn release_builds_still_panic_on_division_by_zero() {
         .with_extension(std::env::consts::EXE_EXTENSION);
     let built = build(&path, &exe, &["--release"]);
     assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
-    let out = Command::new(&exe).output().unwrap();
+    let out = hermetic(&mut Command::new(&exe)).output().unwrap();
     assert_eq!(out.status.code(), Some(101));
     assert!(String::from_utf8_lossy(&out.stderr).contains("division by zero on line 5"));
 }

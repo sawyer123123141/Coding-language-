@@ -3,6 +3,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+mod common;
+
 /// A fresh directory holding `files` (name, text).
 fn project(name: &str, files: &[(&str, &str)]) -> PathBuf {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
@@ -15,7 +17,7 @@ fn project(name: &str, files: &[(&str, &str)]) -> PathBuf {
 }
 
 fn kestrel(args: &[&str], file: &Path) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_kestrel")).args(args).arg(file).output().unwrap()
+    common::hermetic(Command::new(env!("CARGO_BIN_EXE_kestrel")).args(args).arg(file)).output().unwrap()
 }
 
 const GEOM: &str = "pub struct Point {
