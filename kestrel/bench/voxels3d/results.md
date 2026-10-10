@@ -50,9 +50,37 @@ GDScript's world time is its column time × 64.
 - **C# runs faster inside Godot than standalone** (1.0–1.2 s vs 1.4–1.5 s). Godot hosts .NET with its own settings; which one matters is not investigated.
 - **GDScript is about 150x slower than C# and 350x slower than Kestrel `--release`.** A real game would mesh in C# or Kestrel, or in GDScript with a native noise library.
 
-## Next: `par for`
+## With `par for`
 
-Every chunk is independent, so this is the `par for` target (sub-project 3). One snag: `mesh` and `quad` aren't `pure`, because a `pure` function can't call a helper that changes a `var` argument rooted at its own local (see the follow-ups list). `par for` needs that rule relaxed, or a chunk type whose `build(var self)` method does the work.
+`parallel.kes` builds the same world with `par for c in chunks { c.build(seed) }`; `build` is a `pure` method with `var self`. `cs/` has a matching `Parallel.For` mode. This machine has 8 cores and 16 threads, and all versions make 463,749 faces.
+
+Standalone: median of 7 runs, startup subtracted, two passes. The single-thread rows from the same passes are repeated for comparison.
+
+| World build | One thread | All threads | Speedup |
+|---|---:|---:|---:|
+| Kestrel, checks on | 1,065–1,092 ms | 144–147 ms | 7.4x |
+| Kestrel `--release` | 454–463 ms | 63–66 ms | 7.1x |
+| C# .NET 9 (`Parallel.For`) | 1,439–1,465 ms | 368–373 ms | 3.9x |
+| C# .NET 9, tiered compilation off | 1,177 ms | 208 ms | 5.7x |
+
+- **Kestrel scales about 7x on 8 cores.**
+  - The one-thread row runs the `par for` program with `KESTREL_THREADS=1`, which costs nothing over the plain loop (454 ms both).
+  - All threads finish the world in about 65 ms with `--release`, and in about 145 ms with checks on.
+- **C# scales less, partly from JIT warm-up.**
+  - .NET starts with quick, unoptimized code and recompiles hot methods while the program runs. That is only a small part of a 1.4 s run, but a much bigger part of a 0.37 s one.
+  - With tiered compilation off (`DOTNET_TieredCompilation=0`, everything optimized up front), `Parallel.For` takes 208 ms. That is still 3.2x Kestrel `--release`, which is about the gap the single-threaded runs show.
+  - Server GC didn't help (409 ms).
+
+Inside Godot 4.7.2 (one pass, with the C# methods warmed up by earlier calls):
+
+| World build | Time |
+|---|---:|
+| Kestrel `par for` (checks off) | 62 ms |
+| C# `Parallel.For` | 149 ms |
+| Kestrel, one thread (checks off) | 581 ms |
+| C#, one thread | 1,255 ms |
+
+The machine was noisier during this Godot run than during the earlier ones (the checked one-thread row took 1,434 ms vs 1,131–1,294 before).
 
 ## Reproduce
 
@@ -61,6 +89,8 @@ Every chunk is independent, so this is the `par for` target (sub-project 3). One
 ./run.ps1
 # inside Godot (from kestrel/godot/bench)
 ./run.ps1 <path to Godot console exe> bench3d.gd
+# C# without tiered compilation
+$env:DOTNET_TieredCompilation = "0"; .\cs\bin\out\Voxels3dBench.exe 8 par
 ```
 
 The `[AggressiveInlining]` row is a local copy of `cs/` with `[MethodImpl(MethodImplOptions.AggressiveInlining)]` added to those six methods; it isn't checked in.

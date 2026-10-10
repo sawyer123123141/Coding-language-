@@ -45,6 +45,13 @@ Done in 2b-i: labelled arguments evaluate in source order; `func/mod.rs` split; 
 - **`m.get(k, d)` copies a heap-holding default twice** (once as an argument, once when the result is stored), even when the key is found. Wasted arena memory, not wrong.
 - **A loop nested over the same map** makes the outer loop re-index its value on every use (`MapLock` counts as a write). Correct, but slower.
 
+## `par for` (built 2026-10-09)
+
+- **Not yet:** `par for` over maps, and SIMD.
+- **Reading the collection conservatively:** any read of the collection (even `xs.len`) or of an alias of what it belongs to is an error while the body changes items. A finer rule would allow reads that can't see other items.
+- **A failing pool thread parks for good** (unwinding through compiled code isn't safe), and the pool starts a replacement. A failure while holding the growth lock would deadlock the others; it needs an allocation near `isize::MAX`, so it isn't reachable in practice.
+- **Growth in shared arenas takes one lock per job.** It's rare (growth is geometric), but a body that grows many lists made outside the loop will contend on it.
+
 ## Do in 2c
 
 - **Strings (2b-ii scope).** String values are a pointer plus a length into read-only data, so only literals exist. `"{x}"` interpolation works only as a direct `print` argument, because building a new string needs memory, which comes with arenas. No `==`, length, indexing or concatenation yet; `"a" == "b"` reports "`==` needs numbers". Strings nested in a printed struct are quoted, but `"` inside them isn't escaped.
