@@ -74,6 +74,10 @@ pub(crate) fn rename_stmts(stmts: &mut [Stmt], subst: &[Subst]) {
                 rename_place(p, subst);
                 rename_expr(saved, subst);
             }
+            Stmt::ParFor { args, count, .. } => {
+                rename_args(args, subst);
+                rename_expr(count, subst);
+            }
             Stmt::PushArena(None) | Stmt::PopArena { .. } | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
         }
     }

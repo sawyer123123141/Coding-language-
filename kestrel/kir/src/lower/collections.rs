@@ -63,6 +63,7 @@ impl<'a> FnLowerer<'a> {
     /// every use.
     pub(crate) fn for_in(
         &mut self,
+        par: bool,
         index: Option<&ast::Binding>,
         var: &ast::Binding,
         iter: &ast::Expr,
@@ -72,8 +73,29 @@ impl<'a> FnLowerer<'a> {
         if let kestrel_check::Ty::Map(..) = self.t.ty(iter.id) {
             return self.map_for_in(index, var, iter, body, out);
         }
+        if par {
+            return self.par_for_in(index, var, iter, body, out);
+        }
         let line = self.line(iter.span);
         let list = self.place_or_temp(iter, out, true);
+        let len = Expr { kind: ExprKind::Len(list.clone()), ty: KTy::I64, line };
+        let end = Expr { kind: ExprKind::Cast(Box::new(len)), ty: KTy::I32, line };
+        let start = Expr { kind: ExprKind::Int(0), ty: KTy::I32, line };
+        out.push(self.list_loop(index, var, list, body, start, end));
+    }
+
+    /// `for i from start to end`, where `v` stands for `xs[i]` (`list`).
+    /// `start` and `end` must be within the list's length.
+    pub(crate) fn list_loop(
+        &mut self,
+        index: Option<&ast::Binding>,
+        var: &ast::Binding,
+        list: Place,
+        body: &ast::Block,
+        start: Expr,
+        end: Expr,
+    ) -> Stmt {
+        let line = start.line;
         let i = match index {
             Some(b) => self.bind_local(b),
             None => self.temp(KTy::I32),
@@ -99,10 +121,7 @@ impl<'a> FnLowerer<'a> {
             subst[ptr.0 as usize] = Subst::Place(elem);
             rename_stmts(&mut stmts, &subst);
         }
-        let len = Expr { kind: ExprKind::Len(list), ty: KTy::I64, line };
-        let end = Expr { kind: ExprKind::Cast(Box::new(len)), ty: KTy::I32, line };
-        let start = Expr { kind: ExprKind::Int(0), ty: KTy::I32, line };
-        out.push(Stmt::ForRange { var: i, start, end, body: stmts });
+        Stmt::ForRange { var: i, start, end, body: stmts }
     }
 
     /// Whether `stmts` may change the collection at `list` itself (not just

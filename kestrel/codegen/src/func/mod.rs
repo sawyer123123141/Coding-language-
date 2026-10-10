@@ -236,6 +236,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             kir::Stmt::Dup(p) => self.dup(p)?,
             kir::Stmt::MapSet(map, key, value) => self.map_set(map, key, value, key.line)?,
             kir::Stmt::MapUnlock(map, saved) => self.map_unlock(map, saved)?,
+            kir::Stmt::ParFor { .. } => unreachable!("par for isn't generated yet"),
             kir::Stmt::PushArena(_) | kir::Stmt::PopArena { .. } | kir::Stmt::FreeArena(_) => self.arena_stmt(s)?,
             kir::Stmt::Bind(l, p) => {
                 let addr = self.place_addr(p)?;

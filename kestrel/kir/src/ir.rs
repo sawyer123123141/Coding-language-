@@ -61,7 +61,7 @@ impl KTy {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct FuncIdx(pub u32);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct LocalIdx(pub u32);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -82,6 +82,8 @@ pub struct Module {
     pub elems: Vec<KTy>,
     /// The generated function that prints each array or list type printed.
     pub print_fns: HashMap<KTy, FuncIdx>,
+    /// `par for` bodies, each called through `Stmt::ParFor`.
+    pub par_bodies: Vec<FuncIdx>,
     /// `None` for a library (see `kestrel_check::check_with`).
     pub main: Option<FuncIdx>,
 }
@@ -239,6 +241,10 @@ pub enum Stmt {
     MapSet(Place, Expr, Expr),
     /// Ends a loop over the map: its lock count goes back to `saved`.
     MapUnlock(Place, Expr),
+    /// `par for`: runs `func` (a `par_bodies` entry) over `0..count` on
+    /// many threads. Its parameters are `args` (pointers to the variables
+    /// the body uses), then the start and end of a range of indexes.
+    ParFor { func: FuncIdx, args: Vec<Arg>, count: Expr },
 }
 
 #[derive(Clone, Debug, PartialEq)]

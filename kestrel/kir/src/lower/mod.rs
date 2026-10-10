@@ -6,6 +6,7 @@ mod layout;
 mod map_helpers;
 mod maps;
 mod matching;
+mod par;
 mod scopes;
 mod vector;
 
@@ -27,7 +28,7 @@ pub fn lower(program: &Program, t: &Tables, lines: &LineIndex) -> Module {
     funcs.append(&mut helpers.funcs);
     let elems = t.elems.iter().map(|&e| kty(e)).collect();
     let main = t.main.map(|m| FuncIdx(m.0));
-    Module { funcs, structs, enums, elems, print_fns: helpers.print, main }
+    Module { funcs, structs, enums, elems, print_fns: helpers.print, par_bodies: helpers.par_bodies, main }
 }
 
 pub(crate) fn kty(ty: Ty) -> KTy {
@@ -212,7 +213,7 @@ impl<'a> FnLowerer<'a> {
                 end: self.expr(end),
                 body: self.loop_block(body),
             },
-            ast::Stmt::ForIn { index, var, iter, body, .. } => return self.for_in(index.as_ref(), var, iter, body, out),
+            ast::Stmt::ForIn { par, index, var, iter, body, .. } => return self.for_in(*par, index.as_ref(), var, iter, body, out),
             ast::Stmt::Arena { body, .. } => return self.arena_block(None, body, out),
             ast::Stmt::In { arena, body, .. } => return self.arena_block(Some(arena), body, out),
             ast::Stmt::Break(_) => return self.jump(Stmt::Break, out),

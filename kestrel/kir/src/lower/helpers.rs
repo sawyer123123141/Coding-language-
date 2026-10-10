@@ -71,11 +71,21 @@ pub(crate) struct Helpers {
     pub(super) copy: HashMap<KTy, FuncIdx>,
     drop: HashMap<KTy, FuncIdx>,
     pub(crate) print: HashMap<KTy, FuncIdx>,
+    pub(crate) par_bodies: Vec<FuncIdx>,
 }
 
 impl Helpers {
     pub(crate) fn new(base: u32) -> Self {
-        Helpers { base, funcs: Vec::new(), copy: HashMap::new(), drop: HashMap::new(), print: HashMap::new() }
+        Helpers { base, funcs: Vec::new(), copy: HashMap::new(), drop: HashMap::new(), print: HashMap::new(), par_bodies: Vec::new() }
+    }
+
+    /// Adds an outlined `par for` body, named for its index.
+    pub(crate) fn add_par_body(&mut self, mut f: Func) -> FuncIdx {
+        let idx = FuncIdx(self.base + self.funcs.len() as u32);
+        f.name = format!("__kestrel_par_{}", idx.0);
+        self.funcs.push(f);
+        self.par_bodies.push(idx);
+        idx
     }
 
     /// Statements that give the value at `place`, just copied byte for

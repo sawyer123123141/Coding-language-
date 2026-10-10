@@ -45,6 +45,10 @@ fn stmt<'a>(s: &'a Stmt, f: &mut impl FnMut(Node<'a>)) {
             expr(saved, f);
             place(p, true, f);
         }
+        Stmt::ParFor { args: a, count, .. } => {
+            expr(count, f);
+            args(a, f);
+        }
         Stmt::Dup(p) | Stmt::FreeArena(p) => place(p, true, f),
         Stmt::PushArena(Some(p)) => place(p, true, f),
         Stmt::PushArena(None) | Stmt::PopArena { .. } => {}
