@@ -6,14 +6,19 @@ use kestrel_syntax::ast;
 use super::FnLowerer;
 use crate::ir::*;
 
+/// The value of `PI` or `TAU`; `None` for any other built-in.
+pub(crate) fn constant_value(b: Builtin) -> Option<f64> {
+    match b {
+        Builtin::Pi => Some(std::f64::consts::PI),
+        Builtin::Tau => Some(std::f64::consts::TAU),
+        _ => None,
+    }
+}
+
 impl<'a> FnLowerer<'a> {
     /// `PI` or `TAU`, as a float literal of the expression's type.
     pub(crate) fn builtin_constant(b: Builtin) -> ExprKind {
-        match b {
-            Builtin::Pi => ExprKind::Float(std::f64::consts::PI),
-            Builtin::Tau => ExprKind::Float(std::f64::consts::TAU),
-            other => unreachable!("{other:?} isn't a constant"),
-        }
+        ExprKind::Float(constant_value(b).unwrap_or_else(|| unreachable!("{b:?} isn't a constant")))
     }
 
     /// A call to a global built-in function.

@@ -1,6 +1,7 @@
-use kestrel_check::{ConstId, Res, Ty};
+use kestrel_check::{ConstId, Res, Tables, Ty};
 use kestrel_syntax::ast;
 
+use super::builtins::constant_value;
 use super::{binop, kty, FnLowerer};
 use crate::ir::*;
 
@@ -20,10 +21,10 @@ impl<'a> FnLowerer<'a> {
 
     /// `e` converted to the type `to`.
     fn converted(&mut self, e: &ast::Expr, to: KTy) -> Expr {
-        // A literal converted to a float is emitted at the target type, read from the
-        // source, so an f64 never inherits the rounding of an f32 literal.
+        // A literal (or `PI` / `TAU`) converted to a float is emitted at the target type,
+        // read from the source, so an f64 never inherits the rounding of an f32 value.
         if to.is_float() {
-            if let Some(v) = literal_as(e, to) {
+            if let Some(v) = literal_as(self.t, e, to) {
                 return Expr { kind: ExprKind::Float(v), ty: to, line: self.line(e.span) };
             }
         }
@@ -163,14 +164,18 @@ impl<'a> FnLowerer<'a> {
     }
 }
 
-/// The value of a numeric literal (possibly negated) as float type `to`,
+/// The value of a numeric literal or `PI` / `TAU` (possibly negated) as float type `to`,
 /// or `None` if `e` is anything else.
-fn literal_as(e: &ast::Expr, to: KTy) -> Option<f64> {
+fn literal_as(t: &Tables, e: &ast::Expr, to: KTy) -> Option<f64> {
     match &e.kind {
         ast::ExprKind::Int(n) if to == KTy::F32 => Some(*n as f32 as f64),
         ast::ExprKind::Int(n) => Some(*n as f64),
         ast::ExprKind::Float(f) => Some(*f),
-        ast::ExprKind::Unary { op: ast::UnaryOp::Neg, expr } => literal_as(expr, to).map(|v| -v),
+        ast::ExprKind::Ident(_) => match t.res.get(&e.id) {
+            Some(Res::Builtin(b)) => constant_value(*b),
+            _ => None,
+        },
+        ast::ExprKind::Unary { op: ast::UnaryOp::Neg, expr } => literal_as(t, expr, to).map(|v| -v),
         _ => None,
     }
 }

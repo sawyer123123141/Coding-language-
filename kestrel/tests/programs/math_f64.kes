@@ -4,6 +4,8 @@
 // expect: eval 2
 // expect: eval 3
 // expect: 8
+// expect: 6.283185307179586 6.283185307179586 true false true
+// expect: -6.283185307179586 12.566370614359172
 noisy(n: int) -> float {
     print("eval", n)
     float(n)
@@ -20,4 +22,8 @@ main() {
     let h: f64 = 0.49999999999999994
     print(sqrt(u8(9)), sqrt(i64(16)), round(h))
     print(pow(noisy(2), noisy(3)))
+    // PI and TAU keep full precision when the other side is an f64.
+    let w: f64 = 2
+    print(PI * w, w * PI, PI * w == w * PI, PI < w, w < PI)
+    print(-PI * w, TAU * w)
 }
