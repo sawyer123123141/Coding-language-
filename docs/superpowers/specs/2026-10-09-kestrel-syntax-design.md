@@ -122,7 +122,10 @@ main() {
 - No `fn` keyword. Only declarations appear at top level and in
   struct/enum bodies, so a bare `name(` there is unambiguous.
 - `pure` marks a function the compiler verifies has no effects (no I/O,
-  no writes to anything but its own locals, calls only pure functions).
+  no writes to anything but its own locals and its `var` parameters,
+  calls only pure functions). `var` parameters, including `var self`,
+  are allowed (decided 2026-10-09), so `par for` bodies can call
+  `pure build(var self)` on their item.
 - Parameters: `name: Type`. **Read-only by default.**
 - `var name: Type` parameter: the function may change the caller's
   value, and the change is visible to the caller (by reference). A
@@ -315,7 +318,8 @@ Runs iterations in parallel across CPU cores. The body may only:
 
 Anything else is a compile error naming the offending line, e.g.
 "line 3 writes to `world.score`, which is shared." Work splitting
-(chunking) and SIMD are sub-project 3.
+(chunking) and SIMD are sub-project 3. Details and the remaining
+rules: `2026-10-09-par-for-design.md`.
 
 ## Memory
 
