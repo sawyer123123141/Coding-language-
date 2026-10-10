@@ -489,6 +489,6 @@ with "pure functions can't use random numbers: each call changes the generator",
     - copies of literal-backed strings still copy their bytes (a static-data check would skip them);
     - `round` and the trigonometric functions go through a call (`kestrel_rt_math`) or a few instructions;
     - the random generator is per thread.
-- [ ] **Step 4: Godot.** Build the add-on (`kestrel/godot/build.ps1`, with Godot closed) and run the headless test (`demo/tests/test_bridge.gd`); all 26 checks must still pass. Run clippy in `kestrel/godot`.
+- [ ] **Step 4: Godot.** Build the add-on (`kestrel/godot/build.ps1`, with Godot closed) and run the headless test (`demo/tests/test_bridge.gd`); all 26 checks must still pass (there are 24). Run clippy in `kestrel/godot`.
 - [ ] **Step 5: Handoff.** Plan 1 is done; next is plan 2 (the window). Update the test count.
 - [ ] **Step 6: Commit and push** "Document math, random numbers and strings anywhere".

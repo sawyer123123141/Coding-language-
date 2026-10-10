@@ -43,7 +43,7 @@ Done in 2b-i: labelled arguments evaluate in source order; `func/mod.rs` split; 
   - Named float constants widen from `float` (`let HALF = PI / 2` is not exact against an `f64`).
   - Builtin calls don't receive the expected type, so `let b: u8 = min(7, small)` fails while `min(small, 7)` works.
 - **Vector methods aren't allowed in `let` constants** (`let L = vec2(3, 4).length()`), while `sqrt`, `max` and `lerp` are.
-- **Cost of `round`, trig and `exp`.** `round` and the trigonometric and exponential functions go through `kestrel_rt_math` (a call) or a short instruction sequence, so a hot loop full of `sin` pays for the call.
+- **Cost of the trig and exponential functions.** `round` is a short inline instruction sequence. `sin cos tan asin acos atan atan2 exp log pow` call `kestrel_rt_math`, so a hot loop full of `sin` pays for the call.
 - **The random generator is per thread.** `rand_seed` seeds the calling thread only. Random calls are an error in `pure` functions and `par for` bodies, so this only matters if they are ever allowed there (say, one stream per iteration for repeatable parallel noise).
 
 ## Maps (built 2026-10-09)
