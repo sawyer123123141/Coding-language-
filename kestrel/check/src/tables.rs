@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use kestrel_syntax::ast::{BindId, ExprId, FnDecl, Item, Program};
 use kestrel_syntax::Span;
 
+use crate::builtins::Builtin;
 use crate::ty::Ty;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -49,6 +50,8 @@ pub enum Res {
     MapRead,
     /// `Arena()`
     NewArena,
+    /// A global built-in function or constant (`sqrt(x)`, `PI`).
+    Builtin(Builtin),
 }
 
 #[derive(Clone, Debug)]

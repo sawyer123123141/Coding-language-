@@ -75,6 +75,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 let v = self.expr(inner)?;
                 self.cast(v, inner.ty, e.ty, e.line)
             }
+            ExprKind::Math(op, args) => self.math(*op, args, e.ty)?,
             ExprKind::Call(fi, args) => self.call(*fi, args, None)?.expect("value-returning call"),
             ExprKind::If { cond, then_body, then_val, else_body, else_val } => {
                 let c = self.expr(cond)?;

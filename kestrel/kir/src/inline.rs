@@ -195,7 +195,7 @@ impl Inliner<'_> {
                 self.expr(b, depth);
             }
             ExprKind::Call(_, args) => self.args(args, depth),
-            ExprKind::StructLit(_, xs) | ExprKind::VariantLit(_, _, xs) | ExprKind::ArrayLit(xs) => {
+            ExprKind::StructLit(_, xs) | ExprKind::VariantLit(_, _, xs) | ExprKind::ArrayLit(xs) | ExprKind::Math(_, xs) => {
                 for x in xs {
                     self.expr(x, depth);
                 }

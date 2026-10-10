@@ -280,6 +280,8 @@ pub enum ExprKind {
     Or(Box<Expr>, Box<Expr>),
     /// Convert the operand to this expression's `ty`.
     Cast(Box<Expr>),
+    /// A float operation (see `MathOp`); integer `abs`/`min`/`max` lower to `If`.
+    Math(MathOp, Vec<Expr>),
     Call(FuncIdx, Vec<Arg>),
     /// A struct with every field given, in declaration order.
     StructLit(StructIdx, Vec<Expr>),
@@ -299,6 +301,28 @@ pub enum ExprKind {
         else_body: Vec<Stmt>,
         else_val: Option<Box<Expr>>,
     },
+}
+
+/// Float operations: the operands and the result all have the expression's type (F32 or F64).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MathOp {
+    Sqrt,
+    Floor,
+    Ceil,
+    Round,
+    Abs,
+    Min,
+    Max,
+    Sin,
+    Cos,
+    Tan,
+    Asin,
+    Acos,
+    Atan,
+    Atan2,
+    Exp,
+    Log,
+    Pow,
 }
 
 /// What `ExprKind::Map` does with the map at its place.

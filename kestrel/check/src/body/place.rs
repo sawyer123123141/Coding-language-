@@ -61,7 +61,7 @@ impl<'a> BodyChecker<'a> {
         }
         let target_ty = self.check_expr(target, None);
         let Some(root) = self.place_root(target) else {
-            if let (ExprKind::Ident(name), Some(Res::Const(_))) = (&target.kind, self.t.res.get(&target.id)) {
+            if let (ExprKind::Ident(name), Some(Res::Const(_) | Res::Builtin(_))) = (&target.kind, self.t.res.get(&target.id)) {
                 let msg = format!("can't change constant `{name}`");
                 self.error(target.span, msg);
             } else if target_ty != Ty::Error {

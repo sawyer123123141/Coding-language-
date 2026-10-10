@@ -1,4 +1,5 @@
 mod body;
+mod builtins;
 mod collect;
 pub mod tables;
 pub mod ty;
@@ -6,6 +7,7 @@ pub mod ty;
 use kestrel_syntax::ast::Program;
 use kestrel_syntax::Diagnostic;
 
+pub use builtins::Builtin;
 pub use tables::{
     ConstId, ConstInfo, EnumId, EnumInfo, FieldInfo, FnId, FnInfo, LocalId, LocalInfo, ParamSig, Res, StructId,
     StructInfo, Tables, VariantInfo, BUILTIN_STRUCTS, VEC2, VEC3,

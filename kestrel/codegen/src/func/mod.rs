@@ -6,6 +6,7 @@ mod collections;
 mod divide;
 mod expr;
 mod maps;
+mod math;
 mod par;
 mod place;
 mod print;

@@ -1,0 +1,23 @@
+// expect: 3 -3 -2 2
+// expect: 3 3.141592653589793 1024
+// expect: 3 4 0
+// expect: eval 2
+// expect: eval 3
+// expect: 8
+noisy(n: int) -> float {
+    print("eval", n)
+    float(n)
+}
+
+main() {
+    let a: f64 = 2.5
+    let b: f64 = -2.5
+    print(round(a), round(b), ceil(b), floor(a))
+    let nine: f64 = 9
+    let one: f64 = 1
+    let ten: f64 = 10
+    print(sqrt(nine), atan2(1, one) * 4, pow(2, ten))
+    let h: f64 = 0.49999999999999994
+    print(sqrt(u8(9)), sqrt(i64(16)), round(h))
+    print(pow(noisy(2), noisy(3)))
+}

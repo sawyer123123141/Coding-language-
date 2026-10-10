@@ -51,6 +51,7 @@ impl<'a> FnLowerer<'a> {
                 Res::Local(_) if self.t.moves.contains(&e.id) => ExprKind::Move(self.place(e).expect("a local is a place")),
                 Res::Local(_) => ExprKind::Load(self.place(e).expect("a local is a place")),
                 Res::Const(c) => return self.const_value(c),
+                Res::Builtin(b) => Self::builtin_constant(b),
                 other => unreachable!("name resolved to {other:?}"),
             },
             ast::ExprKind::Unary { op: ast::UnaryOp::Neg, expr } if self.vec_ty(e).is_some() => {
@@ -85,6 +86,7 @@ impl<'a> FnLowerer<'a> {
             ast::ExprKind::Call { args, .. } => match self.t.res[&e.id] {
                 Res::Convert(_) => ExprKind::Cast(Box::new(self.expr(&args[0].value))),
                 Res::NewArena => ExprKind::NewArena,
+                Res::Builtin(b) => self.builtin_call(b, args),
                 Res::Fn(f) => {
                     let (pre, fi, a) = self.call_parts(e, f, args, None);
                     Self::with_pre(pre, ExprKind::Call(fi, a), ty, line)

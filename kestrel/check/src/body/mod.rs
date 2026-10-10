@@ -1,3 +1,4 @@
+mod builtins;
 mod call;
 mod collections;
 mod enums;
@@ -17,6 +18,7 @@ use std::collections::{HashMap, HashSet};
 use kestrel_syntax::ast::{Binding, Block, Expr, ExprKind, Item, Program, Stmt};
 use kestrel_syntax::{Diagnostic, Span};
 
+use crate::builtins::Builtin;
 use crate::collect::resolve_type;
 use crate::tables::{ConstId, FnId, LocalId, LocalInfo, Tables};
 use crate::ty::Ty;
@@ -75,6 +77,10 @@ pub(crate) fn is_const_expr(e: &Expr) -> bool {
     match &e.kind {
         ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::None | ExprKind::Str(_) | ExprKind::Ident(_) => true,
         ExprKind::Call { name, args, .. } if name == "Arena" => args.is_empty(),
+        // Pure built-ins (`sqrt(2.0)`) are fine; the random ones change state.
+        ExprKind::Call { name, args, .. } if Builtin::global(name).is_some_and(Builtin::is_pure) => {
+            args.iter().all(|a| is_const_expr(&a.value))
+        }
         ExprKind::Unary { expr, .. } => is_const_expr(expr),
         ExprKind::Binary { lhs, rhs, .. } => is_const_expr(lhs) && is_const_expr(rhs),
         // Each use builds a fresh array, like any other value.
@@ -141,7 +147,7 @@ impl<'a> BodyChecker<'a> {
 
     fn declare(&mut self, bind: &Binding, ty: Ty, mutable: bool, is_param: bool, is_var_param: bool) -> LocalId {
         let name = &bind.name;
-        if crate::collect::BUILTINS.contains(&name.as_str()) {
+        if crate::collect::is_builtin_name(name) {
             self.error(bind.span, format!("`{name}` is a built-in name; pick another"));
         }
         let taken = self.lookup_local(name).is_some()

@@ -1,12 +1,12 @@
 // error 8: pure functions can't call `print`
-// error 9: pure functions can only call pure functions; `log` isn't pure
-log(x: int) {
+// error 9: pure functions can only call pure functions; `report` isn't pure
+report(x: int) {
     print(x)
 }
 
 pure noisy(x: int) -> int {
     print(x)
-    log(x)
+    report(x)
     x
 }
 

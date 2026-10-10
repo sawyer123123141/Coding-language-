@@ -1,0 +1,14 @@
+main() {
+    let min = 3
+    print(sqrt("x"))
+    print(sqrt(1, 2))
+    sqrt(4)
+    print(atan2(1))
+}
+abs(x: int) -> int { x }
+// error 2: `min` is a built-in name; pick another
+// error 3: `sqrt` needs a number here, found string
+// error 4: `sqrt` takes one value
+// error 5: the result of `sqrt` is unused, so this line does nothing
+// error 6: `atan2` takes two values
+// error 8: `abs` is a built-in name; pick another

@@ -118,7 +118,7 @@ pub(crate) fn rename_expr(e: &mut Expr, subst: &[Subst]) {
             rename_expr(b, subst);
         }
         ExprKind::Call(_, args) => rename_args(args, subst),
-        ExprKind::StructLit(_, xs) | ExprKind::VariantLit(_, _, xs) | ExprKind::ArrayLit(xs) => {
+        ExprKind::StructLit(_, xs) | ExprKind::VariantLit(_, _, xs) | ExprKind::ArrayLit(xs) | ExprKind::Math(_, xs) => {
             for x in xs {
                 rename_expr(x, subst);
             }

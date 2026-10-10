@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use kestrel_syntax::ast::{EnumDecl, ExprKind, FieldDecl, FnDecl, Item, Program, StructDecl, TypeExpr, TypeKind};
 use kestrel_syntax::{Diagnostic, Span};
 
+use crate::builtins::Builtin;
 use crate::tables::{
     ConstInfo, EnumId, EnumInfo, FieldInfo, FnId, FnInfo, ParamSig, StructId, StructInfo, Tables, VariantInfo,
     BUILTIN_STRUCTS,
@@ -11,6 +12,12 @@ use crate::ty::Ty;
 
 pub(crate) const BUILTINS: &[&str] =
     &["print", "int", "i64", "u8", "float", "f64", "bool", "string", "vec2", "vec3", "array", "list", "map", "Arena"];
+
+/// Names an item, local or parameter can't take: types and constructors (`BUILTINS`),
+/// and every global built-in function or constant.
+pub(crate) fn is_builtin_name(name: &str) -> bool {
+    BUILTINS.contains(&name) || Builtin::GLOBAL_NAMES.contains(&name)
+}
 
 pub(crate) fn resolve_type(ty: &TypeExpr, t: &mut Tables, diags: &mut Vec<Diagnostic>) -> Ty {
     let msg = match &ty.kind {
@@ -170,7 +177,7 @@ fn check_names(program: &Program, diags: &mut Vec<Diagnostic>) {
         };
         // Items from other modules are named `module.name`.
         let own = name.rsplit('.').next().unwrap_or(name);
-        if BUILTINS.contains(&own) {
+        if is_builtin_name(own) {
             diags.push(Diagnostic::error(span, format!("`{name}` is a built-in name; pick another")));
         } else if !seen.insert(name) {
             diags.push(Diagnostic::error(span, format!("`{name}` is defined twice")));

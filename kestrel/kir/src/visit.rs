@@ -124,7 +124,7 @@ fn expr<'a>(e: &'a Expr, f: &mut impl FnMut(Node<'a>)) {
             expr(b, f);
         }
         ExprKind::Call(_, a) => args(a, f),
-        ExprKind::StructLit(_, xs) | ExprKind::VariantLit(_, _, xs) | ExprKind::ArrayLit(xs) => {
+        ExprKind::StructLit(_, xs) | ExprKind::VariantLit(_, _, xs) | ExprKind::ArrayLit(xs) | ExprKind::Math(_, xs) => {
             for x in xs {
                 expr(x, f);
             }

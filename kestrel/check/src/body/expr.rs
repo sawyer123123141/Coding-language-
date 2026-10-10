@@ -2,6 +2,7 @@ use kestrel_syntax::ast::{BinaryOp, Expr, ExprKind, InterpPart, UnaryOp};
 use kestrel_syntax::Diagnostic;
 
 use super::{BodyChecker, Expect};
+use crate::builtins::Builtin;
 use crate::tables::Res;
 use crate::ty::Ty;
 
@@ -49,7 +50,7 @@ impl<'a> BodyChecker<'a> {
                 }
                 Ty::Str
             }
-            ExprKind::Ident(name) => self.ident(e, name),
+            ExprKind::Ident(name) => self.ident(e, name, want),
             ExprKind::Unary { op, expr } => self.unary(*op, expr, want),
             ExprKind::Binary { op, lhs, rhs } => self.binary(e, *op, lhs, rhs, want),
             ExprKind::Call { .. } => self.check_call(e, want),
@@ -86,7 +87,7 @@ impl<'a> BodyChecker<'a> {
         ty
     }
 
-    fn ident(&mut self, e: &Expr, name: &str) -> Ty {
+    fn ident(&mut self, e: &Expr, name: &str, want: Option<Ty>) -> Ty {
         if let Some(local) = self.lookup_local(name) {
             self.t.res.insert(e.id, Res::Local(local));
             if self.moved.contains(&local) {
@@ -104,7 +105,10 @@ impl<'a> BodyChecker<'a> {
             self.t.res.insert(e.id, Res::Const(c));
             return self.t.consts[c.0 as usize].ty;
         }
-        if self.t.fn_by_name.contains_key(name) {
+        if let Some(ty) = self.builtin_constant(e, name, want) {
+            return ty;
+        }
+        if self.t.fn_by_name.contains_key(name) || Builtin::global(name).is_some() {
             self.error(e.span, format!("`{name}` is a function; call it with `{name}(...)`"));
         } else if self.t.struct_by_name.contains_key(name) {
             self.error(e.span, format!("`{name}` is a struct; build one with `{name}(...)`"));

@@ -28,10 +28,9 @@ pub(crate) struct RtFuncs {
     pub map_dup: FuncId,
     pub str_eq: FuncId,
     pub par_for: FuncId,
+    pub math: FuncId,
     // Not called from generated code yet. Delete each `expect` when its first
     // use lands (the compiler warns once the expectation is unfulfilled).
-    #[expect(dead_code)]
-    pub math: FuncId,
     #[expect(dead_code)]
     pub rand_float: FuncId,
     #[expect(dead_code)]

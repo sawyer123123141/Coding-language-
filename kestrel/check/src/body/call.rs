@@ -3,6 +3,7 @@ use kestrel_syntax::Span;
 
 use super::place::Immutable;
 use super::BodyChecker;
+use crate::builtins::Builtin;
 use crate::tables::{FnId, LocalId, ParamSig, Res};
 use crate::ty::Ty;
 
@@ -33,6 +34,9 @@ impl<'a> BodyChecker<'a> {
         if let Some(&(_, to)) = CONVERSIONS.iter().find(|(n, _)| n == name) {
             return self.check_convert(e, to, args);
         }
+        if let Some(b) = Builtin::global(name) {
+            return self.check_builtin_call(e, b, args);
+        }
         if let Some(&sid) = self.t.struct_by_name.get(name) {
             return self.check_construct(e, sid, args);
         }
@@ -56,6 +60,9 @@ impl<'a> BodyChecker<'a> {
             Some(Res::Fn(f)) if self.t.fns[f.0 as usize].is_pure && !self.t.fns[f.0 as usize].params.iter().any(|p| p.is_var) => {
                 let name = self.t.fns[f.0 as usize].name.clone();
                 self.error(e.span, format!("the result of pure function `{name}` is unused, so this line does nothing"));
+            }
+            Some(Res::Builtin(b)) if b.is_pure() => {
+                self.error(e.span, format!("the result of `{}` is unused, so this line does nothing", b.name()));
             }
             Some(Res::MapRead) => {
                 self.error(e.span, "this only reads the map, so the line does nothing");

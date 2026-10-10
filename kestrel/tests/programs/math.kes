@@ -1,0 +1,20 @@
+// expect: 4 2 3 3 -3 0
+// expect: 1 0 0 1024 1 0
+// expect: 3.1415927 6.2831855 3.141592653589793
+// expect: 1.4142135 2
+// expect: 5
+pure hyp(a: float, b: float) -> float {
+    sqrt(a * a + b * b)
+}
+
+let HALF_PI = PI / 2
+let ROOT2 = sqrt(2.0)
+
+main() {
+    print(sqrt(16), floor(2.7), ceil(2.1), round(2.5), round(-2.5), round(0.49999997))
+    print(cos(0), sin(0), atan2(0, 1), pow(2, 10), exp(0), log(1))
+    let wide: f64 = PI
+    print(PI, TAU, wide)
+    print(ROOT2, round(HALF_PI))
+    print(hyp(3, 4))
+}
