@@ -135,6 +135,17 @@ impl<'a> FnLowerer<'a> {
         out.extend(inner);
     }
 
+    /// Lowers `lower` inside a scratch arena, which the caller pushes before the
+    /// statements `lower` gives and pops with the statements this gives back. The
+    /// arena is a scope like `arena { }`'s while `lower` runs: a `return`, `break` or
+    /// `continue` it lowers pops the arena on its way out, so none leaves it pushed.
+    pub(crate) fn scratch<T>(&mut self, lower: impl FnOnce(&mut Self) -> T) -> (T, Vec<Stmt>) {
+        self.scopes.push(Scope { arena: Some(true), ..Scope::default() });
+        let lowered = lower(self);
+        let scope = self.scopes.pop().expect("scopes balance");
+        (lowered, self.cleanup(&scope))
+    }
+
     pub(crate) fn return_stmt(&mut self, value: Option<&ast::Expr>, out: &mut Vec<Stmt>) {
         let mut v = value.map(|v| {
             let v = self.expr(v);

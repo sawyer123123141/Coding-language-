@@ -265,6 +265,7 @@ impl<'a> FnLowerer<'a> {
                 let list = self.place(receiver.expect("`add` is a method")).expect("checker requires a place for `add`");
                 out.push(Stmt::ListAdd(list, v));
             }
+            Res::Fn(f) if self.wants_scratch(f, args) => self.scratch_call_stmt(e, f, args, out),
             Res::Fn(f) => {
                 let (pre, fi, args) = self.call_parts(e, f, args, receiver);
                 out.extend(pre);

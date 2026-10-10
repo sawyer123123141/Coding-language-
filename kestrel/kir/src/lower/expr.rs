@@ -88,6 +88,7 @@ impl<'a> FnLowerer<'a> {
                 Res::Convert(_) => ExprKind::Cast(Box::new(self.expr(&args[0].value))),
                 Res::NewArena => ExprKind::NewArena,
                 Res::Builtin(b) => self.builtin_call(b, args, ty, line),
+                Res::Fn(f) if self.wants_scratch(f, args) => self.scratch_call_value(e, f, args, ty, line),
                 Res::Fn(f) => {
                     let (pre, fi, a) = self.call_parts(e, f, args, None);
                     Self::with_pre(pre, ExprKind::Call(fi, a), ty, line)

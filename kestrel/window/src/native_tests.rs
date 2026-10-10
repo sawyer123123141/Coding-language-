@@ -39,7 +39,7 @@ fn headless_lines_of(body: impl FnOnce() + Send + 'static) -> Vec<String> {
 }
 
 fn headless(frames: u64) -> Settings {
-    Settings { headless: Some(frames), hidden: false }
+    Settings { headless: Some(frames), hidden: false, quiet: false }
 }
 
 #[test]
@@ -130,6 +130,27 @@ fn headless_queries_print_nothing_and_read_as_idle() {
         }
     });
     assert_eq!(lines, ["window.open 640 480 \"t\""]);
+}
+
+#[test]
+fn a_quiet_headless_window_prints_nothing_but_still_behaves() {
+    let lines = headless_lines_of(|| {
+        let (title, shot) = (kstr("t"), kstr("shot.png"));
+        let black = rgba(0.0, 0.0, 0.0, 1.0);
+        // SAFETY: every pointer is to a live local.
+        unsafe {
+            open_with(&Settings { quiet: true, ..headless(2) }, 10, 10, &title);
+            assert_eq!(kestrel_window_frame(), 1);
+            kestrel_draw_clear(&black);
+            kestrel_draw_text(&title, &v2(0.0, 0.0), 10.0, &black);
+            assert_eq!(kestrel_draw_text_width(&title, 10.0), 5.0, "the width is still measured");
+            kestrel_window_screenshot(&shot);
+            assert_eq!(kestrel_window_frame(), 1);
+            kestrel_window_close();
+            assert_eq!(kestrel_window_frame(), 0, "and the frames still run out");
+        }
+    });
+    assert_eq!(lines, Vec::<String>::new());
 }
 
 #[test]

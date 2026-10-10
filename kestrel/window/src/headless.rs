@@ -5,6 +5,11 @@
 //! a `vec2` as `vec2(x: 1, y: 2)`, a colour as `Color(r: 1, g: 0.3, b: 0.3, a: 1)`
 //! and a string in double quotes. The lines go through the runtime's print
 //! functions, so they stay in order with the program's own `print` output.
+//!
+//! With `KESTREL_HEADLESS_QUIET=1` no line is printed at all: a program that
+//! draws thousands of times a frame can run headless without flooding its output.
+
+use std::cell::Cell;
 
 use kestrel_runtime::print::{
     kestrel_rt_print_f32, kestrel_rt_print_i64, kestrel_rt_print_newline, kestrel_rt_print_space, kestrel_rt_print_str,
@@ -25,8 +30,21 @@ pub enum Arg<'a> {
     Color(KColor),
 }
 
-/// Prints `name` and its arguments on one line.
+thread_local! {
+    /// Set when the headless window opens; the window and its lines belong to one thread.
+    static QUIET: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Turns the lines off (or on) for this thread's window.
+pub fn set_quiet(quiet: bool) {
+    QUIET.set(quiet);
+}
+
+/// Prints `name` and its arguments on one line, unless the window is quiet.
 pub fn line(name: &str, args: &[Arg]) {
+    if QUIET.get() {
+        return;
+    }
     text(name.as_bytes());
     for arg in args {
         kestrel_rt_print_space();
@@ -110,6 +128,18 @@ mod tests {
              window.close\n\
              draw.text \"\" 0.016666668\n"
         );
+    }
+
+    #[test]
+    fn a_quiet_window_prints_no_lines() {
+        let out = captured(|| {
+            set_quiet(true);
+            line("draw.clear", &[]);
+            line("window.close", &[]);
+            set_quiet(false);
+            line("draw.clear", &[]);
+        });
+        assert_eq!(out, "draw.clear\n");
     }
 
     #[test]

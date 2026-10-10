@@ -174,3 +174,58 @@ fn objects_import_natives_by_their_symbol() {
     assert!(has(b"kestrel_twice"), "the object imports the native's symbol");
     assert!(!has(b"k_twice"), "nothing is defined for the native");
 }
+
+/// Where allocation goes right now, as a number: tells the program's own arena from a scratch one.
+extern "C" fn k_where_am_i() -> i64 {
+    kestrel_runtime::arena::kestrel_rt_current_arena() as i64
+}
+extern "C" fn k_where_in(_s: *const KStr) -> i64 {
+    k_where_am_i()
+}
+extern "C" fn k_where_pair(_s: *const KStr, _inner: i64) -> i64 {
+    k_where_am_i()
+}
+/// A `vec2` result and a text argument together: (the text's length, 2).
+extern "C" fn k_measure(out: *mut V2, s: *const KStr) {
+    // SAFETY: the result pointer comes first; `s` points at a live string header.
+    unsafe { *out = V2 { x: (*s).len as f32, y: 2.0 } }
+}
+
+#[test]
+fn an_interpolated_argument_is_built_in_an_arena_that_is_gone_after_the_call() {
+    let src = "native where_am_i() -> i64
+native where_in(s: string) -> i64
+native where_pair(s: string, inner: i64) -> i64
+native measure(s: string) -> vec2
+early(c: bool) -> int {
+    let a = where_in(\"a{if c { return 1 } else { 2 }}\")
+    return 0
+}
+main() {
+    let outer = where_am_i()
+    let n = 42
+    print(where_in(\"n {n}\") != outer, where_in(\"plain\") == outer)
+    // One scratch arena inside another: the inner call pops back to the outer one.
+    print(where_pair(\"a{n}\", where_in(\"b{n}\")) != outer, where_am_i() == outer)
+    print(where_am_i() == outer, measure(\"n {n}\"))
+    print(early(true), early(false), where_am_i() == outer)
+    var i = 0
+    while i < 4 {
+        i += 1
+        let a = where_in(\"c{if i == 2 { continue } else { i }}\")
+        let b = where_in(\"d{if i == 3 { break } else { i }}\")
+    }
+    print(i, where_am_i() == outer)
+}
+";
+    let extra = [
+        ("kestrel_where_am_i", k_where_am_i as *const u8),
+        ("kestrel_where_in", k_where_in as *const u8),
+        ("kestrel_where_pair", k_where_pair as *const u8),
+        ("kestrel_measure", k_measure as *const u8),
+    ];
+    let p = jit_natives(src, &extra).expect("codegen");
+    // `i` stops at 3: `break` leaves the loop on the third round, and every early exit
+    // has popped its arena, so the current arena is the program's again.
+    assert_eq!(run_captured(&p), "true true\ntrue true\ntrue vec2(x: 4, y: 2)\n1 0 true\n3 true\n");
+}

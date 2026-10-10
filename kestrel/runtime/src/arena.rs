@@ -72,6 +72,12 @@ impl Arena {
         self.children.push(child);
     }
 
+    /// The size of every block this arena holds, and those of the arenas it adopted.
+    pub(crate) fn bytes(&self) -> usize {
+        let own: usize = self.blocks.iter().map(|(_, layout)| layout.size()).sum();
+        own + self.children.iter().map(|child| child.bytes()).sum::<usize>()
+    }
+
     /// A block of at least `size` bytes, and how big it really is.
     fn block(&mut self, size: usize, align: usize) -> (*mut u8, usize) {
         let (p, layout) = blocks::take(size, align);
@@ -117,6 +123,12 @@ pub(crate) fn program_arena() -> *mut Arena {
         return a;
     }
     STACK.with_borrow_mut(|s| &mut **s.program.get_or_insert_with(Box::default) as *mut Arena)
+}
+
+/// The size of the program arena's blocks: what `KESTREL_ARENA_REPORT=1` reports.
+pub(crate) fn program_bytes() -> usize {
+    // SAFETY: the program arena lives until the program ends.
+    unsafe { (*program_arena()).bytes() }
 }
 
 /// A new, empty arena (`Arena()`). It allocates nothing until first used.
@@ -256,6 +268,20 @@ mod tests {
         assert_eq!(q, first, "the freed block is reused");
         // SAFETY: `q` holds `BLOCK` bytes.
         assert!(unsafe { std::slice::from_raw_parts(q, BLOCK) }.iter().all(|&x| x == 0));
+    }
+
+    #[test]
+    fn bytes_counts_every_block_including_adopted_ones() {
+        let mut a = Arena::new();
+        assert_eq!(a.bytes(), 0);
+        a.alloc(10, 1);
+        assert_eq!(a.bytes(), BLOCK);
+        a.alloc(BLOCK * 2, 16);
+        assert_eq!(a.bytes(), BLOCK * 3);
+        let mut child = Box::new(Arena::new());
+        child.alloc(10, 1);
+        a.adopt(child);
+        assert_eq!(a.bytes(), BLOCK * 4);
     }
 
     #[test]

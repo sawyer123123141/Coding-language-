@@ -6,7 +6,8 @@
 //! - The **real** backend drives raylib.
 //! - The **headless** backend (`KESTREL_HEADLESS=<n>`) makes no raylib call:
 //!   `frame()` gives `true` `n` times, the clock is 60 frames a second, and
-//!   the natives print what they would have drawn (see `headless.rs`).
+//!   the natives print what they would have drawn (see `headless.rs`), unless
+//!   `KESTREL_HEADLESS_QUIET=1` turns the lines off.
 //!
 //! Both follow the same rules, so a program behaves alike on either:
 //! `close()` only asks, and the next `frame()` closes the window and gives
@@ -62,14 +63,17 @@ pub struct Settings {
     pub headless: Option<u64>,
     /// `KESTREL_HIDDEN=1`: a real window that isn't shown.
     pub hidden: bool,
+    /// `KESTREL_HEADLESS_QUIET=1`: a headless window prints none of its lines.
+    pub quiet: bool,
 }
 
 impl Settings {
     pub fn from_env() -> Result<Settings, String> {
-        Settings::parse(env::var("KESTREL_HEADLESS").ok().as_deref(), env::var("KESTREL_HIDDEN").ok().as_deref())
+        let var = |name| env::var(name).ok();
+        Settings::parse(var("KESTREL_HEADLESS").as_deref(), var("KESTREL_HIDDEN").as_deref(), var("KESTREL_HEADLESS_QUIET").as_deref())
     }
 
-    pub fn parse(headless: Option<&str>, hidden: Option<&str>) -> Result<Settings, String> {
+    pub fn parse(headless: Option<&str>, hidden: Option<&str>, quiet: Option<&str>) -> Result<Settings, String> {
         let headless = match headless.map(str::trim) {
             None | Some("") => None,
             Some(n) => Some(
@@ -77,7 +81,7 @@ impl Settings {
                     .map_err(|_| format!("KESTREL_HEADLESS must be a whole number of frames, like KESTREL_HEADLESS=3, not {n:?}"))?,
             ),
         };
-        Ok(Settings { headless, hidden: hidden == Some("1") })
+        Ok(Settings { headless, hidden: hidden == Some("1"), quiet: quiet == Some("1") })
     }
 }
 
@@ -173,7 +177,10 @@ pub fn open(settings: &Settings, width: i32, height: i32, title: &[u8]) -> Resul
             return Err(format!("window.open needs a width and height above 0, not {width} by {height}"));
         }
         let kind = match settings.headless {
-            Some(frames_to_run) => Kind::Headless { frames_to_run },
+            Some(frames_to_run) => {
+                headless::set_quiet(settings.quiet);
+                Kind::Headless { frames_to_run }
+            }
             None => Kind::Real { time_base: real::init(settings, width, height, title)? },
         };
         let size = V2 { x: width as f32, y: height as f32 };
@@ -254,22 +261,25 @@ mod tests {
     }
 
     fn headless(frames: u64) -> Settings {
-        Settings { headless: Some(frames), hidden: false }
+        Settings { headless: Some(frames), hidden: false, quiet: false }
     }
 
     #[test]
     fn settings_come_from_the_environment_values() {
-        assert_eq!(Settings::parse(None, None), Ok(Settings { headless: None, hidden: false }));
-        assert_eq!(Settings::parse(Some("3"), None).unwrap().headless, Some(3));
-        assert_eq!(Settings::parse(Some(" 100000 "), None).unwrap().headless, Some(100_000));
-        assert_eq!(Settings::parse(Some("0"), None).unwrap().headless, Some(0));
-        assert_eq!(Settings::parse(Some(""), None).unwrap().headless, None, "empty is unset");
-        assert!(Settings::parse(None, Some("1")).unwrap().hidden);
-        assert!(!Settings::parse(None, Some("0")).unwrap().hidden);
-        assert!(!Settings::parse(None, Some("yes")).unwrap().hidden);
-        let err = Settings::parse(Some("lots"), None).unwrap_err();
+        assert_eq!(Settings::parse(None, None, None), Ok(Settings { headless: None, hidden: false, quiet: false }));
+        assert_eq!(Settings::parse(Some("3"), None, None).unwrap().headless, Some(3));
+        assert_eq!(Settings::parse(Some(" 100000 "), None, None).unwrap().headless, Some(100_000));
+        assert_eq!(Settings::parse(Some("0"), None, None).unwrap().headless, Some(0));
+        assert_eq!(Settings::parse(Some(""), None, None).unwrap().headless, None, "empty is unset");
+        assert!(Settings::parse(None, Some("1"), None).unwrap().hidden);
+        assert!(!Settings::parse(None, Some("0"), None).unwrap().hidden);
+        assert!(!Settings::parse(None, Some("yes"), None).unwrap().hidden);
+        assert!(Settings::parse(None, None, Some("1")).unwrap().quiet);
+        assert!(!Settings::parse(None, None, Some("0")).unwrap().quiet);
+        assert!(!Settings::parse(None, None, Some("true")).unwrap().quiet);
+        let err = Settings::parse(Some("lots"), None, None).unwrap_err();
         assert!(err.starts_with("KESTREL_HEADLESS must be a whole number of frames"), "{err}");
-        assert!(Settings::parse(Some("-1"), None).is_err());
+        assert!(Settings::parse(Some("-1"), None, None).is_err());
     }
 
     #[test]

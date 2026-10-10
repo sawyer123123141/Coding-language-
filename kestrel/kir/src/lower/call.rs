@@ -110,6 +110,43 @@ impl<'a> FnLowerer<'a> {
         (pre, FuncIdx(f.0), lowered)
     }
 
+    /// Whether a call to `f` builds text in a scratch arena: `f` is a native, which only
+    /// reads its arguments during the call, and some argument is directly an interpolated
+    /// string. So `draw.text("fps {fps}", ...)` in a frame loop frees its text every frame
+    /// instead of growing the arena it runs in. Text kept in a variable first is not covered.
+    pub(crate) fn wants_scratch(&self, f: FnId, args: &[ast::Arg]) -> bool {
+        self.t.func(f).is_native && args.iter().any(|a| matches!(a.value.kind, ast::ExprKind::Interp(_)))
+    }
+
+    /// The pieces of a call to native `f` made inside a scratch arena: the statements
+    /// that push the arena and evaluate the arguments, the call's own parts, and the
+    /// statements that pop it. Leaving early from an argument pops it too (see `scratch`).
+    fn scratch_parts(&mut self, e: &ast::Expr, f: FnId, args: &[ast::Arg]) -> (Vec<Stmt>, FuncIdx, Vec<Arg>, Vec<Stmt>) {
+        let mut before = vec![Stmt::PushArena(None)];
+        let ((pre, fi, lowered), after) = self.scratch(|this| this.call_parts(e, f, args, None));
+        before.extend(pre);
+        (before, fi, lowered, after)
+    }
+
+    /// A call to native `f` whose result is discarded, with its text in a scratch arena.
+    pub(crate) fn scratch_call_stmt(&mut self, e: &ast::Expr, f: FnId, args: &[ast::Arg], out: &mut Vec<Stmt>) {
+        let (before, fi, lowered, after) = self.scratch_parts(e, f, args);
+        out.extend(before);
+        out.push(Stmt::Call(fi, lowered));
+        out.extend(after);
+    }
+
+    /// A call to native `f` that gives a value of type `ty`, with its text in a scratch
+    /// arena. The result is kept in a temporary and read once the arena is popped. (A native
+    /// gives back only scalars and `vec2`/`vec3`, which hold no arena memory.)
+    pub(crate) fn scratch_call_value(&mut self, e: &ast::Expr, f: FnId, args: &[ast::Arg], ty: KTy, line: u32) -> ExprKind {
+        let (mut stmts, fi, lowered, after) = self.scratch_parts(e, f, args);
+        let result = self.temp(ty);
+        stmts.push(Stmt::Let(result, Expr { kind: ExprKind::Call(fi, lowered), ty, line }));
+        stmts.extend(after);
+        ExprKind::Seq(stmts, Box::new(Expr { kind: ExprKind::Load(Place::local(result)), ty, line }))
+    }
+
     /// `Point(...)`: every field in declaration order, defaults filled in,
     /// arguments evaluated in source order.
     pub(crate) fn construct(&mut self, e: &ast::Expr, sid: StructId, args: &[ast::Arg]) -> (Vec<Stmt>, ExprKind) {
