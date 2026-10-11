@@ -1,0 +1,13 @@
+[package]
+name = "particles-rust"
+version = "0.1.0"
+edition = "2021"
+
+# Its own workspace (and listed in the `kestrel/` workspace's `exclude`), like `godot/`: the
+# compiler's tests shouldn't build it. It reuses the vendored raylib build and the hand-written
+# raylib declarations of `kestrel-window`.
+[workspace]
+
+[dependencies]
+kestrel-window = { path = "../../../window" }
+rayon = "1.11"
