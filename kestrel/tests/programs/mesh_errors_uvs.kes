@@ -1,0 +1,17 @@
+// env: KESTREL_HEADLESS=1
+// expect: window.open 64 64 "t"
+// expect-exit: 101
+// expect-stderr: draw3d.make_mesh needs one uv per vertex or none: 3 vertices, 2 uvs on line 16
+use window
+use draw
+use draw3d
+use { MeshData from draw3d }
+
+main() {
+    window.open(64, 64, "t")
+    var data = MeshData()
+    data.triangle(vec3(0, 0, 0), vec3(1, 0, 0), vec3(0, 1, 0), draw.RED)
+    data.uvs.add(vec2(0, 0))
+    data.uvs.add(vec2(1, 0))
+    let m = draw3d.make_mesh(data)
+}

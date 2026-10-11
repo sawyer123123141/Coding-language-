@@ -1,0 +1,16 @@
+// env: KESTREL_HEADLESS=1
+// expect: window.open 64 64 "t"
+// expect-exit: 101
+// expect-stderr: draw3d.make_mesh needs a multiple of 3 indices, not 7 on line 15
+use window
+use draw
+use draw3d
+use { MeshData from draw3d }
+
+main() {
+    window.open(64, 64, "t")
+    var data = MeshData()
+    data.quad(vec3(0, 0, 0), vec3(1, 0, 0), vec3(1, 1, 0), vec3(0, 1, 0), draw.RED)
+    data.indices.add(0)
+    let m = draw3d.make_mesh(data)
+}

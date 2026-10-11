@@ -1,0 +1,15 @@
+// env: KESTREL_HEADLESS=1
+// expect: window.open 64 64 "t"
+// expect-exit: 101
+// expect-stderr: draw.texture_region got an empty texture; make one with draw.load_texture or draw.make_texture on line 14
+use window
+use draw
+use { Rect, Texture from draw }
+
+main() {
+    window.open(64, 64, "t")
+    // A zero-filled array holds empty textures: their id is 0, which is no GPU object.
+    let empty = array[Texture](2)
+    let part = Rect(pos: vec2(0, 0), size: vec2(2, 2))
+    draw.texture_region(empty[0], part, vec2(0, 0), vec2(8, 8), draw.WHITE)
+}

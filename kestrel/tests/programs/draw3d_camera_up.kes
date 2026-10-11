@@ -1,0 +1,15 @@
+// env: KESTREL_HEADLESS=1
+// expect: window.open 64 64 "t"
+// expect-exit: 101
+// expect-stderr: draw3d.camera needs an up that doesn't point along the view on line 13
+use window
+use draw3d
+use { Camera from draw3d }
+
+main() {
+    window.open(64, 64, "t")
+    while window.frame() {
+        // The camera looks along +z, and so does its up.
+        draw3d.camera(Camera(pos: vec3(0, 0, -3), target: vec3(0, 0, 0), up: vec3(0, 0, 1)))
+    }
+}

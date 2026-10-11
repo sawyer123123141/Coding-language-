@@ -1,0 +1,25 @@
+// env: KESTREL_HEADLESS=1
+// expect: window.open 64 64 "t"
+// expect: draw3d.make_mesh MeshData(vertices: 3, colors: 3, uvs: 3, indices: 3)
+// expect: draw3d.camera Camera(pos: vec3(x: 0, y: 0, z: -3), target: vec3(x: 0, y: 0, z: 0), up: vec3(x: 0, y: 1, z: 0), fov: 75)
+// expect-exit: 101
+// expect-stderr: draw3d.mesh_textured got an empty texture; make one with draw.load_texture or draw.make_texture on line 24
+use window
+use draw
+use draw3d
+use { Texture from draw }
+use { Camera, MeshData from draw3d }
+
+main() {
+    window.open(64, 64, "t")
+    var data = MeshData()
+    data.triangle(vec3(0, 0, 0), vec3(1, 0, 0), vec3(0, 1, 0), draw.RED)
+    data.uvs.add(vec2(0, 0))
+    data.uvs.add(vec2(1, 0))
+    data.uvs.add(vec2(0, 1))
+    let m = draw3d.make_mesh(data)
+    // The mesh has uvs; the texture is a zero-filled one, whose id is 0, which is no GPU object.
+    let empty = array[Texture](1)
+    draw3d.camera(Camera(pos: vec3(0, 0, -3), target: vec3(0, 0, 0)))
+    draw3d.mesh_textured(m, empty[0], vec3(0, 0, 0), draw.WHITE)
+}

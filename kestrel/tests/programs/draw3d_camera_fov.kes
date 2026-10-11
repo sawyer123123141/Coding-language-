@@ -1,0 +1,15 @@
+// env: KESTREL_HEADLESS=1
+// expect: window.open 64 64 "t"
+// expect-exit: 101
+// expect-stderr: draw3d.camera needs a fov between 0 and 180 degrees, not 200 on line 13
+use window
+use draw3d
+use { Camera from draw3d }
+
+main() {
+    window.open(64, 64, "t")
+    while window.frame() {
+        // A field of view of 200 degrees is more than a camera can see.
+        draw3d.camera(Camera(pos: vec3(0, 0, -3), target: vec3(0, 0, 0), fov: 200))
+    }
+}
