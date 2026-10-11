@@ -1,0 +1,42 @@
+struct Inner {
+    mem: Arena = Arena()
+    data: [int] = []
+}
+struct Wrapper {
+    mem: Arena = Arena()
+    inner: Inner
+}
+struct Pair {
+    a: Inner
+    b: Inner
+}
+make_w() -> Wrapper {
+    var w = Wrapper(inner: Inner())
+    in w.mem {
+        w.inner.data = [1, 2, 3]
+    }
+    w
+}
+many() -> list[Inner] {
+    var xs = list[Inner]()
+    xs.add(Inner())
+    xs
+}
+read(i: Inner) -> int {
+    i.data.len
+}
+take_inner() -> Inner {
+    make_w().inner
+}
+main() {
+    let a = Pair(a: Inner(), b: Inner()).a
+    let b = many()[0]
+    var xs = list[Inner]()
+    xs.add(make_w().inner)
+    print(read(make_w().inner), read(many()[0]), make_w().inner.data.len)
+    print(take_inner().data)
+}
+// error 29: can't move this out: it holds an `Arena`, so it can't be copied, and only whole variables move
+// error 32: can't move this out: it holds an `Arena`, so it can't be copied, and only whole variables move
+// error 33: can't move this out: it holds an `Arena`, so it can't be copied, and only whole variables move
+// error 35: can't move this out: it holds an `Arena`, so it can't be copied, and only whole variables move

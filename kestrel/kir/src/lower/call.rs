@@ -138,7 +138,6 @@ impl<'a> FnLowerer<'a> {
             out.push(Stmt::Let(result, Expr { kind: ExprKind::Call(fi, lowered), ty: super::kty(ret), line }));
             out.extend(after);
             self.declared(result);
-            self.held.insert(result);
         } else {
             out.push(Stmt::Call(fi, lowered));
             out.extend(after);
@@ -157,7 +156,7 @@ impl<'a> FnLowerer<'a> {
         stmts.extend(after);
         let place = Place::local(result);
         let value = if super::helpers::owning(ty, self.t) {
-            self.held.insert(result);
+            self.scratch_results.insert(result);
             ExprKind::Move(place)
         } else {
             ExprKind::Load(place)

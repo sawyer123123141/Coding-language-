@@ -379,10 +379,16 @@ impl<'a> BodyChecker<'a> {
                     self.t.moves.insert(v.id);
                 }
             }
-            ExprKind::Field { .. } | ExprKind::Index { .. } if self.place_root(v).is_some() => {
+            // A part of a variable, or of a temporary (a call's result, a construction). `Enum.Variant`
+            // is a field access that builds a value; it isn't a part of anything.
+            ExprKind::Field { .. } | ExprKind::Index { .. } if !matches!(self.t.res.get(&v.id), Some(Res::Variant(..))) => {
                 let what = self.t.owns_what(ty);
                 let msg = format!("can't move this out: it holds {what}, so it can't be copied, and only whole variables move");
-                self.error_help(v.span, msg, "move the whole variable that holds it");
+                let help = match self.place_root(v) {
+                    Some(_) => "move the whole variable that holds it",
+                    None => "store the whole value in a variable first",
+                };
+                self.error_help(v.span, msg, help);
             }
             _ => {}
         }

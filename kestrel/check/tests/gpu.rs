@@ -191,3 +191,42 @@ fn a_gpu_handle_cannot_be_built_compared_or_copied() {
     let reads = "show(t: Tex) {\n print(t.id)\n}\nmain() {\n let a = make(1)\n show(a)\n show(a)\n print(a.id)\n}\n";
     assert!(builtin_errors(reads).is_empty());
 }
+
+#[test]
+fn an_owning_part_of_a_temporary_cannot_be_stored() {
+    // A part of a call's result or a construction could outlive the rest, which is dropped at
+    // the end of the block (and a part may hold memory from a sibling arena), so it is refused.
+    let moved_out = "can't move this out: it holds a GPU object, so it can't be copied, and only whole variables move";
+    let decls = "mk() -> Holder {\n Holder(t: make(1), n: 1)\n}\nmany() -> list[Tex] {\n var xs = list[Tex]()\n xs.add(make(1))\n xs\n}\n";
+    let stores = [
+        "let t = mk().t",
+        "let t = many()[0]",
+        "let t = Holder(t: make(1), n: 1).t",
+        "var ts = list[Tex]()\n ts.add(mk().t)",
+        "var h = mk()\n h.t = mk().t",
+    ];
+    for body in stores {
+        let src = format!("{TEX}{decls}main() {{\n {body}\n}}\n");
+        let diags = {
+            let (mut p, d) = parse(&src);
+            assert!(d.is_empty());
+            p.builtin_ranges = std::iter::once(0..src.len() as u32).collect();
+            check(&p).1
+        };
+        let got: Vec<_> = diags.iter().map(|d| (d.message.as_str(), d.help.as_deref())).collect();
+        assert_eq!(got, vec![(moved_out, Some("store the whole value in a variable first"))], "in: {body}");
+    }
+    // A part of a variable keeps its help.
+    let src = format!("{TEX}main() {{\n let h = Holder(t: make(1), n: 1)\n let t = h.t\n}}\n");
+    let (mut p, _) = parse(&src);
+    p.builtin_ranges = std::iter::once(0..src.len() as u32).collect();
+    let d = check(&p).1;
+    assert_eq!(d[0].help.as_deref(), Some("move the whole variable that holds it"));
+
+    // Reading a part (an argument, a field, a variant that builds a value) is fine.
+    let reads = format!(
+        "{TEX}enum Slot {{\n Empty\n Full {{ t: Tex }}\n}}\n{decls}show(t: Tex) -> int {{\n t.w\n}}\n\
+         main() {{\n print(show(mk().t), take(many()[0]), mk().n, mk().t.w, many().len)\n let s = Slot.Empty\n}}\n"
+    );
+    assert!(errors(&reads, true).is_empty());
+}

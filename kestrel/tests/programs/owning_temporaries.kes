@@ -8,7 +8,8 @@
 // expect: 2501515
 // An owning value that is made and not stored (a discarded call, an argument, the base of a
 // field or index, a `for` or `match` subject) is freed when its block ends, and what was
-// taken out of it first (`heights`, `name`, a whole element) stays alive.
+// copied out of it first (`heights`, `name`) stays alive. (An owning part of one can't be
+// stored: see tests/errors/move_out_of_temporary.kes.)
 struct Chunk {
     x: int
     mem: Arena = Arena()
@@ -71,8 +72,7 @@ main() {
         i += 1
     }
     print(i)
-    let m = many()[0]
-    print(m.x, m.heights)
+    print(many()[0].x, many()[0].heights)
     for k from 0 to 1000 {
         total += sum(make(k)) + width(make(k)) + make(k).heights[1]
     }

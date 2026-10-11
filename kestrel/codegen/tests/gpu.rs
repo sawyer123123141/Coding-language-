@@ -285,9 +285,9 @@ fn owning_values_that_are_never_stored_are_dropped_when_their_block_ends() {
             "2\n2 0\n3\n",
         ),
         (
-            "a field or an element moved out of a temporary",
-            "main() {\n if dropped() == 0 {\n  let a = mk_pair().a\n  let b = many()[1]\n  print(a.w, b.w, dropped())\n }\n print(dropped())\n}\n",
-            "1 2 0\n4\n",
+            "an owning field or element of a temporary, only read",
+            "main() {\n if dropped() == 0 {\n  print(width(mk_pair().b), take(many()[1]), dropped())\n }\n print(dropped())\n}\n",
+            "2 2 0\n4\n",
         ),
         (
             "a function's tail and `return`",

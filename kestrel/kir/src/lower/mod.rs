@@ -71,8 +71,9 @@ pub(crate) struct FnLowerer<'a> {
     origins: HashMap<LocalIdx, Place>,
     /// Enclosing blocks, innermost last, with what leaving each must do.
     scopes: Vec<scopes::Scope>,
-    /// Temporaries that hold a new owning value until their block ends (see `temps`).
-    held: HashSet<LocalIdx>,
+    /// Temporaries holding the owning result of a native called in a scratch arena, which is
+    /// handed on as a new value (see `scratch_call_value` and `temps`).
+    scratch_results: HashSet<LocalIdx>,
     helpers: &'a mut Helpers,
 }
 
@@ -80,7 +81,7 @@ impl<'a> FnLowerer<'a> {
     fn new(program: &'a Program, t: &'a Tables, lines: &'a LineIndex, fn_id: FnId, helpers: &'a mut Helpers) -> Self {
         let (local_map, locals, bindings, elems) = (HashMap::new(), Vec::new(), HashMap::new(), HashMap::new());
         let (origins, scopes) = (HashMap::new(), Vec::new());
-        FnLowerer { program, t, lines, fn_id, local_map, locals, bindings, elems, origins, scopes, held: HashSet::new(), helpers }
+        FnLowerer { program, t, lines, fn_id, local_map, locals, bindings, elems, origins, scopes, scratch_results: HashSet::new(), helpers }
     }
 
     fn lower(mut self) -> Func {

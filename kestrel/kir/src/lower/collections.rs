@@ -187,7 +187,6 @@ impl<'a> FnLowerer<'a> {
     /// about to die. Parameters belong to the caller, so they're copied
     /// regardless.
     pub(crate) fn owned(&mut self, v: Expr, moving: bool) -> Expr {
-        let v = if owning(v.ty, self.t) { self.release(v) } else { v };
         if !has_heap(v.ty, self.t) {
             return v;
         }
