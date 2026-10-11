@@ -64,10 +64,10 @@ From plan 2's reviews and the particles demo. The window spec is `docs/superpowe
 
 ### Language and checker
 
-- **Natives' runtime errors don't name the line**, only the function ("draw.circle was called before window.open"). The call site's line isn't passed to the native.
-- **Hoist heap constants: decide in the 3D spec.** An array, list or map constant (or a struct constant that holds one) is re-lowered and re-allocated at every use (`kir/src/lower/expr.rs`, `const_value`). Measured: `let PALETTE = [draw.RED, draw.GREEN, draw.BLUE]` with `PALETTE[n % 3]` in a frame loop grew the program arena by 4.78 MB over 100,000 frames. Today the window spec tells the user to wrap the loop body in `arena { }` or copy the constant into a `let` before the loop. A real fix builds each such constant once (read-only, never freed, shared), but then a copy of it must still copy, and that is a design question for when 3D programs hold meshes and palettes in constants.
+- **Natives' runtime errors don't name the line**, only the function ("draw.circle was called before window.open"). The call site's line isn't passed to the native. Done in plan 1 of the 3D work (Task 6): a call from the program's own files to a built-in function that isn't `pure` stores its line first, and a native's error ends with "on line N".
+- **Hoist heap constants: decide in the 3D spec.** Done in plan 1 of the 3D work (Task 4): an array, list or map constant (or one that holds one) is built once, before `main`, and every use reads that one value in place; storing it copies. Original note: an array, list or map constant (or a struct constant that holds one) is re-lowered and re-allocated at every use (`kir/src/lower/expr.rs`, `const_value`). Measured: `let PALETTE = [draw.RED, draw.GREEN, draw.BLUE]` with `PALETTE[n % 3]` in a frame loop grew the program arena by 4.78 MB over 100,000 frames. Today the window spec tells the user to wrap the loop body in `arena { }` or copy the constant into a `let` before the loop. A real fix builds each such constant once (read-only, never freed, shared), but then a copy of it must still copy, and that is a design question for when 3D programs hold meshes and palettes in constants.
 - **Struct-valued field defaults are unavailable** (`tint: Color = RED` is an error: "field defaults can't use struct values yet; set the field when you build it"). Constants may construct structs, and field defaults may construct only `vec2` and `vec3`. The check is conservative: `name: string? = NAME` is rejected too, though it would be safe.
-- **A native's type-error help text overstates the allowed struct fields.** It says "a struct of those", but a struct field may not be an enum.
+- **A native's type-error help text overstates the allowed struct fields.** It says "a struct of those", but a struct field may not be an enum. Done in plan 1 of the 3D work (Task 2): the help text now lists what a native can take and return, and says a struct field may be a `list[T]` but not an enum.
 - **A field or variant called `native`** reports "native functions can't be methods", which doesn't say what is wrong. (`native` is a keyword, so the name can't be used; the message should say that.)
 
 ### Window runtime
@@ -87,6 +87,18 @@ From plan 2's reviews and the particles demo. The window spec is `docs/superpowe
 - **The harness's window check is textual.** `cli/tests/programs.rs` panics for a program that calls `window.open` (or an imported `open`) without `// env: KESTREL_HEADLESS=...`. A call hidden in a string would be a false alarm, and a window opened some other way (a future native) wouldn't be caught.
 - **The Godot refusal test** can't tell the refusal of a built-in module from another load error. Check the message.
 
+## Found while building plan 1 of the 3D work (2026-10-10)
+
+From the whole-branch review of plan 1. It found no memory-safety bug, double drop or crash on a valid program.
+
+- **Two shapes still leak an owning value** (and so a GPU object), against the spec's "freed when the block it was made in ends". Both were reproduced, and neither is unsafe. The spec's "GPU objects" section lists them as known gaps.
+  - A mixed `if` used as a read-only argument: `show(if c { make(i) } else { t }, ..)`, or an `if` or `match` arm that has its own locals: `width(if c { let q = make(1); make(2) } else { make(3) })`.
+  - A fresh owning value in a `while` condition: one is made each time round, and only the last is dropped.
+  - The workaround is to store the value in a `let` first. Fix idea: zero-initialise the held temporaries at scope entry, and drop before reassigning in loops.
+- **Moves are flow-insensitive.** `if i % 2 == 0 { a.add(c) } else { b.add(c) }` reports "`c` was moved earlier", because move checking ignores that the two branches are exclusive. This was already so before plan 1, and textures and meshes will make it an everyday pattern.
+- **`k_export_<name>` and `k_thunk_*` symbols** have the same collision shape against user names that `__kestrel_` names had (those are reserved now). Kestrel items are `k_<name>`, so a user function `export_foo` gets the symbol of the export thunk of `foo`, and `thunk___kestrel_par_0` the symbol of a `par for` body's thunk. Prefixing the generated symbols with `__`, as the init thunk's is, would fix both.
+- **Each reload of a file with heap constants leaks the previous constants arena** in the Godot add-on. It happens only at dev time, when a file is reloaded.
+
 ## Maps (built 2026-10-09)
 
 - **Not yet:**
@@ -94,7 +106,7 @@ From plan 2's reviews and the particles demo. The window spec is `docs/superpowe
   - struct, enum and vector keys (they need `==` first);
   - `==` on maps;
   - maps across the Godot bridge (a load error says so).
-- **Map constants are rebuilt at every use** (all constants are re-lowered at each use). A lookup-table constant used inside a hot function builds a fresh map each call: a review measured 616 MB for 2M calls. Hoist constants into the program arena, or build each once.
+- **Map constants are rebuilt at every use** (all constants are re-lowered at each use). Done in plan 1 of the 3D work (Task 4): a map constant is built once, before `main`. Original note: a lookup-table constant used inside a hot function builds a fresh map each call: a review measured 616 MB for 2M calls. Hoist constants into the program arena, or build each once.
 - **Lookups are runtime calls.** Inlining the probe for integer keys into generated code would remove the call; on a map that fits in the cache, the call is most of the remaining cost.
 - **In-order integer keys miss the cache** where C#'s identity hash walks memory in order (2.5x behind in `kestrel/bench/maps`). The scattering hash is the safer default; probing that tolerates identity hashes (as Python's does) is the alternative.
 - **`print(m, m.remove(1), m)`** prints the first `m` after the removal: print arguments are evaluated first, and the first is a header copy sharing entries. Function calls reject this through `check_changed_later`; `print` isn't covered.
@@ -118,7 +130,7 @@ From plan 2's reviews and the particles demo. The window spec is `docs/superpowe
 ## Cheap, fix when the area is next touched
 
 - `-2147483648` / `i64::MIN` literals can't be written (special-case `Neg(Int)`).
-- Constants are re-lowered at every use (exponential on chained constants; an overflow in a constant traps at each use).
+- Constants are re-lowered at every use (exponential on chained constants; an overflow in a constant traps at each use). Heap constants (arrays, lists, maps and what holds them) are now built once, before `main` (plan 1 of the 3D work, Task 4), so for them this is done. Scalar, string, vector and plain-struct constants are still re-lowered at each use.
 - Runtime: `print_str` should guard `len <= 0`; `eprintln!` in `kestrel_rt_panic` can abort on a broken pipe.
 - CLI: `-o` swallows the next flag; `run`/`check` silently accept `-o`/`--release`; unknown `--` flags are ignored; the temp object file has a predictable name.
 - Each runtime function is registered in three places (runtime, `RtFuncs::declare`, `jit_symbols`): generate the last two from one table. The native-libs list in `link.rs` is a hardcoded snapshot of `rustc --print native-static-libs`.
