@@ -17,7 +17,7 @@ Each cell is the **median of the per-second averages** the demo prints (it print
 - A 1280×720 window, vsync on (`window.open` always turns it on).
 - Both `kestrel run --release` (the JIT) and a `kestrel build --release` exe, so the overflow and narrowing checks are off.
 - The starting count is `START_COUNT` in the demo, and `BULK` picks the drawing, both changed per run. The mouse is not used: the measured copies set `target` to the window centre (640, 360), so every run pulls toward the same point.
-- The 2026-10-10 runs (the baseline table) mostly used a visible window. The "hidden" rows set `KESTREL_HIDDEN=1`. **Every run of 2026-10-11 used a hidden window**, so the numbers in "Bulk drawing" are all hidden.
+- The 2026-10-10 runs (the baseline table) mostly used a visible window. The hidden runs of that day set `KESTREL_HIDDEN=1`; their numbers are in the text under the baseline table, not in it. **Every run of 2026-10-11 used a hidden window**, so the numbers in "Bulk drawing" are all hidden.
 - The machine is noisy (a desktop with other programs open), so read differences under about 10% as noise.
 
 ## Results: one `draw.rect` per particle (the baseline, 2026-10-10)
@@ -68,7 +68,7 @@ Hidden windows gave the same numbers at 200,000 (update 0.91, draw 30.2 and 29.9
 | 200,000 | `draw.rect` per particle | JIT | 0.75 (0.74-0.76) | 28.12 (28.07-28.16) | 28.95 (28.90-28.99) | 34.5 (34.5-34.6) |
 | 200,000 | `draw.rect` per particle | exe | 0.76 (0.74-0.76) | 28.66 (28.61-28.79) | 29.50 (29.44-29.64) | 33.9 (33.7-34.0) |
 
-The last two rows are the baseline run again today. They are within about 5-10% of the 2026-10-10 rows (draw 31.65 and 29.55 visible; 30.2 and 29.9 hidden), which is the noise level.
+The last two rows are the baseline run again today. They are within about 11% of the 2026-10-10 rows (draw 31.65 and 29.55 visible; 30.2 and 29.9 hidden). The 11% is the JIT row's 28.12 against 31.65, a little over the 10% I called noise; the other three comparisons are within 7%. Nothing here depends on the difference.
 
 At 500,000 and 1,000,000 the first few seconds are slower than the rest (for example 500,000 JIT: draw 21.7 and 21.1, then 16.7-17.9; 1,000,000 JIT: 43.6-43.9 for four seconds, then 36.6-39.6), which is why the ranges are wide. I don't know why; the medians are over all the values.
 
@@ -96,7 +96,7 @@ The draw time was split with `window.ticks_usec()` around the copy loop and the 
 
 - **The `draw.rects` call is about 90% of the draw time from 50,000 particles up, and nearly all of it is writing the vertices and copying them to the GPU.** The `DrawMesh` call that issues the draw takes microseconds. The vertices are 72 bytes a particle (two triangles of three `x, y, z` floats): 14.4 MB at 200,000. `fill_into` writes them into a buffer on the CPU, then `UpdateMeshBuffer` (a `glBufferSubData`) copies them to the GPU buffer. At 200,000 that is 2.8 ms for the copy (about 5 GB/s) and about 0.9 ms for the fill. The copy is the biggest piece up to 200,000; at 500,000 and 1,000,000 the fill is.
 - **The copy loop in Kestrel is about 10% of the draw time** (2.2 ns a particle: 0.45 ms of the 4.2 at 200,000). It reads each particle's position and writes it into the list by index.
-- **The program never waits for the GPU in these runs**: frame minus update minus draw is under 0.1 ms at 200,000 (0.05) and 0.2 ms at 1,000,000. This doesn't say how long the GPU takes to draw 400,000 tiny triangles, because the hidden window never shows its frames.
+- **`window.frame()` doesn't wait for the GPU in these runs**: frame minus update minus draw is under 0.1 ms at 200,000 (0.05) and 0.2 ms at 1,000,000. That only rules out a wait in `window.frame()`: a wait inside `UpdateMeshBuffer` (a `glBufferSubData` into the buffer the previous frame drew from) would be counted as draw time. Nor does it say how long the GPU takes to draw 400,000 tiny triangles, because the hidden window never shows its frames.
 - **The update is now the smaller part but not nothing:** 0.77 ms of the 5.4 ms frame at 200,000 (14%), and 3.3 of 41.7 ms at 1,000,000 (8%). Drawing is still 85-90% of the frame.
 
 ### Concern: the vertex fill and the upload cost more in the demo than they should
