@@ -1,0 +1,80 @@
+// expect: 2 12 4 5 3
+// expect: 7
+// expect: [9, 10, 11] chunk 9
+// expect: 15 2 2
+// expect: 12 -1
+// expect: 3
+// expect: 1 [1, 2, 3]
+// expect: 2501515
+// An owning value that is made and not stored (a discarded call, an argument, the base of a
+// field or index, a `for` or `match` subject) is freed when its block ends, and what was
+// taken out of it first (`heights`, `name`, a whole element) stays alive.
+struct Chunk {
+    x: int
+    mem: Arena = Arena()
+    heights: [int] = []
+    name: string = ""
+
+    get(self) -> int {
+        self.x
+    }
+
+    fill(var self) {
+        in self.mem {
+            self.heights = [self.x, self.x + 1, self.x + 2]
+            self.name = "chunk {self.x}"
+        }
+    }
+}
+struct Pair {
+    a: Chunk
+    b: Chunk
+}
+make(x: int) -> Chunk {
+    var c = Chunk(x: x)
+    c.fill()
+    c
+}
+width(c: Chunk) -> int {
+    c.x
+}
+sum(c: Chunk) -> int {
+    var total = 0
+    for h in c.heights { total += h }
+    total
+}
+many() -> list[Chunk] {
+    var xs = list[Chunk]()
+    xs.add(make(1))
+    xs.add(make(2))
+    xs
+}
+find(n: int) -> int {
+    for i from 0 to 5 {
+        if width(make(i)) == n { return sum(make(i)) }
+    }
+    -1
+}
+main() {
+    make(1)
+    print(width(make(2)), sum(make(3)), make(4).x, make(5).get(), make(6).heights.len)
+    print(Pair(a: make(7), b: make(8)).a.x)
+    let h = make(9).heights
+    let n = make(9).name
+    print(h, n)
+    var total = 0
+    for c in many() { total += sum(c) }
+    print(total, many()[1].x, many().len)
+    print(find(3), find(9))
+    var i = 0
+    while i < 3 and width(make(i)) < 5 {
+        i += 1
+    }
+    print(i)
+    let m = many()[0]
+    print(m.x, m.heights)
+    for k from 0 to 1000 {
+        total += sum(make(k)) + width(make(k)) + make(k).heights[1]
+    }
+    print(total)
+}

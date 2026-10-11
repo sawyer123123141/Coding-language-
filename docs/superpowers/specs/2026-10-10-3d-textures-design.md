@@ -166,6 +166,7 @@ window.ticks_usec() -> i64
 
 - They move and never copy: `let b = a` moves `a`, and using `a` afterwards is the usual use-after-move error. Passing one to a function or a native passes it by pointer, as with any read-only argument, so drawing doesn't move it.
 - The GPU memory is freed when the owner goes away: at the end of its scope, when it is overwritten, or when the list or struct holding it is dropped. Unlike an `Arena`, a place holding a texture or mesh may be overwritten (`c.mesh = draw3d.make_mesh(d)`); the old one is freed.
+- A texture or mesh that is never stored, like one made inside a call's arguments (`draw.texture(draw.load_texture("a.png"), pos, WHITE)`), is freed when the block it was made in ends, like a `let` the program didn't write.
 - A drop on any thread (including a `par for` pool thread) only queues the object. The window's thread frees the queue at the next `window.frame()`, so freeing is safe wherever the drop happens. A drop after the window has closed does nothing, because the GPU context has gone with it.
 - A `GpuHandle` prints as its number (`Texture(id: 3, width: 16, height: 16)`). A handle of 0 means no object, as in a zero-filled array. Drawing one is an error: "draw.texture got an empty texture; make one with draw.load_texture or draw.make_texture" (and the same for meshes, with `draw3d.make_mesh`).
 - Maps can't hold them, because maps can't hold owning values yet (a known gap).

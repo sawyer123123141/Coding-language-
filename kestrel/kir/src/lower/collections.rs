@@ -15,9 +15,7 @@ impl<'a> FnLowerer<'a> {
     pub(crate) fn place_or_temp(&mut self, e: &ast::Expr, pre: &mut Vec<Stmt>, stable: bool) -> Place {
         let Some(mut p) = self.place(e) else {
             let v = self.expr(e);
-            let tmp = self.temp(v.ty);
-            pre.push(Stmt::Let(tmp, v));
-            return Place::local(tmp);
+            return self.temp_place(v, pre);
         };
         if stable {
             self.stabilize(&mut p, pre);
@@ -189,12 +187,14 @@ impl<'a> FnLowerer<'a> {
     /// about to die. Parameters belong to the caller, so they're copied
     /// regardless.
     pub(crate) fn owned(&mut self, v: Expr, moving: bool) -> Expr {
+        let v = if owning(v.ty, self.t) { self.release(v) } else { v };
         if !has_heap(v.ty, self.t) {
             return v;
         }
         let Expr { kind, ty, line } = v;
         let kind = match kind {
-            // A local that owns an arena may hold memory from it, and is dropped on the way out.
+            // A local that is owning (it holds an `Arena` or a GPU object) may hold memory from an
+            // arena it owns, and is dropped on the way out.
             ExprKind::Load(p)
                 if moving
                     && self.locals[p.root.0 as usize].kind != LocalKind::RefParam

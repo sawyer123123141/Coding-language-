@@ -31,7 +31,28 @@ extern "C" fn k_dropped() -> i32 {
     DROPPED.lock().unwrap().len() as i32
 }
 
-const SYMBOLS: &[(&str, *const u8)] = &[("kestrel_make", k_make as *const u8), ("kestrel_dropped", k_dropped as *const u8)];
+/// A string argument: a pointer to this 16-byte header.
+#[repr(C)]
+struct KStr {
+    ptr: *const u8,
+    len: i64,
+}
+extern "C" fn k_take(t: *const Tex) -> i32 {
+    // SAFETY: a struct argument is a pointer to a live `Tex`.
+    unsafe { (*t).w }
+}
+extern "C" fn k_named(out: *mut Tex, name: *const KStr) {
+    let id = NEXT.fetch_add(1, Ordering::SeqCst);
+    // SAFETY: the result pointer comes first and has room for a `Tex`; the string is live.
+    unsafe { out.write_unaligned(Tex { id, w: (*name).len as i32 }) }
+}
+
+const SYMBOLS: &[(&str, *const u8)] = &[
+    ("kestrel_make", k_make as *const u8),
+    ("kestrel_dropped", k_dropped as *const u8),
+    ("kestrel_take", k_take as *const u8),
+    ("kestrel_named", k_named as *const u8),
+];
 
 /// Takes the turn, forgets earlier runs and sets the hook.
 fn start() -> MutexGuard<'static, ()> {
@@ -170,4 +191,122 @@ fn every_way_out_of_a_scope_and_every_container_drops_each_object_once() {
         dropped.sort_unstable();
         assert_eq!(dropped, (1..=made).collect::<Vec<i64>>(), "each of the {made} objects is dropped once, in:\n{body}");
     }
+}
+
+/// Declarations for the temporaries below.
+const TEMPS: &str = "struct Tex {
+    id: GpuHandle
+    w: int
+
+    width(self) -> int {
+        self.w
+    }
+}
+struct Holder {
+    t: Tex
+    n: int
+}
+struct Pair {
+    a: Tex
+    b: Tex
+}
+enum Slot {
+    Empty
+    Full { t: Tex }
+}
+native make(w: int) -> Tex
+native named(s: string) -> Tex
+native take(t: Tex) -> int
+native dropped() -> int
+width(t: Tex) -> int {
+    t.w
+}
+mk_pair() -> Pair {
+    Pair(a: make(1), b: make(2))
+}
+slot(n: int) -> Slot {
+    if n > 0 {
+        Slot.Full(make(n))
+    } else {
+        Slot.Empty
+    }
+}
+many() -> list[Tex] {
+    var xs = list[Tex]()
+    xs.add(make(1))
+    xs.add(make(2))
+    xs
+}
+";
+
+#[test]
+fn owning_values_that_are_never_stored_are_dropped_when_their_block_ends() {
+    // A value made and not stored behaves like a hidden `let` of the block it is made in: still
+    // alive inside the block (`dropped()` is 0), dropped when the block ends. Every object is
+    // also dropped exactly once.
+    let cases: &[(&str, &str, &str)] = &[
+        ("a discarded call", "main() {\n if dropped() == 0 {\n  make(7)\n  print(dropped())\n }\n print(dropped())\n}\n", "0\n1\n"),
+        ("a Kestrel function's argument", "main() {\n if dropped() == 0 {\n  print(width(make(5)), dropped())\n }\n print(dropped())\n}\n", "5 0\n1\n"),
+        ("a native's argument", "main() {\n if dropped() == 0 {\n  print(take(make(5)), dropped())\n }\n print(dropped())\n}\n", "5 0\n1\n"),
+        ("a field of a call", "main() {\n if dropped() == 0 {\n  print(make(5).w, dropped())\n }\n print(dropped())\n}\n", "5 0\n1\n"),
+        ("a method's receiver", "main() {\n if dropped() == 0 {\n  print(make(5).width(), dropped())\n }\n print(dropped())\n}\n", "5 0\n1\n"),
+        ("a printed value", "main() {\n if dropped() == 0 {\n  print(make(5))\n  print(dropped())\n }\n print(dropped())\n}\n", "Tex(id: 1, w: 5)\n0\n1\n"),
+        ("a field of a construction", "main() {\n if dropped() == 0 {\n  print(Holder(t: make(1), n: 4).n, dropped())\n }\n print(dropped())\n}\n", "4 0\n1\n"),
+        (
+            "a matched value",
+            "main() {\n if dropped() == 0 {\n  let n = match slot(1) {\n   Full s { s.t.w }\n   else { 0 }\n  }\n  print(n, dropped())\n }\n print(dropped())\n}\n",
+            "1 0\n1\n",
+        ),
+        ("a matched value with nothing in it", "main() {\n let n = match slot(0) {\n  Full s { s.t.w }\n  else { 0 }\n }\n print(n, dropped())\n}\n", "0 0\n"),
+        ("a discarded `if`", "main() {\n let c = dropped() == 0\n if c { make(1) } else { make(2) }\n print(dropped())\n}\n", "1\n"),
+        (
+            "a list looped over",
+            "main() {\n var total = 0\n if dropped() == 0 {\n  for t in many() { total += t.w }\n  print(total, dropped())\n }\n print(dropped())\n}\n",
+            "3 0\n2\n",
+        ),
+        (
+            "an element and the length of a list",
+            "main() {\n if dropped() == 0 {\n  print(many()[0].w, many().len, dropped())\n }\n print(dropped())\n}\n",
+            "1 2 0\n4\n",
+        ),
+        (
+            "a value made in each iteration of a loop",
+            "main() {\n for i from 0 to 3 {\n  print(dropped())\n  print(width(make(i)))\n }\n print(dropped())\n}\n",
+            "0\n0\n1\n1\n2\n2\n3\n",
+        ),
+        (
+            "the right side of `and`",
+            "main() {\n let b = dropped() == 0 and width(make(5)) == 5\n let skip = dropped() == 99 and width(make(6)) == 6\n print(b, skip, dropped())\n}\n",
+            "true false 1\n",
+        ),
+        (
+            "a native with text built in a scratch arena",
+            "main() {\n let n = 3\n if dropped() == 0 {\n  print(width(named(\"t{n}\")))\n  named(\"u{n}\")\n  let kept = named(\"v{n}\")\n  print(kept.w, dropped())\n }\n print(dropped())\n}\n",
+            "2\n2 0\n3\n",
+        ),
+        (
+            "a field or an element moved out of a temporary",
+            "main() {\n if dropped() == 0 {\n  let a = mk_pair().a\n  let b = many()[1]\n  print(a.w, b.w, dropped())\n }\n print(dropped())\n}\n",
+            "1 2 0\n4\n",
+        ),
+        (
+            "a function's tail and `return`",
+            "tail() -> int {\n width(make(3))\n}\nearly(c: bool) -> int {\n if c {\n  return width(make(4))\n }\n width(make(5))\n}\nmain() {\n print(tail(), early(true), early(false), dropped())\n}\n",
+            "3 4 5 3\n",
+        ),
+    ];
+    let _turn = start();
+    let mut failures = Vec::new();
+    for (what, body, expected) in cases {
+        DROPPED.lock().unwrap().clear();
+        NEXT.store(1, Ordering::SeqCst);
+        let (out, made, mut dropped) = run(&format!("{TEMPS}{body}"));
+        dropped.sort_unstable();
+        if &out != expected {
+            failures.push(format!("{what}: printed {out:?}, expected {expected:?}"));
+        } else if dropped != (1..=made).collect::<Vec<i64>>() {
+            failures.push(format!("{what}: made {made} objects, dropped {dropped:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "\n{}", failures.join("\n"));
 }

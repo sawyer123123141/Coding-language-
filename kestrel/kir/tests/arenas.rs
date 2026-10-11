@@ -49,3 +49,18 @@ fn return_inside_in_pops_before_returning() {
     let ret = f.body.iter().position(|s| matches!(s, Stmt::Return(_))).unwrap();
     assert!(matches!(f.body[ret - 1], Stmt::PopArena { free: false }), "{:#?}", f.body);
 }
+
+#[test]
+fn an_owning_value_that_is_never_stored_is_dropped_at_the_end_of_its_block() {
+    let m = lower_src(
+        "make() -> Chunk {\n Chunk(x: 1)\n}\nwidth(c: Chunk) -> int {\n c.x\n}\nmain() {\n make()\n print(width(make()), make().x)\n}\n",
+    );
+    let main = func(&m, "main");
+    // Three temporaries (the discarded call, the argument, the base of `.x`) are each freed once, at the end.
+    let frees = main.body.iter().filter(|s| matches!(s, Stmt::FreeArena(_))).count();
+    assert_eq!(frees, 3, "{:#?}", main.body);
+    assert!(matches!(main.body.last(), Some(Stmt::FreeArena(_))));
+    // `width` only reads its parameter and `make` returns a fresh value: neither makes a temporary.
+    assert!(func(&m, "width").body.iter().all(|s| !matches!(s, Stmt::FreeArena(_))));
+    assert!(func(&m, "make").body.iter().all(|s| !matches!(s, Stmt::FreeArena(_))));
+}

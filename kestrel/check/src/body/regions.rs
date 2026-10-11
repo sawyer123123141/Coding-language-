@@ -117,8 +117,9 @@ impl<'a> BodyChecker<'a> {
     /// The contexts whose memory the value of `e` points into. A copy of a
     /// place goes to the current arena. With `moving` (a returned value),
     /// reads of locals aren't copied, so they keep their local's context,
-    /// unless the local owns an arena: its memory may live in that arena,
-    /// which is dropped on the way out, so it's copied.
+    /// unless the local is owning (it holds an `Arena` or a GPU object): an arena
+    /// it holds may hold the value's memory and is dropped on the way out, so
+    /// the value is copied.
     fn region(&self, e: &Expr, moving: bool) -> u64 {
         let ty = self.t.ty(e.id);
         if !self.t.has_heap(ty) {
@@ -342,7 +343,6 @@ impl<'a> BodyChecker<'a> {
         if !self.t.is_owning(ty) {
             return;
         }
-        let what = self.t.owns_what(ty);
         match &v.kind {
             ExprKind::If { then_block, else_block, .. } => {
                 for b in std::iter::once(then_block).chain(else_block.as_ref()) {
@@ -364,9 +364,11 @@ impl<'a> BodyChecker<'a> {
                 let name = info.name.clone();
                 let loops = self.local_ctx.get(&l).map_or(0, |&(_, loops)| loops);
                 if info.is_param {
+                    let what = self.t.owns_what(ty);
                     let msg = format!("can't move parameter `{name}`: it belongs to the caller, and it holds {what}, so it can't be copied");
                     self.error(v.span, msg);
                 } else if self.views.contains(&l) {
+                    let what = self.t.owns_what(ty);
                     let msg = format!("can't move `{name}` out of its collection: it holds {what}, so it can't be copied");
                     self.error(v.span, msg);
                 } else if self.loop_breaks.len() > loops {
@@ -378,6 +380,7 @@ impl<'a> BodyChecker<'a> {
                 }
             }
             ExprKind::Field { .. } | ExprKind::Index { .. } if self.place_root(v).is_some() => {
+                let what = self.t.owns_what(ty);
                 let msg = format!("can't move this out: it holds {what}, so it can't be copied, and only whole variables move");
                 self.error_help(v.span, msg, "move the whole variable that holds it");
             }

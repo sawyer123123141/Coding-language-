@@ -169,7 +169,25 @@ impl<'a> FnLowerer<'a> {
         out.push(stmt);
     }
 
-    /// `target = value` where the target holds an `Arena`: the old value is
+    /// `e`, evaluated only sometimes (the right side of `and` / `or`). It is a block of its own,
+    /// so what it holds is dropped when it finishes; a block around it can't count on the
+    /// temporaries having been made.
+    pub(crate) fn conditional(&mut self, e: &ast::Expr) -> Expr {
+        self.scopes.push(Scope::default());
+        let v = self.expr(e);
+        let scope = self.scopes.pop().expect("scopes balance");
+        let cleanup = self.cleanup(&scope);
+        if cleanup.is_empty() {
+            return v;
+        }
+        let mut stmts = Vec::new();
+        let v = self.spill(v, &mut stmts);
+        stmts.extend(cleanup);
+        let (ty, line) = (v.ty, v.line);
+        Expr { kind: ExprKind::Seq(stmts, Box::new(v)), ty, line }
+    }
+
+    /// `target = value` where the target holds an `Arena` or a GPU object: the old value is
     /// dropped after the new one is computed (it may read the old one).
     pub(crate) fn assign_owning(&mut self, target: &ast::Expr, value: &ast::Expr, out: &mut Vec<Stmt>) {
         let v = self.value(value);

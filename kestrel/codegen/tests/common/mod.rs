@@ -36,26 +36,27 @@ pub fn jit_natives(src: &str, extra: &[(&str, *const u8)]) -> Result<JitProgram,
 
 /// Like `jit_natives`, with the given options (`checked_arith: false` is `--release`).
 pub fn jit_natives_with(src: &str, extra: &[(&str, *const u8)], opts: Options) -> Result<JitProgram, String> {
-    let (p, d) = parse(src);
-    assert!(d.is_empty(), "parse: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
-    let (t, d) = kestrel_check::check(&p);
-    assert!(d.is_empty(), "check: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
-    let mut m = kestrel_kir::lower(&p, &t.unwrap(), &LineIndex::new(src));
-    kestrel_kir::inline::inline_small(&mut m);
-    JitProgram::compile_with(&m, opts, extra)
+    jit_natives_as(src, extra, opts, false)
 }
 
 /// Like `jit_natives`, with the whole source marked as a built-in module, which may name
 /// `GpuHandle`.
 pub fn jit_natives_builtin(src: &str, extra: &[(&str, *const u8)]) -> Result<JitProgram, String> {
+    jit_natives_as(src, extra, Options::default(), true)
+}
+
+/// Compiles `src` with the given natives; `builtin` marks the whole source as a built-in module.
+fn jit_natives_as(src: &str, extra: &[(&str, *const u8)], opts: Options, builtin: bool) -> Result<JitProgram, String> {
     let (mut p, d) = parse(src);
     assert!(d.is_empty(), "parse: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
-    p.builtin_ranges = std::iter::once(0..src.len() as u32).collect();
+    if builtin {
+        p.builtin_ranges = std::iter::once(0..src.len() as u32).collect();
+    }
     let (t, d) = kestrel_check::check(&p);
     assert!(d.is_empty(), "check: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
     let mut m = kestrel_kir::lower(&p, &t.unwrap(), &LineIndex::new(src));
     kestrel_kir::inline::inline_small(&mut m);
-    JitProgram::compile_with(&m, Options::default(), extra)
+    JitProgram::compile_with(&m, opts, extra)
 }
 
 /// Runs the program's `main` on this thread and returns what it printed.

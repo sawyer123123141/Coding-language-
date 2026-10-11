@@ -9,9 +9,10 @@ mod maps;
 mod matching;
 mod par;
 mod scopes;
+mod temps;
 mod vector;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use kestrel_check::{FnId, LocalId, Res, Tables, Ty};
 use kestrel_syntax::ast::{self, Program};
@@ -70,6 +71,8 @@ pub(crate) struct FnLowerer<'a> {
     origins: HashMap<LocalIdx, Place>,
     /// Enclosing blocks, innermost last, with what leaving each must do.
     scopes: Vec<scopes::Scope>,
+    /// Temporaries that hold a new owning value until their block ends (see `temps`).
+    held: HashSet<LocalIdx>,
     helpers: &'a mut Helpers,
 }
 
@@ -77,7 +80,7 @@ impl<'a> FnLowerer<'a> {
     fn new(program: &'a Program, t: &'a Tables, lines: &'a LineIndex, fn_id: FnId, helpers: &'a mut Helpers) -> Self {
         let (local_map, locals, bindings, elems) = (HashMap::new(), Vec::new(), HashMap::new(), HashMap::new());
         let (origins, scopes) = (HashMap::new(), Vec::new());
-        FnLowerer { program, t, lines, fn_id, local_map, locals, bindings, elems, origins, scopes, helpers }
+        FnLowerer { program, t, lines, fn_id, local_map, locals, bindings, elems, origins, scopes, held: HashSet::new(), helpers }
     }
 
     fn lower(mut self) -> Func {
@@ -266,11 +269,11 @@ impl<'a> FnLowerer<'a> {
                 let list = self.place(receiver.expect("`add` is a method")).expect("checker requires a place for `add`");
                 out.push(Stmt::ListAdd(list, v));
             }
-            Res::Fn(f) if self.wants_scratch(f, args) => self.scratch_call_stmt(e, f, args, out),
+            Res::Fn(f) if self.wants_scratch(f, args) => self.scratch_call_stmt(e, f, args, self.line(e.span), out),
             Res::Fn(f) => {
                 let (pre, fi, args) = self.call_parts(e, f, args, receiver);
                 out.extend(pre);
-                out.push(Stmt::Call(fi, args));
+                self.call_stmt(fi, args, self.t.func(f).ret, self.line(e.span), out);
             }
             other => unreachable!("checker rejects a discarded {other:?}"),
         }
@@ -283,7 +286,7 @@ impl<'a> FnLowerer<'a> {
             _ => {
                 let v = self.expr(e);
                 self.helpers.ensure_print(v.ty, self.t);
-                PrintArg::Value(v)
+                PrintArg::Value(self.held(v))
             }
         }
     }

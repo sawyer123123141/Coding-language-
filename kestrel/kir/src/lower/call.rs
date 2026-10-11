@@ -76,7 +76,7 @@ impl<'a> FnLowerer<'a> {
                 lowered.push(Arg::Ref(p));
             } else {
                 let v = self.expr(r);
-                let v = if in_order { v } else { self.spill(v, &mut pre) };
+                let v = if in_order { self.held(v) } else { self.spill_held(v, &mut pre) };
                 lowered.push(Arg::Value(v));
             }
         }
@@ -91,7 +91,7 @@ impl<'a> FnLowerer<'a> {
                     refs.insert(ai, p);
                 } else {
                     let v = self.expr(&a.value);
-                    temps.insert(ai, self.spill(v, &mut pre));
+                    temps.insert(ai, self.spill_held(v, &mut pre));
                 }
             }
         }
@@ -104,7 +104,8 @@ impl<'a> FnLowerer<'a> {
             } else if let Some(v) = temps.remove(&ai) {
                 Arg::Value(v)
             } else {
-                Arg::Value(self.expr(value))
+                let v = self.expr(value);
+                Arg::Value(self.held(v))
             });
         }
         (pre, FuncIdx(f.0), lowered)
@@ -127,22 +128,41 @@ impl<'a> FnLowerer<'a> {
     }
 
     /// A call to native `f` whose result is discarded, with its text in a scratch arena.
-    pub(crate) fn scratch_call_stmt(&mut self, e: &ast::Expr, f: FnId, args: &[ast::Arg], out: &mut Vec<Stmt>) {
+    pub(crate) fn scratch_call_stmt(&mut self, e: &ast::Expr, f: FnId, args: &[ast::Arg], line: u32, out: &mut Vec<Stmt>) {
         let (before, fi, lowered, after) = self.scratch_parts(e, f, args);
         out.extend(before);
-        out.push(Stmt::Call(fi, lowered));
-        out.extend(after);
+        // The scratch arena is popped, so a result that is held goes to the block around the call.
+        let ret = self.t.func(f).ret;
+        if self.t.is_owning(ret) {
+            let result = self.temp(super::kty(ret));
+            out.push(Stmt::Let(result, Expr { kind: ExprKind::Call(fi, lowered), ty: super::kty(ret), line }));
+            out.extend(after);
+            self.declared(result);
+            self.held.insert(result);
+        } else {
+            out.push(Stmt::Call(fi, lowered));
+            out.extend(after);
+        }
     }
 
     /// A call to native `f` that gives a value of type `ty`, with its text in a scratch
     /// arena. The result is kept in a temporary and read once the arena is popped. (A native
-    /// gives back only scalars and `vec2`/`vec3`, which hold no arena memory.)
+    /// gives back a number, a bool, a vector, or a struct of those that may hold a `GpuHandle`.
+    /// None holds scratch memory; a struct with a `GpuHandle` is an owning value, moved out of
+    /// the temporary.)
     pub(crate) fn scratch_call_value(&mut self, e: &ast::Expr, f: FnId, args: &[ast::Arg], ty: KTy, line: u32) -> ExprKind {
         let (mut stmts, fi, lowered, after) = self.scratch_parts(e, f, args);
         let result = self.temp(ty);
         stmts.push(Stmt::Let(result, Expr { kind: ExprKind::Call(fi, lowered), ty, line }));
         stmts.extend(after);
-        ExprKind::Seq(stmts, Box::new(Expr { kind: ExprKind::Load(Place::local(result)), ty, line }))
+        let place = Place::local(result);
+        let value = if super::helpers::owning(ty, self.t) {
+            self.held.insert(result);
+            ExprKind::Move(place)
+        } else {
+            ExprKind::Load(place)
+        };
+        ExprKind::Seq(stmts, Box::new(Expr { kind: value, ty, line }))
     }
 
     /// `Point(...)`: every field in declaration order, defaults filled in,

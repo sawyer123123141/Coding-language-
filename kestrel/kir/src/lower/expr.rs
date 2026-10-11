@@ -73,11 +73,11 @@ impl<'a> FnLowerer<'a> {
             }
             ast::ExprKind::Binary { op, lhs, rhs } => {
                 let l = Box::new(self.expr(lhs));
-                let r = Box::new(self.expr(rhs));
                 match op {
-                    ast::BinaryOp::And => ExprKind::And(l, r),
-                    ast::BinaryOp::Or => ExprKind::Or(l, r),
+                    ast::BinaryOp::And => ExprKind::And(l, Box::new(self.conditional(rhs))),
+                    ast::BinaryOp::Or => ExprKind::Or(l, Box::new(self.conditional(rhs))),
                     other => {
+                        let r = Box::new(self.expr(rhs));
                         let op = binop(*other);
                         let r = Box::new(super::shift_amount(op, *r, l.ty));
                         ExprKind::Binary(op, l, r)
@@ -136,7 +136,10 @@ impl<'a> FnLowerer<'a> {
             ast::ExprKind::Field { base, .. } => match (self.t.res.get(&e.id), self.place(e)) {
                 (Some(Res::Variant(id, v)), _) => ExprKind::VariantLit(EnumIdx(id.0), *v, Vec::new()),
                 (_, Some(place)) => ExprKind::Load(place),
-                (_, None) => ExprKind::FieldOf(Box::new(self.expr(base)), self.t.field_index[&e.id]),
+                (_, None) => {
+                    let base = self.expr(base);
+                    self.field_of(base, self.t.field_index[&e.id], ty, line)
+                }
             },
             ast::ExprKind::Match { .. } => self.match_value(e),
             ast::ExprKind::If { cond, then_block, else_block } => {
