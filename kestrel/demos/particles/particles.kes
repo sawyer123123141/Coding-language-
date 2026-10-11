@@ -5,7 +5,9 @@
 // Move the mouse to pull the dots. Space adds 1,000 more.
 //
 // The dots move in a `par for`, so every core steps its share of them. Drawing
-// is one `draw.rect` call per dot, on the one thread that owns the window.
+// is on the one thread that owns the window: with `BULK` on, the dots' positions
+// are copied into a list and one `draw.rects` call draws them all; with it off,
+// it is one `draw.rect` call per dot, which is much slower.
 // Once a second the demo prints a line with the average times, for measuring.
 use window
 use draw
@@ -17,6 +19,9 @@ let WIDTH = 1280
 let HEIGHT = 720
 let START_COUNT = 50000
 let ADD_COUNT = 1000
+
+// True draws every dot with one `draw.rects`; false draws one `draw.rect` per dot.
+let BULK = true
 
 let BACKGROUND = Color(0.05, 0.05, 0.09)
 let DOT = Color(1, 0.65, 0.2)
@@ -76,6 +81,8 @@ main() {
     window.open(WIDTH, HEIGHT, "Kestrel particles")
     var parts = list[Particle]()
     spawn(var parts, START_COUNT)
+    // The positions `draw.rects` draws, kept across frames so they aren't built again each one.
+    var positions = list[vec2]()
 
     // Sums over the current report interval, and the averages the last one printed.
     var frames = 0
@@ -101,8 +108,20 @@ main() {
         let draw_start = window.time()
 
         draw.clear(BACKGROUND)
-        for p in parts {
-            draw.rect(p.pos, DOT_SIZE, DOT)
+        if BULK {
+            // A list has `add` but no `clear`, so it grows to match the particles (they are only
+            // ever added) and each frame overwrites its entries. This copy is drawing time.
+            while positions.len < parts.len {
+                positions.add(vec2(0, 0))
+            }
+            for i, p in parts {
+                positions[i] = p.pos
+            }
+            draw.rects(positions, DOT_SIZE, DOT)
+        } else {
+            for p in parts {
+                draw.rect(p.pos, DOT_SIZE, DOT)
+            }
         }
         let draw_end = window.time()
 
