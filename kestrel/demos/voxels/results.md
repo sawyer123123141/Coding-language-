@@ -2,11 +2,11 @@
 
 Measured on 2026-10-11. The viewer is `voxels.kes` (with `world.kes` and `fly.kes`): a `par for` builds every chunk's `MeshData`, one loop turns each into a GPU `Mesh`, and every frame draws all the meshes. The spec's success line is "the voxel viewer shows the 8×4×8-chunk world (463,749 faces) at 60 fps on the development machine."
 
-**Short answer.** At `WIDTH = 8` (463,749 faces, 248 meshes) the world builds in about 73-78 ms and uploads in about 53-59 ms, and **the frame holds 60 fps**. But **every one of these runs was held at 60 fps by the machine** (a 16.67 ms frame on a hidden window, which is normally not capped; see "The 60 fps cap" below), so the frame time and fps in the tables are the display's, not the program's. What the program itself uses is the CPU `draw` time: 0.2-0.3 ms at `WIDTH = 8` and about 0.8 ms at `WIDTH = 16`. I looked for where the real limit is by making the world bigger: **the frame is still held at 60 fps up to `WIDTH = 24` (4.2 million faces) and passes 16.67 ms only at `WIDTH = 32` (7.3 million faces, 16 times the spec's world), where it is 16.95 ms (59 fps).** From about `WIDTH` 24 the program waits inside its draw calls, which points at the graphics driver and the GPU, not at Kestrel's code.
+**Short answer.** At `WIDTH = 8` (463,749 faces, 248 meshes) the world builds in about 73-78 ms and uploads in about 53-59 ms, and **the frame holds 60 fps**. (These tables were measured before the terrain got its new colouring the same day; that made the build about 8% longer, so an estimated 80 ms, and left the upload and the frame as they were. See "The colouring change" at the end.) But **every one of these runs was held at 60 fps by the machine** (a 16.67 ms frame on a hidden window, which is normally not capped; see "The 60 fps cap" below), so the frame time and fps in the tables are the display's, not the program's. What the program itself uses is the CPU `draw` time: 0.2-0.3 ms at `WIDTH = 8` and about 0.8 ms at `WIDTH = 16`. I looked for where the real limit is by making the world bigger: **the frame is still held at 60 fps up to `WIDTH = 24` (4.2 million faces) and passes 16.67 ms only at `WIDTH = 32` (7.3 million faces, 16 times the spec's world), where it is 16.95 ms (59 fps).** From about `WIDTH` 24 the program waits inside its draw calls, which points at the graphics driver and the GPU, not at Kestrel's code.
 
 ![The viewer at its start position, WIDTH 8](screenshot.png)
 
-The picture is a hidden-window screenshot at frame 300, taken by a scratch copy of the viewer that calls `window.screenshot` (the overlay shows the last report's numbers): four height bands (stone, dirt, grass, snow), each face shaded by the way it faces, nothing inside-out.
+The picture is a hidden-window screenshot at frame 300 from the viewer's start view, taken by a scratch copy of the viewer that calls `window.screenshot` (the overlay shows the last report's numbers), then reduced to 256 colours to keep the file under 500 KB (the pixels moved by less than half a step on average). It shows the new colouring: grass on top, a band of dirt where the ground steps down, grey rock in the cliffs and under the snow caps, soft dark corners where blocks meet, each face shaded by the way it faces, and nothing inside-out. In the middle is a grassy valley, with mountains behind it and pieces of floating rock at the edges.
 
 ## What the numbers are
 
@@ -22,8 +22,8 @@ The per-second columns follow `demos/particles/results.md`: each cell is the med
 
 - AMD Ryzen 7 5800X (8 cores, 16 threads), NVIDIA GeForce RTX 3070 (driver 591.86), Windows 11, a 60 Hz display. `par for` used all 16 threads unless `KESTREL_THREADS` says otherwise.
 - A 1280×720 window, vsync on. **Every run used a hidden window** (`KESTREL_HIDDEN=1`), because the user must not see one.
-- Both `kestrel run --release` (the JIT) and a `kestrel build --release` exe. The exe is 992,768 bytes (969.5 KiB), the same at every `WIDTH`.
-- Measured copies of `voxels.kes` with only `WIDTH` changed (8 or 16). The camera stays at its start (a hidden window gets no input), so every run draws the same view.
+- Both `kestrel run --release` (the JIT) and a `kestrel build --release` exe. The exe was 992,768 bytes (969.5 KiB), the same at every `WIDTH`; with the new colouring it is 991,744 bytes (968.5 KiB).
+- Measured copies of `voxels.kes` with only `WIDTH` changed (8 or 16). The camera stays at its start (a hidden window gets no input), so every run draws the same view. That was the old start view, outside the world's corner and below the peaks; the colouring change moved it.
 - `bench/particles/measure.py` ran the commands in interleaved rounds (JIT and exe of each `WIDTH` in turn) and killed each process it started after 11 seconds. 4 rounds for the frame columns; the start-up columns pool those with a 10-round batch (14 runs each).
 - The machine is noisy: a desktop with other programs open, and the GPU showed 20-37% busy with nothing of mine running. Read differences under about 10% as noise.
 
@@ -168,3 +168,37 @@ python bench/particles/measure.py --rounds 4 --retry-capped 1 \
 ```
 
 `measure.py` prints the medians and ranges (a row's `build ms` and `upload ms` are over the runs, `draw`, `frame` and `fps` over the per-second lines), warns about runs held to 60 fps (a median frame between 16.4 and 17.0 ms) and kills each process it started after 11 seconds. Every command needs `KESTREL_HIDDEN=1`. The viewer prints `voxels world 8 chunks 256 meshes 248 faces 463749 build 66.49 ms upload 51.07 ms` at start, and a line like `voxels 8 meshes 248 faces 463749 draw 0.23 ms frame 16.67 ms fps 60` once a second. For a one-thread build, add `KESTREL_THREADS=1`.
+
+## The colouring change
+
+Later on 2026-10-11, after the measurements above, the user asked for prettier terrain. The world's shape, its 463,749 faces and their 4 vertices, 4 colours and 6 indices each are the same, and so is the noise; what changed is the colour of each corner, the order of some faces' indices, and the start view.
+
+### How the faces are coloured
+
+This replaces the spec's "coloured by its height band" (the old picture had flat horizontal bands: stone low down, then dirt, grass and snow).
+
+- **Layers by depth.** A block is coloured by how many solid blocks are right above it. The top block of a column (air right above it) is grass, or snow from height 88 up. The two under it are dirt, or rock where the top is snow, so peaks are snow on rock. Deeper is rock. So a cliff shows a grass edge, a band of dirt, then rock, as in Minecraft. To see three blocks up, `solids` samples two more rows above each chunk (36 rows instead of 34).
+- **All six faces of a block take its colour.** A grass block's sides are green, which reads as turf from a distance. A test screenshot with dirt sides under a grass top made every one-block step a brown stripe, which looked busier, so I kept green sides.
+- **Ambient occlusion.** Each face corner is darkened by the solid blocks that touch it in the layer of air the face looks into: the two beside the corner and the one between them. Brightness is 1 with none, then 0.85, 0.7, and 0.55 in a nook (both sides solid). A quad is two triangles and the colour is blended across each, so the quad is cut along the diagonal whose corners are brighter: a single dark corner then shades softly instead of streaking along the cut.
+- **Variation.** Each block's colour is scaled by 0.97 to 1.03, from the noise's hash with a seed of its own, so flat ground isn't one flat colour.
+- The facing shades are as before: top 1.0, faces along ±x 0.8, along ±z 0.7, bottom 0.5.
+
+All of it is in the vertex colours, so drawing costs the same. There is still no lighting.
+
+The viewer now starts at (-40, 155, 70) with yaw 75 and pitch -33: just outside the world's -x side, above the peaks (the world is 128 high), looking down over the grassy middle to the mountains. The old start, (-24, 100, -24), looked at the world's outer walls from below the peaks.
+
+### What it cost
+
+A scratch copy of each version (the committed viewer before the change, with its old start view, and after it), run interleaved by `measure.py` in two batches, hidden windows, all threads. **A game was running on the machine the whole time** (45-77% of the CPU busy), so every number here is higher than in the tables above, and only old against new in the same batch means anything.
+
+| Batch | Run | build ms, old | build ms, new | upload ms, old | upload ms, new |
+|---|---|---:|---:|---:|---:|
+| 10 rounds | JIT | 107.6 (85.8-133.3) | 119.1 (97.5-133.9) | 78.2 (62.3-94.4) | 81.4 (59.6-141.0) |
+| 10 rounds | exe | 102.7 (88.0-163.5) | 106.9 (93.1-131.9) | 75.2 (58.7-235.8) | 75.3 (58.5-112.8) |
+| 8 rounds, a busier spell | JIT | 142.6 (93.8-197.2) | 157.6 (95.0-165.6) | 110.4 (63.7-166.6) | 137.3 (62.5-153.6) |
+| 8 rounds, a busier spell | exe | 143.7 (91.3-181.3) | 152.5 (92.7-190.7) | 118.2 (61.8-156.5) | 103.1 (66.0-215.4) |
+
+- **Build: 4-11% longer.** On one thread, where the timings are steadier, a scratch program timed the two halves of the build for all 256 chunks (9 passes of each version, interleaved; medians): the noise went from 510 to 553 ms (8% longer, about what its 6% more samples predict, within the noise), and the mesher from 68 to 70 ms (3%). The mesher does more for each face (12 more reads of the solid flags, four colours), but it now skips blocks with no air next to them before working anything out for them, which may pay for most of it (I did not time that part alone). So the extra rows of noise are most of the cost. On the tables' quiet machine that would make the build about 80 ms at `WIDTH` 8 (73-78 ms plus 8%); I did not measure that.
+- **Upload: the same** within the noise (the same 1.85 million vertices).
+- **Frame and draw: the same.** In the 10-round batch both versions drew in 0.26-0.28 ms (median) with the frame held at 60 fps, and one 11-second round of each gave the same (a draw of about 2 ms for both, with the game using the GPU).
+- The program arena after the upload is still 64 KiB.

@@ -85,8 +85,9 @@ main() {
     }
     print("voxels world {WIDTH} chunks {chunk_count} meshes {meshes.len} faces {faces} build {two(build_ms)} ms upload {two(upload_ms)} ms")
 
-    // Start outside the world's corner, looking in and down.
-    var flyer = Flyer(pos: vec3(-24, 100, -24), yaw: 45, pitch: -30)
+    // Start just outside the world's -x side, above the peaks (the world is 128 high), looking
+    // in (mostly along +x) and down over its grassy middle to the mountains behind.
+    var flyer = Flyer(pos: vec3(-40, 155, 70), yaw: 75, pitch: -33)
     var last_mouse = input.mouse()
 
     // Sums over the current report interval, and the averages the last one printed. The
