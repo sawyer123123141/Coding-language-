@@ -7,9 +7,11 @@
 //
 // At start a `par for` builds every chunk's mesh data on all cores, and one
 // loop copies each chunk to the GPU as a Mesh (like making an ArrayMesh in
-// Godot). All of that CPU data lives in an `arena { }` that frees it once
-// the meshes are made. Then every frame draws every mesh. It prints the
-// build and upload times at start, and the frame times once a second.
+// Godot). All of that CPU data lives in an `arena { }`, which frees the program's
+// memory for it once the meshes are made (the runtime keeps the freed blocks for
+// later arenas, so the process's memory doesn't shrink). Then every frame draws
+// every mesh. It prints the build and upload times at start, and the frame times
+// once a second.
 use window
 use draw
 use draw3d
@@ -70,7 +72,8 @@ main() {
         }
         let upload_start = window.ticks_usec()
         for c in chunks {
-            // An all-air chunk has nothing to draw, so it gets no mesh.
+            // A chunk with no faces (all air, or solid all through) has nothing to draw,
+            // so it gets no mesh.
             if c.data.vertices.len > 0 {
                 faces += c.data.indices.len / 6
                 meshes.add(draw3d.make_mesh(c.data))
@@ -113,9 +116,10 @@ main() {
         }
         let draw_end = window.time()
 
-        // The overlay: a draw.* call goes back to 2D on its own.
+        // The overlay: a draw.* call goes back to 2D on its own. The window can be resized,
+        // so the bottom line is placed from the window's current height.
         draw.text("{two(fps)} fps   {two(frame_ms)} ms a frame   {faces} faces in {meshes.len} meshes", vec2(10, 10), 20, TEXT)
-        draw.text("right mouse drag to look   WASD move   Space/Shift up and down   wheel speed ({two(flyer.speed)})", vec2(10, SCREEN_HEIGHT - 28), 20, TEXT)
+        draw.text("right mouse drag to look   WASD move   Space/Shift up and down   wheel speed ({two(flyer.speed)})", vec2(10, window.size().y - 28), 20, TEXT)
 
         frames += 1
         draw_sum += draw_end - draw_start
