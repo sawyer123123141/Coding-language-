@@ -87,9 +87,13 @@ fn run() -> ExitCode {
     let opts = Options { checked_arith: !args.release };
     let result = match args.cmd.as_str() {
         "check" => return ExitCode::SUCCESS,
-        "run" => JitProgram::compile_with(&compiled.module, opts, &kestrel_window::symbols())
-            .map_err(internal_error)
-            .map(|p| p.run_main()),
+        "run" => {
+            // The program's relative paths (`window.screenshot`, textures) are read from its own folder.
+            kestrel_window::set_program_dir(Path::new(&args.path).parent().unwrap_or(Path::new("")));
+            JitProgram::compile_with(&compiled.module, opts, &kestrel_window::symbols())
+                .map_err(internal_error)
+                .map(|p| p.run_main())
+        }
         _ => {
             // Programs that use `window`, `draw` or `input` need the window library, which
             // carries the runtime as well.

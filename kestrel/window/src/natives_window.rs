@@ -6,7 +6,9 @@
 use kestrel_runtime::panic::fail_at_call;
 
 use crate::abi::{c_string, str_bytes, write, KStr, V2};
+use crate::gpu;
 use crate::headless::{self, Arg};
+use crate::paths;
 use crate::raylib as rl;
 use crate::real;
 use crate::state::{self, Mode, Settings, View};
@@ -24,6 +26,8 @@ pub unsafe extern "C" fn kestrel_window_open(width: i32, height: i32, title: *co
 /// # Safety
 /// `title` must point to a live string header.
 pub unsafe fn open_with(settings: &Settings, width: i32, height: i32, title: *const KStr) {
+    // Dropping a texture or mesh, on any thread, queues it for the window's thread (see `gpu.rs`).
+    kestrel_runtime::gpu::set_drop_hook(gpu::queue_drop);
     let title = str_bytes(title);
     match state::open(settings, width, height, title) {
         Ok(Mode::Headless) => headless::line("window.open", &[Arg::Int(width), Arg::Int(height), Arg::Str(title)]),
@@ -65,6 +69,15 @@ pub extern "C" fn kestrel_window_time() -> f32 {
     }
 }
 
+/// Microseconds since `window.open`. A headless window counts 60 frames a second.
+#[no_mangle]
+pub extern "C" fn kestrel_window_ticks_usec() -> i64 {
+    match state::view("window.ticks_usec") {
+        View::Real { time_base } => real::ticks(time_base),
+        View::Fixed(values) => values.ticks,
+    }
+}
+
 /// # Safety
 /// `out` must be valid for writing a `vec2`.
 #[no_mangle]
@@ -103,9 +116,10 @@ pub unsafe extern "C" fn kestrel_window_screenshot(path: *const KStr) {
     }
 }
 
-/// Saves what has been drawn so far this frame. `false` if raylib couldn't write the file.
+/// Saves what has been drawn so far this frame, to `path` read the way `paths::resolve` reads it.
+/// `false` if raylib couldn't write the file.
 fn save_screenshot(path: &[u8]) -> bool {
-    let path = c_string(path);
+    let path = c_string(paths::resolve(path).to_string_lossy().as_bytes());
     // SAFETY: the window is open. `path` is a NUL-terminated string, and the image
     // is freed once, after it is exported.
     unsafe {

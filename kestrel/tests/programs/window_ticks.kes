@@ -1,0 +1,18 @@
+// env: KESTREL_HEADLESS=3
+// expect: window.open 64 64 "ticks"
+// expect: 0
+// expect: 16666
+// expect: 33333
+// expect: 50000
+// expect: 50000
+use window
+
+main() {
+    window.open(64, 64, "ticks")
+    print(window.ticks_usec())
+    while window.frame() {
+        print(window.ticks_usec())
+    }
+    // The window has closed: the clock keeps its last value.
+    print(window.ticks_usec())
+}

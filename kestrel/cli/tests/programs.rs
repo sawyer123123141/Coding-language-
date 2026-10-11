@@ -14,18 +14,24 @@ struct Expect {
     stderr: Vec<String>,
     /// `// env: KEY=VALUE` lines: variables set for both the JIT run and the exe run.
     env: Vec<(String, String)>,
+    /// `// asset: <file>` lines: files in `tests/programs` the program reads by a relative path.
+    /// The JIT run finds them in place; the exe run gets a copy next to the exe.
+    assets: Vec<String>,
 }
 
 /// Reads the directives of program `name`. Panics on a malformed or unknown
-/// `// expect...` or `// env:` line so a typo can't silently drop a check.
+/// `// expect...`, `// env:` or `// asset:` line so a typo can't silently drop a check.
 fn expectations(name: &str, src: &str) -> Expect {
     let mut lines = Vec::new();
     let mut exit = 0;
     let mut stderr = Vec::new();
     let mut env = Vec::new();
+    let mut assets = Vec::new();
     for line in src.lines() {
         let line = line.trim();
-        if let Some(rest) = line.strip_prefix("// env:") {
+        if let Some(rest) = line.strip_prefix("// asset:") {
+            assets.push(asset_path(name, rest.trim(), line));
+        } else if let Some(rest) = line.strip_prefix("// env:") {
             let (key, value) = rest
                 .split_once('=')
                 .map(|(key, value)| (key.trim(), value.trim()))
@@ -48,7 +54,25 @@ fn expectations(name: &str, src: &str) -> Expect {
         "{name}: opens a window but has no `// env: KESTREL_HEADLESS=<frames>` line, so the test would open a real window and hang the suite"
     );
     let stdout = lines.iter().map(|l| format!("{l}\n")).collect();
-    Expect { stdout, exit, stderr, env }
+    Expect { stdout, exit, stderr, env, assets }
+}
+
+/// The file an `// asset:` line names: a path inside `tests/programs`, so not absolute and not
+/// climbing out with `..` (the exe run copies it next to the exe).
+fn asset_path(name: &str, file: &str, line: &str) -> String {
+    let path = Path::new(file);
+    let inside = path.components().all(|part| matches!(part, std::path::Component::Normal(_)));
+    assert!(!file.is_empty() && inside, "{name}: bad asset directive (expected a file inside tests/programs): {line}");
+    file.to_string()
+}
+
+/// Copies each of `assets` from `from` to the same relative path in `to`, creating folders.
+fn copy_assets(from: &Path, assets: &[String], to: &Path) {
+    for asset in assets {
+        let (source, target) = (from.join(asset), to.join(asset));
+        fs::create_dir_all(target.parent().expect("an asset path has a folder")).unwrap();
+        fs::copy(&source, &target).unwrap_or_else(|e| panic!("asset {asset}: can't copy {}: {e}", source.display()));
+    }
 }
 
 /// Whether the program calls `window.open` (or `open` imported from `window`), which opens a
@@ -60,8 +84,12 @@ fn opens_a_window(src: &str) -> bool {
     })
 }
 
+fn programs_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/programs")
+}
+
 pub fn programs() -> Vec<PathBuf> {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/programs");
+    let dir = programs_dir();
     let mut files: Vec<PathBuf> = fs::read_dir(&dir)
         .unwrap_or_else(|e| panic!("{}: {e}", dir.display()))
         .map(|e| e.unwrap().path())
@@ -135,6 +163,67 @@ fn env_directives_are_collected() {
     let exp = expectations("env.kes", "// env: A=1\n// env:  B = two words \n// env: C=\nmain() {}\n");
     let expected = [("A", "1"), ("B", "two words"), ("C", "")];
     assert_eq!(exp.env, expected.map(|(k, v)| (k.to_string(), v.to_string())));
+}
+
+#[test]
+fn asset_directives_are_collected() {
+    let exp = expectations("asset.kes", "// asset: a.png
+// asset:  sub/b.bin 
+// expect: ok
+main() {}
+");
+    assert_eq!(exp.assets, ["a.png", "sub/b.bin"]);
+    assert_eq!(exp.stdout, "ok
+", "and the other directives still count");
+    assert!(expectations("none.kes", "main() {}
+").assets.is_empty());
+}
+
+#[test]
+#[should_panic(expected = "typo.kes: bad asset directive (expected a file inside tests/programs): // asset:")]
+fn an_asset_directive_without_a_file_panics() {
+    expectations("typo.kes", "// asset:
+main() {}
+");
+}
+
+#[test]
+#[should_panic(expected = "typo.kes: bad asset directive (expected a file inside tests/programs): // asset: ../outside.png")]
+fn an_asset_outside_the_programs_folder_panics() {
+    expectations("typo.kes", "// asset: ../outside.png
+main() {}
+");
+}
+
+#[test]
+#[should_panic(expected = "typo.kes: unknown expect directive: // expect-asset: a.png")]
+fn an_unknown_directive_still_panics() {
+    expectations("typo.kes", "// expect-asset: a.png
+main() {}
+");
+}
+
+#[test]
+fn assets_are_copied_with_their_folders() {
+    let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join("asset_copy");
+    let _ = fs::remove_dir_all(&root);
+    let (from, to) = (root.join("from"), root.join("to").join("deeper"));
+    fs::create_dir_all(from.join("sub")).unwrap();
+    fs::write(from.join("a.bin"), [1u8, 2, 3]).unwrap();
+    fs::write(from.join("sub").join("b.txt"), "bee").unwrap();
+    fs::write(from.join("not_listed.txt"), "no").unwrap();
+    copy_assets(&from, &["a.bin".to_string(), "sub/b.txt".to_string()], &to);
+    assert_eq!(fs::read(to.join("a.bin")).unwrap(), [1, 2, 3]);
+    assert_eq!(fs::read_to_string(to.join("sub").join("b.txt")).unwrap(), "bee");
+    assert!(!to.join("not_listed.txt").exists());
+}
+
+#[test]
+#[should_panic(expected = "asset missing.png: ")]
+fn a_missing_asset_panics() {
+    let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join("asset_missing");
+    fs::create_dir_all(&root).unwrap();
+    copy_assets(&root, &["missing.png".to_string()], &root.join("out"));
 }
 
 #[test]
@@ -217,6 +306,7 @@ fn programs_run_as_executables() {
             failures.push(format!("{name} [build]: {}", String::from_utf8_lossy(&built.stderr)));
             continue;
         }
+        copy_assets(&programs_dir(), &exp.assets, &out_dir);
         let out = hermetic(&mut Command::new(&exe)).envs(exp.env.iter().map(|(k, v)| (k, v))).output().expect("run built exe");
         failures.extend(compare(&name, "exe", &out, &exp));
     }

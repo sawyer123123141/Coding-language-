@@ -18,6 +18,12 @@ pub fn time(time_base: f64) -> f32 {
     unsafe { (rl::GetTime() - time_base) as f32 }
 }
 
+/// Microseconds since `time_base`, a value `GetTime()` gave.
+pub fn ticks(time_base: f64) -> i64 {
+    // SAFETY: only called while a real window is open.
+    unsafe { ((rl::GetTime() - time_base) * 1_000_000.0) as i64 }
+}
+
 /// Opens the real window. Gives `GetTime()` as of now, the start of `window.time()`.
 pub fn init(settings: &Settings, width: i32, height: i32, title: &[u8]) -> Result<f64, String> {
     let mut flags = rl::FLAG_WINDOW_RESIZABLE | rl::FLAG_VSYNC_HINT | rl::FLAG_MSAA_4X_HINT;

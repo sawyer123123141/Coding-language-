@@ -133,6 +133,25 @@ fn headless_queries_print_nothing_and_read_as_idle() {
 }
 
 #[test]
+fn ticks_usec_counts_microseconds_since_open_and_prints_nothing() {
+    let lines = headless_lines_of(|| {
+        let title = kstr("t");
+        // SAFETY: every pointer is to a live local.
+        unsafe {
+            open_with(&headless(3), 10, 10, &title);
+            assert_eq!(kestrel_window_ticks_usec(), 0);
+            let mut seen = Vec::new();
+            while kestrel_window_frame() == 1 {
+                seen.push(kestrel_window_ticks_usec());
+            }
+            assert_eq!(seen, [16_666, 33_333, 50_000], "a sixtieth of a second a frame, rounded down");
+            assert_eq!(kestrel_window_ticks_usec(), 50_000, "after the window closes it keeps its last value");
+        }
+    });
+    assert_eq!(lines, ["window.open 10 10 \"t\""]);
+}
+
+#[test]
 fn a_quiet_headless_window_prints_nothing_but_still_behaves() {
     let lines = headless_lines_of(|| {
         let (title, shot) = (kstr("t"), kstr("shot.png"));
@@ -174,11 +193,11 @@ fn closing_prints_and_ends_the_frame_loop() {
 #[test]
 fn symbols_are_complete() {
     let table = symbols();
-    assert_eq!(table.len(), 22);
+    assert_eq!(table.len(), 23);
     let names: HashSet<&str> = table.iter().map(|&(name, _)| name).collect();
-    assert_eq!(names.len(), 22, "names are distinct");
+    assert_eq!(names.len(), 23, "names are distinct");
     let addresses: HashSet<usize> = table.iter().map(|&(_, address)| address as usize).collect();
-    assert_eq!(addresses.len(), 22, "each name has its own function");
+    assert_eq!(addresses.len(), 23, "each name has its own function");
     for &(name, address) in &table {
         assert!(
             name.starts_with("kestrel_window_") || name.starts_with("kestrel_draw_") || name.starts_with("kestrel_input_"),
@@ -205,6 +224,6 @@ fn symbols_cover_every_native_the_modules_declare() {
         }
     }
     let provided: HashSet<String> = symbols().iter().map(|&(name, _)| name.to_string()).collect();
-    assert_eq!(declared.len(), 22);
+    assert_eq!(declared.len(), 23);
     assert_eq!(provided, declared);
 }

@@ -4,6 +4,7 @@ pub native frame() -> bool
 pub native close()
 pub native delta() -> float
 pub native time() -> float
+pub native ticks_usec() -> i64
 pub native size() -> vec2
 pub native fps() -> int
 pub native screenshot(path: string)

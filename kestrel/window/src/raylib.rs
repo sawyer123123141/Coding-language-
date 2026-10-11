@@ -57,6 +57,29 @@ pub struct Texture {
     pub format: c_int,
 }
 
+/// `Mesh`: vertex data in CPU memory and, once uploaded, the GPU buffers that hold it. Free it
+/// with `UnloadMesh`, which also `free`s every CPU array.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct Mesh {
+    pub vertex_count: c_int,
+    pub triangle_count: c_int,
+    pub vertices: *mut f32,
+    pub texcoords: *mut f32,
+    pub texcoords2: *mut f32,
+    pub normals: *mut f32,
+    pub tangents: *mut f32,
+    pub colors: *mut u8,
+    pub indices: *mut u16,
+    pub bone_count: c_int,
+    pub bone_indices: *mut u8,
+    pub bone_weights: *mut f32,
+    pub anim_vertices: *mut f32,
+    pub anim_normals: *mut f32,
+    pub vao_id: c_uint,
+    pub vbo_id: *mut c_uint,
+}
+
 /// `Font`: a glyph atlas. It is only passed back to raylib, so the two
 /// pointers (`Rectangle *recs`, `GlyphInfo *glyphs`) are never read here.
 #[repr(C)]
@@ -139,6 +162,10 @@ extern "C" {
     pub fn LoadImageFromScreen() -> Image;
     pub fn GetImageColor(image: Image, x: c_int, y: c_int) -> Color;
     pub fn UnloadImage(image: Image);
+    pub fn UnloadTexture(texture: Texture);
+
+    // Models (rmodels.c).
+    pub fn UnloadMesh(mesh: Mesh);
 
     // rlgl.h: flush the batch of shapes drawn so far.
     pub fn rlDrawRenderBatchActive();

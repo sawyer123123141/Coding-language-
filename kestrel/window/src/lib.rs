@@ -7,11 +7,13 @@
 // this crate's staticlib.
 pub use kestrel_runtime;
 mod abi;
+pub mod gpu;
 mod headless;
 mod keys;
 mod natives_draw;
 mod natives_input;
 mod natives_window;
+mod paths;
 pub mod raylib;
 mod real;
 mod state;
@@ -20,6 +22,8 @@ mod native_tests;
 
 use std::ffi::CString;
 use std::path::Path;
+
+pub use paths::set_program_dir;
 
 use raylib::{GetImageColor, LoadImage, SetTraceLogLevel, UnloadImage, LOG_ERROR};
 
@@ -43,6 +47,7 @@ pub fn symbols() -> Vec<(&'static str, *const u8)> {
         kestrel_window_time,
         kestrel_window_size,
         kestrel_window_fps,
+        kestrel_window_ticks_usec,
         kestrel_window_screenshot,
         kestrel_draw_clear,
         kestrel_draw_rect,

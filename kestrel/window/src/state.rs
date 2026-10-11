@@ -12,9 +12,12 @@
 //! Both follow the same rules, so a program behaves alike on either:
 //! `close()` only asks, and the next `frame()` closes the window and gives
 //! `false`. After that `frame()` keeps giving `false`, drawing and
-//! `window.screenshot` are errors, and the queries (`delta`, `time`, `size`,
-//! `fps`) give the values they had at the end, because raylib has nothing left
-//! to ask. Input reads as nothing.
+//! `window.screenshot` are errors, and the queries (`delta`, `time`, `ticks_usec`,
+//! `size`, `fps`) give the values they had at the end, because raylib has nothing
+//! left to ask. Input reads as nothing.
+//!
+//! The GPU objects (`gpu.rs`) are freed at the start of each frame, and all of
+//! them when the window closes, in the real case before raylib closes.
 //!
 //! The `check_*` functions give an error message instead of failing, so tests
 //! can see the message. The same functions without the prefix call
@@ -26,6 +29,7 @@ use std::env;
 use kestrel_runtime::panic::fail_at_call;
 
 use crate::abi::V2;
+use crate::gpu;
 use crate::headless;
 use crate::raylib as rl;
 use crate::real;
@@ -42,6 +46,8 @@ pub enum Mode {
 pub struct Fixed {
     pub size: V2,
     pub time: f32,
+    /// `window.ticks_usec()`: microseconds, exact however long the program has run.
+    pub ticks: i64,
     pub delta: f32,
     pub fps: i32,
 }
@@ -127,7 +133,9 @@ impl Window {
 
     /// A headless window's query values.
     fn headless_values(&self) -> Fixed {
-        Fixed { size: self.size, time: self.frames as f32 / headless::FPS as f32, delta: 1.0 / headless::FPS as f32, fps: headless::FPS }
+        let fps = headless::FPS;
+        let ticks = (self.frames.saturating_mul(1_000_000) / fps as u64) as i64;
+        Fixed { size: self.size, time: self.frames as f32 / fps as f32, ticks, delta: 1.0 / fps as f32, fps }
     }
 
     /// Ends the previous frame and starts the next, or closes the window.
@@ -137,8 +145,10 @@ impl Window {
         match self.kind {
             Kind::Headless { frames_to_run } => {
                 if self.close_requested || self.frames >= frames_to_run {
+                    gpu::close_all(false);
                     return Some(self.headless_values());
                 }
+                gpu::drain(false);
             }
             Kind::Real { time_base } => {
                 // SAFETY: raylib calls on the thread that opened the window, which is still open.
@@ -150,12 +160,15 @@ impl Window {
                         let last = Fixed {
                             size: real::size(),
                             time: real::time(time_base),
+                            ticks: real::ticks(time_base),
                             delta: rl::GetFrameTime(),
                             fps: rl::GetFPS(),
                         };
+                        gpu::close_all(true);
                         rl::CloseWindow();
                         return Some(last);
                     }
+                    gpu::drain(true);
                     rl::BeginDrawing();
                 }
             }
@@ -316,17 +329,20 @@ mod tests {
         on_a_thread(|| {
             open(&headless(2), 320, 200, b"hi").unwrap();
             assert_eq!(check_drawing("draw.clear"), Ok(Mode::Headless));
-            let at = |frames: f32| View::Fixed(Fixed { size: V2 { x: 320.0, y: 200.0 }, time: frames / 60.0, delta: 1.0 / 60.0, fps: 60 });
-            assert_eq!(check_view("window.time"), Ok(at(0.0)));
+            let at = |frames: i64| {
+                let (size, time, ticks) = (V2 { x: 320.0, y: 200.0 }, frames as f32 / 60.0, frames * 1_000_000 / 60);
+                View::Fixed(Fixed { size, time, ticks, delta: 1.0 / 60.0, fps: 60 })
+            };
+            assert_eq!(check_view("window.time"), Ok(at(0)));
             assert_eq!(frame(), Ok(true));
-            assert_eq!(check_view("window.time"), Ok(at(1.0)));
+            assert_eq!(check_view("window.time"), Ok(at(1)));
             assert_eq!(frame(), Ok(true));
-            assert_eq!(check_view("window.time"), Ok(at(2.0)));
+            assert_eq!(check_view("window.time"), Ok(at(2)));
             assert_eq!(frame(), Ok(false));
             assert_eq!(frame(), Ok(false), "and it stays closed");
             // Closed: drawing is an error; the queries keep their last values.
             assert_eq!(check_drawing("draw.circle"), Err("draw.circle was called after the window closed".to_string()));
-            assert_eq!(check_view("window.size"), Ok(at(2.0)));
+            assert_eq!(check_view("window.size"), Ok(at(2)), "and the clock stops at 33333 microseconds");
             assert_eq!(close(), Ok(None), "closing a closed window does nothing");
             assert_eq!(open(&headless(1), 10, 10, b"a"), Err("window.open was called after the window closed".to_string()));
         });
