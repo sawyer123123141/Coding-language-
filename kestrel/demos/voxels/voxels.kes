@@ -1,0 +1,129 @@
+// The voxel viewer: fly through the bench/voxels3d world in Kestrel's own window.
+//
+//   kestrel run --release demos/voxels/voxels.kes
+//
+// Hold the right mouse button and drag to look, WASD to move, Space and
+// Shift to go up and down, and the wheel to change speed.
+//
+// At start a `par for` builds every chunk's mesh data on all cores, and one
+// loop copies each chunk to the GPU as a Mesh (like making an ArrayMesh in
+// Godot). All of that CPU data lives in an `arena { }` that frees it once
+// the meshes are made. Then every frame draws every mesh. It prints the
+// build and upload times at start, and the frame times once a second.
+use window
+use draw
+use draw3d
+use input
+use { Color from draw }
+use { Mesh, MeshData from draw3d }
+use { Key from input }
+use { chunk_mesh, LAYERS from world }
+use { Flyer, view from fly }
+
+// Chunks across and deep: 8 is the benchmark's world (463,749 faces); try 16
+// for a stress run.
+let WIDTH = 8
+let SEED = 1337
+
+let SCREEN_WIDTH = 1280
+let SCREEN_HEIGHT = 720
+let SKY = Color(0.55, 0.75, 0.95)
+let TEXT = Color(0.05, 0.05, 0.1)
+
+// Seconds between the printed lines.
+let REPORT = 1.0
+
+struct Chunk {
+    x: int
+    y: int
+    z: int
+    data: MeshData
+}
+
+// Rounds to two decimals for printing.
+pure two(x: float) -> float {
+    round(x * 100) / 100
+}
+
+main() {
+    window.open(SCREEN_WIDTH, SCREEN_HEIGHT, "Kestrel voxels")
+
+    // The GPU meshes outlive the arena below; a Mesh holds only its GPU id and counts.
+    var meshes = list[Mesh]()
+    var chunk_count = 0
+    var faces = 0
+    var build_ms = 0.0
+    var upload_ms = 0.0
+    arena {
+        var chunks = list[Chunk]()
+        for cx from 0 to WIDTH {
+            for cy from 0 to LAYERS {
+                for cz from 0 to WIDTH {
+                    chunks.add(Chunk(x: cx, y: cy, z: cz, data: MeshData()))
+                }
+            }
+        }
+        chunk_count = chunks.len
+        let build_start = window.ticks_usec()
+        par for c in chunks {
+            c.data = chunk_mesh(c.x, c.y, c.z, SEED)
+        }
+        let upload_start = window.ticks_usec()
+        for c in chunks {
+            // An all-air chunk has nothing to draw, so it gets no mesh.
+            if c.data.vertices.len > 0 {
+                faces += c.data.indices.len / 6
+                meshes.add(draw3d.make_mesh(c.data))
+            }
+        }
+        let upload_end = window.ticks_usec()
+        build_ms = float(upload_start - build_start) / 1000
+        upload_ms = float(upload_end - upload_start) / 1000
+    }
+    print("voxels world {WIDTH} chunks {chunk_count} meshes {meshes.len} faces {faces} build {two(build_ms)} ms upload {two(upload_ms)} ms")
+
+    // Start outside the world's corner, looking in and down.
+    var flyer = Flyer(pos: vec3(-24, 100, -24), yaw: 45, pitch: -30)
+    var last_mouse = input.mouse()
+
+    // Sums over the current report interval, and the averages the last one printed.
+    var frames = 0
+    var draw_sum = 0.0
+    var interval_start = 0.0
+    var draw_ms = 0.0
+    var frame_ms = 0.0
+    var fps = 0.0
+
+    while window.frame() {
+        let mouse = input.mouse()
+        let turn = if input.held(Key.MouseRight) { mouse - last_mouse } else { vec2(0, 0) }
+        last_mouse = mouse
+        let move = vec3(input.axis(Key.A, Key.D), input.axis(Key.Shift, Key.Space), input.axis(Key.S, Key.W))
+        flyer.fly(move, turn, input.wheel(), window.delta())
+
+        let draw_start = window.time()
+        draw.clear(SKY)
+        draw3d.camera(view(flyer))
+        for m in meshes {
+            draw3d.mesh(m, vec3(0, 0, 0), draw.WHITE)
+        }
+        let draw_end = window.time()
+
+        // The overlay: a draw.* call goes back to 2D on its own.
+        draw.text("{two(fps)} fps   {two(frame_ms)} ms a frame   {faces} faces in {meshes.len} meshes", vec2(10, 10), 20, TEXT)
+        draw.text("right mouse drag to look   WASD move   Space/Shift up and down   wheel speed ({two(flyer.speed)})", vec2(10, SCREEN_HEIGHT - 28), 20, TEXT)
+
+        frames += 1
+        draw_sum += draw_end - draw_start
+        let elapsed = window.time() - interval_start
+        if elapsed >= REPORT {
+            draw_ms = draw_sum / frames * 1000
+            frame_ms = elapsed / frames * 1000
+            fps = frames / elapsed
+            print("voxels {WIDTH} meshes {meshes.len} faces {faces} draw {two(draw_ms)} ms frame {two(frame_ms)} ms fps {two(fps)}")
+            frames = 0
+            draw_sum = 0.0
+            interval_start += elapsed
+        }
+    }
+}

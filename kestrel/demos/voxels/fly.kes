@@ -1,0 +1,50 @@
+// A flying camera, like the Godot editor's free look: the right mouse
+// button held and dragged turns it, WASD moves it where it looks, Space
+// and Shift go straight up and down, and the wheel changes the speed.
+// It is plain maths (`pure`); voxels.kes reads the input and calls `fly`.
+use { Camera from draw3d }
+
+let LOOK = 0.2           // degrees of turn per pixel dragged
+let MOST_PITCH = 89.0    // so the view never lines up with up
+let WHEEL_STEP = 1.25    // speed change per wheel notch
+let SLOWEST = 2.0        // blocks a second
+let FASTEST = 400.0
+
+pub struct Flyer {
+    pos: vec3
+    yaw: float           // degrees: 0 looks along +z, 90 along +x
+    pitch: float         // degrees: positive looks up
+    speed: float = 20    // blocks a second
+
+    // One frame of flying: `move` is (right, up, forward), each -1 to 1,
+    // `turn` the mouse movement in pixels, and `wheel` the wheel's notches.
+    pure fly(var self, move: vec3, turn: vec2, wheel: float, dt: float) {
+        self.yaw -= turn.x * LOOK
+        self.pitch = clamp(self.pitch - turn.y * LOOK, -MOST_PITCH, MOST_PITCH)
+        self.speed = clamp(self.speed * pow(WHEEL_STEP, wheel), SLOWEST, FASTEST)
+        var dir = move
+        if dir.length() > 1 {
+            dir = dir.normalized()
+        }
+        let step = right(self.yaw) * dir.x + vec3(0, 1, 0) * dir.y + forward(self.yaw, self.pitch) * dir.z
+        self.pos += step * self.speed * dt
+    }
+}
+
+// The way a flyer at `yaw` and `pitch` looks, as a vector of length 1.
+pub pure forward(yaw: float, pitch: float) -> vec3 {
+    let y = yaw * PI / 180
+    let p = pitch * PI / 180
+    vec3(sin(y) * cos(p), sin(p), cos(y) * cos(p))
+}
+
+// The flyer's right on the ground: forward (level) crossed with up.
+pub pure right(yaw: float) -> vec3 {
+    let y = yaw * PI / 180
+    vec3(-cos(y), 0, sin(y))
+}
+
+// The camera that sees what the flyer sees.
+pub pure view(f: Flyer) -> Camera {
+    Camera(pos: f.pos, target: f.pos + forward(f.yaw, f.pitch))
+}
