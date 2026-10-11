@@ -28,13 +28,20 @@ fn spacing(size: f32) -> f32 {
     size / 10.0
 }
 
+/// Clears the colour and the depth, and so erases everything drawn before it in the frame. raylib
+/// clears at once but draws shapes late, from a batch, so the batch is drawn first, and the
+/// shapes in it are erased with the rest.
+///
 /// # Safety
 /// `c` must point to a live `Color`.
 #[no_mangle]
 pub unsafe extern "C" fn kestrel_draw_clear(c: *const KColor) {
     let c = read(c);
     // SAFETY (for every `unsafe` block below): the window is open, on this thread.
-    draw("draw.clear", &[Arg::Color(c)], || unsafe { rl::ClearBackground(c.to_raylib()) });
+    draw("draw.clear", &[Arg::Color(c)], || unsafe {
+        rl::rlDrawRenderBatchActive();
+        rl::ClearBackground(c.to_raylib());
+    });
 }
 
 /// A negative width or height covers the rectangle the size spans back from `pos` (`bulk::span`).

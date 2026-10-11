@@ -16,9 +16,9 @@
 //! `size`, `fps`) give the values they had at the end, because raylib has nothing
 //! left to ask. Input reads as nothing.
 //!
-//! The GPU objects (`gpu.rs`) are freed at the start of each frame, and all of
-//! them when the window closes, in the real case before raylib closes. A 3D pass
-//! (`pass.rs`) ends before the frame does, and every frame starts in 2D.
+//! The GPU objects (`gpu.rs`) are freed at the start of each frame, once raylib has drawn
+//! everything batched, and all of them when the window closes, in the real case before
+//! raylib closes. A 3D pass (`pass.rs`) ends before the frame does, and every frame starts in 2D.
 //!
 //! The `check_*` functions give an error message instead of failing, so tests
 //! can see the message. The same functions without the prefix call
@@ -158,6 +158,10 @@ impl Window {
                 unsafe {
                     if self.frames > 0 {
                         rl::EndDrawing();
+                    } else {
+                        // Before the first frame no `EndDrawing` has drawn the batch, and a program may
+                        // have drawn into it: draw it now, so it holds nothing `gpu::drain` frees below.
+                        rl::rlDrawRenderBatchActive();
                     }
                     if self.close_requested || rl::WindowShouldClose() {
                         let last = Fixed {
