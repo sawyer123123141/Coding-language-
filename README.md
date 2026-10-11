@@ -45,7 +45,12 @@ target/release/kestrel check program.kes      # errors only
 
 ## A window
 
-`use window`, `use draw` and `use input` open a window, draw shapes and text, and read the keyboard and mouse. They are built into the compiler (raylib underneath), and work under both `kestrel run` and `kestrel build`. Windows only for now.
+Four modules are built into the compiler (raylib underneath), and work under both `kestrel run` and `kestrel build`. Windows only for now.
+
+- `use window`: open the window, run the frame loop, time, screenshots.
+- `use draw`: shapes, text, textures and sprites, and `draw.rects` to draw thousands of rectangles in one call.
+- `use draw3d`: a camera, meshes you build in Kestrel (`MeshData`, like filling an `ArrayMesh`) and upload to the GPU once, and a few shapes.
+- `use input`: keyboard and mouse.
 
 ```kestrel
 use window
@@ -67,14 +72,24 @@ The showcase is a particle demo: tens of thousands of dots pulled toward the mou
 target/release/kestrel run --release demos/particles/particles.kes
 ```
 
-Move the mouse to pull the particles. Space adds 1,000 more. The window shows the update and draw times, and the demo prints them once a second. `kestrel/demos/particles/results.md` has the numbers: 60 fps (the display's refresh rate) up to about 100,000 particles, and about 30 fps at 200,000, where drawing one rectangle per call, not the `par for` update, is the bottleneck.
+Move the mouse to pull the particles. Space adds 1,000 more. The window shows the update and draw times, and the demo prints them once a second. It draws all the dots with one `draw.rects` call: 200,000 dots draw in about 4.6 ms (a frame takes 5.4 ms), against about 29 ms when each dot was its own `draw.rect` call. `kestrel/demos/particles/results.md` has the numbers, and `kestrel/bench/particles/results.md` compares the demo with a Rust port on the same raylib (Kestrel is 2-7% behind there).
+
+The other showcase is a voxel viewer: fly through the 8x4x8-chunk world of `bench/voxels3d` (463,749 faces) in 3D.
+
+```bash
+target/release/kestrel run --release demos/voxels/voxels.kes
+```
+
+- Hold the right mouse button and drag to look, WASD to move, Space and Shift to go up and down, the mouse wheel to change speed.
+- At start a `par for` builds every chunk's mesh on all cores (about 75 ms) and a loop copies them to the GPU (about 55 ms). Then each frame draws all 248 meshes, with an overlay of the fps, frame time and face count.
+- At the default size it holds 60 fps, the display's rate. That number is capped: every test window on the development machine was held at 60 fps, so the headroom was found by growing the world (the constant `WIDTH` in `voxels.kes`). 60 fps (capped) still holds at 4.2 million faces, 9 times the world, and drops just below at 7.3 million. `kestrel/demos/voxels/results.md` has the numbers and what limits it.
 
 Two environment variables help with testing:
 
 - `KESTREL_HEADLESS=<frames>` opens no window and runs that many frames, printing each `draw.*` call as a line instead (`KESTREL_HEADLESS_QUIET=1` silences them).
 - `KESTREL_HIDDEN=1` opens a real window that isn't shown.
 
-The API is in `docs/superpowers/specs/2026-10-10-window-design.md`.
+The API is in `docs/superpowers/specs/2026-10-10-window-design.md` (window, shapes, text, input) and `docs/superpowers/specs/2026-10-10-3d-textures-design.md` (textures, `draw.rects`, `draw3d`).
 
 ## Layout
 
@@ -85,10 +100,11 @@ The API is in `docs/superpowers/specs/2026-10-10-window-design.md`.
   - `codegen`: Cranelift JIT and object files.
   - `runtime`: arenas, printing and panics.
   - `window`: the window, drawing and input natives (raylib, vendored in `window/raylib`).
-  - `driver`: loading modules and compiling a program, shared by the CLI and the Godot add-on. The built-in `window`, `draw` and `input` modules are in `driver/std`.
+  - `driver`: loading modules and compiling a program, shared by the CLI and the Godot add-on. The built-in `window`, `draw`, `draw3d` and `input` modules are in `driver/std`.
   - `cli`: the `kestrel` command.
   - `godot`: the Godot add-on and its demo project (built separately).
 - `kestrel/demos/particles/`: the particles demo and its measured times.
+- `kestrel/demos/voxels/`: the voxel viewer (`voxels.kes`, `world.kes`, `fly.kes`) and its measured times.
 - `kestrel/tests/programs/` and `kestrel/tests/errors/`: example programs with their expected output, and expected errors.
 - `kestrel/bench/`: benchmarks against Rust and C, with results.
 - `docs/superpowers/specs/`: the language (syntax spec) and compiler (core spec) designs.
@@ -100,6 +116,6 @@ The core language works: functions, structs with methods, enums and `match`, vec
 
 It also runs inside Godot 4: see [`kestrel/godot`](kestrel/godot/README.md). GDScript calls Kestrel functions, and edits hot-reload.
 
-Also built: `map`, `par for` (loops that run on every core over `pure` code), global math and random numbers, and the 2D window above. Next: textures and 3D (the voxel-world viewer).
+Also built: `map`, `par for` (loops that run on every core over `pure` code), global math and random numbers, and the window above with textures, 3D and the voxel viewer. Next: a stronger (faster) backend.
 
 Speed versus Rust is between 1.0x and 1.5x on loops and structs, and about 3x on the voxel heightmap milestone. The numbers are in `kestrel/bench/*/results.md`.

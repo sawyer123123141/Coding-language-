@@ -68,7 +68,10 @@ draw.rects(positions: [vec2], size: vec2, color: Color)
   - `texture_region` draws the `region` of the texture (in texture pixels, from the top-left) over `pos`/`size`, for sprite sheets and atlases (`draw_texture_rect_region`).
   - `tint` multiplies the texture's colours, like Godot's `modulate`; `WHITE` leaves them alone. The colour stays the last argument.
   - Textures are drawn with nearest filtering (crisp pixels, right for pixel art and voxel atlases), and coordinates outside a texture repeat it.
-  - A negative width or height mirrors the image: in `size` it covers the rectangle the size spans from `pos`, flipped; in `region` it flips the part read.
+  - A negative width or height mirrors the image:
+    - A negative `size` covers the rectangle it spans back from `pos`, mirrored.
+    - A negative `region` size reads the same region (at `region.pos`, with the size's absolute value), mirrored. So a sprite-sheet frame flips by negating its size, without moving `region.pos`.
+    - Both negative on the same side cancel: that side is mirrored twice, so it comes out the right way round (the rectangle drawn is still the one `size` spans back from `pos`).
 - A texture's `width` and `height` are plain fields. `id` is the GPU object (see "GPU objects").
 - **`rects`** draws one rectangle per position, all the same size and colour, in one call. It works exactly like calling `draw.rect` for each position in order (a `list[vec2]` is accepted too). It is built for the cost measured in the particles demo: one native call per rectangle, about 150–190 ns each, almost all of it in raylib's per-vertex batch and the driver.
 - **Negative-size rectangles** (a window follow-up, fixed here): `rect`, `rect_outline` and `rects` with a negative width or height now cover the rectangle the size spans from `pos`, instead of drawing nothing.
@@ -221,6 +224,25 @@ window.ticks_usec() -> i64
   - `draw3d.camera Camera(pos: vec3(x: 0, y: 0, z: -3), target: vec3(x: 0, y: 0, z: 0), up: vec3(x: 0, y: 1, z: 0), fov: 75)`
   - Arrays print as their length, not their elements: `draw.rects 50000 vec2(x: 2, y: 2) Color(r: 1, g: 0.65, b: 0.2, a: 1)` and `draw3d.make_mesh MeshData(vertices: 24, colors: 24, uvs: 0, indices: 36)`.
   - Headless `load_texture` still reads the file, for its size and its errors, without a GPU. `make_texture` checks its pixels. Handles count from 1, as in a real window.
+
+## As built (plans 2 and 3)
+
+Where the build settled what this spec left open, or did something other than it said.
+
+- **The map error names `draw.Texture`,** not `Texture`, because the checker qualifies a built-in struct's name everywhere: "maps can't hold values that own a GPU object yet (`draw.Texture` has one); keep them in a list and map keys to indexes".
+- **`window.screenshot` saves only `.png` paths.** PNG encoding goes through raylib's `ExportImageToMemory`, so a `.bmp` or `.jpg` path is an error: "window.screenshot couldn't save {path} (tried {resolved}); give a path that ends in .png, in a folder that exists".
+- **Image files are read and written through Rust** (`image_file.rs`). `load_texture` reads the file with `std::fs::read` and gives the bytes to raylib's `LoadImageFromMemory`; `screenshot` encodes with `ExportImageToMemory` and writes with `std::fs::write`. raylib's own file calls use the ANSI `fopen` and failed in folders with non-ASCII names. Cost: one extra copy of a file's bytes at load.
+- **`draw.clear` draws the pending batch first,** so it erases everything drawn before it, including anything drawn before the first `window.frame()` (that is drawn at the first frame, so a `draw.clear` in frame 1 erases it).
+- **`draw3d` edge cases the spec was silent on.**
+  - `cube` uses the absolute values of its size, so a negative size draws the same cube.
+  - A `sphere` with a radius of 0 or less draws nothing.
+  - A zero `up` gets the "up that doesn't point along the view" message.
+- **An empty mesh counts as having uvs,** so `mesh_textured` of an all-air chunk draws nothing instead of failing with "needs a mesh made with uvs". An empty mesh made without uvs isn't caught.
+- **`make_mesh` has size-limit errors beyond the spec's four,** because raylib takes buffer sizes as C `int`s: "draw3d.make_mesh got 200000000 vertices, but a mesh without indices can have at most 178956970; split it into smaller meshes" (12 bytes a vertex). A mesh can have at most 2,147,483,647 vertices and 1,073,741,823 indices (2 bytes each). They are unit-tested only, because a program would need over 2 GB of mesh data to reach them.
+- **One default material per window** is shared by `draw.rects` and by meshes. Freeing it frees only its array of maps, so it can never unload a program's texture.
+- **A hidden window doesn't wait for vsync** on the development machine (10,000 dots ran at about 4,300 fps hidden), so a hidden run's frame time is how long the program works on a frame. Judge 60 fps from the frame time. Hidden windows were also seen held at 60 fps for long stretches (40 minutes in one session, a whole working session in another), cause unknown; `kestrel/bench/particles/results.md` (the end) and `kestrel/demos/voxels/results.md` have the details, and `measure.py` warns about such runs.
+- **A release window exe is about 895 KiB** (it was about 812 KB before `rmodels` and JPG loading went in). The voxel viewer's is 969.5 KiB.
+- **The voxel viewer's results** are in `kestrel/demos/voxels/results.md`: at `WIDTH` 8 (463,749 faces) it builds in about 73-78 ms, uploads in about 53-59 ms and holds 60 fps (capped; every hidden run that day was held at 60 fps, so the headroom was found by growing the world: 60 fps holds up to `WIDTH` 24, 4.2 million faces, and drops just below at `WIDTH` 32, 7.3 million faces, 16.95 ms).
 
 ## Testing
 

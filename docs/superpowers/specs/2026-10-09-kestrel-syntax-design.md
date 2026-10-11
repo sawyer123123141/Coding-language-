@@ -383,10 +383,11 @@ in chunk.mem {               // owned: lives as long as chunk.mem
 ## Optional values
 
 ```
-let tex = load("grass.png") else { return }
+let hp = scores["ana"] else { return }
 ```
 
 - `T?` holds a `T` or `none`.
+- A map lookup is the usual source of one: `scores["ana"]` on a `map[string, int]` is an `int?`, `none` when the key is missing.
 - `let x = expr else { ... }` unwraps; the `else` block must exit
   (`return`, `break`, `continue`).
 - Using a `T?` as a `T` without unwrapping is a compile error.

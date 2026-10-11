@@ -14,8 +14,9 @@
 //!   stored names only what raylib allocated itself (its vertex array and buffer ids), which
 //!   `UnloadMesh` frees when the program's `Mesh` goes away (`gpu.rs`).
 //!
-//! An empty `MeshData` makes a mesh with no parts, and a headless window keeps only the counts: no
-//! raylib call either way.
+//! An empty `MeshData` makes a mesh with no parts, and a headless window keeps no parts either, only
+//! whether the mesh has uvs and indices (its counts are the program's own `Mesh` fields): no raylib
+//! call either way.
 //!
 //! **Drawing.** Kestrel's fronts are clockwise and OpenGL's are counter-clockwise, so a mesh is
 //! drawn culling OpenGL's front faces. Outside a mesh draw, culling stays as raylib has it (on,

@@ -4,6 +4,11 @@
 // every side of a solid block that touches air, coloured by its height and
 // shaded by the way it faces (there is no lighting, as in early Minecraft).
 //
+// A chunk's mesh is a `MeshData`: lists of vertices, colours and indices, like
+// the arrays you fill an `ArrayMesh` with (or what a `SurfaceTool` collects) in
+// Godot. `draw3d.make_mesh` turns it into the GPU mesh. Every function here is
+// `pure`, so a `par for` can call them: voxels.kes builds all the chunks at once.
+//
 // The benchmark keeps its own copy of this code: it is the reference for
 // the C# comparison, so it doesn't change when the demo does.
 use { Color from draw }
@@ -70,8 +75,9 @@ pure density(x: int, y: int, z: int, seed: int) -> float {
     n - 0.5 - float(y - HEIGHT / 2) / float(HEIGHT * 2)
 }
 
-// The colour of a block at world height y: stone low down, then dirt,
-// grass, and snow on the peaks.
+// The colour of a block at world height y: stone low down (0-47), then dirt
+// (48-63), grass (64-87), and snow on the peaks (88 and up). The limits are
+// fractions of HEIGHT, so these block numbers are for a HEIGHT of 128.
 pub pure band(y: int) -> Color {
     if y < HEIGHT * 3 / 8 {
         STONE
