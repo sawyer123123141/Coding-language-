@@ -214,7 +214,7 @@ fn an_owning_part_of_a_temporary_cannot_be_stored() {
             check(&p).1
         };
         let got: Vec<_> = diags.iter().map(|d| (d.message.as_str(), d.help.as_deref())).collect();
-        assert_eq!(got, vec![(moved_out, Some("store the whole value in a variable first"))], "in: {body}");
+        assert_eq!(got, vec![(moved_out, Some("use the part in place, or keep the whole value in a variable"))], "in: {body}");
     }
     // A part of a variable keeps its help.
     let src = format!("{TEX}main() {{\n let h = Holder(t: make(1), n: 1)\n let t = h.t\n}}\n");

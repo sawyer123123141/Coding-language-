@@ -107,6 +107,28 @@ fn errors_are_reported() {
 }
 
 #[test]
+fn names_starting_with_the_compilers_prefix_are_reserved() {
+    const RESERVED: &str = "names starting with `__kestrel_` are reserved for the compiler; pick another";
+    // Items, locals, loop variables and parameters can't take such a name: the compiler makes
+    // functions with these names, and a user one would collide with them.
+    for src in [
+        "__kestrel_constants() {}\nmain() {}\n",
+        "let __kestrel_copy_1 = 3\nmain() {}\n",
+        "struct __kestrel_print_2 {\n x: int\n}\nmain() {}\n",
+        "enum __kestrel_drop_3 {\n A\n}\nmain() {}\n",
+        "main() {\n let __kestrel_par_0 = 1\n}\n",
+        "main() {\n for __kestrel_x from 0 to 3 { }\n}\n",
+        "f(__kestrel_x: int) {}\nmain() {}\n",
+    ] {
+        assert_eq!(errors(src), vec![RESERVED.to_string()], "source:\n{src}");
+    }
+    // Only the whole prefix is reserved.
+    for src in ["__kestrel() {}\nmain() {}\n", "my__kestrel_x() {}\nmain() {}\n", "main() {\n let _kestrel_x = 1\n print(_kestrel_x)\n}\n"] {
+        assert_eq!(errors(src), Vec::<String>::new(), "source:\n{src}");
+    }
+}
+
+#[test]
 fn always_leaving_if_has_no_value_outside_a_tail() {
     let programs = [
         "main() {\n print(if true { return } else { return })\n}\n",

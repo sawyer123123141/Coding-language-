@@ -19,6 +19,22 @@ pub(crate) fn is_builtin_name(name: &str) -> bool {
     BUILTINS.contains(&name) || Builtin::GLOBAL_NAMES.contains(&name)
 }
 
+/// The prefix of the names of the functions the compiler makes (`__kestrel_constants`,
+/// `__kestrel_copy_N`, ...). A user name with it would collide with one of them.
+const COMPILER_PREFIX: &str = "__kestrel_";
+
+/// The error for a name an item, local or parameter can't take, if it is one: a built-in name,
+/// or one that starts with `COMPILER_PREFIX`. `shown` is the name as the message writes it.
+pub(crate) fn reserved_name_error(name: &str, shown: &str) -> Option<String> {
+    if is_builtin_name(name) {
+        Some(format!("`{shown}` is a built-in name; pick another"))
+    } else if name.starts_with(COMPILER_PREFIX) {
+        Some(format!("names starting with `{COMPILER_PREFIX}` are reserved for the compiler; pick another"))
+    } else {
+        None
+    }
+}
+
 pub(crate) fn resolve_type(ty: &TypeExpr, t: &mut Tables, diags: &mut Vec<Diagnostic>) -> Ty {
     let msg = match &ty.kind {
         TypeKind::Named { name, args } if args.is_empty() => match Ty::from_name(name) {
@@ -181,8 +197,8 @@ fn check_names(program: &Program, diags: &mut Vec<Diagnostic>) {
         };
         // Items from other modules are named `module.name`.
         let own = name.rsplit('.').next().unwrap_or(name);
-        if is_builtin_name(own) {
-            diags.push(Diagnostic::error(span, format!("`{name}` is a built-in name; pick another")));
+        if let Some(msg) = reserved_name_error(own, name) {
+            diags.push(Diagnostic::error(span, msg));
         } else if !seen.insert(name) {
             diags.push(Diagnostic::error(span, format!("`{name}` is defined twice")));
         }

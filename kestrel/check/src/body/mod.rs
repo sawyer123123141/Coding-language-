@@ -110,8 +110,8 @@ impl<'a> BodyChecker<'a> {
 
     fn declare(&mut self, bind: &Binding, ty: Ty, mutable: bool, is_param: bool, is_var_param: bool) -> LocalId {
         let name = &bind.name;
-        if crate::collect::is_builtin_name(name) {
-            self.error(bind.span, format!("`{name}` is a built-in name; pick another"));
+        if let Some(msg) = crate::collect::reserved_name_error(name, name) {
+            self.error(bind.span, msg);
         }
         let taken = self.lookup_local(name).is_some()
             || self.t.const_by_name.contains_key(name)

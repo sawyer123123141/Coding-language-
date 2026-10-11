@@ -386,7 +386,7 @@ impl<'a> BodyChecker<'a> {
                 let msg = format!("can't move this out: it holds {what}, so it can't be copied, and only whole variables move");
                 let help = match self.place_root(v) {
                     Some(_) => "move the whole variable that holds it",
-                    None => "store the whole value in a variable first",
+                    None => "use the part in place, or keep the whole value in a variable",
                 };
                 self.error_help(v.span, msg, help);
             }

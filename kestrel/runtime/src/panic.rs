@@ -42,6 +42,10 @@ pub static kestrel_rt_call_line: AtomicI32 = AtomicI32::new(0);
 
 /// Fails with `msg` and the line of the call into the built-in function that is
 /// failing: "draw.circle was called before window.open on line 12".
+///
+/// A native that a `pure` built-in function can reach must use plain `fail` instead: calls to a
+/// `pure` function never store the line, so the one here would be stale (the line of some earlier
+/// call), and the `pure` function may be running on a `par for` thread.
 pub fn fail_at_call(msg: &str) -> ! {
     match kestrel_rt_call_line.load(Ordering::Relaxed) {
         0 => fail(msg),

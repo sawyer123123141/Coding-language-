@@ -1,0 +1,13 @@
+let __kestrel_copy_1 = 3
+
+__kestrel_constants() {}
+
+f(__kestrel_x: int) {}
+
+main() {
+    let __kestrel_par_0 = 1
+}
+// error 1: names starting with `__kestrel_` are reserved for the compiler; pick another
+// error 3: names starting with `__kestrel_` are reserved for the compiler; pick another
+// error 5: names starting with `__kestrel_` are reserved for the compiler; pick another
+// error 8: names starting with `__kestrel_` are reserved for the compiler; pick another

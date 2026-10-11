@@ -340,9 +340,10 @@ fn a_program_without_heap_constants_has_no_init() {
 }
 
 #[test]
-fn a_function_named_like_the_init_thunk_does_not_clash_with_it() {
-    let p = jit("let A = [1, 2]\ninit_constants() -> int {\n A[1]\n}\nk_init_constants() -> int {\n A[0]\n}\n__kestrel_init_thunk() -> int {\n A[0] + A[1]\n}");
+fn functions_named_init_constants_do_not_clash_with_the_init_thunk() {
+    // `__kestrel_init_thunk` can't be a user name (the checker reserves the prefix), so this
+    // covers the names a clash would have come from: `init_constants` and its `k_` symbol.
+    let p = jit("let A = [1, 2]\ninit_constants() -> int {\n A[1]\n}\nk_init_constants() -> int {\n A[0]\n}");
     assert_eq!(call0::<i32>(&p, "init_constants"), 2);
     assert_eq!(call0::<i32>(&p, "k_init_constants"), 1);
-    assert_eq!(call0::<i32>(&p, "__kestrel_init_thunk"), 3);
 }
