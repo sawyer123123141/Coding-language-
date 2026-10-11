@@ -30,6 +30,10 @@ const SNOW: [u8; 4] = [237, 242, 247, 255];
 /// samples all land on tops is exactly a height band's colour at full brightness, where a side
 /// would be 0.8 or 0.7 of one. Pixel (32, 30) is such a pixel: the snow band's top faces (the
 /// peaks), with snow-coloured pixels above, below and to its right.
+///
+/// That exact pixel is the winding check. The `inked` rectangle only shows that something is
+/// drawn in the middle: with the top faces wound the wrong way, (32, 30) comes out black while
+/// `inked` can still pass (the view then holds other faces), so `inked` alone would not catch it.
 const VOXEL_COLUMN: Case = Case {
     name: "voxel_column",
     program: r#"use window

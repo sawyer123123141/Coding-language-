@@ -257,6 +257,15 @@ fn the_viewer_uploads_each_non_empty_chunk_once_and_draws_every_mesh_each_frame(
     assert_eq!(called("draw3d.camera").len(), 2, "one camera a frame");
     let drawn = called("draw3d.mesh");
     assert_eq!(drawn.len(), 2 * meshes, "every mesh in both frames");
+    // In each frame the camera is set before that frame's meshes are drawn: the order of the
+    // draw3d lines is camera, then `meshes` meshes, twice.
+    let order: Vec<&str> = stdout
+        .lines()
+        .filter_map(|line| line.split(' ').next())
+        .filter(|name| matches!(*name, "draw3d.camera" | "draw3d.mesh"))
+        .collect();
+    let frame = std::iter::once("draw3d.camera").chain(std::iter::repeat_n("draw3d.mesh", meshes));
+    assert_eq!(order, frame.clone().chain(frame).collect::<Vec<_>>(), "each frame sets the camera, then draws its meshes");
     // The `Mesh` values were made inside the `arena { }` and are drawn after it: each frame draws
     // the meshes `make_mesh` made, in order (a list the arena had freed would give other counts).
     for (k, line) in drawn.iter().enumerate() {
@@ -269,8 +278,10 @@ fn the_viewer_uploads_each_non_empty_chunk_once_and_draws_every_mesh_each_frame(
 
 #[test]
 fn the_viewer_frees_the_cpu_mesh_data_once_it_is_uploaded() {
-    // The world's mesh lists are about 70 MB at WIDTH 8; they live in an `arena { }` that ends
-    // after the upload, so the program arena stays small. (Without the arena it holds all of them.)
+    // The world's mesh lists live in an `arena { }` that ends after the upload, so the program
+    // arena stays small (about 64 KiB measured). Without the arena it holds all of them: a
+    // scratch copy with `if true {` in its place kept about 184 MiB, more than the lists' own
+    // size because lists grow by doubling and leave their old buffers behind.
     let dir = scratch("arena");
     let exe = dir.join("voxels").with_extension(std::env::consts::EXE_EXTENSION);
     let mut build = Command::new(env!("CARGO_BIN_EXE_kestrel"));

@@ -86,10 +86,12 @@ main() {
     var flyer = Flyer(pos: vec3(-24, 100, -24), yaw: 45, pitch: -30)
     var last_mouse = input.mouse()
 
-    // Sums over the current report interval, and the averages the last one printed.
+    // Sums over the current report interval, and the averages the last one printed. The
+    // first interval starts now: `window.time()` counts from `window.open`, so starting at 0
+    // would put the world's build and upload into the first line's frame time.
     var frames = 0
     var draw_sum = 0.0
-    var interval_start = 0.0
+    var interval_start = window.time()
     var draw_ms = 0.0
     var frame_ms = 0.0
     var fps = 0.0
@@ -99,7 +101,9 @@ main() {
         let turn = if input.held(Key.MouseRight) { mouse - last_mouse } else { vec2(0, 0) }
         last_mouse = mouse
         let move = vec3(input.axis(Key.A, Key.D), input.axis(Key.Shift, Key.Space), input.axis(Key.S, Key.W))
-        flyer.fly(move, turn, input.wheel(), window.delta())
+        // The first frame's delta holds the world's build and upload (seconds at a large
+        // WIDTH), so a held key would throw the camera; a long frame moves it 0.1 s at most.
+        flyer.fly(move, turn, input.wheel(), min(window.delta(), 0.1))
 
         let draw_start = window.time()
         draw.clear(SKY)
