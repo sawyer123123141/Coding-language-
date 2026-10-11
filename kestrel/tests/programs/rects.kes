@@ -1,0 +1,30 @@
+// env: KESTREL_HEADLESS=1
+// expect: window.open 64 64 "rects"
+// expect: draw.rects 3 vec2(x: 2, y: 2) Color(r: 1, g: 0, b: 0, a: 1)
+// expect: draw.rects 2 vec2(x: -4, y: 3) Color(r: 0, g: 0, b: 1, a: 1)
+// expect: draw.rects 0 vec2(x: 2, y: 2) Color(r: 0, g: 1, b: 0, a: 1)
+// expect: draw.rect vec2(x: 30, y: 30) vec2(x: -10, y: -10) Color(r: 1, g: 1, b: 0, a: 1)
+// expect: draw.rect_outline vec2(x: 14, y: 14) vec2(x: -12, y: 6) 2 Color(r: 1, g: 1, b: 1, a: 1)
+// expect: frames 1
+use window
+use draw
+
+main() {
+    window.open(64, 64, "rects")
+    var dots = list[vec2]()
+    dots.add(vec2(10, 20))
+    dots.add(vec2(30, 40))
+    var empty = list[vec2]()
+    var frames = 0
+    while window.frame() {
+        frames += 1
+        // The positions print as their count: an array, a list, and an empty list.
+        draw.rects([vec2(1, 1), vec2(5, 1), vec2(9, 1)], vec2(2, 2), draw.RED)
+        draw.rects(dots, vec2(-4, 3), draw.BLUE)
+        draw.rects(empty, vec2(2, 2), draw.GREEN)
+        // A negative size covers the rectangle it spans back from `pos`, but the line shows the call as written.
+        draw.rect(vec2(30, 30), vec2(-10, -10), draw.YELLOW)
+        draw.rect_outline(vec2(14, 14), vec2(-12, 6), 2, draw.WHITE)
+    }
+    print("frames", frames)
+}

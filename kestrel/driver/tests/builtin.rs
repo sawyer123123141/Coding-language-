@@ -136,9 +136,10 @@ fn the_built_in_modules_themselves_compile_clean() {
     assert_eq!(text, "");
     let module = compiled.expect("compiles").module;
     let natives: Vec<&str> = module.funcs.iter().filter_map(|f| f.native.as_deref()).collect();
-    assert_eq!(natives.len(), 9 + 14 + 5, "{natives:?}");
+    assert_eq!(natives.len(), 9 + 15 + 5, "{natives:?}");
     assert!(natives.contains(&"kestrel_window_open") && natives.contains(&"kestrel_draw_text_width") && natives.contains(&"kestrel_input_wheel"));
     assert!(natives.contains(&"kestrel_draw_load_texture") && natives.contains(&"kestrel_draw_texture_region"));
+    assert!(natives.contains(&"kestrel_draw_rects"));
 }
 
 #[test]

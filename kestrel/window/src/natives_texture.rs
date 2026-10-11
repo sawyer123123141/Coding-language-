@@ -16,6 +16,7 @@ use std::path::Path;
 use kestrel_runtime::panic::fail_at_call;
 
 use crate::abi::{elems, read, str_bytes, write, KColor, KRect, KSeq, KStr, KTexture, V2};
+use crate::bulk::span;
 use crate::gpu::{self, Object};
 use crate::headless::{self, Arg};
 use crate::image_file;
@@ -155,8 +156,7 @@ fn whole(width: i32, height: i32) -> KRect {
 /// - Mirroring is a negative source width or height, which raylib flips. The two mirrorings
 ///   cancel each other when a side is negative in both.
 pub(crate) fn place(pos: V2, size: V2, region: KRect) -> (rl::Rectangle, rl::Rectangle) {
-    let (x, width) = span(pos.x, size.x);
-    let (y, height) = span(pos.y, size.y);
+    let (corner, extent) = span(pos, size);
     let flip = |drawn: f32, read: f32| (drawn < 0.0) != (read < 0.0);
     let signed = |length: f32, flipped: bool| if flipped { -length.abs() } else { length.abs() };
     let source = rl::Rectangle {
@@ -165,16 +165,7 @@ pub(crate) fn place(pos: V2, size: V2, region: KRect) -> (rl::Rectangle, rl::Rec
         width: signed(region.size.x, flip(size.x, region.size.x)),
         height: signed(region.size.y, flip(size.y, region.size.y)),
     };
-    (source, rl::Rectangle { x, y, width, height })
-}
-
-/// The start and length of what `length` spans from `start`: a negative `length` reaches back.
-fn span(start: f32, length: f32) -> (f32, f32) {
-    if length < 0.0 {
-        (start + length, -length)
-    } else {
-        (start, length)
-    }
+    (source, rl::Rectangle { x: corner.x, y: corner.y, width: extent.x, height: extent.y })
 }
 
 /// `draw.load_texture` for the file `resolved`, which `path` (as the program wrote it) stands for.

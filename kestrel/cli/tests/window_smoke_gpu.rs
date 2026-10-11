@@ -1,4 +1,4 @@
-//! The real-window tests for textures, sprites and (in later tasks) bulk rectangles and 3D:
+//! The real-window tests for textures, sprites, bulk rectangles and (in later tasks) 3D:
 //! draw on the GPU, take a screenshot and check its pixels, under both `kestrel run` (the JIT)
 //! and `kestrel build` (an exe). The shared machinery is in `common/smoke.rs`; the shapes and
 //! text are in `window_smoke.rs`.
@@ -11,7 +11,7 @@
 
 mod common;
 
-use common::smoke::{smoke, Case, How, BLACK, BLUE, GREEN, RED, WHITE};
+use common::smoke::{smoke, Case, How, BLACK, BLUE, GREEN, RED, WHITE, YELLOW};
 
 /// Both ways of making a texture and all three ways of drawing one, in a 64 by 64 window:
 ///
@@ -122,4 +122,79 @@ fn a_folder_with_a_non_ascii_name_works_under_the_jit() {
 #[test]
 fn a_folder_with_a_non_ascii_name_works_in_an_exe() {
     smoke(How::Exe, &TEXTURES_ACCENTED);
+}
+
+/// `draw.rects` and negative-size rectangles, in a 64 by 64 window on black:
+///
+/// - 50 red 2 by 2 dots from one `draw.rects` call, in five rows of ten, 4 pixels apart, from
+///   (0, 40) to (38, 58);
+/// - a green square drawn before the dots where dot 25 goes, which the dots must cover;
+/// - a one-dot `draw.rects` with a negative size before them, which spans back from its position.
+///   It is small, so the 50 dots that follow make the mesh grow;
+/// - a blue square over dot 9 and a white square drawn after the dots, which must be on top and
+///   keep their own colours (the 2D batch still works after the mesh draw);
+/// - a `draw.rect` and a `draw.rect_outline` with negative sizes.
+const RECTS: Case = Case {
+    name: "rects",
+    program: r#"use window
+use draw
+
+main() {
+    window.open(64, 64, "rects")
+    // Dot i is at (4 * (i % 10), 40 + 4 * (i / 10)).
+    var dots = list[vec2]()
+    for i from 0 to 50 {
+        dots.add(vec2(float(4 * (i % 10)), float(40 + 4 * (i / 10))))
+    }
+    var n = 0
+    while window.frame() {
+        n += 1
+        draw.clear(draw.BLACK)
+        draw.rect(vec2(20, 48), vec2(2, 2), draw.GREEN)
+        draw.rects([vec2(50, 30)], vec2(-4, -4), draw.BLUE)
+        draw.rects(dots, vec2(2, 2), draw.RED)
+        draw.rect(vec2(36, 40), vec2(2, 2), draw.BLUE)
+        draw.rect(vec2(48, 4), vec2(8, 8), draw.WHITE)
+        // Negative sizes: the square covers (20, 20) to (30, 30), the outline (2, 2) to (14, 14).
+        draw.rect(vec2(30, 30), vec2(-10, -10), draw.YELLOW)
+        draw.rect_outline(vec2(14, 14), vec2(-12, -12), 2, draw.WHITE)
+        if n == 3 {
+            window.screenshot("SHOT_PATH")
+            window.close()
+        }
+    }
+    print("frames", n)
+}
+"#,
+    stdout: "frames 3\n",
+    size: (64, 64),
+    pixels: &[
+        (1, 41, RED, "inside dot 0, the first"),
+        (37, 57, RED, "inside dot 49, the last"),
+        (2, 41, BLACK, "just right of dot 0"),
+        (1, 42, BLACK, "just below dot 0"),
+        (21, 49, RED, "dot 25, which covers the green square drawn before the dots"),
+        (48, 28, BLUE, "the one-dot draw.rects with size (-4, -4) at (50, 30)"),
+        (50, 28, BLACK, "at its position's column, which a negative size doesn't reach"),
+        (37, 41, BLUE, "the blue square drawn after the dots, over dot 9"),
+        (52, 8, WHITE, "the white square drawn after the dots, not tinted by them"),
+        (25, 25, YELLOW, "the square with size (-10, -10) at (30, 30)"),
+        (21, 21, YELLOW, "near its top-left corner, (20, 20)"),
+        (31, 31, BLACK, "past (30, 30), which a negative size doesn't reach"),
+        (3, 8, WHITE, "the left border of the outline with size (-12, -12) at (14, 14)"),
+        (12, 8, WHITE, "its right border"),
+        (8, 8, BLACK, "inside the outline"),
+    ],
+    inked: &[],
+    assets: &[],
+};
+
+#[test]
+fn bulk_and_negative_size_rectangles_draw_under_the_jit() {
+    smoke(How::Jit, &RECTS);
+}
+
+#[test]
+fn bulk_and_negative_size_rectangles_draw_in_an_exe() {
+    smoke(How::Exe, &RECTS);
 }

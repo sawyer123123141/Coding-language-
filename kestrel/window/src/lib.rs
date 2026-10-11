@@ -7,10 +7,12 @@
 // this crate's staticlib.
 pub use kestrel_runtime;
 mod abi;
+mod bulk;
 pub mod gpu;
 mod headless;
 mod image_file;
 mod keys;
+mod material;
 mod natives_draw;
 mod natives_input;
 mod natives_texture;
@@ -54,6 +56,7 @@ pub fn symbols() -> Vec<(&'static str, *const u8)> {
         kestrel_draw_clear,
         kestrel_draw_rect,
         kestrel_draw_rect_outline,
+        kestrel_draw_rects,
         kestrel_draw_circle,
         kestrel_draw_circle_outline,
         kestrel_draw_line,

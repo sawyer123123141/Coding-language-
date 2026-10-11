@@ -5,7 +5,8 @@
 //! that the window is open first, then either prints its line (headless) or
 //! draws with raylib.
 
-use crate::abi::{c_string, read, str_bytes, KColor, KStr, V2};
+use crate::abi::{c_string, elems, read, str_bytes, KColor, KSeq, KStr, V2};
+use crate::bulk::{self, span};
 use crate::headless::{self, Arg};
 use crate::raylib as rl;
 use crate::state::{self, Mode};
@@ -32,16 +33,23 @@ pub unsafe extern "C" fn kestrel_draw_clear(c: *const KColor) {
     draw("draw.clear", &[Arg::Color(c)], || unsafe { rl::ClearBackground(c.to_raylib()) });
 }
 
+/// A negative width or height covers the rectangle the size spans back from `pos` (`bulk::span`).
+/// The headless line shows the size as given.
+///
 /// # Safety
 /// `pos` and `size` must point to live `vec2`s, `c` to a live `Color`.
 #[no_mangle]
 pub unsafe extern "C" fn kestrel_draw_rect(pos: *const V2, size: *const V2, c: *const KColor) {
     let (pos, size, c) = (read(pos), read(size), read(c));
     let args = [Arg::Vec2(pos), Arg::Vec2(size), Arg::Color(c)];
-    draw("draw.rect", &args, || unsafe { rl::DrawRectangleV(pos.to_raylib(), size.to_raylib(), c.to_raylib()) });
+    draw("draw.rect", &args, || {
+        let (corner, size) = span(pos, size);
+        unsafe { rl::DrawRectangleV(corner.to_raylib(), size.to_raylib(), c.to_raylib()) }
+    });
 }
 
-/// The border is drawn inside the rectangle, `width` thick.
+/// The border is drawn inside the rectangle, `width` thick. A negative size spans back from
+/// `pos`, as for `rect`.
 ///
 /// # Safety
 /// `pos` and `size` must point to live `vec2`s, `c` to a live `Color`.
@@ -49,10 +57,25 @@ pub unsafe extern "C" fn kestrel_draw_rect(pos: *const V2, size: *const V2, c: *
 pub unsafe extern "C" fn kestrel_draw_rect_outline(pos: *const V2, size: *const V2, width: f32, c: *const KColor) {
     let (pos, size, c) = (read(pos), read(size), read(c));
     let args = [Arg::Vec2(pos), Arg::Vec2(size), Arg::Float(width), Arg::Color(c)];
-    draw("draw.rect_outline", &args, || unsafe {
-        let rec = rl::Rectangle { x: pos.x, y: pos.y, width: size.x, height: size.y };
-        rl::DrawRectangleLinesEx(rec, width, c.to_raylib());
+    draw("draw.rect_outline", &args, || {
+        let (corner, size) = span(pos, size);
+        let rec = rl::Rectangle { x: corner.x, y: corner.y, width: size.x, height: size.y };
+        unsafe { rl::DrawRectangleLinesEx(rec, width, c.to_raylib()) }
     });
+}
+
+/// One rectangle of `size` at each of `positions`, in order, all in `c`: what a `rect` for each
+/// would draw, in one GPU draw call (`bulk.rs`). The headless line shows the positions' count.
+///
+/// # Safety
+/// `positions` must point to a live array or list header of `vec2`s, `size` to a live `vec2`,
+/// `c` to a live `Color`.
+#[no_mangle]
+pub unsafe extern "C" fn kestrel_draw_rects(positions: *const KSeq, size: *const V2, c: *const KColor) {
+    let (positions, size, c) = (elems::<V2>(positions), read(size), read(c));
+    let args = [Arg::Count(positions.len() as i64), Arg::Vec2(size), Arg::Color(c)];
+    // SAFETY: as for every block here; and every drawing native draws in 2D.
+    draw("draw.rects", &args, || unsafe { bulk::draw(positions, size, c.to_raylib()) });
 }
 
 /// # Safety

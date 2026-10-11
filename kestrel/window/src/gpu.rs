@@ -86,13 +86,19 @@ pub fn drain(real: bool) {
 }
 
 /// When the window closes: frees every object (raylib unloads only when `real`, before
-/// `CloseWindow`), then forgets them.
+/// `CloseWindow`), then forgets them. A real window also frees its own GPU objects, which no
+/// Kestrel value holds: the `draw.rects` mesh and the default material.
 pub fn close_all(real: bool) {
     let all = REGISTRY.take();
     // Their queued drops (if any) have nothing left to free.
     queue().retain(|id| !all.contains_key(id));
     for object in all.into_values() {
         free(object, real);
+    }
+    if real {
+        // SAFETY: the window's thread, with its window still open (`close_all` runs before `CloseWindow`).
+        unsafe { crate::bulk::close() };
+        crate::material::close();
     }
 }
 
@@ -125,7 +131,7 @@ fn free(object: Object, real: bool) {
 }
 
 /// `mesh` without the CPU arrays: the ones `UnloadMesh` would `free` that raylib didn't allocate.
-fn without_cpu_pointers(mesh: rl::Mesh) -> rl::Mesh {
+pub(crate) fn without_cpu_pointers(mesh: rl::Mesh) -> rl::Mesh {
     rl::Mesh {
         vertices: std::ptr::null_mut(),
         texcoords: std::ptr::null_mut(),

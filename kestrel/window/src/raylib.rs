@@ -80,6 +80,55 @@ pub struct Mesh {
     pub vbo_id: *mut c_uint,
 }
 
+/// `Matrix`: four by four floats, stored row by row as raylib names them (`m0, m4, m8, m12` is
+/// the first row), which OpenGL reads as column-major.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Matrix {
+    pub m0: f32,
+    pub m4: f32,
+    pub m8: f32,
+    pub m12: f32,
+    pub m1: f32,
+    pub m5: f32,
+    pub m9: f32,
+    pub m13: f32,
+    pub m2: f32,
+    pub m6: f32,
+    pub m10: f32,
+    pub m14: f32,
+    pub m3: f32,
+    pub m7: f32,
+    pub m11: f32,
+    pub m15: f32,
+}
+
+/// `Shader`: a GPU program and its uniform locations (`RL_MAX_SHADER_LOCATIONS` of them).
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct Shader {
+    pub id: c_uint,
+    pub locs: *mut c_int,
+}
+
+/// `MaterialMap`: one of a material's maps: a texture, a colour and a value.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct MaterialMap {
+    pub texture: Texture,
+    pub color: Color,
+    pub value: f32,
+}
+
+/// `Material`: a shader and its maps (`MAX_MATERIAL_MAPS` of them, allocated by raylib).
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct Material {
+    pub shader: Shader,
+    pub maps: *mut MaterialMap,
+    pub params: [f32; 4],
+}
+
 /// `Font`: a glyph atlas. It is only passed back to raylib, so the two
 /// pointers (`Rectangle *recs`, `GlyphInfo *glyphs`) are never read here.
 #[repr(C)]
@@ -113,6 +162,13 @@ pub const TEXTURE_WRAP_REPEAT: c_int = 0;
 
 /// `KeyboardKey::KEY_NULL`: no key.
 pub const KEY_NULL: c_int = 0;
+
+/// `MaterialMapIndex::MATERIAL_MAP_DIFFUSE` (`MATERIAL_MAP_ALBEDO`), as an index into `Material::maps`.
+pub const MATERIAL_MAP_DIFFUSE: usize = 0;
+
+/// `RL_DEFAULT_SHADER_ATTRIB_LOCATION_POSITION` (rlgl.h): the vertex buffer of a mesh that holds
+/// its positions, as `UpdateMeshBuffer`'s `index`.
+pub const MESH_BUFFER_POSITIONS: c_int = 0;
 
 extern "C" {
     // Window and frame loop (rcore.c).
@@ -184,11 +240,39 @@ extern "C" {
     pub fn DrawTexturePro(texture: Texture, source: Rectangle, dest: Rectangle, origin: Vector2, rotation: f32, tint: Color);
 
     // Models (rmodels.c).
+    /// Makes the mesh's vertex array and buffers, sized by `vertexCount`, from its CPU arrays. A
+    /// null array that the shader needs (colours, texture coordinates) gets a fixed value instead.
+    pub fn UploadMesh(mesh: *mut Mesh, dynamic: bool);
+    /// Writes `data_size` bytes of `data` into the mesh's vertex buffer `index`, at byte `offset`.
+    pub fn UpdateMeshBuffer(mesh: Mesh, index: c_int, data: *const c_void, data_size: c_int, offset: c_int);
     pub fn UnloadMesh(mesh: Mesh);
+    pub fn DrawMesh(mesh: Mesh, material: Material, transform: Matrix);
+    /// raylib's default shader and texture (both raylib's own), with `maps` allocated for this material.
+    pub fn LoadMaterialDefault() -> Material;
 
     // Memory (rcore.c): frees what raylib allocated and handed over.
     pub fn MemFree(ptr: *mut c_void);
 
     // rlgl.h: flush the batch of shapes drawn so far.
     pub fn rlDrawRenderBatchActive();
+    pub fn rlEnableBackfaceCulling();
+    pub fn rlDisableBackfaceCulling();
+}
+
+#[cfg(all(test, target_pointer_width = "64"))]
+mod tests {
+    use std::mem::{align_of, offset_of, size_of};
+
+    use super::*;
+
+    /// The structs `raylib.h` passes to the mesh functions, on a 64-bit target.
+    #[test]
+    fn the_material_layouts_are_raylibs() {
+        assert_eq!((size_of::<Matrix>(), align_of::<Matrix>()), (64, 4));
+        assert_eq!((offset_of!(Matrix, m4), offset_of!(Matrix, m1), offset_of!(Matrix, m15)), (4, 16, 60));
+        assert_eq!((size_of::<Shader>(), offset_of!(Shader, locs)), (16, 8));
+        assert_eq!(size_of::<Texture>(), 20);
+        assert_eq!((size_of::<MaterialMap>(), offset_of!(MaterialMap, color), offset_of!(MaterialMap, value)), (28, 20, 24));
+        assert_eq!((size_of::<Material>(), offset_of!(Material, maps), offset_of!(Material, params)), (40, 16, 24));
+    }
 }

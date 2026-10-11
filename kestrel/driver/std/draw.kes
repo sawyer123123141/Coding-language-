@@ -31,8 +31,12 @@ pub struct Texture {
 }
 
 pub native clear(color: Color)
+// A negative width or height reaches back from pos (in rect, rect_outline and rects).
 pub native rect(pos: vec2, size: vec2, color: Color)
 pub native rect_outline(pos: vec2, size: vec2, width: float, color: Color)
+// One rectangle of this size at each position, in order: what a rect call for each would draw,
+// but in one GPU draw call, which is much faster when there are thousands. A list[vec2] works too.
+pub native rects(positions: [vec2], size: vec2, color: Color)
 pub native circle(center: vec2, radius: float, color: Color)
 pub native circle_outline(center: vec2, radius: float, width: float, color: Color)
 pub native line(a: vec2, b: vec2, width: float, color: Color)

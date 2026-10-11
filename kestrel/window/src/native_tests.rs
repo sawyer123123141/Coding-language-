@@ -11,6 +11,7 @@ use crate::natives_window::*;
 use crate::state::Settings;
 use crate::symbols;
 
+mod rects;
 mod texture;
 
 fn kstr(s: &str) -> KStr {
@@ -200,11 +201,11 @@ fn closing_prints_and_ends_the_frame_loop() {
 #[test]
 fn symbols_are_complete() {
     let table = symbols();
-    assert_eq!(table.len(), 28);
+    assert_eq!(table.len(), 29);
     let names: HashSet<&str> = table.iter().map(|&(name, _)| name).collect();
-    assert_eq!(names.len(), 28, "names are distinct");
+    assert_eq!(names.len(), 29, "names are distinct");
     let addresses: HashSet<usize> = table.iter().map(|&(_, address)| address as usize).collect();
-    assert_eq!(addresses.len(), 28, "each name has its own function");
+    assert_eq!(addresses.len(), 29, "each name has its own function");
     for &(name, address) in &table {
         assert!(
             name.starts_with("kestrel_window_") || name.starts_with("kestrel_draw_") || name.starts_with("kestrel_input_"),
@@ -231,6 +232,6 @@ fn symbols_cover_every_native_the_modules_declare() {
         }
     }
     let provided: HashSet<String> = symbols().iter().map(|&(name, _)| name.to_string()).collect();
-    assert_eq!(declared.len(), 28);
+    assert_eq!(declared.len(), 29);
     assert_eq!(provided, declared);
 }
