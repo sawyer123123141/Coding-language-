@@ -38,103 +38,27 @@ fn run_beside(name: &str, modules: &[&str], main: &str) -> String {
     stdout.into_owned()
 }
 
-/// One solid block makes six faces, wound and coloured right; the bands meet where they should;
-/// and the whole 8x4x8 world has the benchmark's 463,749 faces.
-const WORLD_CHECK: &str = r#"use { chunk_mesh, mesh_of, band, shaded, PAD, LAYERS, STONE, DIRT, GRASS, SNOW from world }
-use { Color from draw }
-
-struct Count {
-    x: int
-    y: int
-    z: int
-    faces: int = 0
-    vertices: int = 0
-    colors: int = 0
-    uvs: int = 0
-    indices: int = 0
-
-    pure measure(var self) {
-        arena {
-            let m = chunk_mesh(self.x, self.y, self.z, 1337)
-            self.faces = m.indices.len / 6
-            self.vertices = m.vertices.len
-            self.colors = m.colors.len
-            self.uvs = m.uvs.len
-            self.indices = m.indices.len
-        }
-    }
-}
-
-pure near(a: Color, b: Color) -> bool {
-    abs(a.r - b.r) < 0.000001 and abs(a.g - b.g) < 0.000001 and abs(a.b - b.b) < 0.000001 and a.a == b.a
-}
-
-main() {
-    // One solid block at (5, 6, 7) in chunk (0, 0, 0).
-    var solid = array[u8](PAD * PAD * PAD)
-    solid[((6 + 1) * PAD + 7 + 1) * PAD + 5 + 1] = 1
-    let m = mesh_of(solid, 0, 0, 0)
-    print("block", m.vertices.len, m.colors.len, m.uvs.len, m.indices.len)
-    // The faces come in the mesher's order: +x, -x, +y, -y, +z, -z.
-    let outward = [vec3(1, 0, 0), vec3(-1, 0, 0), vec3(0, 1, 0), vec3(0, -1, 0), vec3(0, 0, 1), vec3(0, 0, -1)]
-    let light = [0.8, 0.8, 1.0, 0.5, 0.7, 0.7]
-    for f, out in outward {
-        // The face's first triangle as the indices draw it (a face is six indices, a b c a c d).
-        let a = m.vertices[m.indices[f * 6]]
-        let b = m.vertices[m.indices[f * 6 + 1]]
-        let c = m.vertices[m.indices[f * 6 + 2]]
-        // Clockwise seen from outside, so the right-hand normal of a b c points in.
-        let inward = (b - a).cross(c - a).dot(out) < 0.0
-        print("face", f, inward, near(m.colors[m.indices[f * 6]], shaded(STONE, light[f])))
-    }
-    print("shaded", near(shaded(Color(1, 0.5, 0.25), 0.5), Color(0.5, 0.25, 0.125)))
-    print("bands", near(band(0), STONE), near(band(47), STONE), near(band(48), DIRT), near(band(63), DIRT), near(band(64), GRASS), near(band(87), GRASS), near(band(88), SNOW), near(band(127), SNOW))
-
-    // The same block in chunk (1, 2, 3): its +x face starts at the block's world position plus
-    // (1, 0, 0), which is (32 + 5 + 1, 64 + 6, 96 + 7), and world height 70 is in the grass band.
-    let far = mesh_of(solid, 1, 2, 3)
-    var grass = true
-    for f from 0 to 6 {
-        grass = grass and near(far.colors[far.indices[f * 6]], shaded(GRASS, light[f]))
-    }
-    print("far", far.vertices[far.indices[0]], grass)
-
-    var counts = list[Count]()
-    for cx from 0 to 8 {
-        for cy from 0 to LAYERS {
-            for cz from 0 to 8 {
-                counts.add(Count(x: cx, y: cy, z: cz))
-            }
-        }
-    }
-    par for c in counts {
-        c.measure()
-    }
-    var faces = 0
-    var vertices = 0
-    var colors = 0
-    var uvs = 0
-    var indices = 0
-    for c in counts {
-        faces += c.faces
-        vertices += c.vertices
-        colors += c.colors
-        uvs += c.uvs
-        indices += c.indices
-    }
-    print("world", faces, vertices, colors, uvs, indices)
-}
-"#;
+/// One solid block makes six faces, wound and coloured right; blocks are coloured by their depth
+/// (grass, dirt, stone, snow on the peaks) with a little variation each; face corners are darkened
+/// by the blocks next to them, and the quad is cut along the diagonal that keeps that smooth; and
+/// the whole 8x4x8 world has the benchmark's 463,749 faces. The program is long, so it is a file
+/// of its own (`voxels/world_check.kes`, beside this one), which cargo doesn't treat as a test.
+const WORLD_CHECK: &str = include_str!("voxels/world_check.kes");
 
 #[test]
 fn the_world_makes_the_benchmarks_faces_wound_and_coloured_right() {
     let out = run_beside("world", &["world.kes"], WORLD_CHECK);
     let mut expected = String::from("block 24 24 0 36\n");
     for f in 0..6 {
-        expected += &format!("face {f} true true\n");
+        expected += &format!("face {f} true true [0, 1, 2, 0, 2, 3]\n");
     }
     expected += "shaded true\n";
-    expected += "bands true true true true true true true true\n";
+    expected += "layers true true true true true true true true\n";
+    expected += "variation true true true\n";
+    expected += "depth [true, true, true, true, true]\n";
+    expected += "snow true true\n";
+    expected += "ao true true true true [0, 1, 2, 0, 2, 3]\n";
+    expected += "flip true true [1, 2, 3, 1, 3, 0] true\n";
     expected += "far vec3(x: 38, y: 70, z: 103) true\n";
     expected += "world 463749 1854996 1854996 0 2782494\n";
     assert_eq!(out, expected);

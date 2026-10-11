@@ -1,8 +1,10 @@
 // The voxel world of bench/voxels3d, for the viewer: chunks of 32x32x32
 // blocks, stacked 4 high. Density is 3D value noise in three octaves, so
 // there are hills, caves and overhangs. Each chunk's mesh gets a face for
-// every side of a solid block that touches air, coloured by its height and
-// shaded by the way it faces (there is no lighting, as in early Minecraft).
+// every side of a solid block that touches air. A block is coloured by how
+// deep it is (grass on top, dirt under it, then stone; snow on the peaks),
+// and each face corner is shaded by the way the face looks and by the blocks
+// around the corner (there is no lighting, as in early Minecraft).
 //
 // A chunk's mesh is a `MeshData`: lists of vertices, colours and indices, like
 // the arrays you fill an `ArrayMesh` with (or what a `SurfaceTool` collects) in
@@ -10,7 +12,9 @@
 // `pure`, so a `par for` can call them: voxels.kes builds all the chunks at once.
 //
 // The benchmark keeps its own copy of this code: it is the reference for
-// the C# comparison, so it doesn't change when the demo does.
+// the C# comparison, so it doesn't change when the demo does. The shape of the
+// world and its faces are the same in both; the colours differ, and so does the
+// diagonal some quads are cut along.
 use { Color from draw }
 use { MeshData from draw3d }
 
@@ -19,17 +23,42 @@ pub let PAD = SIZE + 2       // solid flags include a one-block border
 pub let LAYERS = 4           // chunks stacked vertically
 pub let HEIGHT = LAYERS * SIZE
 
-// The height bands, bottom to top.
+// How deep the soil is: the top block of a column and the dirt under it, 3
+// blocks, with rock below. A block looks this far up to find out how deep it
+// is, so the solid flags hold that many rows above the chunk (the border row
+// and DIRT_DEPTH - 1 more): ROWS rows in all.
+pub let DIRT_DEPTH = 3
+pub let ROWS = PAD + DIRT_DEPTH - 1
+
+// Steps between neighbouring blocks in the solid flags.
+let STEP_X = 1
+let STEP_Y = PAD * PAD
+let STEP_Z = PAD
+
+// The block colours.
 pub let STONE = Color(0.52, 0.52, 0.55)
 pub let DIRT = Color(0.47, 0.34, 0.22)
 pub let GRASS = Color(0.33, 0.62, 0.27)
 pub let SNOW = Color(0.93, 0.95, 0.97)
+
+// Top blocks from this world height up are snow (88 of the 128).
+pub let SNOW_LINE = HEIGHT * 11 / 16
 
 // How bright each side of a block is: the top brightest, the bottom darkest.
 let TOP = 1.0
 let SIDE_X = 0.8
 let SIDE_Z = 0.7
 let BOTTOM = 0.5
+
+// How bright a face corner is: NOOK + OCCLUDED * its ambient occlusion (see
+// `occlusion`), so 1 with no solid block touching it, 0.85 and 0.7 with one or
+// two, and 0.55 in a nook.
+let NOOK = 0.55
+let OCCLUDED = 0.15
+
+// The colour variation's own seed, not the world's, so the variation doesn't
+// follow the terrain.
+let VARIATION_SEED = 7919
 
 pure hash(x: int, y: int, z: int, seed: int) -> int {
     var h = i64(x) * 73856093 ^ i64(y) * 19349663 ^ i64(z) * 83492791 ^ i64(seed) * 1610612741
@@ -75,19 +104,25 @@ pure density(x: int, y: int, z: int, seed: int) -> float {
     n - 0.5 - float(y - HEIGHT / 2) / float(HEIGHT * 2)
 }
 
-// The colour of a block at world height y: stone low down (0-47), then dirt
-// (48-63), grass (64-87), and snow on the peaks (88 and up). The limits are
-// fractions of HEIGHT, so these block numbers are for a HEIGHT of 128.
-pub pure band(y: int) -> Color {
-    if y < HEIGHT * 3 / 8 {
-        STONE
-    } else if y < HEIGHT / 2 {
+// The colour of a block `depth` blocks down from the top of its column (0 is
+// the top block, with air right above it), at world height y. The top block is
+// grass, or snow from the snow line up; the DIRT_DEPTH - 1 blocks under it are
+// dirt, or stone under snow, so peaks are snow on rock; deeper is stone. So a
+// cliff shows grass on its edge, a band of dirt, then rock, as in Minecraft.
+pub pure layer(depth: int, y: int) -> Color {
+    if depth == 0 {
+        if y >= SNOW_LINE { SNOW } else { GRASS }
+    } else if depth < DIRT_DEPTH and y + depth < SNOW_LINE {
         DIRT
-    } else if y < HEIGHT * 11 / 16 {
-        GRASS
     } else {
-        SNOW
+        STONE
     }
+}
+
+// A brightness of 0.97 to 1.03 for world block (x, y, z), the same for all its
+// faces, so flat ground isn't one flat colour.
+pub pure variation(x: int, y: int, z: int) -> float {
+    1.0 + 0.06 * (lattice(x, y, z, VARIATION_SEED) - 0.5)
 }
 
 // `c` at brightness `light` (1 leaves it as it is).
@@ -96,11 +131,12 @@ pub pure shaded(c: Color, light: float) -> Color {
 }
 
 // Solid flags (1 or 0) for chunk (cx, cy, cz) plus a one-block border, so
-// the mesher can see the neighbouring chunks' blocks.
+// the mesher can see the neighbouring chunks' blocks, and DIRT_DEPTH - 1 more
+// rows on top, so the top blocks can see how deep they are.
 pub pure solids(cx: int, cy: int, cz: int, seed: int) -> [u8] {
-    var out = array[u8](PAD * PAD * PAD)
+    var out = array[u8](PAD * PAD * ROWS)
     var i = 0
-    for y from 0 to PAD {
+    for y from 0 to ROWS {
         for z from 0 to PAD {
             for x from 0 to PAD {
                 if density(cx * SIZE + x - 1, cy * SIZE + y - 1, cz * SIZE + z - 1, seed) > 0.0 {
@@ -113,45 +149,129 @@ pub pure solids(cx: int, cy: int, cz: int, seed: int) -> [u8] {
     out
 }
 
+// How many solid blocks are right above the block at `i`, counting up to DIRT_DEPTH.
+pure depth_at(solid: [u8], i: int) -> int {
+    var n = 0
+    while n < DIRT_DEPTH and solid[i + (n + 1) * STEP_Y] == 1 {
+        n += 1
+    }
+    n
+}
+
+// Whether the solid block at `i` touches air, so it has a face.
+pure exposed(solid: [u8], i: int) -> bool {
+    solid[i + STEP_X] == 0 or solid[i - STEP_X] == 0 or solid[i + STEP_Y] == 0 or
+        solid[i - STEP_Y] == 0 or solid[i + STEP_Z] == 0 or solid[i - STEP_Z] == 0
+}
+
+// The ambient occlusion of a face corner, the classic voxel kind: 3 when no
+// solid block touches it, down to 0 in a nook. `front` is the air block the face
+// looks into, and `su` and `sv` step from it along the face toward the corner.
+// The three blocks beside the corner in that layer are the two sides and the
+// one between them; with both sides solid, the corner is a nook whatever the third is.
+pure occlusion(solid: [u8], front: int, su: int, sv: int) -> int {
+    let side1 = int(solid[front + su])
+    let side2 = int(solid[front + sv])
+    if side1 == 1 and side2 == 1 {
+        0
+    } else {
+        3 - side1 - side2 - int(solid[front + su + sv])
+    }
+}
+
+// The step in the solid flags for a move of one block along `v` (an axis, either way).
+pure step(v: vec3) -> int {
+    int(v.x) * STEP_X + int(v.y) * STEP_Y + int(v.z) * STEP_Z
+}
+
+// A chunk's mesh being built: MeshData plus a face whose corners get their own
+// colours, like a Godot SurfaceTool with a colour per vertex. (It is a struct
+// with a `var self` method because a pure function can't yet call a free
+// function that fills one of its locals.)
+struct Builder {
+    data: MeshData
+
+    // One block face: corners a, a + u, a + u + v and a + v, clockwise seen from
+    // outside, and `front` the air block it looks into. Each corner is `colour`
+    // darkened by its ambient occlusion. A quad is two triangles, and the colour is
+    // blended across each, so the cut decides how the shading runs: the quad is cut
+    // along the diagonal whose corners are brighter, which keeps a single dark
+    // corner a soft round shadow instead of a streak.
+    pure face(var self, solid: [u8], front: int, a: vec3, u: vec3, v: vec3, colour: Color) {
+        let su = step(u)
+        let sv = step(v)
+        let ao_a = occlusion(solid, front, -su, -sv)
+        let ao_b = occlusion(solid, front, su, -sv)
+        let ao_c = occlusion(solid, front, su, sv)
+        let ao_d = occlusion(solid, front, -su, sv)
+        let base = self.data.vertices.len
+        self.data.vertices.add(a)
+        self.data.vertices.add(a + u)
+        self.data.vertices.add(a + u + v)
+        self.data.vertices.add(a + v)
+        self.data.colors.add(shaded(colour, NOOK + OCCLUDED * ao_a))
+        self.data.colors.add(shaded(colour, NOOK + OCCLUDED * ao_b))
+        self.data.colors.add(shaded(colour, NOOK + OCCLUDED * ao_c))
+        self.data.colors.add(shaded(colour, NOOK + OCCLUDED * ao_d))
+        if ao_a + ao_c < ao_b + ao_d {
+            // Cut along b d: the triangles b c d and b d a, still clockwise.
+            self.data.indices.add(base + 1)
+            self.data.indices.add(base + 2)
+            self.data.indices.add(base + 3)
+            self.data.indices.add(base + 1)
+            self.data.indices.add(base + 3)
+            self.data.indices.add(base)
+        } else {
+            // Cut along a c: the triangles a b c and a c d, as MeshData.quad does.
+            self.data.indices.add(base)
+            self.data.indices.add(base + 1)
+            self.data.indices.add(base + 2)
+            self.data.indices.add(base)
+            self.data.indices.add(base + 2)
+            self.data.indices.add(base + 3)
+        }
+    }
+}
+
 // The mesh of chunk (cx, cy, cz) from its solid flags: a face for each
-// solid block side that touches air. The corners of each face go clockwise
-// seen from outside, Godot's front-face order.
+// solid block side that touches air, given as its first corner and its two
+// edges (see Builder.face). The corners of each face go clockwise seen from
+// outside, Godot's front-face order.
 pub pure mesh_of(solid: [u8], cx: int, cy: int, cz: int) -> MeshData {
-    var m = MeshData()
+    var b = Builder(data: MeshData())
     for y from 0 to SIZE {
-        let colour = band(cy * SIZE + y)
-        let top = shaded(colour, TOP)
-        let side_x = shaded(colour, SIDE_X)
-        let side_z = shaded(colour, SIDE_Z)
-        let bottom = shaded(colour, BOTTOM)
         for z from 0 to SIZE {
             for x from 0 to SIZE {
                 let i = ((y + 1) * PAD + z + 1) * PAD + x + 1
-                if solid[i] == 1 {
-                    let p = vec3(cx * SIZE + x, cy * SIZE + y, cz * SIZE + z)
-                    if solid[i + 1] == 0 {
-                        m.quad(p + vec3(1, 0, 0), p + vec3(1, 0, 1), p + vec3(1, 1, 1), p + vec3(1, 1, 0), side_x)
+                if solid[i] == 1 and exposed(solid, i) {
+                    let wx = cx * SIZE + x
+                    let wy = cy * SIZE + y
+                    let wz = cz * SIZE + z
+                    let p = vec3(wx, wy, wz)
+                    let colour = shaded(layer(depth_at(solid, i), wy), variation(wx, wy, wz))
+                    if solid[i + STEP_X] == 0 {
+                        b.face(solid, i + STEP_X, p + vec3(1, 0, 0), vec3(0, 0, 1), vec3(0, 1, 0), shaded(colour, SIDE_X))
                     }
-                    if solid[i - 1] == 0 {
-                        m.quad(p + vec3(0, 0, 1), p, p + vec3(0, 1, 0), p + vec3(0, 1, 1), side_x)
+                    if solid[i - STEP_X] == 0 {
+                        b.face(solid, i - STEP_X, p + vec3(0, 0, 1), vec3(0, 0, -1), vec3(0, 1, 0), shaded(colour, SIDE_X))
                     }
-                    if solid[i + PAD * PAD] == 0 {
-                        m.quad(p + vec3(0, 1, 0), p + vec3(1, 1, 0), p + vec3(1, 1, 1), p + vec3(0, 1, 1), top)
+                    if solid[i + STEP_Y] == 0 {
+                        b.face(solid, i + STEP_Y, p + vec3(0, 1, 0), vec3(1, 0, 0), vec3(0, 0, 1), shaded(colour, TOP))
                     }
-                    if solid[i - PAD * PAD] == 0 {
-                        m.quad(p, p + vec3(0, 0, 1), p + vec3(1, 0, 1), p + vec3(1, 0, 0), bottom)
+                    if solid[i - STEP_Y] == 0 {
+                        b.face(solid, i - STEP_Y, p, vec3(0, 0, 1), vec3(1, 0, 0), shaded(colour, BOTTOM))
                     }
-                    if solid[i + PAD] == 0 {
-                        m.quad(p + vec3(1, 0, 1), p + vec3(0, 0, 1), p + vec3(0, 1, 1), p + vec3(1, 1, 1), side_z)
+                    if solid[i + STEP_Z] == 0 {
+                        b.face(solid, i + STEP_Z, p + vec3(1, 0, 1), vec3(-1, 0, 0), vec3(0, 1, 0), shaded(colour, SIDE_Z))
                     }
-                    if solid[i - PAD] == 0 {
-                        m.quad(p, p + vec3(1, 0, 0), p + vec3(1, 1, 0), p + vec3(0, 1, 0), side_z)
+                    if solid[i - STEP_Z] == 0 {
+                        b.face(solid, i - STEP_Z, p, vec3(1, 0, 0), vec3(0, 1, 0), shaded(colour, SIDE_Z))
                     }
                 }
             }
         }
     }
-    m
+    b.data
 }
 
 // The mesh of chunk (cx, cy, cz) of the world made from `seed`.

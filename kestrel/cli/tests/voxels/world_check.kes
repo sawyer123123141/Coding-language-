@@ -1,0 +1,205 @@
+// The check of demos/voxels/world.kes that voxels_demo.rs runs next to a copy of it: faces,
+// winding, layers, colour variation, ambient occlusion and the diagonal flip, and the whole
+// world's face count. voxels_demo.rs holds what it must print.
+use { chunk_mesh, mesh_of, layer, variation, shaded, PAD, ROWS, LAYERS, STONE, DIRT, GRASS, SNOW from world }
+use { Color from draw }
+use { MeshData from draw3d }
+
+// One chunk's counts, filled in a par for.
+struct Count {
+    x: int
+    y: int
+    z: int
+    faces: int = 0
+    vertices: int = 0
+    colors: int = 0
+    uvs: int = 0
+    indices: int = 0
+
+    pure measure(var self) {
+        arena {
+            let m = chunk_mesh(self.x, self.y, self.z, 1337)
+            self.faces = m.indices.len / 6
+            self.vertices = m.vertices.len
+            self.colors = m.colors.len
+            self.uvs = m.uvs.len
+            self.indices = m.indices.len
+        }
+    }
+}
+
+pure near(a: Color, b: Color) -> bool {
+    abs(a.r - b.r) < 0.000001 and abs(a.g - b.g) < 0.000001 and abs(a.b - b.b) < 0.000001 and a.a == b.a
+}
+
+// The solid flags of a chunk with no blocks.
+pure empty() -> [u8] {
+    array[u8](PAD * PAD * ROWS)
+}
+
+// Where block (x, y, z) of the chunk is in its solid flags.
+pure at(x: int, y: int, z: int) -> int {
+    ((y + 1) * PAD + z + 1) * PAD + x + 1
+}
+
+// Whether both triangles of face f of m are clockwise seen from outside, where `out` points:
+// the right-hand normal of each then points in. A face is four vertices and six indices.
+pure wound(m: MeshData, f: int, out: vec3) -> bool {
+    var ok = true
+    for t from 0 to 2 {
+        let a = m.vertices[m.indices[f * 6 + t * 3]]
+        let b = m.vertices[m.indices[f * 6 + t * 3 + 1]]
+        let c = m.vertices[m.indices[f * 6 + t * 3 + 2]]
+        ok = ok and (b - a).cross(c - a).dot(out) < 0.0
+    }
+    ok
+}
+
+// Face f's six indices, counted from its first vertex: [0, 1, 2, 0, 2, 3] is the triangles
+// a b c and a c d, cut along a c; [1, 2, 3, 1, 3, 0] is b c d and b d a, cut along b d.
+pure cut(m: MeshData, f: int) -> [int] {
+    var out = array[int](6)
+    for k from 0 to 6 {
+        out[k] = m.indices[f * 6 + k] - f * 4
+    }
+    out
+}
+
+// The face of m whose first corner is at `corner`, or -1.
+pure face_at(m: MeshData, corner: vec3) -> int {
+    var found = -1
+    for f from 0 to m.vertices.len / 4 {
+        let v = m.vertices[f * 4]
+        if v.x == corner.x and v.y == corner.y and v.z == corner.z {
+            found = f
+        }
+    }
+    found
+}
+
+// Whether all four corners of face f of m are coloured `want`.
+pure all_corners(m: MeshData, f: int, want: Color) -> bool {
+    if f < 0 {
+        return false
+    }
+    var ok = true
+    for k from 0 to 4 {
+        ok = ok and near(m.colors[f * 4 + k], want)
+    }
+    ok
+}
+
+main() {
+    // One solid block at (5, 6, 7) in chunk (0, 0, 0), with air all round.
+    var solid = empty()
+    solid[at(5, 6, 7)] = 1
+    let m = mesh_of(solid, 0, 0, 0)
+    print("block", m.vertices.len, m.colors.len, m.uvs.len, m.indices.len)
+    // The faces come in the mesher's order: +x, -x, +y, -y, +z, -z.
+    let outward = [vec3(1, 0, 0), vec3(-1, 0, 0), vec3(0, 1, 0), vec3(0, -1, 0), vec3(0, 0, 1), vec3(0, 0, -1)]
+    let light = [0.8, 0.8, 1.0, 0.5, 0.7, 0.7]
+    let lone = variation(5, 6, 7)
+    for f, out in outward {
+        // Air above it and below the snow line, so it is grass. With no blocks next to it every
+        // corner is at full brightness, so each face is cut a b c, a c d.
+        print("face", f, wound(m, f, out), all_corners(m, f, shaded(GRASS, light[f] * lone)), cut(m, f))
+    }
+    print("shaded", near(shaded(Color(1, 0.5, 0.25), 0.5), Color(0.5, 0.25, 0.125)))
+
+    // The layers: the top block of a column is grass, snow from height 88 up; the next two are dirt,
+    // or stone where the top is snow; deeper is stone.
+    print("layers", near(layer(0, 87), GRASS), near(layer(0, 88), SNOW), near(layer(1, 50), DIRT), near(layer(2, 50), DIRT), near(layer(3, 50), STONE), near(layer(1, 86), DIRT), near(layer(1, 87), STONE), near(layer(2, 86), STONE))
+
+    // Each block's colour is scaled by up to 3% either way, differently from block to block.
+    var lo = 2.0
+    var hi = 0.0
+    for x from 0 to 20 {
+        for z from 0 to 20 {
+            lo = min(lo, variation(x, 64, z))
+            hi = max(hi, variation(x, 64, z))
+        }
+    }
+    print("variation", lo >= 0.97, hi <= 1.03, hi - lo > 0.04)
+
+    // A column of five blocks at x 5, z 7, y 2 to 6. Top down: grass (air above it), dirt (one and
+    // two blocks above it), stone (three, and more). Each +x face looks into air all round, so its
+    // corners are at full brightness: the layer's colour at 0.8, times the block's variation.
+    var column = empty()
+    for y from 2 to 7 {
+        column[at(5, y, 7)] = 1
+    }
+    let col = mesh_of(column, 0, 0, 0)
+    let layers = [GRASS, DIRT, DIRT, STONE, STONE]
+    var depth = array[bool](5)
+    for k from 0 to 5 {
+        let y = 6 - k
+        depth[k] = all_corners(col, face_at(col, vec3(6, y, 7)), shaded(layers[k], 0.8 * variation(5, y, 7)))
+    }
+    print("depth", depth)
+
+    // Two blocks at x 5, z 7 in chunk (0, 3, 0), at world heights 96 and 97, above the snow line. The
+    // top one's top face (its first corner at (5, 98, 7)) is snow; the one under it is rock, not
+    // dirt (its +x face starts at (6, 96, 7)).
+    var peak = empty()
+    peak[at(5, 0, 7)] = 1
+    peak[at(5, 1, 7)] = 1
+    let s = mesh_of(peak, 0, 3, 0)
+    print("snow", all_corners(s, face_at(s, vec3(5, 98, 7)), shaded(SNOW, variation(5, 97, 7))), all_corners(s, face_at(s, vec3(6, 96, 7)), shaded(STONE, 0.8 * variation(5, 96, 7))))
+
+    // Ambient occlusion: block A at (5, 6, 7) and block B at (5, 7, 8), one up and one along +z.
+    // A's top face is its third (vertices 8 to 11), with corners a b c d at (x-, z-), (x+, z-),
+    // (x+, z+) and (x-, z+). In the air layer above A, B is a side of corners c and d, so they have
+    // ao 2 (brightness 0.85), and a and b have nothing next to them (ao 3, full brightness). The
+    // diagonals' sums are equal (3 + 2 both ways), so the face is cut a b c, a c d.
+    var pair = empty()
+    pair[at(5, 6, 7)] = 1
+    pair[at(5, 7, 8)] = 1
+    let p = mesh_of(pair, 0, 0, 0)
+    let top = shaded(GRASS, variation(5, 6, 7))
+    print("ao", near(p.colors[8], top), near(p.colors[9], top), near(p.colors[10], shaded(top, 0.85)), near(p.colors[11], shaded(top, 0.85)), cut(p, 2))
+
+    // The diagonal flip: block A with one block at (4, 7, 6), diagonal to A's top corner a in the
+    // air layer above A. It is a's corner cell and none of b's, c's or d's cells (those are at x 5
+    // to 6 or z 7 to 8), so a has ao 3 - (0 + 0 + 1) = 2 and b, c and d have 3. a + c = 5 is less
+    // than b + d = 6, so the face is cut along b d, as b c d and b d a, still clockwise.
+    var corner = empty()
+    corner[at(5, 6, 7)] = 1
+    corner[at(4, 7, 6)] = 1
+    let q = mesh_of(corner, 0, 0, 0)
+    print("flip", near(q.colors[8], shaded(top, 0.85)), near(q.colors[10], top), cut(q, 2), wound(q, 2, vec3(0, 1, 0)))
+
+    // The lone block in chunk (1, 2, 3): its +x face starts at the block's world position plus
+    // (1, 0, 0), which is (32 + 5 + 1, 64 + 6, 96 + 7). World height 70 is below the snow line, so
+    // it is grass, with the variation of world block (37, 70, 103).
+    let far = mesh_of(solid, 1, 2, 3)
+    var grass = true
+    for f from 0 to 6 {
+        grass = grass and all_corners(far, f, shaded(GRASS, light[f] * variation(37, 70, 103)))
+    }
+    print("far", far.vertices[far.indices[0]], grass)
+
+    var counts = list[Count]()
+    for cx from 0 to 8 {
+        for cy from 0 to LAYERS {
+            for cz from 0 to 8 {
+                counts.add(Count(x: cx, y: cy, z: cz))
+            }
+        }
+    }
+    par for c in counts {
+        c.measure()
+    }
+    var faces = 0
+    var vertices = 0
+    var colors = 0
+    var uvs = 0
+    var indices = 0
+    for c in counts {
+        faces += c.faces
+        vertices += c.vertices
+        colors += c.colors
+        uvs += c.uvs
+        indices += c.indices
+    }
+    print("world", faces, vertices, colors, uvs, indices)
+}
