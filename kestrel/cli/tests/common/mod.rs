@@ -1,6 +1,8 @@
 //! Helpers shared by the CLI test binaries.
 #![allow(dead_code)]
 
+pub mod smoke;
+
 use std::ffi::{OsStr, OsString};
 use std::process::Command;
 

@@ -2,9 +2,11 @@
 //!
 //! A line is the qualified name (`draw.circle`), then each argument after a
 //! space, printed the way `print` prints it: numbers as Rust's `{}` does,
-//! a `vec2` as `vec2(x: 1, y: 2)`, a colour as `Color(r: 1, g: 0.3, b: 0.3, a: 1)`
-//! and a string in double quotes. The lines go through the runtime's print
-//! functions, so they stay in order with the program's own `print` output.
+//! a `vec2` as `vec2(x: 1, y: 2)`, a colour as `Color(r: 1, g: 0.3, b: 0.3, a: 1)`,
+//! a `Rect` as `Rect(pos: vec2(x: 0, y: 0), size: vec2(x: 4, y: 2))`, a `Texture` as
+//! `Texture(id: 1, width: 4, height: 4)`, an array as its length and a string in
+//! double quotes. The lines go through the runtime's print functions, so they stay
+//! in order with the program's own `print` output.
 //!
 //! With `KESTREL_HEADLESS_QUIET=1` no line is printed at all: a program that
 //! draws thousands of times a frame can run headless without flooding its output.
@@ -15,7 +17,7 @@ use kestrel_runtime::print::{
     kestrel_rt_print_f32, kestrel_rt_print_i64, kestrel_rt_print_newline, kestrel_rt_print_space, kestrel_rt_print_str,
 };
 
-use crate::abi::{KColor, V2};
+use crate::abi::{KColor, KRect, KTexture, V2};
 
 /// Frames per second the headless clock pretends to run at.
 pub const FPS: i32 = 60;
@@ -28,6 +30,10 @@ pub enum Arg<'a> {
     Str(&'a [u8]),
     Vec2(V2),
     Color(KColor),
+    /// An array argument: it prints as its length.
+    Count(i64),
+    Rect(KRect),
+    Texture(KTexture),
 }
 
 thread_local! {
@@ -58,6 +64,9 @@ pub fn line(name: &str, args: &[Arg]) {
             }
             Arg::Vec2(v) => vec2(v),
             Arg::Color(c) => color(c),
+            Arg::Count(n) => kestrel_rt_print_i64(n),
+            Arg::Rect(r) => rect(r),
+            Arg::Texture(t) => texture(t),
         }
     }
     kestrel_rt_print_newline();
@@ -76,6 +85,24 @@ fn field(label: &[u8], v: f32) {
 fn vec2(v: V2) {
     field(b"vec2(x: ", v.x);
     field(b", y: ", v.y);
+    text(b")");
+}
+
+fn rect(r: KRect) {
+    text(b"Rect(pos: ");
+    vec2(r.pos);
+    text(b", size: ");
+    vec2(r.size);
+    text(b")");
+}
+
+fn texture(t: KTexture) {
+    text(b"Texture(id: ");
+    kestrel_rt_print_i64(t.id);
+    text(b", width: ");
+    kestrel_rt_print_i64(i64::from(t.width));
+    text(b", height: ");
+    kestrel_rt_print_i64(i64::from(t.height));
     text(b")");
 }
 
@@ -127,6 +154,21 @@ mod tests {
              window.open 320 -1 \"hi\"\n\
              window.close\n\
              draw.text \"\" 0.016666668\n"
+        );
+    }
+
+    #[test]
+    fn texture_arguments_print_the_way_print_prints_them() {
+        let out = captured(|| {
+            let texture = KTexture { id: 3, width: 16, height: 8 };
+            let region = KRect { pos: V2 { x: 0.0, y: 2.5 }, size: V2 { x: -4.0, y: 4.0 } };
+            line("draw.texture_region", &[Arg::Texture(texture), Arg::Rect(region), Arg::Count(256)]);
+            line("draw.texture", &[Arg::Texture(KTexture { id: 0, width: 0, height: 0 })]);
+        });
+        assert_eq!(
+            out,
+            "draw.texture_region Texture(id: 3, width: 16, height: 8) Rect(pos: vec2(x: 0, y: 2.5), size: vec2(x: -4, y: 4)) 256\n\
+             draw.texture Texture(id: 0, width: 0, height: 0)\n"
         );
     }
 

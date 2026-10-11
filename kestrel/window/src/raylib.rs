@@ -102,6 +102,15 @@ pub const FLAG_WINDOW_HIDDEN: c_uint = 0x0000_0080;
 /// `TraceLogLevel::LOG_ERROR`.
 pub const LOG_ERROR: c_int = 5;
 
+/// `PixelFormat::PIXELFORMAT_UNCOMPRESSED_R8G8B8A8`: four bytes a pixel, red first.
+pub const PIXELFORMAT_UNCOMPRESSED_R8G8B8A8: c_int = 7;
+
+/// `TextureFilter::TEXTURE_FILTER_POINT`: no smoothing, so pixels stay crisp when scaled.
+pub const TEXTURE_FILTER_POINT: c_int = 0;
+
+/// `TextureWrap::TEXTURE_WRAP_REPEAT`: coordinates outside a texture repeat it.
+pub const TEXTURE_WRAP_REPEAT: c_int = 0;
+
 /// `KeyboardKey::KEY_NULL`: no key.
 pub const KEY_NULL: c_int = 0;
 
@@ -162,7 +171,11 @@ extern "C" {
     pub fn LoadImageFromScreen() -> Image;
     pub fn GetImageColor(image: Image, x: c_int, y: c_int) -> Color;
     pub fn UnloadImage(image: Image);
+    pub fn LoadTextureFromImage(image: Image) -> Texture;
     pub fn UnloadTexture(texture: Texture);
+    pub fn SetTextureFilter(texture: Texture, filter: c_int);
+    pub fn SetTextureWrap(texture: Texture, wrap: c_int);
+    pub fn DrawTexturePro(texture: Texture, source: Rectangle, dest: Rectangle, origin: Vector2, rotation: f32, tint: Color);
 
     // Models (rmodels.c).
     pub fn UnloadMesh(mesh: Mesh);

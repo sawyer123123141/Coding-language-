@@ -1,0 +1,10 @@
+// env: KESTREL_HEADLESS=1
+// expect-exit: 101
+// expect-stderr: draw.load_texture was called before window.open on line 8
+use draw
+
+main() {
+    // A texture lives on the GPU, so the window has to be open first.
+    let tex = draw.load_texture("checker.png")
+    print(tex.width)
+}

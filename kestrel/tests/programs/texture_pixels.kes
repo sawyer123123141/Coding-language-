@@ -1,0 +1,13 @@
+// env: KESTREL_HEADLESS=1
+// expect: window.open 64 64 "t"
+// expect-exit: 101
+// expect-stderr: draw.make_texture needs width × height pixels: 2 by 2 is 4, not 3 on line 11
+use window
+use draw
+
+main() {
+    window.open(64, 64, "t")
+    // Three pixels for a 2 by 2 texture.
+    let tex = draw.make_texture(2, 2, [draw.RED, draw.GREEN, draw.BLUE])
+    print(tex.width)
+}

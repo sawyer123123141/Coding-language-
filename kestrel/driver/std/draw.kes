@@ -17,6 +17,19 @@ pub let ORANGE = Color(1, 0.647059, 0)
 pub let PURPLE = Color(0.627451, 0.12549, 0.941176)
 pub let TRANSPARENT = Color(1, 1, 1, 0)
 
+// A rectangle: its top-left corner and its size (Godot's Rect2).
+pub struct Rect {
+    pos: vec2
+    size: vec2
+}
+
+// A texture on the GPU. It is freed when the value that holds it goes away.
+pub struct Texture {
+    id: GpuHandle
+    width: int
+    height: int
+}
+
 pub native clear(color: Color)
 pub native rect(pos: vec2, size: vec2, color: Color)
 pub native rect_outline(pos: vec2, size: vec2, width: float, color: Color)
@@ -26,3 +39,12 @@ pub native line(a: vec2, b: vec2, width: float, color: Color)
 pub native triangle(a: vec2, b: vec2, c: vec2, color: Color)
 pub native text(text: string, pos: vec2, size: float, color: Color)
 pub native text_width(text: string, size: float) -> float
+
+// Textures. A relative path means the program's folder, and the window has to be open first.
+// Pixels are given row by row from the top-left. A negative size mirrors the image, and the
+// tint multiplies its colours (WHITE leaves them alone).
+pub native load_texture(path: string) -> Texture
+pub native make_texture(width: int, height: int, pixels: [Color]) -> Texture
+pub native texture(tex: Texture, pos: vec2, tint: Color)
+pub native texture_rect(tex: Texture, pos: vec2, size: vec2, tint: Color)
+pub native texture_region(tex: Texture, region: Rect, pos: vec2, size: vec2, tint: Color)

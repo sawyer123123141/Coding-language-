@@ -1,0 +1,39 @@
+// env: KESTREL_HEADLESS=2
+// asset: assets/checker.png
+// expect: window.open 64 64 "textures"
+// expect: draw.load_texture "assets/checker.png"
+// expect: loaded 4 4
+// expect: draw.make_texture 2 1 2
+// expect: draw.make_texture 1 1 1
+// expect: draw.texture Texture(id: 1, width: 4, height: 4) vec2(x: 10, y: 40) Color(r: 1, g: 1, b: 1, a: 1)
+// expect: draw.texture_rect Texture(id: 2, width: 2, height: 1) vec2(x: 0, y: 0) vec2(x: 32, y: 16) Color(r: 1, g: 1, b: 1, a: 1)
+// expect: draw.texture_region Texture(id: 1, width: 4, height: 4) Rect(pos: vec2(x: 0, y: 0), size: vec2(x: 4, y: 2)) vec2(x: 64, y: 32) vec2(x: -32, y: 16) Color(r: 1, g: 1, b: 1, a: 1)
+// expect: draw.texture Texture(id: 3, width: 1, height: 1) vec2(x: 1, y: 1) Color(r: 1, g: 0, b: 0, a: 1)
+// expect: draw.make_texture 1 1 1
+// expect: draw.texture Texture(id: 1, width: 4, height: 4) vec2(x: 10, y: 40) Color(r: 1, g: 1, b: 1, a: 1)
+// expect: draw.texture_rect Texture(id: 2, width: 2, height: 1) vec2(x: 0, y: 0) vec2(x: 32, y: 16) Color(r: 1, g: 1, b: 1, a: 1)
+// expect: draw.texture_region Texture(id: 1, width: 4, height: 4) Rect(pos: vec2(x: 0, y: 0), size: vec2(x: 4, y: 2)) vec2(x: 64, y: 32) vec2(x: -32, y: 16) Color(r: 1, g: 1, b: 1, a: 1)
+// expect: draw.texture Texture(id: 4, width: 1, height: 1) vec2(x: 1, y: 1) Color(r: 1, g: 0, b: 0, a: 1)
+// expect: frames 2
+use window
+use draw
+use { Rect from draw }
+
+main() {
+    window.open(64, 64, "textures")
+    let checker = draw.load_texture("assets/checker.png")
+    print("loaded", checker.width, checker.height)
+    let pair = draw.make_texture(2, 1, [draw.RED, draw.BLUE])
+    var frames = 0
+    while window.frame() {
+        frames += 1
+        // A texture made in a `let` inside the loop is dropped at the end of each frame.
+        let dot = draw.make_texture(1, 1, [draw.GREEN])
+        draw.texture(checker, vec2(10, 40), draw.WHITE)
+        draw.texture_rect(pair, vec2(0, 0), vec2(32, 16), draw.WHITE)
+        // A negative size mirrors the part drawn.
+        draw.texture_region(checker, Rect(pos: vec2(0, 0), size: vec2(4, 2)), vec2(64, 32), vec2(-32, 16), draw.WHITE)
+        draw.texture(dot, vec2(1, 1), draw.RED)
+    }
+    print("frames", frames)
+}

@@ -12,6 +12,7 @@ mod headless;
 mod keys;
 mod natives_draw;
 mod natives_input;
+mod natives_texture;
 mod natives_window;
 mod paths;
 pub mod raylib;
@@ -33,6 +34,7 @@ use raylib::{GetImageColor, LoadImage, SetTraceLogLevel, UnloadImage, LOG_ERROR}
 pub fn symbols() -> Vec<(&'static str, *const u8)> {
     use natives_draw::*;
     use natives_input::*;
+    use natives_texture::*;
     use natives_window::*;
 
     // Names come from the identifiers, so a symbol can't drift from its function.
@@ -58,6 +60,11 @@ pub fn symbols() -> Vec<(&'static str, *const u8)> {
         kestrel_draw_triangle,
         kestrel_draw_text,
         kestrel_draw_text_width,
+        kestrel_draw_load_texture,
+        kestrel_draw_make_texture,
+        kestrel_draw_texture,
+        kestrel_draw_texture_rect,
+        kestrel_draw_texture_region,
         kestrel_input_held,
         kestrel_input_pressed,
         kestrel_input_released,
@@ -103,6 +110,38 @@ pub fn png_pixels(path: &Path, points: &[(i32, i32)]) -> Option<Vec<Option<[u8; 
 mod tests {
     use super::raylib::{Color, ExportImage, GenImageColor, ImageDrawPixel, UnloadImage};
     use super::*;
+
+    /// The test image the texture programs load: four 2x2 cells, all opaque.
+    #[test]
+    fn the_checker_test_image_has_four_colour_cells() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/programs/assets/checker.png");
+        let (red, green, blue, white) = ([255, 0, 0, 255], [0, 255, 0, 255], [0, 0, 255, 255], [255, 255, 255, 255]);
+        for (y, row) in [[red, green], [red, green], [blue, white], [blue, white]].into_iter().enumerate() {
+            for x in 0..4 {
+                assert_eq!(png_pixel(&path, x, y as i32), Some(row[x as usize / 2]), "pixel ({x}, {y})");
+            }
+        }
+        assert_eq!(png_pixel(&path, 4, 0), None, "4 pixels wide");
+        assert_eq!(png_pixel(&path, 0, 4), None, "and 4 tall");
+    }
+
+    #[test]
+    fn jpg_files_are_written_and_read_because_the_build_switches_them_on() {
+        let red = Color { r: 255, g: 0, b: 0, a: 255 };
+        let path = std::env::temp_dir().join(format!("kestrel_window_{}.jpg", std::process::id()));
+        let c_path = CString::new(path.to_str().unwrap()).unwrap();
+        // SAFETY: a fresh image, exported and freed once.
+        unsafe {
+            SetTraceLogLevel(LOG_ERROR);
+            let image = GenImageColor(8, 8, red);
+            assert!(ExportImage(image, c_path.as_ptr()), "raylib was built without JPG support");
+            UnloadImage(image);
+        }
+        // JPG is lossy, so a red image comes back as almost red.
+        let [r, g, b, a] = png_pixel(&path, 4, 4).expect("raylib was built without JPG support");
+        assert!(r > 240 && g < 15 && b < 15 && a == 255, "{r} {g} {b} {a}");
+        std::fs::remove_file(&path).unwrap();
+    }
 
     #[test]
     fn png_round_trip() {

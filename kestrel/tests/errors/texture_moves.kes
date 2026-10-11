@@ -1,0 +1,17 @@
+use draw
+use { Texture from draw }
+
+struct Mine {
+    h: GpuHandle
+}
+
+main() {
+    let a = draw.load_texture("a.png")
+    let b = a
+    print(b.width, a.width)
+    var by_name = map[int, Texture]()
+}
+
+// error 5: `GpuHandle` is only for Kestrel's built-in modules
+// error 11: `a` was moved earlier, so it can't be used here
+// error 12: maps can't hold values that own a GPU object yet (`draw.Texture` has one); keep them in a list and map keys to indexes

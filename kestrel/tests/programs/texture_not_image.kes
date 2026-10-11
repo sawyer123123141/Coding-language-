@@ -1,0 +1,15 @@
+// env: KESTREL_HEADLESS=1
+// asset: assets/not_an_image.png
+// expect: window.open 64 64 "t"
+// expect-exit: 101
+// expect-stderr: draw.load_texture couldn't read assets/not_an_image.png (looked for
+// expect-stderr: /assets/not_an_image.png): it isn't a PNG, JPG or BMP image on line 13
+use window
+use draw
+
+main() {
+    window.open(64, 64, "t")
+    // The file is there, but it isn't an image. raylib's own warning about it stays quiet.
+    let tex = draw.load_texture("assets/not_an_image.png")
+    print(tex.width)
+}

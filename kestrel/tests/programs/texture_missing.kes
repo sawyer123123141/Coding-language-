@@ -1,0 +1,14 @@
+// env: KESTREL_HEADLESS=1
+// expect: window.open 64 64 "t"
+// expect-exit: 101
+// expect-stderr: draw.load_texture couldn't read missing.png (looked for
+// expect-stderr: /missing.png): no such file on line 12
+use window
+use draw
+
+main() {
+    window.open(64, 64, "t")
+    // The file isn't there, under `kestrel run` or beside the exe.
+    let tex = draw.load_texture("missing.png")
+    print(tex.width)
+}

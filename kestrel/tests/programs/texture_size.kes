@@ -1,0 +1,13 @@
+// env: KESTREL_HEADLESS=1
+// expect: window.open 64 64 "t"
+// expect-exit: 101
+// expect-stderr: draw.make_texture needs a width and height above 0, not 0 by 4 on line 11
+use window
+use draw
+
+main() {
+    window.open(64, 64, "t")
+    // A texture with no width.
+    let tex = draw.make_texture(0, 4, [draw.RED])
+    print(tex.width)
+}

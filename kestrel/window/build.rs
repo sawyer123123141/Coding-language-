@@ -1,7 +1,8 @@
 //! Compiles the vendored raylib (`raylib/`) into a static library.
 //!
 //! There is no bindgen: the functions Kestrel uses are declared by hand in
-//! `src/raylib.rs`. Audio is switched off; the models module is on, for meshes.
+//! `src/raylib.rs`. Audio is switched off; the models module is on, for meshes, and JPG loading
+//! is on, for textures (PNG and BMP are on in raylib's defaults).
 
 fn main() {
     println!("cargo:rerun-if-changed=raylib");
@@ -18,6 +19,7 @@ fn main() {
         .define("GRAPHICS_API_OPENGL_33", None)
         .define("SUPPORT_MODULE_RAUDIO", "0")
         .define("SUPPORT_MODULE_RMODELS", "1")
+        .define("SUPPORT_FILEFORMAT_JPG", "1")
         .warnings(false)
         .compile("raylib");
 
