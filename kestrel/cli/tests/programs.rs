@@ -167,40 +167,28 @@ fn env_directives_are_collected() {
 
 #[test]
 fn asset_directives_are_collected() {
-    let exp = expectations("asset.kes", "// asset: a.png
-// asset:  sub/b.bin 
-// expect: ok
-main() {}
-");
+    let exp = expectations("asset.kes", "// asset: a.png\n// asset:  sub/b.bin \n// expect: ok\nmain() {}\n");
     assert_eq!(exp.assets, ["a.png", "sub/b.bin"]);
-    assert_eq!(exp.stdout, "ok
-", "and the other directives still count");
-    assert!(expectations("none.kes", "main() {}
-").assets.is_empty());
+    assert_eq!(exp.stdout, "ok\n", "and the other directives still count");
+    assert!(expectations("none.kes", "main() {}\n").assets.is_empty());
 }
 
 #[test]
 #[should_panic(expected = "typo.kes: bad asset directive (expected a file inside tests/programs): // asset:")]
 fn an_asset_directive_without_a_file_panics() {
-    expectations("typo.kes", "// asset:
-main() {}
-");
+    expectations("typo.kes", "// asset:\nmain() {}\n");
 }
 
 #[test]
 #[should_panic(expected = "typo.kes: bad asset directive (expected a file inside tests/programs): // asset: ../outside.png")]
 fn an_asset_outside_the_programs_folder_panics() {
-    expectations("typo.kes", "// asset: ../outside.png
-main() {}
-");
+    expectations("typo.kes", "// asset: ../outside.png\nmain() {}\n");
 }
 
 #[test]
 #[should_panic(expected = "typo.kes: unknown expect directive: // expect-asset: a.png")]
 fn an_unknown_directive_still_panics() {
-    expectations("typo.kes", "// expect-asset: a.png
-main() {}
-");
+    expectations("typo.kes", "// expect-asset: a.png\nmain() {}\n");
 }
 
 #[test]

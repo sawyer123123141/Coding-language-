@@ -3,6 +3,8 @@
 //! Each one is `kestrel_window_<name>`. Strings arrive as a pointer to their
 //! header, and `size` writes its `vec2` through the pointer it is given.
 
+use std::path::Path;
+
 use kestrel_runtime::panic::fail_at_call;
 
 use crate::abi::{c_string, str_bytes, write, KStr, V2};
@@ -106,20 +108,28 @@ pub unsafe extern "C" fn kestrel_window_screenshot(path: *const KStr) {
     match state::drawing("window.screenshot") {
         Mode::Headless => headless::line("window.screenshot", &[Arg::Str(path)]),
         Mode::Real => {
-            if !save_screenshot(path) {
-                fail_at_call(&format!(
-                    "window.screenshot could not save \"{}\"; give a path that ends in .png, in a folder that exists",
-                    String::from_utf8_lossy(path)
-                ));
+            let resolved = paths::resolve(path);
+            if !save_screenshot(&resolved) {
+                fail_at_call(&screenshot_error(path, &resolved));
             }
         }
     }
 }
 
-/// Saves what has been drawn so far this frame, to `path` read the way `paths::resolve` reads it.
+/// The error for a screenshot that couldn't be saved: the path as the program wrote it, and where
+/// it was tried, since a relative path doesn't go where the program was run from.
+fn screenshot_error(path: &[u8], resolved: &Path) -> String {
+    format!(
+        "window.screenshot couldn't save {} (tried {}); give a path that ends in .png, in a folder that exists",
+        String::from_utf8_lossy(path),
+        paths::display(resolved)
+    )
+}
+
+/// Saves what has been drawn so far this frame to the file `path`.
 /// `false` if raylib couldn't write the file.
-fn save_screenshot(path: &[u8]) -> bool {
-    let path = c_string(paths::resolve(path).to_string_lossy().as_bytes());
+fn save_screenshot(path: &Path) -> bool {
+    let path = c_string(path.to_string_lossy().as_bytes());
     // SAFETY: the window is open. `path` is a NUL-terminated string, and the image
     // is freed once, after it is exported.
     unsafe {
@@ -129,5 +139,29 @@ fn save_screenshot(path: &[u8]) -> bool {
         let saved = rl::ExportImage(image, path.as_ptr());
         rl::UnloadImage(image);
         saved
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[test]
+    fn a_failed_screenshot_names_the_path_and_where_it_was_tried() {
+        // A real failed save can't run in the headless suite, so check the message itself.
+        let resolved: PathBuf = Path::new("game").join("shots").join("a.png");
+        assert_eq!(
+            screenshot_error(b"shots/a.png", &resolved),
+            "window.screenshot couldn't save shots/a.png (tried game/shots/a.png); \
+             give a path that ends in .png, in a folder that exists"
+        );
+    }
+
+    #[test]
+    fn a_path_that_is_not_utf8_is_still_named() {
+        let message = screenshot_error(b"bad\xff.png", Path::new("bad.png"));
+        assert!(message.starts_with("window.screenshot couldn't save bad\u{fffd}.png (tried bad.png); "), "{message}");
     }
 }

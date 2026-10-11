@@ -25,6 +25,17 @@ pub fn resolve(path: &[u8]) -> PathBuf {
     resolve_in(path, PROGRAM_DIR.get().map(PathBuf::as_path), exe_dir.as_deref())
 }
 
+/// `path` as error messages show it: with forward slashes, which read the same on every platform.
+pub fn display(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    // Elsewhere a backslash is a letter of a file name.
+    if cfg!(windows) {
+        text.replace('\\', "/")
+    } else {
+        text.into_owned()
+    }
+}
+
 /// `set_program_dir` for the folder held in `cell`.
 fn set_in(cell: &OnceLock<PathBuf>, dir: &Path) {
     let dir = if dir.as_os_str().is_empty() {
@@ -98,11 +109,26 @@ mod tests {
         assert_eq!(resolve(b"a.png"), exe_dir.join("a.png"));
     }
 
+    #[test]
+    fn a_path_is_shown_with_forward_slashes() {
+        let path = Path::new("game").join("shots").join("a.png");
+        assert_eq!(display(&path), "game/shots/a.png");
+        assert_eq!(display(Path::new("a.png")), "a.png");
+        assert_eq!(display(Path::new("")), "");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_path_is_shown_with_forward_slashes() {
+        assert_eq!(display(Path::new(r"C:\game\shots\a.png")), "C:/game/shots/a.png");
+        assert_eq!(display(Path::new(r"C:\game\shots/a.png")), "C:/game/shots/a.png", "mixed separators too");
+    }
+
     #[cfg(windows)]
     #[test]
     fn a_rooted_path_without_a_drive_is_not_moved_into_the_folder() {
         let program = absolute("program");
-        assert_eq!(resolve_in(br"\data.png", Some(&program), None), PathBuf::from(r"\data.png"));
+        assert_eq!(resolve_in(br"\data\a.png", Some(&program), None), PathBuf::from(r"\data\a.png"));
     }
 
     #[test]
