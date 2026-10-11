@@ -198,7 +198,8 @@ window.ticks_usec() -> i64
 - **The GPU registry** (`kestrel-window`):
   - A handle is an `i64` from a counter that starts at 1 and is never reused, so headless lines and tests are deterministic.
   - A registry on the window's thread maps handles to raylib textures and meshes. The drop queue is a mutex-guarded list, drained in `window.frame()` and at close.
-  - The drop function is a window-crate symbol that compiled code calls (registered with the JIT like the natives).
+  - The drop function is a runtime symbol, `kestrel_rt_gpu_drop(id)`, that compiled code calls. It forwards to a hook that the window crate sets once (`kestrel_runtime::gpu::set_drop_hook`; the first hook set stays).
+  - The hook runs on whatever thread drops the value, a `par for` pool thread included, so it must only queue the id.
   - A program can only hold a `GpuHandle` through `draw` or `draw3d`, so it always links the window library.
 - **Meshes over 65,536 vertices.** raylib's meshes use 16-bit indices. `make_mesh` splits a larger indexed mesh into parts of at most 65,536 vertices (triangles grouped in order, vertices renumbered per part) and draws the parts one after another. Kestrel code sees one `Mesh`. An unindexed mesh needs no split. Cost if wrong: a little more GPU memory, from vertices duplicated across parts.
 - **Colours** are converted from `Color` (four floats) to raylib's four bytes when a mesh is made. Vertices and uvs are uploaded straight from the list memory, with no conversion.
