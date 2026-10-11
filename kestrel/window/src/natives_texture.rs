@@ -15,8 +15,7 @@ use std::path::Path;
 
 use kestrel_runtime::panic::fail_at_call;
 
-use crate::abi::{elems, read, str_bytes, write, KColor, KRect, KSeq, KStr, KTexture, V2};
-use crate::bulk::span;
+use crate::abi::{elems, read, span, str_bytes, write, KColor, KRect, KSeq, KStr, KTexture, V2};
 use crate::gpu::{self, Object};
 use crate::headless::{self, Arg};
 use crate::image_file;

@@ -167,6 +167,21 @@ pub fn channel(c: f32) -> u8 {
     (c.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
+/// The rectangle `size` spans from `pos`, as its top-left corner and a positive size: a negative
+/// width or height reaches back from `pos`.
+pub fn span(pos: V2, size: V2) -> (V2, V2) {
+    let axis = |start: f32, length: f32| if length < 0.0 { (start + length, -length) } else { (start, length) };
+    let (x, width) = axis(pos.x, size.x);
+    let (y, height) = axis(pos.y, size.y);
+    (V2 { x, y }, V2 { x: width, y: height })
+}
+
+/// A float as `print` prints it (`200`, `0.5`, `NaN`): what an error message shows for a number.
+/// Same as `Arg::Float` in a headless line, which a test in `headless.rs` checks.
+pub fn float_text(v: f32) -> String {
+    v.to_string()
+}
+
 /// Reads the value `p` points at.
 ///
 /// # Safety
@@ -237,6 +252,16 @@ mod tests {
         assert_eq!(mid.to_raylib(), raylib::Color { r: 128, g: 0, b: 255, a: 0 });
         // Not a number reads as 0 rather than a random colour.
         assert_eq!(channel(f32::NAN), 0);
+    }
+
+    #[test]
+    fn span_gives_the_top_left_corner_and_a_positive_size() {
+        let v2 = |x, y| V2 { x, y };
+        assert_eq!(span(v2(10.0, 20.0), v2(4.0, 6.0)), (v2(10.0, 20.0), v2(4.0, 6.0)));
+        assert_eq!(span(v2(30.0, 30.0), v2(-10.0, -10.0)), (v2(20.0, 20.0), v2(10.0, 10.0)));
+        assert_eq!(span(v2(30.0, 30.0), v2(-10.0, 5.0)), (v2(20.0, 30.0), v2(10.0, 5.0)), "x only");
+        assert_eq!(span(v2(30.0, 30.0), v2(10.0, -5.0)), (v2(30.0, 25.0), v2(10.0, 5.0)), "y only");
+        assert_eq!(span(v2(3.0, 4.0), v2(0.0, 0.0)), (v2(3.0, 4.0), v2(0.0, 0.0)), "a zero size stays zero");
     }
 
     #[test]

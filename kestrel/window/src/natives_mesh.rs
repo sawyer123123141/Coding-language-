@@ -120,7 +120,7 @@ pub(crate) fn make_mesh_in(mode: Mode, lists: &Lists) -> Result<KMesh, String> {
         Mode::Real => unsafe { upload(lists) },
     };
     let indexed = !indices.is_empty();
-    let object = Object::Mesh { parts, has_uvs: uvs.len() == vertices.len(), indexed, vertex_count, triangle_count };
+    let object = Object::Mesh { parts, has_uvs: uvs.len() == vertices.len(), indexed };
     Ok(KMesh { id: gpu::add(object), vertex_count, triangle_count })
 }
 
@@ -274,7 +274,7 @@ unsafe fn draw_real(id: i64, texture: Option<rl::Texture>, pos: V3, tint: rl::Co
         if parts.is_empty() {
             return;
         }
-        // SAFETY (both blocks): the window is open, on this thread, in 3D (this function's contract),
+        // SAFETY (all three blocks below): the window is open, on this thread, in 3D (this function's contract),
         // and the parts are live meshes it uploaded. Drawing adds and frees no GPU object.
         let draw_with = |material| unsafe { draw_parts(parts, *indexed, material, pos) };
         match texture {

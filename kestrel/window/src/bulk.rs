@@ -1,5 +1,5 @@
-//! `draw.rects`: many rectangles of one size and colour in one GPU draw call, and `span`, which
-//! every rectangle native uses for a negative size.
+//! `draw.rects`: many rectangles of one size and colour in one GPU draw call (a negative size is
+//! `abi::span`'s, as for `draw.rect`).
 //!
 //! raylib's shape functions feed each rectangle's vertices to its batch one call at a time, which
 //! is most of what a `draw.rect` costs. Here a call's rectangles are written into one reused
@@ -31,7 +31,7 @@
 use std::cell::RefCell;
 use std::ffi::c_int;
 
-use crate::abi::V2;
+use crate::abi::{span, V2};
 use crate::gpu;
 use crate::material;
 use crate::raylib as rl;
@@ -73,15 +73,6 @@ const IDENTITY: rl::Matrix = rl::Matrix {
     m11: 0.0,
     m15: 1.0,
 };
-
-/// The rectangle `size` spans from `pos`, as its top-left corner and a positive size: a negative
-/// width or height reaches back from `pos`.
-pub(crate) fn span(pos: V2, size: V2) -> (V2, V2) {
-    let axis = |start: f32, length: f32| if length < 0.0 { (start + length, -length) } else { (start, length) };
-    let (x, width) = axis(pos.x, size.x);
-    let (y, height) = axis(pos.y, size.y);
-    (V2 { x, y }, V2 { x: width, y: height })
-}
 
 /// Writes the vertices of the rectangle `size` spans from each of `positions` into `buf`, and
 /// gives them: `FLOATS_PER_RECT` floats a rectangle. `buf` only grows, so once it has held the
@@ -250,15 +241,6 @@ mod tests {
             xs.fold(f32::NEG_INFINITY, f32::max),
             ys.fold(f32::NEG_INFINITY, f32::max),
         )
-    }
-
-    #[test]
-    fn span_gives_the_top_left_corner_and_a_positive_size() {
-        assert_eq!(span(v2(10.0, 20.0), v2(4.0, 6.0)), (v2(10.0, 20.0), v2(4.0, 6.0)));
-        assert_eq!(span(v2(30.0, 30.0), v2(-10.0, -10.0)), (v2(20.0, 20.0), v2(10.0, 10.0)));
-        assert_eq!(span(v2(30.0, 30.0), v2(-10.0, 5.0)), (v2(20.0, 30.0), v2(10.0, 5.0)), "x only");
-        assert_eq!(span(v2(30.0, 30.0), v2(10.0, -5.0)), (v2(30.0, 25.0), v2(10.0, 5.0)), "y only");
-        assert_eq!(span(v2(3.0, 4.0), v2(0.0, 0.0)), (v2(3.0, 4.0), v2(0.0, 0.0)), "a zero size stays zero");
     }
 
     #[test]

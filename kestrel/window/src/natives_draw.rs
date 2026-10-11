@@ -5,8 +5,8 @@
 //! that the window is open first, then either prints its line (headless) or
 //! draws with raylib.
 
-use crate::abi::{c_string, elems, read, str_bytes, KColor, KSeq, KStr, V2};
-use crate::bulk::{self, span};
+use crate::abi::{c_string, elems, read, span, str_bytes, KColor, KSeq, KStr, V2};
+use crate::bulk;
 use crate::headless::{self, Arg};
 use crate::pass;
 use crate::raylib as rl;
@@ -44,7 +44,7 @@ pub unsafe extern "C" fn kestrel_draw_clear(c: *const KColor) {
     });
 }
 
-/// A negative width or height covers the rectangle the size spans back from `pos` (`bulk::span`).
+/// A negative width or height covers the rectangle the size spans back from `pos` (`abi::span`).
 /// The headless line shows the size as given.
 ///
 /// # Safety

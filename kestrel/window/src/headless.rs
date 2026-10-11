@@ -8,8 +8,8 @@
 //! a `Rect` as `Rect(pos: vec2(x: 0, y: 0), size: vec2(x: 4, y: 2))`, a `Texture` as
 //! `Texture(id: 1, width: 4, height: 4)`, a `Mesh` as `Mesh(id: 1, vertex_count: 4, triangle_count: 2)`,
 //! a `MeshData` as `MeshData(vertices: 4, colors: 4, uvs: 0, indices: 6)` (its lists as their
-//! lengths), an array as its length and a string in double quotes. The lines go through the runtime's print functions, so they stay
-//! in order with the program's own `print` output.
+//! lengths), an array as its length and a string in double quotes. The lines go through the
+//! runtime's print functions, so they stay in order with the program's own `print` output.
 //!
 //! With `KESTREL_HEADLESS_QUIET=1` no line is printed at all: a program that
 //! draws thousands of times a frame can run headless without flooding its output.
@@ -118,12 +118,6 @@ fn camera(c: KCamera) {
     text(b")");
 }
 
-/// A float as `print` prints it (`200`, `0.5`, `NaN`): what an error message shows for a number.
-/// Same as `Arg::Float` in a line, which a test checks.
-pub fn float_text(v: f32) -> String {
-    v.to_string()
-}
-
 fn rect(r: KRect) {
     text(b"Rect(pos: ");
     vec2(r.pos);
@@ -180,6 +174,7 @@ pub fn text_width(text: &[u8], size: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::abi::float_text;
     use kestrel_runtime::print::{capture_output, take_output};
 
     /// Runs `body` on a fresh thread, because the print sink is thread-local.

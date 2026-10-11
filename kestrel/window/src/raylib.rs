@@ -251,13 +251,14 @@ extern "C" {
     // Images (rtextures.c).
     pub fn GenImageColor(width: c_int, height: c_int, color: Color) -> Image;
     pub fn ImageDrawPixel(dst: *mut Image, pos_x: c_int, pos_y: c_int, color: Color);
-    /// Writes with `fopen` too (see `LoadImage`). Kestrel saves with `ExportImageToMemory`.
+    /// Writes with C's `fopen`, which takes the ANSI code page on Windows, so a path with a character
+    /// outside it can't be written. Kestrel saves with `ExportImageToMemory`.
     pub fn ExportImage(image: Image, file_name: *const c_char) -> bool;
     /// Gives a buffer that `MemFree` releases. Only `".png"` is supported.
     pub fn ExportImageToMemory(image: Image, file_type: *const c_char, file_size: *mut c_int) -> *mut u8;
-    /// Opens the file with C's `fopen`, which takes the ANSI code page on Windows, so a path with
-    /// a character outside it can't be read. Kestrel reads files itself and uses `LoadImageFromMemory`.
-    pub fn LoadImage(file_name: *const c_char) -> Image;
+    /// Kestrel reads image files itself (`image_file.rs`), because raylib's `LoadImage` opens them with
+    /// C's `fopen`, which takes the ANSI code page on Windows, so a path with a character outside it
+    /// can't be read.
     pub fn LoadImageFromMemory(file_type: *const c_char, file_data: *const u8, data_size: c_int) -> Image;
     pub fn LoadImageFromScreen() -> Image;
     pub fn GetImageColor(image: Image, x: c_int, y: c_int) -> Color;

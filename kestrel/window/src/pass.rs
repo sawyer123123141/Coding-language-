@@ -25,8 +25,7 @@
 
 use std::cell::Cell;
 
-use crate::abi::{KCamera, V3};
-use crate::headless::float_text;
+use crate::abi::{float_text, KCamera, V3};
 use crate::raylib as rl;
 
 /// Where drawing is: the camera `draw3d.camera` last set, and whether the pass is in 3D.

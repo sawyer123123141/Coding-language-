@@ -95,7 +95,7 @@ fn run() -> ExitCode {
                 .map(|p| p.run_main())
         }
         _ => {
-            // Programs that use `window`, `draw` or `input` need the window library, which
+            // Programs that use `window`, `draw`, `draw3d` or `input` need the window library, which
             // carries the runtime as well.
             let lib = if compiled.builtins.is_empty() { Lib::Runtime } else { Lib::Window };
             build(&compiled.module, opts, &args, lib).map(|()| 0)

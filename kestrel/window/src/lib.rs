@@ -8,7 +8,7 @@
 pub use kestrel_runtime;
 mod abi;
 mod bulk;
-pub mod gpu;
+mod gpu;
 mod headless;
 mod image_file;
 mod keys;

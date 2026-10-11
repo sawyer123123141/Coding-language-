@@ -26,8 +26,9 @@ pub enum Object {
     Texture { texture: Option<rl::Texture>, width: i32, height: i32 },
     /// A mesh's parts are uploaded raylib meshes with no CPU arrays (`without_cpu_pointers`), so
     /// none of them points at memory raylib didn't allocate. `indexed` says whether they have index
-    /// buffers, which `DrawMesh` can't tell from a null `indices` (see `natives_mesh.rs`).
-    Mesh { parts: Vec<rl::Mesh>, has_uvs: bool, indexed: bool, vertex_count: i32, triangle_count: i32 },
+    /// buffers, which `DrawMesh` can't tell from a null `indices` (see `natives_mesh.rs`). (Its
+    /// vertex and triangle counts are the program's `Mesh`'s own fields, so they aren't kept here.)
+    Mesh { parts: Vec<rl::Mesh>, has_uvs: bool, indexed: bool },
 }
 
 /// The ids not handed out yet: the next one. 0 means no object, so they start at 1.
@@ -106,6 +107,7 @@ pub fn close_all(real: bool) {
 }
 
 /// How many objects are alive on this thread (tests).
+#[cfg(test)]
 pub fn live() -> usize {
     REGISTRY.with_borrow(HashMap::len)
 }
@@ -168,7 +170,7 @@ mod tests {
     }
 
     fn mesh() -> Object {
-        Object::Mesh { parts: Vec::new(), has_uvs: true, indexed: true, vertex_count: 4, triangle_count: 2 }
+        Object::Mesh { parts: Vec::new(), has_uvs: true, indexed: true }
     }
 
     /// Whether `id` is waiting in the queue.
@@ -195,7 +197,7 @@ mod tests {
             assert_eq!(size_of_texture(0), None, "0 is no object");
             assert_eq!(size_of_texture(ids[2] + 1_000_000), None, "an id nobody made");
             let mesh_id = add(mesh());
-            assert_eq!(with(mesh_id, |o| matches!(o, Object::Mesh { vertex_count: 4, .. })), Some(true));
+            assert_eq!(with(mesh_id, |o| matches!(o, Object::Mesh { has_uvs: true, indexed: true, .. })), Some(true));
         });
     }
 

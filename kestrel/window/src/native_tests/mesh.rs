@@ -57,12 +57,10 @@ fn camera() -> KCamera {
     KCamera { pos: v3(0.0, 0.0, -3.0), target: v3(0.0, 0.0, 0.0), up: v3(0.0, 1.0, 0.0), fov: 75.0 }
 }
 
-/// What the registry holds for mesh `id`: `(parts, has_uvs, indexed, vertex_count, triangle_count)`.
-fn registered(id: i64) -> Option<(usize, bool, bool, i32, i32)> {
+/// What the registry holds for mesh `id`: `(parts, has_uvs, indexed)`.
+fn registered(id: i64) -> Option<(usize, bool, bool)> {
     gpu::with(id, |object| match object {
-        Object::Mesh { parts, has_uvs, indexed, vertex_count, triangle_count } => {
-            Some((parts.len(), *has_uvs, *indexed, *vertex_count, *triangle_count))
-        }
+        Object::Mesh { parts, has_uvs, indexed } => Some((parts.len(), *has_uvs, *indexed)),
         Object::Texture { .. } => None,
     })
     .flatten()
@@ -127,12 +125,14 @@ fn a_headless_mesh_keeps_its_counts_and_flags_but_no_parts() {
         // SAFETY: every pointer is to a live local.
         unsafe { open_with(&headless(1), 8, 8, &title) };
         let indexed = make_mesh_in(Mode::Headless, &lists(&SQUARE, &[], &uvs, &QUAD)).unwrap();
-        assert_eq!(registered(indexed.id), Some((0, true, true, 4, 2)));
+        assert_eq!(registered(indexed.id), Some((0, true, true)));
+        assert_eq!((indexed.vertex_count, indexed.triangle_count), (4, 2));
         let unindexed = make_mesh_in(Mode::Headless, &lists(&loose, &[], &[], &[])).unwrap();
-        assert_eq!(registered(unindexed.id), Some((0, false, false, 3, 1)));
+        assert_eq!(registered(unindexed.id), Some((0, false, false)));
+        assert_eq!((unindexed.vertex_count, unindexed.triangle_count), (3, 1));
         // An empty mesh has a uv for each of its (no) vertices, so mesh_textured draws it: nothing.
         let empty = make_mesh_in(Mode::Headless, &lists(&[], &[], &[], &[])).unwrap();
-        assert_eq!(registered(empty.id), Some((0, true, false, 0, 0)));
+        assert_eq!(registered(empty.id), Some((0, true, false)));
         assert_eq!((empty.vertex_count, empty.triangle_count), (0, 0));
     });
 }
