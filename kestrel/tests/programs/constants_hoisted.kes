@@ -1,0 +1,79 @@
+// expect: 3 2 [10, 20, 30]
+// expect: [1, 2, 3] [1, 2]
+// expect: 60
+// expect: 2 true 7
+// expect: Palette(names: ["sky", "sea"], ids: [1, 2])
+// expect: 22
+// expect: 99 10
+// expect: 6000
+// expect: 300
+let NESTED = [ITEMS, [4, 5]]
+let ITEMS = [10, 20, 30]
+let MORE: list[int] = [1, 2]
+let COSTS = {"a": 1, "b": 2}
+let PAL = Palette(names: ["sky", "sea"], ids: [1, 2])
+let UNUSED = [9, 9, 9]
+
+struct Palette {
+    names: [string]
+    ids: [int]
+}
+
+pure sum(xs: [int]) -> int {
+    var s = 0
+    for x in xs {
+        s += x
+    }
+    s
+}
+
+pure cost_total() -> int {
+    var total = 0
+    for k, v in COSTS {
+        total += v
+    }
+    total
+}
+
+pure first() -> [int] {
+    ITEMS
+}
+
+struct Item {
+    v: int
+    c: int = 0
+
+    pure fill(var self) {
+        self.v = sum(ITEMS)
+        self.c = cost_total()
+    }
+}
+
+main() {
+    print(ITEMS.len, MORE.len, ITEMS)
+    var grown = MORE
+    grown.add(3)
+    print(grown, MORE)
+    print(sum(ITEMS))
+    print(COSTS.len, COSTS.has("a"), COSTS.get("b", 0) + 5)
+    print(PAL)
+    print(NESTED[0][1] + NESTED[1].len)
+    var a = first()
+    a[0] = 99
+    print(a[0], ITEMS[0])
+    var items = list[Item]()
+    for i from 0 to 100 {
+        items.add(Item(v: 0))
+    }
+    par for it in items {
+        it.fill()
+    }
+    var all = 0
+    var costs = 0
+    for it in items {
+        all += it.v
+        costs += it.c
+    }
+    print(all)
+    print(costs)
+}

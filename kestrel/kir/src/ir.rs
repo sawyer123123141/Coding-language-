@@ -80,6 +80,10 @@ pub struct EnumIdx(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ElemIdx(pub u32);
 
+/// A zero-filled global in `Module::globals`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct GlobalIdx(pub u32);
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Module {
     pub funcs: Vec<Func>,
@@ -90,6 +94,13 @@ pub struct Module {
     pub print_fns: HashMap<KTy, FuncIdx>,
     /// `par for` bodies, each called through `Stmt::ParFor`.
     pub par_bodies: Vec<FuncIdx>,
+    /// Zero-filled global memory, by `GlobalIdx`. Empty without heap constants; otherwise
+    /// global 0 is the "built" flag (`Bool`), global 1 the constants' arena (`Arena`), and
+    /// one more follows for each heap constant that is used.
+    pub globals: Vec<KTy>,
+    /// `__kestrel_constants`, which builds the heap constants once (it can run again and does
+    /// nothing). `main` calls it first; a host that calls other functions runs it itself.
+    pub init: Option<FuncIdx>,
     /// `None` for a library (see `kestrel_check::check_with`).
     pub main: Option<FuncIdx>,
 }
@@ -176,7 +187,7 @@ pub enum LocalKind {
     Addressed,
     /// Holds a pointer to the caller's value: a `var` parameter, or any
     /// aggregate parameter (read-only ones are passed by pointer too). Also
-    /// a `for ... in` element, set by `Stmt::Bind`.
+    /// a `for ... in` element (`Stmt::Bind`) or a heap constant (`Stmt::BindGlobal`).
     RefParam,
 }
 
@@ -204,6 +215,8 @@ pub enum Stmt {
     /// Points a reference local at a place (a `for ... in` element, found
     /// once per iteration).
     Bind(LocalIdx, Place),
+    /// Points a reference local at a global: a heap constant, built before `main`.
+    BindGlobal(LocalIdx, GlobalIdx),
     /// Makes an arena current: a fresh one (`arena { }`), or the one at a
     /// place (`in x { }`, creating it there if it's still null).
     PushArena(Option<Place>),

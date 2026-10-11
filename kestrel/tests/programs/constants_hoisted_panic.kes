@@ -1,0 +1,16 @@
+// expect-exit: 101
+// expect-stderr: division by zero on line 10
+// A heap constant is built once before `main`, so a failure in its value stops the program
+// before `main` prints anything, and names the line inside the constant.
+let ZERO = 0
+let UNUSED = [10 / ZERO]
+
+let BOOM = [
+    1,
+    10 / ZERO
+]
+
+main() {
+    print("start")
+    print(BOOM[0])
+}

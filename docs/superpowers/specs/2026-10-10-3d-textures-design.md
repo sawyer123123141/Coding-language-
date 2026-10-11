@@ -151,11 +151,11 @@ window.ticks_usec() -> i64
 ## Language additions
 
 - **`a.cross(b)`** on `vec3`, GDScript's `Vector3.cross` (right-handed). It is `pure`, and the name isn't reserved, like the other vector methods.
-- **Heap constants are built once** (window ruling N, decided here). An array, list or map constant, or one that holds such a value or a string built by interpolation, is built a single time before `main` starts. Every use reads that one value in place.
+- **Heap constants are built once** (window ruling N, decided here). An array, list or map constant, or one that holds such a value (in a struct field or an optional), is built a single time before `main` starts. (A constant can't build a string by interpolation, so there is no such case.) Every use reads that one value in place.
   - Indexing, `.len`, `for in`, a read-only argument and `print` copy nothing.
   - Storing the constant (`let palette = PALETTE`, a field, `list.add(PALETTE)`) copies it, as storing any other place does. A constant is never moved.
   - So the window spec's advice to wrap the loop in `arena { }` or copy the constant first is no longer needed: the palette that grew the arena by 4.78 MB over 100,000 frames now grows it by 0 bytes. A map constant used inside a hot function is no longer rebuilt at each call either.
-  - Constants that allocate nothing (numbers, vectors, plain structs such as `draw.RED`) are unchanged: they are written in place where used.
+  - Constants that allocate nothing (numbers, strings, vectors, plain structs such as `draw.RED`) are unchanged: they are written in place where used. So is a constant that holds an `Arena`, which still makes a fresh arena at each use.
   - A heap constant that no code uses is never built.
   - A runtime failure inside a heap constant's value (an overflow, say) now happens once, before `main`, with the constant's line.
 - **`GpuHandle`** is a built-in type that only Kestrel's built-in modules can name. Elsewhere it is an error: "`GpuHandle` is only for Kestrel's built-in modules". Programs meet it only as the `id` field of `Texture` and `Mesh`. See the next section.
@@ -208,7 +208,7 @@ window.ticks_usec() -> i64
   - The CLI tells the window crate the program's folder before running JIT code. A built exe uses its own folder.
   - The program-test harness gains `// asset: <file>`, which copies a file next to a test's built exe.
 - **Hoisted constants:**
-  - KIR gains global slots for heap constants and an init function that builds the used ones in dependency order (the order ruling C already computes), into a constants arena that lives as long as the program.
+  - KIR gains global slots for heap constants and an init function that builds the used ones in dependency order (the order ruling C already computes, plus the constants that the field defaults of a constructed struct use), into a constants arena that lives as long as the program.
   - `main` calls the init first. The Godot add-on calls it on its worker thread after each load and hot reload, before the first call, because each add-on call runs in an arena freed afterwards.
   - Uses lower to reads of the slot, and lowering treats a constant as a place that is never moved, so storing it copies.
   - Codegen defines the slots as data in both the JIT and object files.

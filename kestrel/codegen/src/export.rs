@@ -67,12 +67,17 @@ pub(crate) fn export_ty(m: &kir::Module, ty: KTy) -> ExportTy {
     }
 }
 
+/// The signature every thunk has: `fn(args: *const u8, ret: *mut u8)`.
+fn thunk_signature<M: Module>(module: &M) -> Signature {
+    let ptr = module.target_config().pointer_type();
+    let mut sig = Signature::new(module.isa().default_call_conv());
+    sig.params.extend([AbiParam::new(ptr), AbiParam::new(ptr)]);
+    sig
+}
+
 /// Defines a thunk for each exported function; `ids` are the functions'.
 pub(crate) fn define_thunks<M: Module>(module: &mut M, m: &kir::Module, ids: &[FuncId]) -> Result<Vec<(ExportInfo, FuncId)>, String> {
-    let ptr = module.target_config().pointer_type();
-    let cc = module.isa().default_call_conv();
-    let mut sig = Signature::new(cc);
-    sig.params.extend([AbiParam::new(ptr), AbiParam::new(ptr)]);
+    let sig = thunk_signature(module);
     let mut out = Vec::new();
     let mut fb_ctx = FunctionBuilderContext::new();
     for (i, f) in m.funcs.iter().enumerate().filter(|(_, f)| f.exported) {
@@ -129,4 +134,30 @@ pub(crate) fn define_thunks<M: Module>(module: &mut M, m: &kir::Module, ids: &[F
         out.push((info, id));
     }
     Ok(out)
+}
+
+/// Defines the thunk that runs the function building the heap constants (`kir::Module::init`),
+/// if the module has one. It has the shape of an export thunk, and takes no arguments and
+/// gives no result, so a host passes null for both. It is kept apart from the exports.
+pub(crate) fn define_init_thunk<M: Module>(module: &mut M, m: &kir::Module, ids: &[FuncId]) -> Result<Option<FuncId>, String> {
+    let Some(init) = m.init else { return Ok(None) };
+    let sig = thunk_signature(module);
+    let id = module.declare_function("k_init_constants", Linkage::Local, &sig).map_err(|e| e.to_string())?;
+    let mut func = Function::with_name_signature(Default::default(), sig);
+    let mut fb_ctx = FunctionBuilderContext::new();
+    {
+        let mut b = FunctionBuilder::new(&mut func, &mut fb_ctx);
+        let block = b.create_block();
+        b.append_block_params_for_function_params(block);
+        b.switch_to_block(block);
+        b.seal_block(block);
+        let fref = module.declare_func_in_func(ids[init.0 as usize], b.func);
+        b.ins().call(fref, &[]);
+        b.ins().return_(&[]);
+        b.finalize();
+    }
+    let mut ctx = module.make_context();
+    ctx.func = func;
+    module.define_function(id, &mut ctx).map_err(|e| format!("constants thunk: {e:?}"))?;
+    Ok(Some(id))
 }

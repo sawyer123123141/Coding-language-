@@ -5,6 +5,7 @@ mod call;
 mod collections;
 mod divide;
 mod expr;
+mod globals;
 mod maps;
 mod math;
 mod par;
@@ -86,6 +87,8 @@ pub(crate) struct Shared<'a> {
     /// The thunk of each `par for` body, by `FuncIdx`.
     pub par_thunks: &'a HashMap<u32, FuncId>,
     pub rt: &'a RtFuncs,
+    /// The data of each global, by `GlobalIdx`.
+    pub globals: &'a [DataId],
     pub opts: Options,
     /// The whole program: struct layouts and callees' signatures.
     pub kir: &'a kir::Module,
@@ -251,6 +254,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 let Slot::Ptr(v) = self.slots[l.0 as usize] else { unreachable!("binds a reference local") };
                 self.b.def_var(v, addr);
             }
+            kir::Stmt::BindGlobal(l, g) => self.bind_global(*l, *g),
         }
         Ok(true)
     }

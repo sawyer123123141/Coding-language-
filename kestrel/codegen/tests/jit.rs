@@ -315,3 +315,26 @@ fn structs_print_with_field_names() {
     assert_eq!(code, Some(0), "stderr: {stderr}");
     assert!(stdout.contains("L(a: P(x: 1, f: 2.5, ok: true), n: -3) 7\n"), "stdout: {stdout}");
 }
+
+#[test]
+fn heap_constants_are_built_by_the_init_thunk() {
+    let src = "let ITEMS = [4, 5, 6]\nlet COSTS = {\"a\": 7}\npure pick(i: int) -> int {\n ITEMS[i]\n}\npure cost() -> int {\n COSTS.get(\"a\", 0) + COSTS.len\n}\n";
+    let p = jit(src);
+    // The helper already ran the init, as `main` would.
+    assert_eq!(call1(&p, "pick", 2), 6);
+    assert_eq!(call0::<i32>(&p, "cost"), 8);
+    // Running it again builds nothing new, and leaves the constants as they were.
+    p.run_init();
+    let thunk = p.init_thunk().expect("a program with heap constants has an init");
+    // SAFETY: the thunk reads neither argument.
+    unsafe { thunk(std::ptr::null(), std::ptr::null_mut()) };
+    assert_eq!(call1(&p, "pick", 0), 4);
+}
+
+#[test]
+fn a_program_without_heap_constants_has_no_init() {
+    let p = jit("let N = 3\npure f() -> int {\n N\n}");
+    assert!(p.init_thunk().is_none());
+    p.run_init();
+    assert_eq!(call0::<i32>(&p, "f"), 3);
+}

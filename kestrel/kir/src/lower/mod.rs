@@ -1,6 +1,7 @@
 mod builtins;
 mod call;
 mod collections;
+mod consts;
 mod expr;
 mod helpers;
 mod layout;
@@ -14,7 +15,7 @@ mod vector;
 
 use std::collections::{HashMap, HashSet};
 
-use kestrel_check::{FnId, LocalId, Res, Tables, Ty};
+use kestrel_check::{ConstId, FnId, LocalId, Res, Tables, Ty};
 use kestrel_syntax::ast::{self, Program};
 use kestrel_syntax::{LineIndex, Span};
 
@@ -28,10 +29,15 @@ pub fn lower(program: &Program, t: &Tables, lines: &LineIndex) -> Module {
     let mut helpers = Helpers::new(t.fns.len() as u32);
     let mut funcs: Vec<Func> =
         (0..t.fns.len()).map(|i| FnLowerer::new(program, t, lines, FnId(i as u32), &mut helpers).lower()).collect();
+    let init = consts::lower_init(program, t, lines, &mut helpers);
     funcs.append(&mut helpers.funcs);
     let elems = t.elems.iter().map(|&e| kty(e)).collect();
     let main = t.main.map(|m| FuncIdx(m.0));
-    Module { funcs, structs, enums, elems, print_fns: helpers.print, par_bodies: helpers.par_bodies, main }
+    if let (Some(init), Some(main)) = (init, main) {
+        funcs[main.0 as usize].body.insert(0, Stmt::Call(init, Vec::new()));
+    }
+    let globals = helpers.consts.into_globals();
+    Module { funcs, structs, enums, elems, print_fns: helpers.print, par_bodies: helpers.par_bodies, globals, init, main }
 }
 
 pub(crate) fn kty(ty: Ty) -> KTy {
@@ -74,6 +80,8 @@ pub(crate) struct FnLowerer<'a> {
     /// Temporaries holding the owning result of a native called in a scratch arena, which is
     /// handed on as a new value (see `scratch_call_value` and `temps`).
     scratch_results: HashSet<LocalIdx>,
+    /// The reference local of each heap constant this function uses (see `consts`).
+    const_locals: HashMap<ConstId, LocalIdx>,
     helpers: &'a mut Helpers,
 }
 
@@ -81,7 +89,8 @@ impl<'a> FnLowerer<'a> {
     fn new(program: &'a Program, t: &'a Tables, lines: &'a LineIndex, fn_id: FnId, helpers: &'a mut Helpers) -> Self {
         let (local_map, locals, bindings, elems) = (HashMap::new(), Vec::new(), HashMap::new(), HashMap::new());
         let (origins, scopes) = (HashMap::new(), Vec::new());
-        FnLowerer { program, t, lines, fn_id, local_map, locals, bindings, elems, origins, scopes, scratch_results: HashSet::new(), helpers }
+        let (scratch_results, const_locals) = (HashSet::new(), HashMap::new());
+        FnLowerer { program, t, lines, fn_id, local_map, locals, bindings, elems, origins, scopes, scratch_results, const_locals, helpers }
     }
 
     fn lower(mut self) -> Func {
@@ -108,7 +117,7 @@ impl<'a> FnLowerer<'a> {
         }
         let params = (0..info.params.len()).map(|i| LocalIdx(i as u32)).collect();
         let ret = if info.ret == Ty::Unit { None } else { Some(kty(info.ret)) };
-        let body = if info.is_native {
+        let mut body = if info.is_native {
             Vec::new()
         } else if ret.is_some() {
             let (mut stmts, tail) = self.block_value(&decl.body);
@@ -120,6 +129,7 @@ impl<'a> FnLowerer<'a> {
         } else {
             self.block_stmts(&decl.body)
         };
+        body.splice(0..0, self.const_binds());
         Func {
             name: info.name.clone(),
             params,

@@ -196,6 +196,8 @@ pub struct Tables {
     pub elem_ids: HashMap<Ty, ElemId>,
     pub fn_by_name: HashMap<String, FnId>,
     pub const_by_name: HashMap<String, ConstId>,
+    /// Every constant in the order `check_consts` checked it: each comes after the constants it uses.
+    pub const_order: Vec<ConstId>,
     pub main: Option<FnId>,
     /// Copied from the program: where the built-in modules' source is. Only they may
     /// name `GpuHandle` (see `in_builtin`).

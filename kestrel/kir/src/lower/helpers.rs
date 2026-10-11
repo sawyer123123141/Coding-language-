@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 use kestrel_check::Tables;
 
+use super::consts::ConstGlobals;
 use super::kty;
 use crate::ir::*;
 
@@ -87,11 +88,14 @@ pub(crate) struct Helpers {
     drop: HashMap<KTy, FuncIdx>,
     pub(crate) print: HashMap<KTy, FuncIdx>,
     pub(crate) par_bodies: Vec<FuncIdx>,
+    /// The heap constants the functions use, and their globals.
+    pub(super) consts: ConstGlobals,
 }
 
 impl Helpers {
     pub(crate) fn new(base: u32) -> Self {
-        Helpers { base, funcs: Vec::new(), copy: HashMap::new(), drop: HashMap::new(), print: HashMap::new(), par_bodies: Vec::new() }
+        let (copy, drop, print) = (HashMap::new(), HashMap::new(), HashMap::new());
+        Helpers { base, funcs: Vec::new(), copy, drop, print, par_bodies: Vec::new(), consts: ConstGlobals::default() }
     }
 
     /// Adds an outlined `par for` body, named for its index.

@@ -148,7 +148,7 @@ impl Inliner<'_> {
                 self.args(args, depth);
                 self.expr(count, depth);
             }
-            Stmt::PushArena(None) | Stmt::PopArena { .. } | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
+            Stmt::BindGlobal(..) | Stmt::PushArena(None) | Stmt::PopArena { .. } | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
         }
     }
 

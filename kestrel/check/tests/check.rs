@@ -57,6 +57,14 @@ fn a_constant_may_use_one_declared_below_it() {
 }
 
 #[test]
+fn constants_are_ordered_after_the_constants_they_use() {
+    let t = ok("let AREA = SIZE * SIZE\nlet SIZE = WIDTH + 1\nlet WIDTH = 31\nlet OTHER = 7\nmain() {}\n");
+    let ids: Vec<u32> = t.const_order.iter().map(|c| c.0).collect();
+    // WIDTH (2), then SIZE (1), then AREA (0); the unrelated OTHER (3) keeps its place after them.
+    assert_eq!(ids, [2, 1, 0, 3]);
+}
+
+#[test]
 fn diverging_branches_satisfy_return_type() {
     ok("f(x: int) -> int {\n if x > 0 { return 1 } else { return 2 }\n}\nmain() {}\n");
     ok("f(x: int) -> int {\n if x > 0 { 1 } else { 2 }\n}\nmain() {}\n");

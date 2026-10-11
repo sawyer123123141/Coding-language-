@@ -1,5 +1,6 @@
 pub mod export;
 mod func;
+mod globals;
 mod isa;
 mod native;
 mod par_thunk;
@@ -34,8 +35,8 @@ pub(crate) fn symbol(name: &str) -> String {
 }
 
 /// Declares every function of `m` in `module` and defines the ones with bodies
-/// (natives are imports under their own symbols). Returns their ids, indexed
-/// by `FuncIdx`.
+/// (natives are imports under their own symbols), and defines its globals. Returns
+/// the functions' ids, indexed by `FuncIdx`.
 pub(crate) fn define_module<M: Module>(module: &mut M, m: &kir::Module, opts: Options) -> Result<Vec<FuncId>, String> {
     let cc = module.isa().default_call_conv();
     let ptr = module.target_config().pointer_type();
@@ -49,7 +50,8 @@ pub(crate) fn define_module<M: Module>(module: &mut M, m: &kir::Module, opts: Op
         ids.push(id.map_err(|e| e.to_string())?);
     }
     let par_thunks = par_thunk::define_par_thunks(module, m, &ids)?;
-    let shared = func::Shared { funcs: &ids, par_thunks: &par_thunks, rt: &rt, opts, kir: m };
+    let globals = globals::define_globals(module, m)?;
+    let shared = func::Shared { funcs: &ids, par_thunks: &par_thunks, rt: &rt, globals: &globals, opts, kir: m };
     let mut strings = func::Strings::default();
     let mut ctx = module.make_context();
     let mut fb_ctx = FunctionBuilderContext::new();

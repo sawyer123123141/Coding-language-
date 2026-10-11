@@ -2,6 +2,7 @@ use kestrel_check::{ConstId, Res, Tables, Ty};
 use kestrel_syntax::ast;
 
 use super::builtins::constant_value;
+use super::consts::{decl, hoisted};
 use super::{binop, kty, FnLowerer};
 use crate::ir::*;
 
@@ -51,6 +52,8 @@ impl<'a> FnLowerer<'a> {
             ast::ExprKind::Ident(_) => match self.t.res[&e.id] {
                 Res::Local(_) if self.t.moves.contains(&e.id) => ExprKind::Move(self.place(e).expect("a local is a place")),
                 Res::Local(_) => ExprKind::Load(self.place(e).expect("a local is a place")),
+                // Built once, before `main`: a use reads the global in place (see `consts`).
+                Res::Const(c) if hoisted(self.t, c) => ExprKind::Load(Place::local(self.const_local(c))),
                 Res::Const(c) => return self.const_value(c),
                 Res::Builtin(b) => Self::builtin_constant(b),
                 other => unreachable!("name resolved to {other:?}"),
@@ -160,12 +163,10 @@ impl<'a> FnLowerer<'a> {
         Expr { kind, ty, line }
     }
 
-    /// A constant's initializer, re-lowered at each use.
+    /// The initializer of a constant that holds no array, list or map, written out at each use.
     fn const_value(&mut self, c: ConstId) -> Expr {
         let (t, program) = (self.t, self.program);
-        let item = t.consts[c.0 as usize].item;
-        let ast::Item::Const(decl) = &program.items[item] else { unreachable!("ConstInfo points at a const") };
-        self.expr(&decl.value)
+        self.expr(&decl(program, t, c).value)
     }
 }
 

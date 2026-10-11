@@ -11,7 +11,13 @@ pub fn jit_with(src: &str, opts: Options) -> JitProgram {
     assert!(d.is_empty(), "check: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
     let mut m = kestrel_kir::lower(&p, &t.unwrap(), &LineIndex::new(src));
     kestrel_kir::inline::inline_small(&mut m);
-    JitProgram::compile(&m, opts).expect("codegen")
+    built(JitProgram::compile(&m, opts).expect("codegen"))
+}
+
+/// `p` with its heap constants built, as `main` would build them: tests call functions directly.
+fn built(p: JitProgram) -> JitProgram {
+    p.run_init();
+    p
 }
 
 pub fn jit(src: &str) -> JitProgram {
@@ -56,7 +62,7 @@ fn jit_natives_as(src: &str, extra: &[(&str, *const u8)], opts: Options, builtin
     assert!(d.is_empty(), "check: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
     let mut m = kestrel_kir::lower(&p, &t.unwrap(), &LineIndex::new(src));
     kestrel_kir::inline::inline_small(&mut m);
-    JitProgram::compile_with(&m, opts, extra)
+    JitProgram::compile_with(&m, opts, extra).map(built)
 }
 
 /// Runs the program's `main` on this thread and returns what it printed.

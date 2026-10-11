@@ -1,0 +1,65 @@
+// expect: Shelf(xs: [7, 8, 9], n: 1)
+// expect: 24
+// expect: [4, 5]
+// expect: has 5
+// expect: bc 2 ["p", "q"]
+// expect: [1, 2] [0]
+// expect: 48 42
+// expect: [100, 8, 9] [7, 8, 9] [7, 8, 9]
+// expect: ["p", "q", "r"] ["p", "q"]
+// A constant that builds a struct whose field default is another constant: the default's
+// constant is built first, though nothing in `P` names it and it is declared below.
+let P = Shelf()
+let DEFAULTS = [7, 8, 9]
+let MAYBE: [int]? = [4, 5]
+let NAMES = ["a", "bc"]
+let TABLE = {"x": [1, 2], "y": [3]}
+let LIST: list[string] = ["p", "q"]
+let ANSWER = 42
+
+struct Shelf {
+    xs: [int] = DEFAULTS
+    n: int = 1
+}
+
+pure total(s: Shelf) -> int {
+    var t = 0
+    for x in s.xs {
+        t += x
+    }
+    t
+}
+
+struct Counter {
+    total: int = 0
+
+    pure bump(var self) {
+        for n in DEFAULTS {
+            self.total += n
+        }
+    }
+}
+
+show_maybe() {
+    let m = MAYBE else { return }
+    print("has", m[1])
+}
+
+main() {
+    print(P)
+    print(total(P))
+    print(MAYBE)
+    show_maybe()
+    print(NAMES[1], NAMES.len, LIST)
+    print(TABLE["x"], TABLE.get("z", [0]))
+    var c = Counter()
+    c.bump()
+    c.bump()
+    print(c.total, ANSWER)
+    var s = Shelf()
+    s.xs[0] = 100
+    print(s.xs, DEFAULTS, P.xs)
+    var l = LIST
+    l.add("r")
+    print(l, LIST)
+}

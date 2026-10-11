@@ -68,7 +68,8 @@ fn stmt<'a>(s: &'a Stmt, f: &mut impl FnMut(Node<'a>)) {
         }
         Stmt::Call(_, args) => self::args(args, f),
         Stmt::Print(parts) | Stmt::Write(parts) => print_args(parts, f),
-        Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
+        // Neither reads nor writes a place: it only points a local at a global.
+        Stmt::BindGlobal(..) | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
     }
 }
 

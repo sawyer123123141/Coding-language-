@@ -280,3 +280,61 @@ fn a_block_value_spilled_before_its_drops_is_moved_out_and_a_literal_is_not_copi
     assert!(then_body.iter().any(|s| matches!(s, Stmt::Let(_, Expr { kind: ExprKind::StrLit(l), .. }) if l == "lit")), "{then_body:#?}");
     assert!(!then_body.iter().any(|s| matches!(s, Stmt::Dup(_))), "{then_body:#?}");
 }
+
+/// The (local, global) pairs `f` binds with `BindGlobal`, in order.
+fn bound_globals(f: &Func) -> Vec<(LocalIdx, GlobalIdx)> {
+    f.body.iter().filter_map(|s| if let Stmt::BindGlobal(l, g) = s { Some((*l, *g)) } else { None }).collect()
+}
+
+#[test]
+fn heap_constants_become_globals_built_once() {
+    let m = lower_src("let ITEMS = [1, 2, 3]\nlet N = 3\nmain() {\n print(ITEMS[0], ITEMS.len, N)\n}\n");
+    let ints = ElemIdx(m.elems.iter().position(|&e| e == KTy::I32).unwrap() as u32);
+    // The built flag, the constants' arena, then the one heap constant. `N` makes no global.
+    assert_eq!(m.globals, vec![KTy::Bool, KTy::Arena, KTy::Array(ints)]);
+    let init = m.init.expect("a used heap constant needs the init function");
+    assert_eq!(m.funcs[init.0 as usize].name, "__kestrel_constants");
+    let main = func(&m, "main");
+    assert_eq!(main.body[0], Stmt::Call(init, Vec::new()), "{:#?}", main.body);
+    let bound = bound_globals(main);
+    assert_eq!(bound.len(), 1, "{:#?}", main.body);
+    let (local, global) = bound[0];
+    assert_eq!(global, GlobalIdx(2));
+    assert_eq!(main.locals[local.0 as usize].name, "ITEMS");
+    assert_eq!(main.locals[local.0 as usize].kind, LocalKind::RefParam);
+    // A use reads the global in place: no copy, no new array.
+    assert!(
+        matches!(&main.body[2], Stmt::Print(args) if matches!(&args[0], PrintArg::Value(Expr { kind: ExprKind::Load(Place { root, .. }), .. }) if *root == local)),
+        "{:#?}",
+        main.body
+    );
+}
+
+#[test]
+fn unused_heap_constants_are_not_built() {
+    let m = lower_src("let UNUSED = [9]\nmain() {}\n");
+    assert!(m.init.is_none());
+    assert!(m.globals.is_empty());
+    assert!(m.funcs.iter().all(|f| f.name != "__kestrel_constants"));
+    assert!(!matches!(func(&m, "main").body.first(), Some(Stmt::Call(..))));
+}
+
+#[test]
+fn a_constant_used_by_another_is_built_first() {
+    // `NESTED` is declared above the `ITEMS` it holds, and is the only one the program uses.
+    let m = lower_src("let NESTED = [ITEMS, [4]]\nlet ITEMS = [1, 2]\nmain() {\n print(NESTED[0][1])\n}\n");
+    let init = &m.funcs[m.init.expect("a used heap constant needs the init function").0 as usize];
+    let nested = bound_globals(func(&m, "main"))[0].1;
+    // Every constant of the init is bound at its start; the assignments follow in build order.
+    let bound = bound_globals(init);
+    let global_of = |local: LocalIdx| bound.iter().find(|(l, _)| *l == local).expect("bound at the start").1;
+    let built: Vec<GlobalIdx> = init
+        .body
+        .iter()
+        .filter_map(|s| if let Stmt::Assign(Place { root, path }, _) = s { path.is_empty().then(|| global_of(*root)) } else { None })
+        .filter(|g| g.0 >= 2)
+        .collect();
+    assert_eq!(built.len(), 2, "{:#?}", init.body);
+    assert_ne!(built[0], nested, "ITEMS must be built before NESTED");
+    assert_eq!(built[1], nested);
+}

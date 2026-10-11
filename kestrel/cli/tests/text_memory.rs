@@ -66,6 +66,20 @@ fn text_built_for_a_native_does_not_grow_the_program_arena() {
 }
 
 #[test]
+fn a_heap_constant_in_the_frame_loop_does_not_grow_the_program_arena() {
+    // A constant array is built once, before `main`, and read in place. Before that, each
+    // `PALETTE[n % 3]` built the whole array again in the program arena (about 4.78 MB over
+    // 100,000 frames).
+    let src = "use window\nuse draw\nuse { Color from draw }\n\nlet PALETTE = [draw.RED, draw.GREEN, draw.BLUE]\n\nmain() {\n    window.open(64, 64, \"constant memory\")\n    var n = 0\n    while window.frame() {\n        n += 1\n        draw.rect(vec2(0, 0), vec2(1, 1), PALETTE[n % 3])\n    }\n}\n";
+    let exe = build("constant_palette", src);
+    let (few, many) = (arena_bytes(&exe, FEW_FRAMES), arena_bytes(&exe, MANY_FRAMES));
+    assert!(
+        few.abs_diff(many) < 64 * 1024,
+        "the program arena grew from {few} bytes ({FEW_FRAMES} frames) to {many} bytes ({MANY_FRAMES} frames)"
+    );
+}
+
+#[test]
 fn text_kept_in_a_variable_does_grow_it() {
     // The control: a string stored in a variable stays in the program arena, so the
     // measurement can see growth. (`"n {n}"` is about 7 bytes a frame, which comes to 0.6 MiB

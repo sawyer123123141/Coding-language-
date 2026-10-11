@@ -73,6 +73,7 @@ impl Order<'_> {
         self.stack.pop();
         self.marks[i] = Mark::Done;
         check_const(self.consts[i], i, t, diags);
+        t.const_order.push(ConstId(i as u32));
     }
 
     /// `back` is on the stack and the constant at the top uses it: a loop. The

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use kestrel_check::{EnumId, FnId, Res, StructId};
 use kestrel_syntax::ast;
 
+use super::consts::hoisted;
 use super::FnLowerer;
 use crate::ir::*;
 
@@ -15,6 +16,8 @@ impl<'a> FnLowerer<'a> {
                     Some(p) => p.clone(),
                     None => Place::local(self.local_map[l]),
                 }),
+                // A heap constant is a place that is only read: never moved, so storing it copies.
+                Some(&Res::Const(c)) if hoisted(self.t, c) => Some(Place::local(self.const_local(c))),
                 _ => None,
             },
             // `m[k]` is a lookup, not a place.

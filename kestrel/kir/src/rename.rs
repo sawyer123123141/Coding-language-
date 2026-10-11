@@ -64,6 +64,7 @@ pub(crate) fn rename_stmts(stmts: &mut [Stmt], subst: &[Subst]) {
                 rename_local(l, subst);
                 rename_place(p, subst);
             }
+            Stmt::BindGlobal(l, _) => rename_local(l, subst),
             Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::DropGpu(p) | Stmt::PushArena(Some(p)) => rename_place(p, subst),
             Stmt::MapSet(p, k, v, _) => {
                 rename_place(p, subst);
