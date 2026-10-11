@@ -51,7 +51,7 @@ VOXEL_START_COLUMNS = ["width", "chunks", "meshes", "faces", "build", "upload"]
 
 def run_once(command, env, secs):
     """The per-second lines (a dict of columns each, first dropped) and the viewer's start line (a dict, or None)
-    the command printed in `secs` seconds. Voxel lines have the columns `voxels` (their W), `draw`, `frame` and `fps`."""
+    the command printed in `secs` seconds. Voxel lines have the columns `voxels` (always True: it marks the row as a voxel line), `draw`, `frame` and `fps`."""
     proc = subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     timer = threading.Timer(secs, proc.kill)
     timer.start()

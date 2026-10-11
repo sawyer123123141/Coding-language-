@@ -32,7 +32,7 @@ The per-second columns follow `demos/particles/results.md`: each cell is the med
 A hidden window is normally not held to the display's rate on this machine (see the end of `bench/particles/results.md`, which also records an earlier spell when it was). **During all of this session every hidden run was held at 60 fps**, whatever the world size, until the work per frame went past 16.67 ms (see the headroom table). So:
 
 - `measure.py --retry-capped` did not help: every run of the main tables was repeated once (4 repeats a configuration, all of them capped again), and an earlier try with 4 repeats each at `WIDTH` 8 and 16 stayed capped too. Of the roughly 120 runs at `WIDTH` 8 and 16, all but two had a median frame of 16.6-16.7 ms (the two were `WIDTH` 16 runs at 16.97 and 17.02 ms, in a batch with a slow start-up).
-- **The frame and fps cells for `WIDTH` 8, 16, 20 and 24 below are capped: "60 fps (capped; the frame never waited on the program)".** They say the program finished every frame in time, not how much time it had left. The CPU `draw` time and the stress runs below are what say how much.
+- **The frame and fps cells for `WIDTH` 8, 16, 20 and 24 below are capped: the median frame is the display's 16.67 ms.** At `WIDTH` 8 and 16 every per-second value in the "`WIDTH` 8 and 16" table below is 16.60-16.74 ms; at 20 and 24 the median is, but some seconds were slower (up to 23.41 and 30.52 ms). The cells say the program finished its median frame in time, not how much time it had left. The CPU `draw` time and the stress runs below are what say how much.
 - A visible window would also show at most 60 fps (vsync).
 
 ## Results: `WIDTH` 8 and 16
@@ -44,14 +44,16 @@ A hidden window is normally not held to the display's rate on this machine (see 
 | 16 | JIT | 1,000 | 1,908,007 | 292.6 (257.9-345.8) | 205.7 (190.3-290.0) | 0.82 (0.73-0.91) | 16.67 (16.62-16.70), capped | 60.0 (59.9-60.2), capped |
 | 16 | exe | 1,000 | 1,908,007 | 296.6 (264.8-684.0) | 217.7 (193.0-747.5) | 0.76 (0.67-5.22) | 16.67 (16.60-16.74), capped | 60.0 (59.8-60.2), capped |
 
-The frame cells are over 32-36 per-second values a row; the start-up cells over 14 runs. 8 of the 256 chunks at `WIDTH` 8 (24 of 1,024 at 16) are all air and get no mesh, which is why meshes is fewer than chunks; the faces count is exact (463,749 at `WIDTH` 8, the benchmark's).
+The frame cells are over 32-36 per-second values a row; the start-up cells over 14 runs. 8 of the 256 chunks at `WIDTH` 8 (24 of 1,024 at 16) have no faces and get no mesh, which is why meshes is fewer than chunks. At `WIDTH` 8, 3 of the 8 are all air and 5 are solid all through, buried in the bottom layer (a scratch program counted the solid flags of each: 0 or all 39,304). The faces count is exact (463,749 at `WIDTH` 8, the benchmark's).
 
 - **JIT and exe are the same speed** within the noise, as expected: both run the same machine code.
-- **Build:** 65-78 ms at `WIDTH` 8 for 256 chunks, 260-300 ms at 16 for 1,024 (4 times the chunks, about 4 times the time).
-- **Upload:** 48-59 ms at `WIDTH` 8, about 200-220 ms at 16. It is about 27-32 ns for each vertex at both sizes (1.85 million vertices at `WIDTH` 8, 7.63 million at 16).
+- **Build:** 73-78 ms at `WIDTH` 8 for 256 chunks (runs 65-126 ms), 293-297 ms at 16 for 1,024 (runs 258-684 ms): 4 times the chunks, about 4 times the time. These are the medians of the JIT and exe rows; the ranges are in the table.
+- **Upload:** 53-59 ms at `WIDTH` 8 (runs 48-120 ms), 206-218 ms at 16 (runs 190-748 ms). It is about 27-32 ns for each vertex at both sizes (1.85 million vertices at `WIDTH` 8, 7.63 million at 16).
 - **Outliers** are the machine, not the viewer: single runs showed a draw of 1.4 to 5 ms for several seconds, and one exe run at `WIDTH` 16 a build of 684 ms and an upload of 747 ms (the medians ignore them).
 - **Start-up** (build plus upload) is about 125 ms at `WIDTH` 8 and about 500 ms at `WIDTH` 16.
 - **Memory:** the process's peak working set was 269 MiB at `WIDTH` 8 and 875 MiB at 16 (a single run of each, polled every 10 ms). Most of it is the build arena, which holds every chunk's lists until the upload is done.
+  - **The process keeps that memory after the upload.** The `arena { }` frees it for the program (the program arena stays at 64 KiB), but the runtime keeps freed blocks in a per-thread spare cache for later arenas instead of returning them to Windows (`runtime/src/blocks.rs`, up to 256 MiB a thread). The `par for` threads' arenas are handed to the `arena { }` (`runtime/src/par.rs`), so all of its blocks are freed, and cached, on the main thread. So the working set stays near its peak at `WIDTH` 8: an earlier run measured 268 MiB at the end, for a world whose GPU data is 35 MB.
+  - **A headless check** (a release exe of the committed viewer, no window and no graphics driver, one run, sampled every 20 ms): after the build the working set was 172 MiB for the whole run, with the program arena at 64 KiB. That is close to the 184 MiB of blocks the build allocates (the program arena of a copy without the `arena { }`). The rest of the 268 MiB is presumably the graphics context and driver; I did not measure it. The same check at `WIDTH` 16 held 249 MiB, just under the 256 MiB limit. That these 172 and 249 MiB are the spare cache is read from the code and fits the numbers; I did not instrument the cache.
 
 ### The world's meshes
 
@@ -83,8 +85,8 @@ The capped frame hides the program's own time, so I raised `WIDTH` until the fra
 | 24 | 2,245 | 4,210,488 | 9.59 (8.20-26.73) | 16.67 (16.60-30.52), capped | 60.0 (32.8-60.2), capped |
 | 32 | 3,983 | 7,339,599 | 14.21 (13.16-66.29) | **16.95 (16.40-66.48)** | **59.0 (15.0-61.0)** |
 
-- **The frame is held at 60 fps up to `WIDTH` 24, and only just passes 16.67 ms at 32**: 16.95 ms median, and per run 16.69, 16.68, 17.24 and 19.20 ms. So **the viewer stops reaching 60 fps at about 7 million faces, about `WIDTH` 31 or 32**, 16 times the spec's world.
-- **The draw time is what changes first.** It is 1.2 ms at 3.0 million faces and 9.6 ms at 4.2 million; at 7.3 million it is 14.2 ms of the 16.95. With 4,000 `draw3d.mesh` calls, that is not the cost of the calls: in the stress runs below, 3,968 calls cost 1.9 ms. The rest is the program **waiting inside the draw calls for the driver and the GPU**. So I take the limit to be the GPU and its driver, from about 4 million faces, at roughly 2 ms for every million faces (9.6 ms of waiting at 4.2 million, 14.2 at 7.3; this is an inference from the waiting, not a GPU timing).
+- **The frame is held at 60 fps up to `WIDTH` 24, and only just passes 16.67 ms at 32**: 16.95 ms median, and per run 16.69, 16.68, 17.24 and 19.20 ms. So **the viewer stops reaching 60 fps somewhere between `WIDTH` 24 and 32** (4.2 and 7.3 million faces); I did not run in between. `WIDTH` 32 is 16 times the spec's world.
+- **The draw time is what changes first.** It is 1.2 ms at 3.0 million faces and 9.6 ms at 4.2 million (8 times as long for 1.4 times the faces); at 7.3 million it is 14.2 ms of the 16.95. With 4,000 `draw3d.mesh` calls, that is not the cost of the calls: in the stress runs below, 3,968 calls cost 1.9 ms. The rest is the program **waiting inside the draw calls for the driver and the GPU**. So I take the limit to be the GPU and its driver. The waiting starts between 3 and 4 million faces and does not grow in step with the face count, so there is no steady cost for each million faces to quote. This is an inference from the waiting, not a GPU timing.
 - The first seconds of the big worlds are slower (`WIDTH` 32: 66, 45, 31, then 14-17 ms a frame), maybe because the driver moves the buffers into video memory on their first use, or the GPU clock ramps up; I did not find out which. The medians are over every value after the first line.
 
 ### Stress: drawing the `WIDTH` 8 world several times
@@ -110,14 +112,14 @@ To see the cost of more faces without the memory (and to see a frame past the ca
 **Yes.** Every `WIDTH` 8 run (JIT and exe, about 70 runs in all) held 60 fps (59.1-60.9 in the per-second values), at a draw time of 0.2-0.3 ms. That is the display's rate, not the program's: the machine held hidden windows at 60 fps the whole time, so I cannot give the frame time the program would reach without the cap. Evidence for how much room there is:
 
 - The CPU draw at `WIDTH` 8 is 0.25 ms of a 16.67 ms frame.
-- The same world drawn 16 times a frame (7.4 million faces) still holds 60 fps; the real bigger worlds, with 4.2 million faces (`WIDTH` 24) hold it and 7.3 million barely fail it. So the GPU time for 463,749 faces is probably about 1 ms (roughly 2 ms a million faces; an extrapolation, not a measurement).
+- The same world drawn 16 times a frame (7.4 million faces) still holds 60 fps; the real bigger worlds, with 4.2 million faces (`WIDTH` 24) hold it and 7.3 million barely fail it. So the GPU time for the 463,749 faces of `WIDTH` 8 is not measured, but it is far under a frame.
 - The program's own part of a frame (reading input, `fly`, the overlay text, `window.frame()`) is not separated out here.
 
 A visible window would show at most 60 fps (vsync, which `window.open` always turns on), so 60 is also the most the spec could ask for. I did not run a visible window.
 
 ## Where the start-up time goes: the upload
 
-At `WIDTH` 8 the upload takes 48-59 ms and the build 65-78 ms, so the upload is about 40% of the start-up. Earlier runs of the viewer on this machine, before these measurements, showed an upload of 290-320 ms, several times what plan 2's measure of `make_mesh` predicts (a 70,000-vertex mesh in about 2.1 ms, so about 55 ms for 1.85 million vertices). **That slow upload did not come back in about 50 runs at `WIDTH` 8 (46-120 ms), and the upload agrees with plan 2's figure.** I could make it slow again, by a lot, only by loading the CPU (below).
+At `WIDTH` 8 the upload takes 53-59 ms (medians; runs 48-120 ms) and the build 73-78 ms (runs 65-126 ms), so the upload is about 40% of the start-up. Earlier runs of the viewer on this machine, before these measurements, showed an upload of 290-320 ms, several times what plan 2's measure of `make_mesh` predicts (a 70,000-vertex mesh in about 2.1 ms, so about 55 ms for 1.85 million vertices). **That slow upload did not come back in about 50 runs at `WIDTH` 8 (46-120 ms), and the upload agrees with plan 2's figure.** I could make it slow again, by a lot, only by loading the CPU (below).
 
 A scratch program timed each `make_mesh` call with `window.ticks_usec()` after the same build, twice (the second pass uploads the same data again). Three runs of 248 meshes each; the per-vertex figures are from the first run:
 

@@ -1,7 +1,7 @@
 # Kestrel
 
 A compiled language for games: plain values, arenas instead of a garbage
-collector, and (coming in sub-project 3) parallel loops over `pure` code.
+collector, and parallel loops (`par for`) over `pure` code.
 It compiles through Cranelift to native code, either JIT-run in place or
 built into an executable.
 
@@ -82,7 +82,7 @@ target/release/kestrel run --release demos/voxels/voxels.kes
 
 - Hold the right mouse button and drag to look, WASD to move, Space and Shift to go up and down, the mouse wheel to change speed.
 - At start a `par for` builds every chunk's mesh on all cores (about 75 ms) and a loop copies them to the GPU (about 55 ms). Then each frame draws all 248 meshes, with an overlay of the fps, frame time and face count.
-- At the default size it holds 60 fps, the display's rate. That number is capped: every test window on the development machine was held at 60 fps, so the headroom was found by growing the world (the constant `WIDTH` in `voxels.kes`). 60 fps (capped) still holds at 4.2 million faces, 9 times the world, and drops just below at 7.3 million. `kestrel/demos/voxels/results.md` has the numbers and what limits it.
+- At the default size it holds 60 fps, the display's rate. That number is capped: every hidden window was held at 60 fps while the viewer was measured, so the headroom was found by growing the world (the constant `WIDTH` in `voxels.kes`). 60 fps (capped) still holds at 4.2 million faces, 9 times the world, and drops just below at 7.3 million. `kestrel/demos/voxels/results.md` has the numbers and what limits it.
 
 Two environment variables help with testing:
 
@@ -107,7 +107,7 @@ The API is in `docs/superpowers/specs/2026-10-10-window-design.md` (window, shap
 - `kestrel/demos/voxels/`: the voxel viewer (`voxels.kes`, `world.kes`, `fly.kes`) and its measured times.
 - `kestrel/tests/programs/` and `kestrel/tests/errors/`: example programs with their expected output, and expected errors.
 - `kestrel/bench/`: benchmarks against Rust and C, with results.
-- `docs/superpowers/specs/`: the language (syntax spec) and compiler (core spec) designs.
+- `docs/superpowers/specs/`: the designs: the language (syntax), the compiler (core), the window, and textures and 3D.
 - `docs/superpowers/plans/`: the implementation plans, done so far.
 
 ## Status
@@ -118,4 +118,4 @@ It also runs inside Godot 4: see [`kestrel/godot`](kestrel/godot/README.md). GDS
 
 Also built: `map`, `par for` (loops that run on every core over `pure` code), global math and random numbers, and the window above with textures, 3D and the voxel viewer. Next: a stronger (faster) backend.
 
-Speed versus Rust is between 1.0x and 1.5x on loops and structs, and about 3x on the voxel heightmap milestone. The numbers are in `kestrel/bench/*/results.md`.
+Speed versus Rust is between 1.0x and 1.5x on loops and structs, and about 3x on the voxel heightmap milestone. The particle demo's loops are further behind: on one thread its update step took 1.5 times Rust's time (3.4 times with the `pow` hoisted out) and its copy loop 2 to 3 times, though a whole frame with bulk drawing is only 2-7% behind. The numbers are in `kestrel/bench/*/results.md`.
