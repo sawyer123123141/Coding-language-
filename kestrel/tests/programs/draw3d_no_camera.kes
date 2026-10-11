@@ -1,0 +1,17 @@
+// env: KESTREL_HEADLESS=1
+// expect: window.open 64 64 "t"
+// expect: draw.clear Color(r: 0, g: 0, b: 0, a: 1)
+// expect-exit: 101
+// expect-stderr: draw3d.cube needs a camera; call draw3d.camera first on line 15
+use window
+use draw
+use draw3d
+
+main() {
+    window.open(64, 64, "t")
+    while window.frame() {
+        draw.clear(draw.BLACK)
+        // No draw3d.camera call yet, in this frame or an earlier one.
+        draw3d.cube(vec3(0, 0, 0), vec3(1, 1, 1), draw.RED)
+    }
+}

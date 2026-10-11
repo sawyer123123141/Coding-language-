@@ -25,6 +25,27 @@ pub struct Vector2 {
     pub y: f32,
 }
 
+/// `Vector3`: three floats.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Vector3 {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+
+/// `Camera3D` (also `Camera`): where it is, what it looks at, which way is up, the vertical field
+/// of view in degrees (for a perspective projection) and the projection.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Camera3D {
+    pub position: Vector3,
+    pub target: Vector3,
+    pub up: Vector3,
+    pub fovy: f32,
+    pub projection: c_int,
+}
+
 /// `Rectangle`: top-left corner and size.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -160,6 +181,9 @@ pub const TEXTURE_FILTER_POINT: c_int = 0;
 /// `TextureWrap::TEXTURE_WRAP_REPEAT`: coordinates outside a texture repeat it.
 pub const TEXTURE_WRAP_REPEAT: c_int = 0;
 
+/// `CameraProjection::CAMERA_PERSPECTIVE`.
+pub const CAMERA_PERSPECTIVE: c_int = 0;
+
 /// `KeyboardKey::KEY_NULL`: no key.
 pub const KEY_NULL: c_int = 0;
 
@@ -239,6 +263,18 @@ extern "C" {
     pub fn SetTextureWrap(texture: Texture, wrap: c_int);
     pub fn DrawTexturePro(texture: Texture, source: Rectangle, dest: Rectangle, origin: Vector2, rotation: f32, tint: Color);
 
+    // 3D mode (rcore.c). Each one flushes the batch first, so what was drawn stays under what follows.
+    /// Starts a perspective projection (near 0.05, far 4000), the camera's view, and the depth
+    /// test. Pushes the projection matrix, which `EndMode3D` pops.
+    pub fn BeginMode3D(camera: Camera3D);
+    /// Puts back the 2D projection and turns the depth test off. Backface culling is untouched.
+    pub fn EndMode3D();
+
+    // 3D shapes (rmodels.c).
+    pub fn DrawLine3D(start_pos: Vector3, end_pos: Vector3, color: Color);
+    pub fn DrawCube(position: Vector3, width: f32, height: f32, length: f32, color: Color);
+    pub fn DrawSphere(center_pos: Vector3, radius: f32, color: Color);
+
     // Models (rmodels.c).
     /// Makes the mesh's vertex array and buffers, sized by `vertexCount`, from its CPU arrays. A
     /// null array that the shader needs (colours, texture coordinates) gets a fixed value instead.
@@ -274,5 +310,14 @@ mod tests {
         assert_eq!(size_of::<Texture>(), 20);
         assert_eq!((size_of::<MaterialMap>(), offset_of!(MaterialMap, color), offset_of!(MaterialMap, value)), (28, 20, 24));
         assert_eq!((size_of::<Material>(), offset_of!(Material, maps), offset_of!(Material, params)), (40, 16, 24));
+    }
+
+    /// The camera `BeginMode3D` takes by value: three `Vector3`s, a float and an int.
+    #[test]
+    fn the_camera_layout_is_raylibs() {
+        assert_eq!((size_of::<Vector3>(), align_of::<Vector3>()), (12, 4));
+        assert_eq!((size_of::<Camera3D>(), align_of::<Camera3D>()), (44, 4));
+        let offsets = (offset_of!(Camera3D, target), offset_of!(Camera3D, up), offset_of!(Camera3D, fovy), offset_of!(Camera3D, projection));
+        assert_eq!(offsets, (12, 24, 36, 40));
     }
 }

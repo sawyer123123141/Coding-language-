@@ -8,12 +8,16 @@
 use crate::abi::{c_string, elems, read, str_bytes, KColor, KSeq, KStr, V2};
 use crate::bulk::{self, span};
 use crate::headless::{self, Arg};
+use crate::pass;
 use crate::raylib as rl;
 use crate::state::{self, Mode};
 
-/// Runs `real` to draw with raylib, or prints the call's line in headless mode.
+/// Checks the window and ends a 3D pass if one is going (drawing here is 2D), then runs `real` to
+/// draw with raylib, or prints the call's line in headless mode.
 fn draw(name: &'static str, args: &[Arg], real: impl FnOnce()) {
-    match state::drawing(name) {
+    let mode = state::drawing(name);
+    pass::enter_2d(mode == Mode::Real);
+    match mode {
         Mode::Headless => headless::line(name, args),
         Mode::Real => real(),
     }
@@ -74,7 +78,7 @@ pub unsafe extern "C" fn kestrel_draw_rect_outline(pos: *const V2, size: *const 
 pub unsafe extern "C" fn kestrel_draw_rects(positions: *const KSeq, size: *const V2, c: *const KColor) {
     let (positions, size, c) = (elems::<V2>(positions), read(size), read(c));
     let args = [Arg::Count(positions.len() as i64), Arg::Vec2(size), Arg::Color(c)];
-    // SAFETY: as for every block here; and every drawing native draws in 2D.
+    // SAFETY: as for every block here; and `draw` ended any 3D pass, so this draws in 2D.
     draw("draw.rects", &args, || unsafe { bulk::draw(positions, size, c.to_raylib()) });
 }
 

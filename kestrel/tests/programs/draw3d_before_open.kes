@@ -1,0 +1,11 @@
+// env: KESTREL_HEADLESS=1
+// expect-exit: 101
+// expect-stderr: draw3d.camera was called before window.open on line 10
+use draw3d
+use { Camera from draw3d }
+
+main() {
+    // This camera is wrong too (pos is target), but the missing window is reported first.
+    let cam = Camera(pos: vec3(0, 0, 0), target: vec3(0, 0, 0))
+    draw3d.camera(cam)
+}

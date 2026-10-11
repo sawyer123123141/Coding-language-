@@ -1,0 +1,14 @@
+// env: KESTREL_HEADLESS=1
+// expect: window.open 64 64 "t"
+// expect-exit: 101
+// expect-stderr: draw3d.camera needs pos and target to differ on line 12
+use window
+use draw3d
+use { Camera from draw3d }
+
+main() {
+    window.open(64, 64, "t")
+    while window.frame() {
+        draw3d.camera(Camera(pos: vec3(1, 2, 3), target: vec3(1, 2, 3)))
+    }
+}

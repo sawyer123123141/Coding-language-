@@ -130,7 +130,7 @@ impl Kestrel {
         }
         // Those modules need Kestrel's own window, which Godot already has.
         if !compiled.builtins.is_empty() {
-            godot_error!("window, draw and input can't be used inside Godot");
+            godot_error!("window, draw, draw3d and input can't be used inside Godot");
             return false;
         }
         match JitProgram::compile(&compiled.module, Options { checked_arith: self.checks }) {

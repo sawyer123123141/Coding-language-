@@ -3,6 +3,8 @@
 //! A line is the qualified name (`draw.circle`), then each argument after a
 //! space, printed the way `print` prints it: numbers as Rust's `{}` does,
 //! a `vec2` as `vec2(x: 1, y: 2)`, a colour as `Color(r: 1, g: 0.3, b: 0.3, a: 1)`,
+//! a `vec3` as `vec3(x: 0, y: 0, z: -3)`, a `Camera` as
+//! `Camera(pos: vec3(x: 0, y: 0, z: -3), target: vec3(x: 0, y: 0, z: 0), up: vec3(x: 0, y: 1, z: 0), fov: 75)`,
 //! a `Rect` as `Rect(pos: vec2(x: 0, y: 0), size: vec2(x: 4, y: 2))`, a `Texture` as
 //! `Texture(id: 1, width: 4, height: 4)`, an array as its length and a string in
 //! double quotes. The lines go through the runtime's print functions, so they stay
@@ -17,7 +19,7 @@ use kestrel_runtime::print::{
     kestrel_rt_print_f32, kestrel_rt_print_i64, kestrel_rt_print_newline, kestrel_rt_print_space, kestrel_rt_print_str,
 };
 
-use crate::abi::{KColor, KRect, KTexture, V2};
+use crate::abi::{KCamera, KColor, KRect, KTexture, V2, V3};
 
 /// Frames per second the headless clock pretends to run at.
 pub const FPS: i32 = 60;
@@ -29,11 +31,13 @@ pub enum Arg<'a> {
     Float(f32),
     Str(&'a [u8]),
     Vec2(V2),
+    Vec3(V3),
     Color(KColor),
     /// An array argument: it prints as its length.
     Count(i64),
     Rect(KRect),
     Texture(KTexture),
+    Camera(KCamera),
 }
 
 thread_local! {
@@ -63,10 +67,12 @@ pub fn line(name: &str, args: &[Arg]) {
                 text(b"\"");
             }
             Arg::Vec2(v) => vec2(v),
+            Arg::Vec3(v) => vec3(v),
             Arg::Color(c) => color(c),
             Arg::Count(n) => kestrel_rt_print_i64(n),
             Arg::Rect(r) => rect(r),
             Arg::Texture(t) => texture(t),
+            Arg::Camera(c) => camera(c),
         }
     }
     kestrel_rt_print_newline();
@@ -86,6 +92,30 @@ fn vec2(v: V2) {
     field(b"vec2(x: ", v.x);
     field(b", y: ", v.y);
     text(b")");
+}
+
+fn vec3(v: V3) {
+    field(b"vec3(x: ", v.x);
+    field(b", y: ", v.y);
+    field(b", z: ", v.z);
+    text(b")");
+}
+
+fn camera(c: KCamera) {
+    text(b"Camera(pos: ");
+    vec3(c.pos);
+    text(b", target: ");
+    vec3(c.target);
+    text(b", up: ");
+    vec3(c.up);
+    field(b", fov: ", c.fov);
+    text(b")");
+}
+
+/// A float as `print` prints it (`200`, `0.5`, `NaN`): what an error message shows for a number.
+/// Same as `Arg::Float` in a line, which a test checks.
+pub fn float_text(v: f32) -> String {
+    v.to_string()
 }
 
 fn rect(r: KRect) {
@@ -170,6 +200,32 @@ mod tests {
             "draw.texture_region Texture(id: 3, width: 16, height: 8) Rect(pos: vec2(x: 0, y: 2.5), size: vec2(x: -4, y: 4)) 256\n\
              draw.texture Texture(id: 0, width: 0, height: 0)\n"
         );
+    }
+
+    #[test]
+    fn camera_and_vec3_arguments_print_the_way_print_prints_them() {
+        let out = captured(|| {
+            let (origin, up) = (V3 { x: 0.0, y: 0.0, z: 0.0 }, V3 { x: 0.0, y: 1.0, z: 0.0 });
+            let camera = KCamera { pos: V3 { x: 0.0, y: 0.5, z: -3.0 }, target: origin, up, fov: 75.0 };
+            line("draw3d.camera", &[Arg::Camera(camera)]);
+            line("draw3d.line", &[Arg::Vec3(origin), Arg::Vec3(V3 { x: 1.5, y: -2.0, z: 3.0 })]);
+        });
+        assert_eq!(
+            out,
+            "draw3d.camera Camera(pos: vec3(x: 0, y: 0.5, z: -3), target: vec3(x: 0, y: 0, z: 0), \
+             up: vec3(x: 0, y: 1, z: 0), fov: 75)\n\
+             draw3d.line vec3(x: 0, y: 0, z: 0) vec3(x: 1.5, y: -2, z: 3)\n"
+        );
+    }
+
+    #[test]
+    fn float_text_is_what_a_line_prints_for_a_float() {
+        for v in [200.0, 0.5, -0.0, 1e-7, 3.4e38, 0.016666668, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let printed = captured(move || line("x", &[Arg::Float(v)]));
+            assert_eq!(printed, format!("x {}\n", float_text(v)), "{v}");
+        }
+        assert_eq!(float_text(200.0), "200");
+        assert_eq!(float_text(0.5), "0.5");
     }
 
     #[test]

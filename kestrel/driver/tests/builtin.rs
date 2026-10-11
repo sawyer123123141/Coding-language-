@@ -1,4 +1,4 @@
-//! The modules that ship inside the compiler: `window`, `draw` and `input`.
+//! The modules that ship inside the compiler: `window`, `draw`, `draw3d` and `input`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -49,6 +49,20 @@ fn the_built_in_modules_load_in_the_order_they_are_used() {
 }
 
 #[test]
+fn draw3d_is_a_built_in_module_that_brings_draw_with_it() {
+    let dir = project("draw3d", &[]);
+    // It takes its `Color` from `draw`, so `draw` is loaded even if the program never says `use draw`.
+    let src = "use draw3d\nuse { Camera from draw3d }\nmain() {\n    print(Camera(pos: vec3(0, 0, -3), target: vec3(0, 0, 0)))\n}\n";
+    let (compiled, text) = build(&dir, src);
+    assert_eq!(text, "");
+    assert_eq!(compiled.expect("compiles").builtins, ["draw3d", "draw"]);
+
+    let (compiled, text) = build(&dir, "use window\nuse draw\nuse draw3d\nmain() {}\n");
+    assert_eq!(text, "");
+    assert_eq!(compiled.expect("compiles").builtins, ["window", "draw", "draw3d"]);
+}
+
+#[test]
 fn a_module_can_use_a_built_in_module() {
     let dir = project("nested", &[("shapes.kes", "use { Color, RED from draw }\npub tint() -> Color { RED }\n")]);
     let (compiled, text) = build(&dir, "use shapes\nuse draw\nmain() {\n    print(shapes.tint())\n}\n");
@@ -69,7 +83,7 @@ fn built_in_files_have_virtual_paths_and_never_change() {
 #[test]
 fn a_file_named_after_a_built_in_module_is_refused() {
     let message = |name: &str| format!("`{name}` is a built-in module, so {name}.kes can't be used as a module; rename the file");
-    for name in ["window", "draw", "input"] {
+    for name in ["window", "draw", "draw3d", "input"] {
         let dir = project(&format!("shadow_{name}"), &[(&format!("{name}.kes"), "pub f() -> int { 1 }\n")]);
         let (compiled, text) = build(&dir, &format!("use {name}\nmain() {{}}\n"));
         assert!(compiled.is_none());
@@ -131,15 +145,16 @@ fn only_built_in_modules_name_gpu_handle() {
 #[test]
 fn the_built_in_modules_themselves_compile_clean() {
     let dir = project("clean", &[]);
-    let src = "use window\nuse draw\nuse input\nmain() {}\n";
+    let src = "use window\nuse draw\nuse draw3d\nuse input\nmain() {}\n";
     let (compiled, text) = build(&dir, src);
     assert_eq!(text, "");
     let module = compiled.expect("compiles").module;
     let natives: Vec<&str> = module.funcs.iter().filter_map(|f| f.native.as_deref()).collect();
-    assert_eq!(natives.len(), 9 + 15 + 5, "{natives:?}");
+    assert_eq!(natives.len(), 9 + 15 + 4 + 5, "{natives:?}");
     assert!(natives.contains(&"kestrel_window_open") && natives.contains(&"kestrel_draw_text_width") && natives.contains(&"kestrel_input_wheel"));
     assert!(natives.contains(&"kestrel_draw_load_texture") && natives.contains(&"kestrel_draw_texture_region"));
     assert!(natives.contains(&"kestrel_draw_rects"));
+    assert!(natives.contains(&"kestrel_draw3d_camera") && natives.contains(&"kestrel_draw3d_line"));
 }
 
 #[test]

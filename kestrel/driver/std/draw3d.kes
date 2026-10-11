@@ -1,0 +1,23 @@
+// 3D drawing: a camera and a few shapes. y is up and the axes are right-handed, as in Godot 3D.
+// Colours are drawn as given: there is no lighting. The colour is always last.
+use { Color, Texture from draw }
+
+// Where the camera is, what it looks at, which way is up, and its vertical field of view in degrees.
+// The near and far planes are fixed at 0.05 and 4,000.
+pub struct Camera {
+    pos: vec3
+    target: vec3
+    up: vec3 = vec3(0, 1, 0)
+    fov: float = 75
+}
+
+// Reads the camera (a copy, so changing it afterwards needs another call) and starts 3D drawing.
+// The camera stays set, across frames too, until the next call. A draw call (draw.rect, ...) goes
+// back to 2D on its own, and the next draw3d call is in 3D again with the same camera. Calling
+// a draw3d drawing before any camera was set is an error. draw.clear clears depth as well as colour.
+pub native camera(cam: Camera)
+// A solid box centred on center, and a solid ball.
+pub native cube(center: vec3, size: vec3, color: Color)
+pub native sphere(center: vec3, radius: float, color: Color)
+// One pixel wide: GPUs draw thick 3D lines poorly.
+pub native line(a: vec3, b: vec3, color: Color)

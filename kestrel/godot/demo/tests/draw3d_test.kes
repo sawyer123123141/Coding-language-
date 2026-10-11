@@ -1,0 +1,3 @@
+// Uses only the 3D built-in module, which the add-on refuses to load.
+use draw3d
+pub pure answer() -> int { 42 }

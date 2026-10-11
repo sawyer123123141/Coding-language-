@@ -97,3 +97,55 @@ main() {
     let p = jit_natives(src, &extra).expect("codegen");
     assert_eq!(run_captured(&p), "3 4950 0 5\n200 1\nPair(n: 7, at: vec3(x: 1, y: 2, z: 3), ok: true)\n");
 }
+
+/// `draw3d.Camera`: three `vec3`s and a `float`, which the window crate reads as `KCamera`.
+#[repr(C)]
+struct Cam {
+    pos: V3,
+    target: V3,
+    up: V3,
+    fov: f32,
+}
+
+extern "C" fn k_cam_parts(c: *const Cam) -> f32 {
+    // SAFETY: a pointer to a live `Cam`, laid out as above. Each field is read at its own offset,
+    // so a layout that differs shows in the sum.
+    unsafe { (*c).pos.x + 10.0 * (*c).target.y + 100.0 * (*c).up.z + 1000.0 * (*c).fov }
+}
+extern "C" fn k_cam_fovs(cs: *const KSeq) -> f32 {
+    // SAFETY: a pointer to a live array header of `Cam`s. The elements are read 40 bytes apart.
+    unsafe { elems::<Cam>((*cs).ptr, (*cs).len).iter().fold(0.0, |total, c| total + c.fov) }
+}
+extern "C" fn k_gap(a: *const V3, b: *const V3) -> f32 {
+    // SAFETY: two pointers to live `vec3`s.
+    unsafe { (*b).z - (*a).z }
+}
+
+#[test]
+fn a_struct_of_three_vec3s_and_a_float_is_forty_bytes_and_vec3s_travel_by_pointer() {
+    let src = "struct Cam {
+    pos: vec3
+    target: vec3
+    up: vec3 = vec3(0, 1, 0)
+    fov: float = 75
+}
+native cam_parts(c: Cam) -> float
+native cam_fovs(cs: [Cam]) -> float
+native gap(a: vec3, b: vec3) -> float
+main() {
+    let c = Cam(pos: vec3(1, 2, 3), target: vec3(4, 5, 6), up: vec3(0, 1, 2))
+    let cams = [Cam(pos: vec3(0, 0, 0), target: vec3(0, 0, 1), fov: 10), Cam(pos: vec3(0, 0, 0), target: vec3(0, 0, 1), fov: 20), Cam(pos: vec3(0, 0, 0), target: vec3(0, 0, 1))]
+    print(cam_parts(c), cam_fovs(cams), gap(vec3(0, 0, 1), vec3(0, 0, 6)))
+}
+";
+    let extra = [
+        ("kestrel_cam_parts", k_cam_parts as *const u8),
+        ("kestrel_cam_fovs", k_cam_fovs as *const u8),
+        ("kestrel_gap", k_gap as *const u8),
+    ];
+    let p = jit_natives(src, &extra).expect("codegen");
+    // pos.x 1 + 10 * target.y 5 + 100 * up.z 2 + 1000 * the default fov 75; then 10 + 20 + 75; then 6 - 1.
+    assert_eq!(run_captured(&p), "75251 105 5\n");
+    assert_eq!(std::mem::size_of::<Cam>(), 40);
+    assert_eq!(std::mem::offset_of!(Cam, fov), 36);
+}

@@ -1,4 +1,4 @@
-//! The real-window tests for textures, sprites, bulk rectangles and (in later tasks) 3D:
+//! The real-window tests for textures, sprites, bulk rectangles and 3D shapes (and, in later tasks, meshes):
 //! draw on the GPU, take a screenshot and check its pixels, under both `kestrel run` (the JIT)
 //! and `kestrel build` (an exe). The shared machinery is in `common/smoke.rs`; the shapes and
 //! text are in `window_smoke.rs`.
@@ -197,4 +197,135 @@ fn bulk_and_negative_size_rectangles_draw_under_the_jit() {
 #[test]
 fn bulk_and_negative_size_rectangles_draw_in_an_exe() {
     smoke(How::Exe, &RECTS);
+}
+
+/// A red cube of size 2 at the origin, seen by a camera at (0, 0, -5) looking at it, in a 64 by 64
+/// window on black. The camera's field of view is 75 degrees (the default), so the cube's front
+/// face (4 units from the camera) is about 21 pixels wide: it covers x and y from 22 to 41. The
+/// screenshot is taken while the 3D pass is still going (it ends the pass before it captures).
+const CUBE: Case = Case {
+    name: "cube",
+    program: r#"use window
+use draw
+use draw3d
+use { Camera from draw3d }
+
+main() {
+    window.open(64, 64, "cube")
+    let cam = Camera(pos: vec3(0, 0, -5), target: vec3(0, 0, 0))
+    var n = 0
+    while window.frame() {
+        n += 1
+        draw.clear(draw.BLACK)
+        draw3d.camera(cam)
+        draw3d.cube(vec3(0, 0, 0), vec3(2, 2, 2), draw.RED)
+        if n == 3 {
+            window.screenshot("SHOT_PATH")
+            window.close()
+        }
+    }
+    print("frames", n)
+}
+"#,
+    stdout: "frames 3\n",
+    size: (64, 64),
+    pixels: &[
+        (32, 32, RED, "the centre, which the cube covers"),
+        (24, 24, RED, "near the front face's top-left corner"),
+        (40, 40, RED, "near its bottom-right corner"),
+        (19, 32, BLACK, "left of the cube"),
+        (45, 32, BLACK, "right of the cube"),
+        (32, 19, BLACK, "above the cube"),
+        (32, 45, BLACK, "below the cube"),
+        (0, 0, BLACK, "the top-left corner"),
+        (63, 0, BLACK, "the top-right corner"),
+        (0, 63, BLACK, "the bottom-left corner"),
+        (63, 63, BLACK, "the bottom-right corner"),
+    ],
+    inked: &[],
+    assets: &[],
+};
+
+#[test]
+fn a_cube_draws_under_the_jit() {
+    smoke(How::Jit, &CUBE);
+}
+
+#[test]
+fn a_cube_draws_in_an_exe() {
+    smoke(How::Exe, &CUBE);
+}
+
+/// Going between 2D and 3D in one frame, in a 64 by 64 window, with the camera of `CUBE`:
+///
+/// - a blue 2D rectangle over the left half, then the red cube of `CUBE` and a green slab behind it
+///   (drawn after it, so only the depth test keeps the red cube in front). The slab's front face
+///   is 6.5 units away and covers x and y from 7 to 56;
+/// - a white 2D square over the middle of the cube (28 to 35): `draw.rect` ends the 3D pass, and
+///   2D is drawn on top of 3D again with the pixel coordinates it had before;
+/// - a yellow cube below the middle that a `draw3d` call draws after the square: the pass is in 3D
+///   again, with the same camera. Its size is negative, which is the same box as a positive one;
+/// - `draw3d.camera` is called in the first frame only, so the later frames, and the screenshot in
+///   the third, show that the camera stays set;
+/// - after the screenshot a `draw3d.sphere` begins 3D again and the window closes in that pass.
+const SWITCH: Case = Case {
+    name: "switch",
+    program: r#"use window
+use draw
+use draw3d
+use { Camera from draw3d }
+
+main() {
+    window.open(64, 64, "switch")
+    let cam = Camera(pos: vec3(0, 0, -5), target: vec3(0, 0, 0))
+    var n = 0
+    while window.frame() {
+        n += 1
+        draw.clear(draw.BLACK)
+        draw.rect(vec2(0, 0), vec2(32, 64), draw.BLUE)
+        if n == 1 {
+            draw3d.camera(cam)
+        }
+        draw3d.cube(vec3(0, 0, 0), vec3(2, 2, 2), draw.RED)
+        draw3d.cube(vec3(0, 0, 2), vec3(8, 8, 1), draw.GREEN)
+        draw.rect(vec2(28, 28), vec2(8, 8), draw.WHITE)
+        draw3d.cube(vec3(0, -2.5, 0), vec3(-1, -1, -1), draw.YELLOW)
+        if n == 3 {
+            window.screenshot("SHOT_PATH")
+            draw3d.sphere(vec3(0, 0, 0), 1, draw.WHITE)
+            window.close()
+        }
+    }
+    print("frames", n)
+}
+"#,
+    stdout: "frames 3\n",
+    size: (64, 64),
+    pixels: &[
+        (3, 32, BLUE, "the 2D background, left of the green slab"),
+        (3, 60, BLUE, "the 2D background, lower down"),
+        (60, 32, BLACK, "right of the green slab, where nothing was drawn"),
+        (15, 15, GREEN, "the green slab, which is 3D drawn over the 2D background"),
+        (50, 50, GREEN, "the green slab over the black"),
+        (24, 24, RED, "the red cube, which is in front of the green slab although it was drawn first"),
+        (40, 40, RED, "the red cube's other corner"),
+        (30, 30, WHITE, "the 2D square, which is on top of the 3D cube"),
+        (32, 32, WHITE, "the middle of the 2D square"),
+        (25, 32, RED, "the cube just left of the square, so the square didn't take the cube's place"),
+        (32, 55, YELLOW, "the yellow cube, drawn in 3D after the 2D square"),
+        (32, 58, YELLOW, "the yellow cube below the green slab"),
+        (32, 62, BLACK, "below the yellow cube"),
+    ],
+    inked: &[],
+    assets: &[],
+};
+
+#[test]
+fn the_2d_and_3d_passes_switch_under_the_jit() {
+    smoke(How::Jit, &SWITCH);
+}
+
+#[test]
+fn the_2d_and_3d_passes_switch_in_an_exe() {
+    smoke(How::Exe, &SWITCH);
 }

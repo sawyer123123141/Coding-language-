@@ -17,7 +17,8 @@
 //! left to ask. Input reads as nothing.
 //!
 //! The GPU objects (`gpu.rs`) are freed at the start of each frame, and all of
-//! them when the window closes, in the real case before raylib closes.
+//! them when the window closes, in the real case before raylib closes. A 3D pass
+//! (`pass.rs`) ends before the frame does, and every frame starts in 2D.
 //!
 //! The `check_*` functions give an error message instead of failing, so tests
 //! can see the message. The same functions without the prefix call
@@ -31,6 +32,7 @@ use kestrel_runtime::panic::fail_at_call;
 use crate::abi::V2;
 use crate::gpu;
 use crate::headless;
+use crate::pass;
 use crate::raylib as rl;
 use crate::real;
 
@@ -151,6 +153,7 @@ impl Window {
                 gpu::drain(false);
             }
             Kind::Real { time_base } => {
+                pass::enter_2d(true); // a frame, or the window, never ends inside a 3D pass
                 // SAFETY: raylib calls on the thread that opened the window, which is still open.
                 unsafe {
                     if self.frames > 0 {
@@ -173,6 +176,7 @@ impl Window {
                 }
             }
         }
+        pass::start_frame();
         self.frames += 1;
         None
     }

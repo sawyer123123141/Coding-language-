@@ -1,4 +1,4 @@
-//! The modules that ship inside the compiler: `window`, `draw` and `input`.
+//! The modules that ship inside the compiler: `window`, `draw`, `draw3d` and `input`.
 //! They are ordinary Kestrel files, embedded here, whose bodyless `native`
 //! functions Rust implements (see `kestrel-window`). A program loads one with
 //! `use window`, exactly as it would a file next to it.
@@ -9,9 +9,10 @@ use std::path::Path;
 const DIR: &str = "<builtin>";
 
 /// Each built-in module: its name, and its source.
-const MODULES: [(&str, &str); 3] = [
+const MODULES: [(&str, &str); 4] = [
     ("window", include_str!("../std/window.kes")),
     ("draw", include_str!("../std/draw.kes")),
+    ("draw3d", include_str!("../std/draw3d.kes")),
     ("input", include_str!("../std/input.kes")),
 ];
 
@@ -51,7 +52,7 @@ mod tests {
 
     #[test]
     fn every_module_is_found_by_name() {
-        for name in ["window", "draw", "input"] {
+        for name in ["window", "draw", "draw3d", "input"] {
             let (found, src) = find(name).expect(name);
             assert_eq!(found, name);
             assert!(src.starts_with("//"), "{name} starts with a comment");

@@ -11,6 +11,7 @@ use crate::abi::{str_bytes, write, KStr, V2};
 use crate::gpu;
 use crate::headless::{self, Arg};
 use crate::image_file;
+use crate::pass;
 use crate::paths;
 use crate::raylib as rl;
 use crate::real;
@@ -106,7 +107,10 @@ pub extern "C" fn kestrel_window_fps() -> i32 {
 #[no_mangle]
 pub unsafe extern "C" fn kestrel_window_screenshot(path: *const KStr) {
     let path = str_bytes(path);
-    match state::drawing("window.screenshot") {
+    let mode = state::drawing("window.screenshot");
+    // A 3D pass ends first, which draws what the pass had batched.
+    pass::enter_2d(mode == Mode::Real);
+    match mode {
         Mode::Headless => headless::line("window.screenshot", &[Arg::Str(path)]),
         Mode::Real => {
             let resolved = paths::resolve(path);

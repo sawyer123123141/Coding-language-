@@ -20,6 +20,7 @@ use crate::bulk::span;
 use crate::gpu::{self, Object};
 use crate::headless::{self, Arg};
 use crate::image_file;
+use crate::pass;
 use crate::paths;
 use crate::raylib as rl;
 use crate::state::{self, Mode};
@@ -116,9 +117,9 @@ pub(crate) fn lookup(name: &str, tex: KTexture) -> Result<Found, String> {
     .ok_or_else(|| format!("{name} got an empty texture; make one with draw.load_texture or draw.make_texture"))
 }
 
-/// What the three drawing natives share: check the window and the texture, then print the call's
-/// line (headless) or draw. `layout` gives the source and destination rectangles for a texture of
-/// the width and height given.
+/// What the three drawing natives share: check the window, end a 3D pass if one is going (a sprite
+/// is 2D), check the texture, then print the call's line (headless) or draw. `layout` gives the
+/// source and destination rectangles for a texture of the width and height given.
 fn sprite(
     name: &'static str,
     args: &[Arg],
@@ -127,6 +128,7 @@ fn sprite(
     layout: impl FnOnce(i32, i32) -> (rl::Rectangle, rl::Rectangle),
 ) {
     let mode = state::drawing(name);
+    pass::enter_2d(mode == Mode::Real);
     let found = lookup(name, tex).unwrap_or_else(|msg| fail_at_call(&msg));
     match mode {
         Mode::Headless => headless::line(name, args),
