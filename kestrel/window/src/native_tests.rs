@@ -12,6 +12,7 @@ use crate::state::Settings;
 use crate::symbols;
 
 mod draw3d;
+mod mesh;
 mod rects;
 mod texture;
 
@@ -202,11 +203,11 @@ fn closing_prints_and_ends_the_frame_loop() {
 #[test]
 fn symbols_are_complete() {
     let table = symbols();
-    assert_eq!(table.len(), 33);
+    assert_eq!(table.len(), 36);
     let names: HashSet<&str> = table.iter().map(|&(name, _)| name).collect();
-    assert_eq!(names.len(), 33, "names are distinct");
+    assert_eq!(names.len(), 36, "names are distinct");
     let addresses: HashSet<usize> = table.iter().map(|&(_, address)| address as usize).collect();
-    assert_eq!(addresses.len(), 33, "each name has its own function");
+    assert_eq!(addresses.len(), 36, "each name has its own function");
     for &(name, address) in &table {
         assert!(
             ["kestrel_window_", "kestrel_draw_", "kestrel_draw3d_", "kestrel_input_"].iter().any(|prefix| name.starts_with(prefix)),
@@ -234,6 +235,6 @@ fn symbols_cover_every_native_the_modules_declare() {
         }
     }
     let provided: HashSet<String> = symbols().iter().map(|&(name, _)| name.to_string()).collect();
-    assert_eq!(declared.len(), 33);
+    assert_eq!(declared.len(), 36);
     assert_eq!(provided, declared);
 }

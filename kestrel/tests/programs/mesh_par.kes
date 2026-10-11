@@ -1,0 +1,69 @@
+// env: KESTREL_HEADLESS=2
+// env: KESTREL_HEADLESS_QUIET=1
+// expect: built 544 544 0 816
+// expect: chunk 15 64 [60, 62, 63]
+// expect: meshes 16 544 272
+// expect: frames 2
+// What the voxel viewer does: build a MeshData per chunk in a par for (quad is pure), then turn
+// each into a GPU mesh on the main thread and draw them every frame.
+use window
+use draw
+use draw3d
+use { Camera, Mesh, MeshData from draw3d }
+
+struct Chunk {
+    n: int
+    data: MeshData
+}
+
+main() {
+    window.open(64, 64, "par")
+    var chunks = list[Chunk]()
+    for i from 0 to 16 {
+        chunks.add(Chunk(n: i, data: MeshData()))
+    }
+    // Chunk i gets i + 1 quads in a row along x.
+    par for c in chunks {
+        for k from 0 to c.n + 1 {
+            let x = float(k)
+            c.data.quad(vec3(x, 0, 0), vec3(x + 1, 0, 0), vec3(x + 1, 1, 0), vec3(x, 1, 0), draw.RED)
+        }
+    }
+    var vertices = 0
+    var colors = 0
+    var uvs = 0
+    var indices = 0
+    for c in chunks {
+        vertices += c.data.vertices.len
+        colors += c.data.colors.len
+        uvs += c.data.uvs.len
+        indices += c.data.indices.len
+    }
+    print("built", vertices, colors, uvs, indices)
+    let last = chunks[15].data
+    print("chunk", chunks[15].n, last.vertices.len, [last.indices[93], last.indices[94], last.indices[95]])
+
+    var meshes = list[Mesh]()
+    for c in chunks {
+        meshes.add(draw3d.make_mesh(c.data))
+    }
+    var mesh_vertices = 0
+    var mesh_triangles = 0
+    for m in meshes {
+        mesh_vertices += m.vertex_count
+        mesh_triangles += m.triangle_count
+    }
+    print("meshes", meshes.len, mesh_vertices, mesh_triangles)
+
+    let cam = Camera(pos: vec3(8, 0.5, -10), target: vec3(8, 0.5, 0))
+    var frames = 0
+    while window.frame() {
+        frames += 1
+        draw.clear(draw.BLACK)
+        draw3d.camera(cam)
+        for m in meshes {
+            draw3d.mesh(m, vec3(0, 0, 0), draw.WHITE)
+        }
+    }
+    print("frames", frames)
+}

@@ -1,4 +1,4 @@
-// 3D drawing: a camera and a few shapes. y is up and the axes are right-handed, as in Godot 3D.
+// 3D drawing: a camera, meshes and a few shapes. y is up and the axes are right-handed, as in Godot 3D.
 // Colours are drawn as given: there is no lighting. The colour is always last.
 use { Color, Texture from draw }
 
@@ -11,11 +11,72 @@ pub struct Camera {
     fov: float = 75
 }
 
+// A mesh being built, in plain Kestrel: it can be built anywhere, a pure function or a par for
+// body included. draw3d.make_mesh copies it to the GPU.
+//
+// - colors is empty (every vertex white) or has one colour per vertex.
+// - uvs is empty or has one per vertex: (0, 0) is the texture's top-left and (1, 1) its bottom-right.
+// - indices lists three vertex numbers per triangle. With none, the vertices are taken three at a time.
+// - A triangle's front is the side its corners go clockwise from, as in Godot. Back faces aren't drawn.
+pub struct MeshData {
+    vertices: list[vec3] = []
+    colors: list[Color] = []
+    uvs: list[vec2] = []
+    indices: list[int] = []
+
+    // Four corners, clockwise seen from the front (as in Godot), as the
+    // triangles a b c and a c d. Adds no uvs.
+    pure quad(var self, a: vec3, b: vec3, c: vec3, d: vec3, color: Color) {
+        let base = self.vertices.len
+        self.vertices.add(a)
+        self.vertices.add(b)
+        self.vertices.add(c)
+        self.vertices.add(d)
+        for k from 0 to 4 {
+            self.colors.add(color)
+        }
+        self.indices.add(base)
+        self.indices.add(base + 1)
+        self.indices.add(base + 2)
+        self.indices.add(base)
+        self.indices.add(base + 2)
+        self.indices.add(base + 3)
+    }
+
+    // One triangle, clockwise seen from the front. Adds no uvs.
+    pure triangle(var self, a: vec3, b: vec3, c: vec3, color: Color) {
+        let base = self.vertices.len
+        self.vertices.add(a)
+        self.vertices.add(b)
+        self.vertices.add(c)
+        for k from 0 to 3 {
+            self.colors.add(color)
+        }
+        self.indices.add(base)
+        self.indices.add(base + 1)
+        self.indices.add(base + 2)
+    }
+}
+
+// A mesh on the GPU, made by make_mesh. It is freed when the value that holds it goes away.
+pub struct Mesh {
+    id: GpuHandle
+    vertex_count: int
+    triangle_count: int
+}
+
 // Reads the camera (a copy, so changing it afterwards needs another call) and starts 3D drawing.
 // The camera stays set, across frames too, until the next call. A draw call (draw.rect, ...) goes
 // back to 2D on its own, and the next draw3d call is in 3D again with the same camera. Calling
 // a draw3d drawing before any camera was set is an error. draw.clear clears depth as well as colour.
 pub native camera(cam: Camera)
+// Copies data to the GPU (keeping no copy of its own, so data can go right after). An empty
+// MeshData makes a mesh that draws nothing. Needs the window open.
+pub native make_mesh(data: MeshData) -> Mesh
+// Draws m moved by pos, its colours multiplied by tint; mesh_textured multiplies them by tex at
+// the uvs too, so it needs a mesh made with uvs.
+pub native mesh(m: Mesh, pos: vec3, tint: Color)
+pub native mesh_textured(m: Mesh, tex: Texture, pos: vec3, tint: Color)
 // A solid box centred on center, and a solid ball.
 pub native cube(center: vec3, size: vec3, color: Color)
 pub native sphere(center: vec3, radius: float, color: Color)

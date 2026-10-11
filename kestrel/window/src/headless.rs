@@ -6,8 +6,9 @@
 //! a `vec3` as `vec3(x: 0, y: 0, z: -3)`, a `Camera` as
 //! `Camera(pos: vec3(x: 0, y: 0, z: -3), target: vec3(x: 0, y: 0, z: 0), up: vec3(x: 0, y: 1, z: 0), fov: 75)`,
 //! a `Rect` as `Rect(pos: vec2(x: 0, y: 0), size: vec2(x: 4, y: 2))`, a `Texture` as
-//! `Texture(id: 1, width: 4, height: 4)`, an array as its length and a string in
-//! double quotes. The lines go through the runtime's print functions, so they stay
+//! `Texture(id: 1, width: 4, height: 4)`, a `Mesh` as `Mesh(id: 1, vertex_count: 4, triangle_count: 2)`,
+//! a `MeshData` as `MeshData(vertices: 4, colors: 4, uvs: 0, indices: 6)` (its lists as their
+//! lengths), an array as its length and a string in double quotes. The lines go through the runtime's print functions, so they stay
 //! in order with the program's own `print` output.
 //!
 //! With `KESTREL_HEADLESS_QUIET=1` no line is printed at all: a program that
@@ -19,7 +20,7 @@ use kestrel_runtime::print::{
     kestrel_rt_print_f32, kestrel_rt_print_i64, kestrel_rt_print_newline, kestrel_rt_print_space, kestrel_rt_print_str,
 };
 
-use crate::abi::{KCamera, KColor, KRect, KTexture, V2, V3};
+use crate::abi::{KCamera, KColor, KMesh, KRect, KTexture, V2, V3};
 
 /// Frames per second the headless clock pretends to run at.
 pub const FPS: i32 = 60;
@@ -38,6 +39,9 @@ pub enum Arg<'a> {
     Rect(KRect),
     Texture(KTexture),
     Camera(KCamera),
+    Mesh(KMesh),
+    /// A `MeshData` argument: it prints its lists as their lengths.
+    MeshData { vertices: usize, colors: usize, uvs: usize, indices: usize },
 }
 
 thread_local! {
@@ -73,6 +77,8 @@ pub fn line(name: &str, args: &[Arg]) {
             Arg::Rect(r) => rect(r),
             Arg::Texture(t) => texture(t),
             Arg::Camera(c) => camera(c),
+            Arg::Mesh(m) => mesh(m),
+            Arg::MeshData { vertices, colors, uvs, indices } => mesh_data([vertices, colors, uvs, indices]),
         }
     }
     kestrel_rt_print_newline();
@@ -133,6 +139,26 @@ fn texture(t: KTexture) {
     kestrel_rt_print_i64(i64::from(t.width));
     text(b", height: ");
     kestrel_rt_print_i64(i64::from(t.height));
+    text(b")");
+}
+
+fn mesh(m: KMesh) {
+    text(b"Mesh(id: ");
+    kestrel_rt_print_i64(m.id);
+    text(b", vertex_count: ");
+    kestrel_rt_print_i64(i64::from(m.vertex_count));
+    text(b", triangle_count: ");
+    kestrel_rt_print_i64(i64::from(m.triangle_count));
+    text(b")");
+}
+
+/// The lengths of a `MeshData`'s four lists, in field order.
+fn mesh_data(lengths: [usize; 4]) {
+    let labels: [&[u8]; 4] = [b"MeshData(vertices: ", b", colors: ", b", uvs: ", b", indices: "];
+    for (label, n) in labels.into_iter().zip(lengths) {
+        text(label);
+        kestrel_rt_print_i64(n as i64);
+    }
     text(b")");
 }
 
@@ -215,6 +241,21 @@ mod tests {
             "draw3d.camera Camera(pos: vec3(x: 0, y: 0.5, z: -3), target: vec3(x: 0, y: 0, z: 0), \
              up: vec3(x: 0, y: 1, z: 0), fov: 75)\n\
              draw3d.line vec3(x: 0, y: 0, z: 0) vec3(x: 1.5, y: -2, z: 3)\n"
+        );
+    }
+
+    #[test]
+    fn mesh_arguments_print_the_way_print_prints_them_with_lists_as_lengths() {
+        let out = captured(|| {
+            let data = Arg::MeshData { vertices: 24, colors: 24, uvs: 0, indices: 36 };
+            line("draw3d.make_mesh", &[data]);
+            let mesh = KMesh { id: 7, vertex_count: 4, triangle_count: 2 };
+            line("draw3d.mesh", &[Arg::Mesh(mesh), Arg::Vec3(V3 { x: 1.0, y: 0.0, z: -2.5 })]);
+        });
+        assert_eq!(
+            out,
+            "draw3d.make_mesh MeshData(vertices: 24, colors: 24, uvs: 0, indices: 36)\n\
+             draw3d.mesh Mesh(id: 7, vertex_count: 4, triangle_count: 2) vec3(x: 1, y: 0, z: -2.5)\n"
         );
     }
 

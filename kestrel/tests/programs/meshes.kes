@@ -1,0 +1,89 @@
+// env: KESTREL_HEADLESS=2
+// expect: window.open 64 64 "meshes"
+// expect: quad 4 4 0 6
+// expect: indices [0, 1, 2, 0, 2, 3]
+// expect: triangle 7 7 0 9
+// expect: last [4, 5, 6]
+// expect: draw3d.make_mesh MeshData(vertices: 7, colors: 7, uvs: 0, indices: 9)
+// expect: made Mesh(id: 1, vertex_count: 7, triangle_count: 3) 7 3
+// expect: draw3d.make_mesh MeshData(vertices: 0, colors: 0, uvs: 0, indices: 0)
+// expect: empty 0 0
+// expect: draw3d.make_mesh MeshData(vertices: 4, colors: 4, uvs: 4, indices: 6)
+// expect: draw3d.make_mesh MeshData(vertices: 6, colors: 0, uvs: 0, indices: 0)
+// expect: unindexed 6 2
+// expect: draw.make_texture 2 1 2
+// expect: draw3d.camera Camera(pos: vec3(x: 0, y: 0, z: -3), target: vec3(x: 0, y: 0, z: 0), up: vec3(x: 0, y: 1, z: 0), fov: 75)
+// expect: draw3d.mesh Mesh(id: 1, vertex_count: 7, triangle_count: 3) vec3(x: 1, y: 2, z: 3) Color(r: 1, g: 1, b: 1, a: 1)
+// expect: draw3d.mesh Mesh(id: 2, vertex_count: 0, triangle_count: 0) vec3(x: 0, y: 0, z: 0) Color(r: 1, g: 0, b: 0, a: 1)
+// expect: draw3d.mesh_textured Mesh(id: 3, vertex_count: 4, triangle_count: 2) Texture(id: 5, width: 2, height: 1) vec3(x: 0, y: 0, z: 0) Color(r: 1, g: 1, b: 1, a: 1)
+// expect: draw3d.mesh_textured Mesh(id: 2, vertex_count: 0, triangle_count: 0) Texture(id: 5, width: 2, height: 1) vec3(x: 0, y: 0, z: 0) Color(r: 1, g: 1, b: 1, a: 1)
+// expect: draw3d.mesh Mesh(id: 4, vertex_count: 6, triangle_count: 2) vec3(x: 0, y: -1, z: 0) Color(r: 0, g: 0, b: 1, a: 1)
+// expect: draw.rect vec2(x: 0, y: 0) vec2(x: 8, y: 8) Color(r: 1, g: 1, b: 1, a: 1)
+// expect: draw3d.mesh Mesh(id: 1, vertex_count: 7, triangle_count: 3) vec3(x: 1, y: 2, z: 3) Color(r: 1, g: 1, b: 1, a: 1)
+// expect: draw3d.make_mesh MeshData(vertices: 3, colors: 3, uvs: 0, indices: 3)
+// expect: draw3d.mesh Mesh(id: 6, vertex_count: 3, triangle_count: 1) vec3(x: 0, y: 0, z: 0) Color(r: 1, g: 1, b: 1, a: 1)
+// expect: draw3d.make_mesh MeshData(vertices: 3, colors: 3, uvs: 0, indices: 3)
+// expect: draw3d.mesh Mesh(id: 7, vertex_count: 3, triangle_count: 1) vec3(x: 0, y: 0, z: 0) Color(r: 1, g: 1, b: 1, a: 1)
+// expect: frames 2
+use window
+use draw
+use draw3d
+use { Camera, MeshData from draw3d }
+
+main() {
+    window.open(64, 64, "meshes")
+    var data = MeshData()
+    data.quad(vec3(-1, -1, 0), vec3(1, -1, 0), vec3(1, 1, 0), vec3(-1, 1, 0), draw.RED)
+    print("quad", data.vertices.len, data.colors.len, data.uvs.len, data.indices.len)
+    print("indices", data.indices)
+    data.triangle(vec3(0, 0, 1), vec3(1, 0, 1), vec3(0, 1, 1), draw.GREEN)
+    print("triangle", data.vertices.len, data.colors.len, data.uvs.len, data.indices.len)
+    print("last", [data.indices[6], data.indices[7], data.indices[8]])
+    let made = draw3d.make_mesh(data)
+    print("made", made, made.vertex_count, made.triangle_count)
+
+    // An empty MeshData (an all-air chunk) makes a mesh that draws nothing, textured or not.
+    let empty = draw3d.make_mesh(MeshData())
+    print("empty", empty.vertex_count, empty.triangle_count)
+
+    // A textured square: one uv per vertex, (0, 0) at the texture's top-left.
+    var square = MeshData()
+    square.quad(vec3(-1, -1, 0), vec3(1, -1, 0), vec3(1, 1, 0), vec3(-1, 1, 0), draw.WHITE)
+    square.uvs.add(vec2(1, 1))
+    square.uvs.add(vec2(0, 1))
+    square.uvs.add(vec2(0, 0))
+    square.uvs.add(vec2(1, 0))
+    let textured = draw3d.make_mesh(square)
+
+    // No indices and no colours: the vertices are taken three at a time, all white.
+    var loose = MeshData()
+    for i from 0 to 6 {
+        loose.vertices.add(vec3(float(i), float(i % 2), 0))
+    }
+    let unindexed = draw3d.make_mesh(loose)
+    print("unindexed", unindexed.vertex_count, unindexed.triangle_count)
+
+    let pair = draw.make_texture(2, 1, [draw.RED, draw.BLUE])
+    let cam = Camera(pos: vec3(0, 0, -3), target: vec3(0, 0, 0))
+    var frames = 0
+    while window.frame() {
+        frames += 1
+        if frames == 1 {
+            draw3d.camera(cam)
+            draw3d.mesh(made, vec3(1, 2, 3), draw.WHITE)
+            draw3d.mesh(empty, vec3(0, 0, 0), draw.RED)
+            draw3d.mesh_textured(textured, pair, vec3(0, 0, 0), draw.WHITE)
+            draw3d.mesh_textured(empty, pair, vec3(0, 0, 0), draw.WHITE)
+            draw3d.mesh(unindexed, vec3(0, -1, 0), draw.BLUE)
+            // 2D, then 3D again with the same camera.
+            draw.rect(vec2(0, 0), vec2(8, 8), draw.WHITE)
+            draw3d.mesh(made, vec3(1, 2, 3), draw.WHITE)
+        }
+        // A mesh made in the loop is freed at the next frame; the camera stays set.
+        var one = MeshData()
+        one.triangle(vec3(0, 0, 0), vec3(1, 0, 0), vec3(0, 1, 0), draw.WHITE)
+        let each = draw3d.make_mesh(one)
+        draw3d.mesh(each, vec3(0, 0, 0), draw.WHITE)
+    }
+    print("frames", frames)
+}

@@ -194,6 +194,11 @@ pub const MATERIAL_MAP_DIFFUSE: usize = 0;
 /// its positions, as `UpdateMeshBuffer`'s `index`.
 pub const MESH_BUFFER_POSITIONS: c_int = 0;
 
+/// `rlCullMode::RL_CULL_FACE_FRONT` (rlgl.h): cull OpenGL's front faces, the counter-clockwise ones.
+pub const RL_CULL_FACE_FRONT: c_int = 0;
+/// `rlCullMode::RL_CULL_FACE_BACK` (rlgl.h): cull OpenGL's back faces, rlgl's setting from the start.
+pub const RL_CULL_FACE_BACK: c_int = 1;
+
 extern "C" {
     // Window and frame loop (rcore.c).
     pub fn SetConfigFlags(flags: c_uint);
@@ -293,6 +298,8 @@ extern "C" {
     pub fn rlDrawRenderBatchActive();
     pub fn rlEnableBackfaceCulling();
     pub fn rlDisableBackfaceCulling();
+    /// Which faces culling removes: `RL_CULL_FACE_FRONT` or `RL_CULL_FACE_BACK` (`glCullFace`).
+    pub fn rlSetCullFace(mode: c_int);
 }
 
 #[cfg(all(test, target_pointer_width = "64"))]

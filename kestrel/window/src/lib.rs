@@ -13,9 +13,11 @@ mod headless;
 mod image_file;
 mod keys;
 mod material;
+mod mesh_data;
 mod natives_3d;
 mod natives_draw;
 mod natives_input;
+mod natives_mesh;
 mod natives_texture;
 mod natives_window;
 mod pass;
@@ -39,6 +41,7 @@ pub fn symbols() -> Vec<(&'static str, *const u8)> {
     use natives_3d::*;
     use natives_draw::*;
     use natives_input::*;
+    use natives_mesh::*;
     use natives_texture::*;
     use natives_window::*;
 
@@ -72,6 +75,9 @@ pub fn symbols() -> Vec<(&'static str, *const u8)> {
         kestrel_draw_texture_rect,
         kestrel_draw_texture_region,
         kestrel_draw3d_camera,
+        kestrel_draw3d_make_mesh,
+        kestrel_draw3d_mesh,
+        kestrel_draw3d_mesh_textured,
         kestrel_draw3d_cube,
         kestrel_draw3d_sphere,
         kestrel_draw3d_line,

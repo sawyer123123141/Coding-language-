@@ -1,7 +1,7 @@
-//! The real-window tests for textures, sprites, bulk rectangles and 3D shapes (and, in later tasks, meshes):
-//! draw on the GPU, take a screenshot and check its pixels, under both `kestrel run` (the JIT)
-//! and `kestrel build` (an exe). The shared machinery is in `common/smoke.rs`; the shapes and
-//! text are in `window_smoke.rs`.
+//! The real-window tests for textures, sprites, bulk rectangles and 3D shapes: draw on the GPU,
+//! take a screenshot and check its pixels, under both `kestrel run` (the JIT) and `kestrel build`
+//! (an exe). The shared machinery is in `common/smoke.rs`; the shapes and text are in
+//! `window_smoke.rs`, and meshes in `window_smoke_mesh.rs`.
 //!
 //! The window is hidden (`KESTREL_HIDDEN=1`), so no window appears while these run. If this
 //! machine's driver doesn't render hidden windows, set `KESTREL_SMOKE_VISIBLE=1` in the

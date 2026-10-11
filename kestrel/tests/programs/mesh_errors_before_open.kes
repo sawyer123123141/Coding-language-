@@ -1,0 +1,12 @@
+// env: KESTREL_HEADLESS=1
+// expect-exit: 101
+// expect-stderr: draw3d.make_mesh was called before window.open on line 11
+use draw3d
+use { MeshData from draw3d }
+
+main() {
+    // This data is wrong too (one vertex and no indices), but the missing window is reported first.
+    var data = MeshData()
+    data.vertices.add(vec3(0, 0, 0))
+    let m = draw3d.make_mesh(data)
+}

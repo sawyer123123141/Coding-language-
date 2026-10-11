@@ -24,7 +24,10 @@ use crate::raylib as rl;
 /// What a handle stands for. Headless objects keep only what natives check.
 pub enum Object {
     Texture { texture: Option<rl::Texture>, width: i32, height: i32 },
-    Mesh { parts: Vec<rl::Mesh>, has_uvs: bool, vertex_count: i32, triangle_count: i32 },
+    /// A mesh's parts are uploaded raylib meshes with no CPU arrays (`without_cpu_pointers`), so
+    /// none of them points at memory raylib didn't allocate. `indexed` says whether they have index
+    /// buffers, which `DrawMesh` can't tell from a null `indices` (see `natives_mesh.rs`).
+    Mesh { parts: Vec<rl::Mesh>, has_uvs: bool, indexed: bool, vertex_count: i32, triangle_count: i32 },
 }
 
 /// The ids not handed out yet: the next one. 0 means no object, so they start at 1.
@@ -165,7 +168,7 @@ mod tests {
     }
 
     fn mesh() -> Object {
-        Object::Mesh { parts: Vec::new(), has_uvs: true, vertex_count: 4, triangle_count: 2 }
+        Object::Mesh { parts: Vec::new(), has_uvs: true, indexed: true, vertex_count: 4, triangle_count: 2 }
     }
 
     /// Whether `id` is waiting in the queue.

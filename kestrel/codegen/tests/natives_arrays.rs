@@ -149,3 +149,91 @@ main() {
     assert_eq!(std::mem::size_of::<Cam>(), 40);
     assert_eq!(std::mem::offset_of!(Cam, fov), 36);
 }
+
+/// `draw3d.MeshData`: four `list[T]` fields, each an inline 32-byte header, so the struct is 128
+/// bytes and a native gets a pointer to it. The window crate reads it as `KMeshData`.
+#[repr(C)]
+struct MeshData {
+    vertices: KList,
+    colors: KList,
+    uvs: KList,
+    indices: KList,
+}
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Rgba {
+    r: f32,
+    g: f32,
+    b: f32,
+    a: f32,
+}
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct V2 {
+    x: f32,
+    y: f32,
+}
+
+extern "C" fn k_mesh_lens(d: *const MeshData) -> i64 {
+    // SAFETY: a pointer to a live `MeshData`, laid out as above.
+    unsafe { (*d).vertices.len * 1_000_000 + (*d).colors.len * 10_000 + (*d).uvs.len * 100 + (*d).indices.len }
+}
+extern "C" fn k_mesh_picks(d: *const MeshData) -> f32 {
+    // SAFETY: a pointer to a live `MeshData` whose lists hold `vec3`, `Color`, `vec2` and `int`
+    // elements, read through each header's `ptr` and `len` only. An empty list may have a null `ptr`.
+    unsafe {
+        let d = &*d;
+        let vertices = elems::<V3>(d.vertices.ptr, d.vertices.len);
+        let colors = elems::<Rgba>(d.colors.ptr, d.colors.len);
+        let uvs = elems::<V2>(d.uvs.ptr, d.uvs.len);
+        let indices = elems::<i32>(d.indices.ptr, d.indices.len);
+        let last = |n: usize| n.checked_sub(1);
+        let z = last(vertices.len()).map_or(0.0, |i| vertices[i].z);
+        let color = colors.first().map_or(0.0, |c| c.r + 2.0 * c.g + 4.0 * c.b + 8.0 * c.a);
+        let uv = last(uvs.len()).map_or(0.0, |i| uvs[i].x + 2.0 * uvs[i].y);
+        let index = last(indices.len()).map_or(0, |i| indices[i]);
+        z + 10.0 * color + 1000.0 * uv + 100_000.0 * index as f32
+    }
+}
+
+#[test]
+fn a_struct_of_four_lists_reaches_a_native_as_four_32_byte_headers() {
+    let src = "struct Color {
+    r: float
+    g: float
+    b: float
+    a: float = 1
+}
+struct MeshData {
+    vertices: list[vec3] = []
+    colors: list[Color] = []
+    uvs: list[vec2] = []
+    indices: list[int] = []
+}
+native mesh_lens(d: MeshData) -> i64
+native mesh_picks(d: MeshData) -> float
+main() {
+    var d = MeshData()
+    print(mesh_lens(d), mesh_picks(d))
+    for i from 0 to 5 {
+        d.vertices.add(vec3(0, 0, i))
+    }
+    d.colors.add(Color(1, 0, 1))
+    d.colors.add(Color(0, 0, 0, 0))
+    d.uvs.add(vec2(0, 0))
+    d.uvs.add(vec2(0.5, 0.25))
+    d.uvs.add(vec2(1, 2))
+    for i from 0 to 4 {
+        d.indices.add(i * 2)
+    }
+    print(mesh_lens(d), mesh_picks(d))
+}
+";
+    let extra = [("kestrel_mesh_lens", k_mesh_lens as *const u8), ("kestrel_mesh_picks", k_mesh_picks as *const u8)];
+    let p = jit_natives(src, &extra).expect("codegen");
+    // Lengths 5, 2, 3, 4. The last vertex's z is 4; the first colour is 1 + 4 + 8 = 13; the last
+    // uv is 1 + 2 * 2 = 5; the last index is 6: 4 + 130 + 5000 + 600000.
+    assert_eq!(run_captured(&p), "0 0\n5020304 605134\n");
+    assert_eq!(std::mem::size_of::<MeshData>(), 128);
+    assert_eq!(std::mem::offset_of!(MeshData, indices), 96);
+}

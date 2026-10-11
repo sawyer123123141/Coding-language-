@@ -33,6 +33,26 @@ pub(crate) unsafe fn tinted(color: rl::Color) -> rl::Material {
     material
 }
 
+/// Runs `draw` with the material tinted `color` (see `tinted`) and with `texture` as its diffuse
+/// texture, then puts raylib's white default texture back: the material is shared, and a program's
+/// texture is only borrowed for the draw (its `Texture` frees it, maybe before the next frame).
+///
+/// # Safety
+/// A real window must be open, on this thread, and `texture` must be a live texture of it.
+pub(crate) unsafe fn with_texture(color: rl::Color, texture: rl::Texture, draw: impl FnOnce(rl::Material)) {
+    // SAFETY: the window is open, on this thread (this function's contract).
+    let material = unsafe { tinted(color) };
+    // SAFETY: as in `tinted`, the diffuse map is inside the maps, which live until `close`, and nothing
+    // else holds a reference to them; `draw` only reads them, through `DrawMesh`.
+    unsafe {
+        let diffuse = material.maps.add(rl::MATERIAL_MAP_DIFFUSE);
+        let default = (*diffuse).texture;
+        (*diffuse).texture = texture;
+        draw(material);
+        (*diffuse).texture = default;
+    }
+}
+
 /// Frees the material, if this thread made one, and forgets it.
 ///
 /// Only the array of maps is freed. The shader and the texture are raylib's defaults, which raylib

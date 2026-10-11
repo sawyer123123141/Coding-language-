@@ -85,6 +85,50 @@ pub struct KSeq {
     pub len: i64,
 }
 
+/// A `list[T]` stored in a struct field: its whole 32-byte header, in place. The first two words
+/// are where the elements are and how many, as in `KSeq`; the capacity and the arena the elements
+/// were allocated in are the list's own business, and a native never reads them.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct KList {
+    pub ptr: *const u8,
+    pub len: i64,
+    pub cap: i64,
+    pub arena: *const u8,
+}
+
+/// `draw3d.MeshData`: four lists, of `vec3` (`V3`), `Color` (`KColor`), `vec2` (`V2`) and `int`
+/// (`i32`) elements. 128 bytes.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct KMeshData {
+    pub vertices: KList,
+    pub colors: KList,
+    pub uvs: KList,
+    pub indices: KList,
+}
+
+/// `draw3d.Mesh`: the id of its GPU object (0 for none) and the counts of the `MeshData` it was made from.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct KMesh {
+    pub id: i64,
+    pub vertex_count: i32,
+    pub triangle_count: i32,
+}
+
+impl KList {
+    /// The list's elements: `elems` of its first two words.
+    ///
+    /// # Safety
+    /// The list's `ptr` must address `len` live `T`s (any `ptr` will do when `len` is 0 or less)
+    /// that outlive the returned slice, and `T` must have the layout of the element type.
+    pub unsafe fn elems<'a, T>(&self) -> &'a [T] {
+        // The slice borrows the elements, not this header, so the temporary header can go.
+        elems(&KSeq { ptr: self.ptr, len: self.len })
+    }
+}
+
 impl V2 {
     pub fn to_raylib(self) -> raylib::Vector2 {
         raylib::Vector2 { x: self.x, y: self.y }
@@ -245,6 +289,39 @@ mod tests {
         assert_eq!((size_of::<KCamera>(), align_of::<KCamera>()), (40, 4));
         let offsets = (offset_of!(KCamera, pos), offset_of!(KCamera, target), offset_of!(KCamera, up), offset_of!(KCamera, fov));
         assert_eq!(offsets, (0, 12, 24, 36));
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn the_mesh_layouts_are_kestrels() {
+        use std::mem::{align_of, offset_of, size_of};
+        // A `list[T]` field is its whole header, in place: `{ptr, len, cap, arena}`, 32 bytes. Its
+        // first two words are an array's, so `KSeq` reads it. (`codegen/tests/natives_arrays.rs`
+        // checks that compiled code agrees.)
+        assert_eq!((size_of::<KList>(), align_of::<KList>()), (32, 8));
+        assert_eq!((offset_of!(KList, ptr), offset_of!(KList, len), offset_of!(KList, cap), offset_of!(KList, arena)), (0, 8, 16, 24));
+        // `MeshData { vertices: list[vec3], colors: list[Color], uvs: list[vec2], indices: list[int] }`.
+        assert_eq!((size_of::<KMeshData>(), align_of::<KMeshData>()), (128, 8));
+        let offsets =
+            (offset_of!(KMeshData, vertices), offset_of!(KMeshData, colors), offset_of!(KMeshData, uvs), offset_of!(KMeshData, indices));
+        assert_eq!(offsets, (0, 32, 64, 96));
+        // `Mesh { id: GpuHandle, vertex_count: int, triangle_count: int }`: like `Texture`.
+        assert_eq!((size_of::<KMesh>(), align_of::<KMesh>()), (16, 8));
+        assert_eq!((offset_of!(KMesh, id), offset_of!(KMesh, vertex_count), offset_of!(KMesh, triangle_count)), (0, 8, 12));
+        // The elements: a `vec3` is 12 bytes, a `Color` 16, a `vec2` 8 and an `int` 4.
+        assert_eq!((size_of::<V3>(), size_of::<KColor>(), size_of::<V2>(), size_of::<i32>()), (12, 16, 8, 4));
+    }
+
+    #[test]
+    fn a_list_field_reads_as_its_elements() {
+        let uvs = [V2 { x: 0.0, y: 1.0 }, V2 { x: 1.0, y: 0.5 }];
+        let list = KList { ptr: uvs.as_ptr().cast(), len: 2, cap: 8, arena: std::ptr::null() };
+        let empty = KList { ptr: std::ptr::null(), len: 0, cap: 0, arena: std::ptr::null() };
+        // SAFETY: `list` describes `uvs`, which outlives the slices; `empty` has no elements.
+        unsafe {
+            assert_eq!(list.elems::<V2>(), uvs);
+            assert!(empty.elems::<V2>().is_empty());
+        }
     }
 
     #[test]
