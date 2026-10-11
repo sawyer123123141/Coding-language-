@@ -67,6 +67,11 @@ pub(crate) fn export_ty(m: &kir::Module, ty: KTy) -> ExportTy {
     }
 }
 
+/// The symbol of the constants thunk. Kestrel items are `k_<name>` (and the generated thunks
+/// `k_export_<name>` and `k_thunk_<name>`), natives are `kestrel_<module>_<name>` and the runtime
+/// is `kestrel_rt_*`; no symbol made from a Kestrel name starts with `__`, so this can't collide.
+const INIT_THUNK_SYMBOL: &str = "__kestrel_init_thunk";
+
 /// The signature every thunk has: `fn(args: *const u8, ret: *mut u8)`.
 fn thunk_signature<M: Module>(module: &M) -> Signature {
     let ptr = module.target_config().pointer_type();
@@ -142,7 +147,7 @@ pub(crate) fn define_thunks<M: Module>(module: &mut M, m: &kir::Module, ids: &[F
 pub(crate) fn define_init_thunk<M: Module>(module: &mut M, m: &kir::Module, ids: &[FuncId]) -> Result<Option<FuncId>, String> {
     let Some(init) = m.init else { return Ok(None) };
     let sig = thunk_signature(module);
-    let id = module.declare_function("k_init_constants", Linkage::Local, &sig).map_err(|e| e.to_string())?;
+    let id = module.declare_function(INIT_THUNK_SYMBOL, Linkage::Local, &sig).map_err(|e| e.to_string())?;
     let mut func = Function::with_name_signature(Default::default(), sig);
     let mut fb_ctx = FunctionBuilderContext::new();
     {

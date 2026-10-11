@@ -1,0 +1,18 @@
+// expect: 1
+// expect: 3
+// The generated function that builds heap constants has a symbol of its own, so a function
+// of the program with a name like it (and like the other generated names) still works.
+let A = [1, 2]
+
+init_constants() {
+    print(A[0])
+}
+
+init_thunk() -> int {
+    A[0] + A[1]
+}
+
+main() {
+    init_constants()
+    print(init_thunk())
+}
