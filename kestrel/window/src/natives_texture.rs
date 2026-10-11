@@ -15,9 +15,10 @@ use std::path::Path;
 
 use kestrel_runtime::panic::fail_at_call;
 
-use crate::abi::{c_string, elems, read, str_bytes, write, KColor, KRect, KSeq, KStr, KTexture, V2};
+use crate::abi::{elems, read, str_bytes, write, KColor, KRect, KSeq, KStr, KTexture, V2};
 use crate::gpu::{self, Object};
 use crate::headless::{self, Arg};
+use crate::image_file;
 use crate::paths;
 use crate::raylib as rl;
 use crate::state::{self, Mode};
@@ -179,24 +180,15 @@ fn span(start: f32, length: f32) -> (f32, f32) {
 /// `draw.load_texture` for the file `resolved`, which `path` (as the program wrote it) stands for.
 /// A real window uploads the image; a headless one only reads it.
 pub(crate) fn load_texture_in(mode: Mode, path: &[u8], resolved: &Path) -> Result<KTexture, String> {
-    let cannot_read = |why: &str| {
-        format!("draw.load_texture couldn't read {} (looked for {}): {why}", String::from_utf8_lossy(path), paths::display(resolved))
-    };
-    // Checked first, so a missing file doesn't get the message for a file that isn't an image.
-    if !resolved.is_file() {
-        return Err(cannot_read("no such file"));
-    }
-    let c_path = c_string(resolved.to_string_lossy().as_bytes());
-    // SAFETY: `c_path` is a NUL-terminated string that lives through the call. `LoadImage` needs
-    // no window.
-    let image = unsafe {
-        // raylib's loader logs a line to stdout for each image, and a warning for one it can't read.
-        rl::SetTraceLogLevel(rl::LOG_ERROR);
-        rl::LoadImage(c_path.as_ptr())
-    };
-    if image.data.is_null() {
-        return Err(cannot_read("it isn't a PNG, JPG or BMP image"));
-    }
+    // A missing file says so before anything is decoded, so it isn't told it isn't an image.
+    let image = image_file::load(resolved).map_err(|failure| {
+        format!(
+            "draw.load_texture couldn't read {} (looked for {}): {}",
+            String::from_utf8_lossy(path),
+            paths::display(resolved),
+            failure.reason()
+        )
+    })?;
     let texture = match mode {
         Mode::Headless => Ok(None),
         Mode::Real => upload(image).map(Some).ok_or_else(|| {
@@ -224,8 +216,8 @@ pub(crate) fn make_texture_in(mode: Mode, width: i32, height: i32, colors: &[KCo
     let texture = match mode {
         Mode::Headless => None,
         Mode::Real => {
-            let message = too_big(&format!("draw.make_texture couldn't make a {width} by {height} texture"));
-            Some(upload_pixels(width, height, colors).ok_or(message)?)
+            let message = || too_big(&format!("draw.make_texture couldn't make a {width} by {height} texture"));
+            Some(upload_pixels(width, height, colors).ok_or_else(message)?)
         }
     };
     Ok(register(texture, width, height))

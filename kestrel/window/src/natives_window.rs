@@ -7,9 +7,10 @@ use std::path::Path;
 
 use kestrel_runtime::panic::fail_at_call;
 
-use crate::abi::{c_string, str_bytes, write, KStr, V2};
+use crate::abi::{str_bytes, write, KStr, V2};
 use crate::gpu;
 use crate::headless::{self, Arg};
+use crate::image_file;
 use crate::paths;
 use crate::raylib as rl;
 use crate::real;
@@ -126,20 +127,23 @@ fn screenshot_error(path: &[u8], resolved: &Path) -> String {
     )
 }
 
-/// Saves what has been drawn so far this frame to the file `path`.
-/// `false` if raylib couldn't write the file.
+/// Saves what has been drawn so far this frame to the PNG file `path`.
+/// `false` if the path doesn't end in `.png` or the file couldn't be written.
 fn save_screenshot(path: &Path) -> bool {
-    let path = c_string(path.to_string_lossy().as_bytes());
-    // SAFETY: the window is open. `path` is a NUL-terminated string, and the image
-    // is freed once, after it is exported.
-    unsafe {
+    if image_file::file_type(path) != Some(".png") {
+        return false;
+    }
+    // SAFETY: the window is open. The image is freed once, after it is encoded.
+    let png = unsafe {
         // Shapes are batched: send the ones drawn so far, or the capture would miss them.
         rl::rlDrawRenderBatchActive();
         let image = rl::LoadImageFromScreen();
-        let saved = rl::ExportImage(image, path.as_ptr());
+        let png = image_file::encode_png(image);
         rl::UnloadImage(image);
-        saved
-    }
+        png
+    };
+    // Rust writes the file, because raylib's own `fopen` can't open every Windows path.
+    png.is_some_and(|bytes| std::fs::write(path, bytes).is_ok())
 }
 
 #[cfg(test)]
@@ -157,6 +161,14 @@ mod tests {
             "window.screenshot couldn't save shots/a.png (tried game/shots/a.png); \
              give a path that ends in .png, in a folder that exists"
         );
+    }
+
+    #[test]
+    fn only_a_png_path_is_saved_and_the_rest_fail_before_touching_the_screen() {
+        // No window is open here; a path that isn't a PNG's is refused before the capture.
+        for name in ["shot.jpg", "shot.bmp", "shot.tga", "shot", "shot.png.txt"] {
+            assert!(!save_screenshot(Path::new(name)), "{name}");
+        }
     }
 
     #[test]

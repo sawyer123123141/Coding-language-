@@ -78,7 +78,7 @@ impl How {
     }
 }
 
-/// A scratch folder for one test (an ASCII path, so raylib and the Kestrel string literal agree).
+/// A scratch folder for one test. Its name may have non-ASCII letters: Rust opens every file.
 fn scratch(name: &str) -> PathBuf {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("window_smoke").join(name);
     fs::create_dir_all(&dir).unwrap();

@@ -19,6 +19,9 @@ use common::smoke::{smoke, Case, How, BLACK, BLUE, GREEN, RED, WHITE};
 /// - a 2 by 1 texture of red and blue stretched over (32, 0) to (64, 16);
 /// - the top row of the checker as a region, drawn with a negative width, so its right-hand
 ///   colour comes out on the left: green, then red, over (32, 32) to (64, 48);
+/// - the whole checker as a region twice as wide as the texture, which repeats it side by side,
+///   over (0, 32) to (16, 40);
+/// - the checker with a negative height, so it is flipped upside down over (24, 44) to (32, 52);
 /// - the checker at its natural size, plain and tinted red;
 /// - a texture made in each frame, so the real frees (`UnloadTexture`) run too.
 ///
@@ -42,6 +45,11 @@ main() {
         draw.texture_rect(pair, vec2(32, 0), vec2(32, 16), draw.WHITE)
         let top_row = Rect(pos: vec2(0, 0), size: vec2(4, 2))
         draw.texture_region(checker, top_row, vec2(64, 32), vec2(-32, 16), draw.WHITE)
+        // A region twice as wide as the texture repeats it.
+        let wide = Rect(pos: vec2(0, 0), size: vec2(8, 4))
+        draw.texture_region(checker, wide, vec2(0, 32), vec2(16, 8), draw.WHITE)
+        // A negative height covers the rectangle above `pos`, upside down.
+        draw.texture_rect(checker, vec2(24, 52), vec2(8, -8), draw.WHITE)
         draw.texture(checker, vec2(4, 52), draw.WHITE)
         draw.texture(checker, vec2(20, 52), draw.RED)
         // A texture made every frame is freed at the next frame, and the last one when the window closes.
@@ -75,11 +83,26 @@ main() {
         (23, 53, BLACK, "its green cell, which a red tint removes"),
         (23, 55, RED, "its white cell, which a red tint turns red"),
         (12, 54, BLACK, "beside the natural-size checker"),
+        (2, 34, RED, "the repeating region's first copy, top-left cell"),
+        (6, 34, GREEN, "its first copy, top-right cell"),
+        (10, 34, RED, "its second copy, which only a repeating texture has: top-left cell"),
+        (14, 34, GREEN, "its second copy, top-right cell"),
+        (10, 38, BLUE, "its second copy, bottom-left cell"),
+        (14, 38, WHITE, "its second copy, bottom-right cell"),
+        (26, 46, BLUE, "the upside-down checker's top-left cell, which is the bottom-left one"),
+        (30, 46, WHITE, "its top-right cell, which is the bottom-right one"),
+        (26, 50, RED, "its bottom-left cell, which is the top-left one"),
+        (30, 50, GREEN, "its bottom-right cell, which is the top-right one"),
         (40, 58, GREEN, "the one-pixel texture made in the frame, stretched"),
     ],
     inked: &[],
     assets: &[("assets/checker.png", "checker.png")],
 };
+
+/// The same program in a folder whose name has a space and a non-ASCII letter. raylib's own file
+/// functions can't open such a path on Windows, so this checks that Rust reads the texture and
+/// writes the screenshot.
+const TEXTURES_ACCENTED: Case = Case { name: "textures caf\u{e9}", ..TEXTURES };
 
 #[test]
 fn textures_and_sprites_draw_under_the_jit() {
@@ -89,4 +112,14 @@ fn textures_and_sprites_draw_under_the_jit() {
 #[test]
 fn textures_and_sprites_draw_in_an_exe() {
     smoke(How::Exe, &TEXTURES);
+}
+
+#[test]
+fn a_folder_with_a_non_ascii_name_works_under_the_jit() {
+    smoke(How::Jit, &TEXTURES_ACCENTED);
+}
+
+#[test]
+fn a_folder_with_a_non_ascii_name_works_in_an_exe() {
+    smoke(How::Exe, &TEXTURES_ACCENTED);
 }

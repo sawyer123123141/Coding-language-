@@ -9,6 +9,7 @@ pub use kestrel_runtime;
 mod abi;
 pub mod gpu;
 mod headless;
+mod image_file;
 mod keys;
 mod natives_draw;
 mod natives_input;
@@ -21,12 +22,11 @@ mod state;
 #[cfg(test)]
 mod native_tests;
 
-use std::ffi::CString;
 use std::path::Path;
 
 pub use paths::set_program_dir;
 
-use raylib::{GetImageColor, LoadImage, SetTraceLogLevel, UnloadImage, LOG_ERROR};
+use raylib::{GetImageColor, UnloadImage};
 
 /// The native functions, as `(symbol, address)` pairs: what the JIT needs to
 /// link a program that uses `window`, `draw` or `input`. A built program finds
@@ -84,16 +84,10 @@ pub fn png_pixel(path: &Path, x: i32, y: i32) -> Option<[u8; 4]> {
 /// once. Gives `None` if the file can't be read as an image; a point outside it
 /// gives `None` in its place.
 pub fn png_pixels(path: &Path, points: &[(i32, i32)]) -> Option<Vec<Option<[u8; 4]>>> {
-    let c_path = CString::new(path.to_str()?).ok()?;
-    // SAFETY: `c_path` is a valid C string. `image` is read only while loaded
-    // and is unloaded before returning.
+    // Read by Rust, so a path raylib's own `fopen` can't open (a non-ASCII folder on Windows) still works.
+    let image = image_file::load(path).ok()?;
+    // SAFETY: `image` was just loaded. It is read only while loaded and is unloaded once, before returning.
     unsafe {
-        // raylib's loader logs an INFO line to stdout per image; tests don't want it.
-        SetTraceLogLevel(LOG_ERROR);
-        let image = LoadImage(c_path.as_ptr());
-        if image.data.is_null() {
-            return None;
-        }
         let pixels = points
             .iter()
             .map(|&(x, y)| {
@@ -108,7 +102,9 @@ pub fn png_pixels(path: &Path, points: &[(i32, i32)]) -> Option<Vec<Option<[u8; 
 
 #[cfg(test)]
 mod tests {
-    use super::raylib::{Color, ExportImage, GenImageColor, ImageDrawPixel, UnloadImage};
+    use std::ffi::CString;
+
+    use super::raylib::{Color, ExportImage, GenImageColor, ImageDrawPixel, SetTraceLogLevel, UnloadImage, LOG_ERROR};
     use super::*;
 
     /// The test image the texture programs load: four 2x2 cells, all opaque.
