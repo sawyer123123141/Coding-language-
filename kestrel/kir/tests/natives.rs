@@ -172,3 +172,101 @@ main() {{}}
     assert_eq!(exits_after_a_pop(&m, "loops"), (2, 2));
     assert_eq!(arena_ops(&m, "loops"), ["push", "pop", "pop", "push", "pop", "pop"]);
 }
+
+/// Lowers `src`, where the source from the line `// built-in` on is a built-in module's.
+fn lower_with_built_ins(src: &str, inline: bool) -> Module {
+    let (mut p, d) = parse(src);
+    assert!(d.is_empty(), "parse: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
+    p.builtin_ranges = std::iter::once(src.find("// built-in").expect("a marker line") as u32..src.len() as u32).collect();
+    let (t, d) = kestrel_check::check(&p);
+    assert!(d.is_empty(), "check: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
+    let mut m = lower(&p, &t.unwrap(), &LineIndex::new(src));
+    if inline {
+        inline::inline_small(&mut m);
+    }
+    m
+}
+
+/// What `name` does that matters to the line a native's error names, in running order: the
+/// `SetLine`s and the calls.
+#[derive(Debug, PartialEq)]
+enum Step {
+    Line(u32),
+    Call(String),
+}
+
+fn steps(m: &Module, name: &str) -> Vec<Step> {
+    let mut steps = Vec::new();
+    visit::walk(&func(m, name).body, &mut |node| match node {
+        visit::Node::Stmt(Stmt::SetLine(n)) => steps.push(Step::Line(*n)),
+        visit::Node::Expr(Expr { kind: ExprKind::Call(f, _), .. }) | visit::Node::Stmt(Stmt::Call(f, _)) => {
+            steps.push(Step::Call(m.funcs[f.0 as usize].name.clone()));
+        }
+        _ => {}
+    });
+    steps
+}
+
+fn call(name: &str) -> Step {
+    Step::Call(name.to_string())
+}
+
+#[test]
+fn calls_into_built_in_modules_record_their_line() {
+    let src = "main() {
+ print(held(2))
+ print(axis())
+ print(mixf(1))
+}
+// built-in
+native held(k: int) -> bool
+pure native mixf(x: float) -> float
+axis() -> float { if held(1) { 1.0 } else { 0.0 } }
+";
+    // A call to a built-in function that isn't `pure` records its line, whether the function is
+    // a native or written in Kestrel. A `pure` one doesn't, and neither do the calls that
+    // built-in code makes.
+    for inline in [false, true] {
+        let m = lower_with_built_ins(src, inline);
+        let main = steps(&m, "main");
+        let lines: Vec<_> = main.iter().filter(|s| matches!(s, Step::Line(_))).collect();
+        assert_eq!(lines, [&Step::Line(2), &Step::Line(3)], "inline {inline}: {main:?}");
+        // Each line is set right before its call.
+        assert_eq!(main[..2], [Step::Line(2), call("held")], "inline {inline}: {main:?}");
+        let at = main.iter().position(|s| *s == Step::Line(3)).unwrap();
+        assert!(main[at + 1..].iter().all(|s| !matches!(s, Step::Line(_))), "inline {inline}: {main:?}");
+        assert_eq!(steps(&m, "axis"), [call("held")], "inline {inline}");
+    }
+}
+
+const PAINTING: &str = "main() {
+ paint(1,
+  size())
+ paint(pos(), 2)
+}
+pos() -> int { size() + 1 }
+// built-in
+native size() -> int
+native paint(a: int, b: int)
+";
+
+#[test]
+fn a_call_in_the_arguments_does_not_take_over_the_line() {
+    // `size()` runs while the arguments are evaluated, and sets its own line. This call's line
+    // is stored after every argument, so it is the one still set when `paint` runs.
+    let m = lower_with_built_ins(PAINTING, false);
+    let main = steps(&m, "main");
+    assert_eq!(main[..4], [Step::Line(3), call("size"), Step::Line(2), call("paint")], "{main:?}");
+}
+
+#[test]
+fn a_user_function_in_the_arguments_does_not_take_over_the_line() {
+    // `pos` calls `size`, which sets a line inside `pos` (line 6). Its call is evaluated before
+    // this call's line is stored, whether or not `pos` is inlined afterwards.
+    for inline in [false, true] {
+        let m = lower_with_built_ins(PAINTING, inline);
+        assert_eq!(steps(&m, "pos"), [Step::Line(6), call("size")], "inline {inline}");
+        let main = steps(&m, "main");
+        assert_eq!(main[main.len() - 2..], [Step::Line(4), call("paint")], "inline {inline}: {main:?}");
+    }
+}

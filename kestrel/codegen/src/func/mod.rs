@@ -255,6 +255,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 self.b.def_var(v, addr);
             }
             kir::Stmt::BindGlobal(l, g) => self.bind_global(*l, *g),
+            kir::Stmt::SetLine(line) => self.set_line(*line),
         }
         Ok(true)
     }

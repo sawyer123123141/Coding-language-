@@ -243,6 +243,9 @@ pub enum Stmt {
     /// many threads. Its parameters are `args` (pointers to the variables
     /// the body uses), then the start and end of a range of indexes.
     ParFor { func: FuncIdx, args: Vec<Arg>, count: Expr },
+    /// Records the line of the call that follows, from the program's own code to a built-in
+    /// function that isn't `pure`, for the errors that function raises.
+    SetLine(u32),
 }
 
 #[derive(Clone, Debug, PartialEq)]

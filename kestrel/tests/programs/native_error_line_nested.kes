@@ -1,0 +1,12 @@
+// env: KESTREL_HEADLESS=0
+// expect: window.open 64 64 "lines"
+// expect-exit: 101
+// expect-stderr: draw.circle was called after the window closed on line 10
+use window
+use draw
+main() {
+    window.open(64, 64, "lines")
+    while window.frame() {}
+    draw.circle(vec2(1, 1),
+        window.size().x, draw.RED)
+}

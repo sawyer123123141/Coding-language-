@@ -1,0 +1,9 @@
+// env: KESTREL_HEADLESS=1
+// expect-exit: 101
+// expect-stderr: input.held was called before window.open on line 7
+use input
+use { Key from input }
+main() {
+    print(input.axis(Key.Left,
+        Key.Right))
+}

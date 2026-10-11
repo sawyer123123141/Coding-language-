@@ -1,5 +1,5 @@
 use cranelift_codegen::ir::{types, AbiParam, Signature, Type};
-use cranelift_module::{FuncId, Linkage, Module};
+use cranelift_module::{DataId, FuncId, Linkage, Module};
 
 /// Runtime functions, declared as imports in a module.
 pub(crate) struct RtFuncs {
@@ -35,12 +35,15 @@ pub(crate) struct RtFuncs {
     pub str_begin: FuncId,
     pub str_end: FuncId,
     pub gpu_drop: FuncId,
+    /// The runtime's `kestrel_rt_call_line`, the line of the latest call into a built-in function.
+    pub call_line: DataId,
 }
 
 impl RtFuncs {
     pub fn declare<M: Module>(module: &mut M) -> Result<Self, String> {
         let cc = module.isa().default_call_conv();
         let ptr = module.target_config().pointer_type();
+        let call_line = module.declare_data("kestrel_rt_call_line", Linkage::Import, true, false).map_err(|e| e.to_string())?;
         let mut decl = |name: &str, params: &[Type], ret: Option<Type>| -> Result<FuncId, String> {
             let mut sig = Signature::new(cc);
             // The C ABI leaves an i8 argument's upper bits undefined unless the caller extends it.
@@ -88,6 +91,7 @@ impl RtFuncs {
             str_begin: decl("kestrel_rt_str_begin", &[], None)?,
             str_end: decl("kestrel_rt_str_end", &[ptr], None)?,
             gpu_drop: decl("kestrel_rt_gpu_drop", &[I64], None)?,
+            call_line,
         })
     }
 }
@@ -129,6 +133,7 @@ pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
         ("kestrel_rt_str_begin", print::kestrel_rt_str_begin as *const u8),
         ("kestrel_rt_str_end", print::kestrel_rt_str_end as *const u8),
         ("kestrel_rt_gpu_drop", gpu::kestrel_rt_gpu_drop as *const u8),
+        ("kestrel_rt_call_line", std::ptr::addr_of!(panic::kestrel_rt_call_line).cast::<u8>()),
     ]
 }
 

@@ -3,7 +3,7 @@
 //! Each one is `kestrel_window_<name>`. Strings arrive as a pointer to their
 //! header, and `size` writes its `vec2` through the pointer it is given.
 
-use kestrel_runtime::panic::fail;
+use kestrel_runtime::panic::fail_at_call;
 
 use crate::abi::{c_string, str_bytes, write, KStr, V2};
 use crate::headless::{self, Arg};
@@ -15,7 +15,7 @@ use crate::state::{self, Mode, Settings, View};
 /// `title` must point to a live string header.
 #[no_mangle]
 pub unsafe extern "C" fn kestrel_window_open(width: i32, height: i32, title: *const KStr) {
-    let settings = Settings::from_env().unwrap_or_else(|msg| fail(&msg));
+    let settings = Settings::from_env().unwrap_or_else(|msg| fail_at_call(&msg));
     open_with(&settings, width, height, title);
 }
 
@@ -28,7 +28,7 @@ pub unsafe fn open_with(settings: &Settings, width: i32, height: i32, title: *co
     match state::open(settings, width, height, title) {
         Ok(Mode::Headless) => headless::line("window.open", &[Arg::Int(width), Arg::Int(height), Arg::Str(title)]),
         Ok(Mode::Real) => {}
-        Err(msg) => fail(&msg),
+        Err(msg) => fail_at_call(&msg),
     }
 }
 
@@ -37,12 +37,12 @@ pub extern "C" fn kestrel_window_frame() -> u8 {
     // `print` is buffered until the program ends. A program that runs frames for
     // minutes would show nothing meanwhile, so show it once per frame.
     kestrel_runtime::print::flush();
-    state::frame().unwrap_or_else(|msg| fail(&msg)) as u8
+    state::frame().unwrap_or_else(|msg| fail_at_call(&msg)) as u8
 }
 
 #[no_mangle]
 pub extern "C" fn kestrel_window_close() {
-    match state::close().unwrap_or_else(|msg| fail(&msg)) {
+    match state::close().unwrap_or_else(|msg| fail_at_call(&msg)) {
         Some(Mode::Headless) => headless::line("window.close", &[]),
         Some(Mode::Real) | None => {}
     }
@@ -94,7 +94,7 @@ pub unsafe extern "C" fn kestrel_window_screenshot(path: *const KStr) {
         Mode::Headless => headless::line("window.screenshot", &[Arg::Str(path)]),
         Mode::Real => {
             if !save_screenshot(path) {
-                fail(&format!(
+                fail_at_call(&format!(
                     "window.screenshot could not save \"{}\"; give a path that ends in .png, in a folder that exists",
                     String::from_utf8_lossy(path)
                 ));

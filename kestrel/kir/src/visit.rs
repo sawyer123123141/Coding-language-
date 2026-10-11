@@ -30,52 +30,52 @@ pub fn places(stmts: &[Stmt], f: &mut impl FnMut(&Place, bool)) {
 fn stmt<'a>(s: &'a Stmt, f: &mut impl FnMut(Node<'a>)) {
     f(Node::Stmt(s));
     match s {
-        Stmt::Let(_, e) | Stmt::Return(Some(e)) | Stmt::RandSeed(e) => expr(e, f),
+        Stmt::Let(_, e) | Stmt::Return(Some(e)) | Stmt::RandSeed(e) => walk_expr(e, f),
         Stmt::Assign(p, e) | Stmt::ListAdd(p, e) => {
-            expr(e, f);
+            walk_expr(e, f);
             place(p, true, f);
         }
         Stmt::Bind(_, p) => place(p, false, f),
         Stmt::MapSet(p, k, v, _) => {
-            expr(k, f);
-            expr(v, f);
+            walk_expr(k, f);
+            walk_expr(v, f);
             place(p, true, f);
         }
         Stmt::MapUnlock(p, saved) => {
-            expr(saved, f);
+            walk_expr(saved, f);
             place(p, true, f);
         }
         Stmt::ParFor { args: a, count, .. } => {
-            expr(count, f);
+            walk_expr(count, f);
             args(a, f);
         }
         Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::DropGpu(p) => place(p, true, f),
         Stmt::PushArena(Some(p)) => place(p, true, f),
         Stmt::PushArena(None) | Stmt::PopArena { .. } => {}
         Stmt::If { cond, then_body, else_body } => {
-            expr(cond, f);
+            walk_expr(cond, f);
             walk(then_body, f);
             walk(else_body, f);
         }
         Stmt::While { cond, body } => {
-            expr(cond, f);
+            walk_expr(cond, f);
             walk(body, f);
         }
         Stmt::ForRange { start, end, body, .. } => {
-            expr(start, f);
-            expr(end, f);
+            walk_expr(start, f);
+            walk_expr(end, f);
             walk(body, f);
         }
         Stmt::Call(_, args) => self::args(args, f),
         Stmt::Print(parts) | Stmt::Write(parts) => print_args(parts, f),
-        // Neither reads nor writes a place: it only points a local at a global.
-        Stmt::BindGlobal(..) | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
+        // None reads or writes a place. (`BindGlobal` only points a local at a global.)
+        Stmt::BindGlobal(..) | Stmt::SetLine(_) | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
     }
 }
 
 fn place<'a>(p: &'a Place, written: bool, f: &mut impl FnMut(Node<'a>)) {
     for at in p.path.iter().filter_map(Proj::at) {
-        expr(at, f);
+        walk_expr(at, f);
     }
     f(Node::Place(p, written));
 }
@@ -83,7 +83,7 @@ fn place<'a>(p: &'a Place, written: bool, f: &mut impl FnMut(Node<'a>)) {
 fn args<'a>(args: &'a [Arg], f: &mut impl FnMut(Node<'a>)) {
     for a in args {
         match a {
-            Arg::Value(e) => expr(e, f),
+            Arg::Value(e) => walk_expr(e, f),
             Arg::Ref(p) => place(p, true, f),
         }
     }
@@ -92,14 +92,15 @@ fn args<'a>(args: &'a [Arg], f: &mut impl FnMut(Node<'a>)) {
 fn print_args<'a>(parts: &'a [PrintArg], f: &mut impl FnMut(Node<'a>)) {
     for p in parts {
         match p {
-            PrintArg::Value(e) => expr(e, f),
+            PrintArg::Value(e) => walk_expr(e, f),
             PrintArg::Interp(inner) => print_args(inner, f),
             PrintArg::Str(_) => {}
         }
     }
 }
 
-fn expr<'a>(e: &'a Expr, f: &mut impl FnMut(Node<'a>)) {
+/// Calls `f` for `e` and each statement, expression and place inside it, as `walk` does.
+pub fn walk_expr<'a>(e: &'a Expr, f: &mut impl FnMut(Node<'a>)) {
     f(Node::Expr(e));
     match &e.kind {
         ExprKind::Int(_)
@@ -114,33 +115,33 @@ fn expr<'a>(e: &'a Expr, f: &mut impl FnMut(Node<'a>)) {
         ExprKind::Move(p) => place(p, true, f),
         ExprKind::Map(op, p, xs) => {
             for x in xs {
-                expr(x, f);
+                walk_expr(x, f);
             }
             place(p, matches!(op, MapOp::Remove | MapOp::Lock), f);
         }
         ExprKind::Format(parts) => print_args(parts, f),
         ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) => place(p, false, f),
-        ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) => expr(x, f),
+        ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) => walk_expr(x, f),
         ExprKind::Binary(_, a, b) | ExprKind::And(a, b) | ExprKind::Or(a, b) | ExprKind::RandInt(a, b) => {
-            expr(a, f);
-            expr(b, f);
+            walk_expr(a, f);
+            walk_expr(b, f);
         }
         ExprKind::Call(_, a) => args(a, f),
         ExprKind::StructLit(_, xs) | ExprKind::VariantLit(_, _, xs) | ExprKind::ArrayLit(xs) | ExprKind::Math(_, xs) => {
             for x in xs {
-                expr(x, f);
+                walk_expr(x, f);
             }
         }
         ExprKind::Seq(stmts, v) => {
             walk(stmts, f);
-            expr(v, f);
+            walk_expr(v, f);
         }
         ExprKind::If { cond, then_body, then_val, else_body, else_val } => {
-            expr(cond, f);
+            walk_expr(cond, f);
             walk(then_body, f);
             walk(else_body, f);
             for v in [then_val, else_val].into_iter().flatten() {
-                expr(v, f);
+                walk_expr(v, f);
             }
         }
     }

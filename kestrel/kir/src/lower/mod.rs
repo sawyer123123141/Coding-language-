@@ -5,6 +5,7 @@ mod consts;
 mod expr;
 mod helpers;
 mod layout;
+mod lines;
 mod map_helpers;
 mod maps;
 mod matching;

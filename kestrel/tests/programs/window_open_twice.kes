@@ -1,7 +1,7 @@
 // env: KESTREL_HEADLESS=1
 // expect: window.open 320 200 "hi"
 // expect-exit: 101
-// expect-stderr: the window is already open
+// expect-stderr: the window is already open on line 8
 use window
 main() {
     window.open(320, 200, "hi")

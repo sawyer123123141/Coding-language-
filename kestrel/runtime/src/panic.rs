@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicI32, Ordering};
+
 pub const PANIC_OVERFLOW: i32 = 1;
 pub const PANIC_DIV_ZERO: i32 = 2;
 /// A narrowing conversion (`int(x)`, `u8(x)`) got a value the target can't hold.
@@ -28,6 +30,23 @@ pub fn fail(msg: &str) -> ! {
     }
     eprintln!("kestrel: {msg}");
     std::process::exit(101);
+}
+
+/// The line of the latest call from a program's own code to a built-in function
+/// that isn't `pure` (0 before the first). Compiled code stores it just before such
+/// a call, so a native's error can name the line. Only the window's thread runs
+/// those calls.
+#[no_mangle]
+#[allow(non_upper_case_globals)]
+pub static kestrel_rt_call_line: AtomicI32 = AtomicI32::new(0);
+
+/// Fails with `msg` and the line of the call into the built-in function that is
+/// failing: "draw.circle was called before window.open on line 12".
+pub fn fail_at_call(msg: &str) -> ! {
+    match kestrel_rt_call_line.load(Ordering::Relaxed) {
+        0 => fail(msg),
+        line => fail(&format!("{msg} on line {line}")),
+    }
 }
 
 #[no_mangle]

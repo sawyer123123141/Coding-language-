@@ -111,6 +111,8 @@ impl<'a> FnLowerer<'a> {
                 Arg::Value(self.held(v))
             });
         }
+        // Last of `pre`, so it runs after the arguments' own statements and right before the call.
+        self.record_line(e, f, &mut lowered, &mut pre);
         (pre, FuncIdx(f.0), lowered)
     }
 

@@ -1,6 +1,6 @@
 // env: KESTREL_HEADLESS=1
 // expect-exit: 101
-// expect-stderr: draw.circle was called before window.open
+// expect-stderr: draw.circle was called before window.open on line 6
 use draw
 main() {
     draw.circle(vec2(1, 1), 2, draw.RED)

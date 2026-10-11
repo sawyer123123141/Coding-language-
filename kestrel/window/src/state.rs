@@ -18,12 +18,12 @@
 //!
 //! The `check_*` functions give an error message instead of failing, so tests
 //! can see the message. The same functions without the prefix call
-//! `kestrel_runtime::panic::fail` with it.
+//! `kestrel_runtime::panic::fail_at_call` with it, which adds the line of the program's call.
 
 use std::cell::RefCell;
 use std::env;
 
-use kestrel_runtime::panic::fail;
+use kestrel_runtime::panic::fail_at_call;
 
 use crate::abi::V2;
 use crate::headless;
@@ -243,12 +243,12 @@ pub fn check_view(name: &str) -> Result<View, String> {
 
 /// `check_drawing`, failing the program with the message.
 pub fn drawing(name: &str) -> Mode {
-    check_drawing(name).unwrap_or_else(|msg| fail(&msg))
+    check_drawing(name).unwrap_or_else(|msg| fail_at_call(&msg))
 }
 
 /// `check_view`, failing the program with the message.
 pub fn view(name: &str) -> View {
-    check_view(name).unwrap_or_else(|msg| fail(&msg))
+    check_view(name).unwrap_or_else(|msg| fail_at_call(&msg))
 }
 
 #[cfg(test)]
