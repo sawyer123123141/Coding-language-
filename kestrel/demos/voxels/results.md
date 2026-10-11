@@ -6,7 +6,7 @@ Measured on 2026-10-11. The viewer is `voxels.kes` (with `world.kes` and `fly.ke
 
 ![The viewer at its start position, WIDTH 8](screenshot.png)
 
-The picture is a hidden-window screenshot at frame 300 from the viewer's start view, taken by a scratch copy of the viewer that calls `window.screenshot` (the overlay shows the last report's numbers), then reduced to 256 colours to keep the file under 500 KB (the pixels moved by less than half a step on average). It shows the new colouring: grass on top, a band of dirt where the ground steps down, grey rock in the cliffs and under the snow caps, soft dark corners where blocks meet, each face shaded by the way it faces, and nothing inside-out. In the middle is a grassy valley, with mountains behind it and pieces of floating rock at the edges.
+The picture is a hidden-window screenshot at frame 300 from the viewer's start view, taken by a scratch copy of the viewer that calls `window.screenshot` (the overlay shows the last report's numbers), then reduced to 256 colours to keep the file under 500 KB (the pixels moved by less than half a step of 255 on average). It shows the new colouring: grass on top, a band of dirt where the ground steps down, grey rock in the cliffs and under the snow caps, soft dark corners where blocks meet, each face shaded by the way it faces, and nothing inside-out. In the middle is a grassy valley, with mountains behind it and pieces of floating rock at the edges.
 
 ## What the numbers are
 
@@ -177,7 +177,7 @@ Later on 2026-10-11, after the measurements above, the user asked for prettier t
 
 This replaces the spec's "coloured by its height band" (the old picture had flat horizontal bands: stone low down, then dirt, grass and snow).
 
-- **Layers by depth.** A block is coloured by how many solid blocks are right above it. The top block of a column (air right above it) is grass, or snow from height 88 up. The two under it are dirt, or rock where the top is snow, so peaks are snow on rock. Deeper is rock. So a cliff shows a grass edge, a band of dirt, then rock, as in Minecraft. To see three blocks up, `solids` samples two more rows above each chunk (36 rows instead of 34).
+- **Layers by depth.** A block is coloured by how many solid blocks are right above it. The top block of a column (air right above it) is grass, or snow from height 88 up. The two under it are dirt, or rock where the top is snow, so peaks are snow on rock. Deeper is rock. So a cliff shows a grass edge, a band of dirt, then rock, as in Minecraft. To see three blocks up, `solids` samples two more rows above each chunk (36 rows instead of 34). A cave's floor has air right above it too, so it is grass: a chunk can't see whether there is sky above the cave's roof.
 - **All six faces of a block take its colour.** A grass block's sides are green, which reads as turf from a distance. A test screenshot with dirt sides under a grass top made every one-block step a brown stripe, which looked busier, so I kept green sides.
 - **Ambient occlusion.** Each face corner is darkened by the solid blocks that touch it in the layer of air the face looks into: the two beside the corner and the one between them. Brightness is 1 with none, then 0.85, 0.7, and 0.55 in a nook (both sides solid). A quad is two triangles and the colour is blended across each, so the quad is cut along the diagonal whose corners are brighter: a single dark corner then shades softly instead of streaking along the cut.
 - **Variation.** Each block's colour is scaled by 0.97 to 1.03, from the noise's hash with a seed of its own, so flat ground isn't one flat colour.
@@ -189,7 +189,7 @@ The viewer now starts at (-40, 155, 70) with yaw 75 and pitch -33: just outside 
 
 ### What it cost
 
-A scratch copy of each version (the committed viewer before the change, with its old start view, and after it), run interleaved by `measure.py` in two batches, hidden windows, all threads. **A game was running on the machine the whole time** (45-77% of the CPU busy), so every number here is higher than in the tables above, and only old against new in the same batch means anything.
+A scratch copy of each version (the committed viewer before the change, with its old start view, and after it), run interleaved by `measure.py` in two batches, hidden windows, all threads. **A game was running on the machine during all of these runs** (the CPU was 45-77% busy each time I looked), so every number here is higher than in the tables above, and only old against new in the same batch means anything.
 
 | Batch | Run | build ms, old | build ms, new | upload ms, old | upload ms, new |
 |---|---|---:|---:|---:|---:|
@@ -198,7 +198,7 @@ A scratch copy of each version (the committed viewer before the change, with its
 | 8 rounds, a busier spell | JIT | 142.6 (93.8-197.2) | 157.6 (95.0-165.6) | 110.4 (63.7-166.6) | 137.3 (62.5-153.6) |
 | 8 rounds, a busier spell | exe | 143.7 (91.3-181.3) | 152.5 (92.7-190.7) | 118.2 (61.8-156.5) | 103.1 (66.0-215.4) |
 
-- **Build: 4-11% longer.** On one thread, where the timings are steadier, a scratch program timed the two halves of the build for all 256 chunks (9 passes of each version, interleaved; medians): the noise went from 510 to 553 ms (8% longer, about what its 6% more samples predict, within the noise), and the mesher from 68 to 70 ms (3%). The mesher does more for each face (12 more reads of the solid flags, four colours), but it now skips blocks with no air next to them before working anything out for them, which may pay for most of it (I did not time that part alone). So the extra rows of noise are most of the cost. On the tables' quiet machine that would make the build about 80 ms at `WIDTH` 8 (73-78 ms plus 8%); I did not measure that.
+- **Build: 4-11% longer.** On one thread, where the timings are steadier, a scratch program timed the two halves of the build for all 256 chunks (9 passes of each version, interleaved; medians): the noise went from 510 to 553 ms (8% longer, about what its 6% more samples predict, within the noise), and the mesher from 68 to 70 ms (3%). The mesher does more for each face (12 more reads of the solid flags, four colours instead of one), but it is a small part of the build either way (about 70 of 620 ms on one thread). So the extra rows of noise are most of the cost. On the tables' quiet machine that would make the build about 80 ms at `WIDTH` 8 (73-78 ms plus 8%); I did not measure that.
 - **Upload: the same** within the noise (the same 1.85 million vertices).
 - **Frame and draw: the same.** In the 10-round batch both versions drew in 0.26-0.28 ms (median) with the frame held at 60 fps, and one 11-second round of each gave the same (a draw of about 2 ms for both, with the game using the GPU).
 - The program arena after the upload is still 64 KiB.

@@ -13,7 +13,7 @@ use common::smoke::{smoke, Case, How, BLACK};
 
 /// The top face of block (15, 92, 15), a snow block in a flat patch of snow near the column's
 /// middle, as bytes: `world.kes`'s `SNOW`, `Color(0.93, 0.95, 0.97)`, times that block's variation
-/// (0.98, so the bytes are under `SNOW`'s 237, 242, 247). The eight blocks around it in the air
+/// (about 0.98, so the bytes are under `SNOW`'s 237, 242, 247). The eight blocks around it in the air
 /// layer above are all air, so all four corners have full ambient occlusion (brightness 1) and
 /// the face is this one colour all over. Its four neighbours' tops differ (their own variation),
 /// so no other block's top gives exactly these bytes there. (A scratch program printed each top
@@ -27,9 +27,9 @@ const SNOW_TOP: [u8; 4] = [233, 238, 243, 255];
 /// the screen and +x is left.
 ///
 /// The column covers 32 by 32 blocks. The window's half-height is `(300 - h) * tan(6°)` blocks at
-/// height h, so the 128 pixels cover 43.5 blocks at h = 93 (2.94 pixels a block, the column 94
-/// pixels across) and 38.9 at h = 115, the top of the highest block (3.29 pixels a block, the
-/// column 105 pixels). The window's corners show the background.
+/// height h, so the 128 pixels cover 43.5 blocks at h = 93, the top of the snow patch (2.94 pixels
+/// a block, the column 94 pixels across), and 38.9 at h = 115, the top of the highest block (3.29
+/// pixels a block, the column 105 pixels). The window's corners show the background.
 ///
 /// Each block has its own slight colour, so a pixel is one face's colour only if all of its
 /// samples land on that face, which needs faces a few pixels wide: hence the window of 128
@@ -39,9 +39,10 @@ const SNOW_TOP: [u8; 4] = [233, 238, 243, 255];
 /// The top faces are what the camera sees, so if the world's top faces were wound the wrong way
 /// they would be culled and the column would show no top at all. That exact pixel is the winding
 /// check: a side face would be 0.8 or 0.7 as bright, and with the top faces wound the wrong way
-/// (65, 65) comes out a different colour while the `inked` rectangle can still pass (the view then
-/// holds other faces), so `inked` alone would not catch it. `inked` only shows that something is
-/// drawn in the middle.
+/// (65, 65) comes out black (a scratch copy of `world.kes` with the top face's corners in the
+/// other order gave that) while the `inked` rectangle can still pass (the view then holds other
+/// faces), so `inked` alone would not catch it. `inked` only shows that something is drawn in the
+/// middle.
 const VOXEL_COLUMN: Case = Case {
     name: "voxel_column",
     program: r#"use window
