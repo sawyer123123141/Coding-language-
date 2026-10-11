@@ -135,6 +135,10 @@ impl Kestrel {
         }
         match JitProgram::compile(&compiled.module, Options { checked_arith: self.checks }) {
             Ok(program) => {
+                if let Err(msg) = self.build_constants(&program) {
+                    godot_error!("Kestrel: a constant failed to build: {msg}");
+                    return false;
+                }
                 let exports = program.exports();
                 self.loaded = Some(Loaded { _program: program, exports, files: compiled.files });
                 true
@@ -142,6 +146,32 @@ impl Kestrel {
             Err(e) => {
                 godot_error!("Kestrel: internal compiler error: {e}");
                 false
+            }
+        }
+    }
+
+    /// Builds the heap constants (arrays, lists and maps held in `let`s) of a program
+    /// before its first call. A library has no `main` to do it, and a recompiled program
+    /// needs its own. Runs on the Kestrel thread, like every call.
+    fn build_constants(&mut self, program: &JitProgram) -> Result<(), String> {
+        let Some(thunk) = program.init_thunk() else { return Ok(()) };
+        if self.worker.is_none() {
+            self.worker = Some(Worker::start()?);
+        }
+        let job = Job { thunk, args: Vec::new(), ret_size: 0, heap: bridge::Heap::None };
+        match self.worker.as_ref().expect("just started").call(job) {
+            Some(Reply::Done { output, .. }) => {
+                print_output(&output);
+                Ok(())
+            }
+            Some(Reply::Failed { msg, output }) => {
+                print_output(&output);
+                self.worker = None;
+                Err(msg)
+            }
+            None => {
+                self.worker = None;
+                Err("the Kestrel thread stopped".to_string())
             }
         }
     }

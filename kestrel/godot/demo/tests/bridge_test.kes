@@ -33,3 +33,14 @@ pub pure crash(i: int) -> int {
     xs[i]
 }
 pub pure hidden() -> Chunk { Chunk(1) }
+
+// A heap constant: the add-on builds it when it loads the file.
+let WEIGHTS = [10, 20, 30]
+
+pub weight_sum() -> int {
+    var s = 0
+    for w in WEIGHTS {
+        s += w
+    }
+    s
+}

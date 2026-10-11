@@ -33,6 +33,7 @@ func _init() -> void:
 	check("the next call works", k.run("add", [1, 1.0]), 2.0)
 	check("unknown function returns null", k.run("nope", []), null)
 	check("wrong argument type returns null", k.run("add", ["x", 1.0]), null)
+	check("a heap constant is built before the first call", k.run("weight_sum", []), 60)
 
 	# Hot reload: change a file on disk and the next call sees it.
 	var path := "user://hot.kes"
