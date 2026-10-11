@@ -199,19 +199,38 @@ fn bulk_and_negative_size_rectangles_draw_in_an_exe() {
     smoke(How::Exe, &RECTS);
 }
 
-/// A red cube of size 2 at the origin, seen by a camera at (0, 0, -5) looking at it, in a 64 by 64
-/// window on black. The camera's field of view is 75 degrees (the default), so the cube's front
-/// face (4 units from the camera) is about 21 pixels wide: it covers x and y from 22 to 41. The
-/// screenshot is taken while the 3D pass is still going (it ends the pass before it captures).
-const CUBE: Case = Case {
-    name: "cube",
+/// A red cube of size 2 at the origin, a blue sphere and a green line, seen by a camera at
+/// (0, 0, -5) looking at the origin, in a 64 by 64 window on black. The screenshot is taken while
+/// the 3D pass is still going (it ends the pass before it captures).
+///
+/// **Where things land.** The camera looks along +z with y up, so the screen's right is
+/// `(0, 0, 1) × (0, 1, 0) = (-1, 0, 0)`: +x is on the screen's left. The field of view is 75
+/// degrees (the default), so a point at depth d (its distance along z from the camera) is
+/// `32 / (d × tan 37.5°) = 41.70 / d` pixels from the centre for every world unit: a world
+/// point (x, y) at z = 0 (depth 5) lands at pixel (32 - 8.34 x, 32 - 8.34 y). Pixels are checked
+/// at least two pixels inside or outside an edge, because the window is multisampled.
+///
+/// - **The cube.** Its front face is at z = -1 (depth 4), 10.43 pixels a unit, so it covers x and y
+///   from 21.6 to 42.4. (Nothing of its sides shows: the camera is level with its middle.)
+/// - **The sphere**, centre (-2.4, 2.4, 0), radius 0.8. Its centre lands at (32 + 20.0, 32 - 20.0)
+///   = (52.0, 12.0). A sphere off the middle of the screen is an ellipse. This one is 6.04 units
+///   from the camera, 34 degrees off the axis, and its half-angle is 7.6 degrees. That makes an
+///   ellipse with semi-axes of 8.2 pixels along the diagonal from the screen's middle and 6.8
+///   across it, centred 0.7 pixels farther out than the sphere's centre. So it holds every point
+///   within 4 pixels of (52, 12), and spans x from 45 to 60 and y from 4 to 19.
+/// - **The line**, from (1.5, -2.5, 0) to (-1.5, -2.5, 0), is at depth 5, so it runs along y = 32 +
+///   8.34 × 2.5 = 52.85, from x = 32 - 12.5 = 19.5 to 44.5. It is one pixel wide, and the window
+///   is multisampled, so its pixels have partial coverage and blended colours: the check is that
+///   the rectangle around it has ink, and that the pixels above and below it are black.
+const SHAPES_3D: Case = Case {
+    name: "shapes_3d",
     program: r#"use window
 use draw
 use draw3d
 use { Camera from draw3d }
 
 main() {
-    window.open(64, 64, "cube")
+    window.open(64, 64, "shapes")
     let cam = Camera(pos: vec3(0, 0, -5), target: vec3(0, 0, 0))
     var n = 0
     while window.frame() {
@@ -219,6 +238,8 @@ main() {
         draw.clear(draw.BLACK)
         draw3d.camera(cam)
         draw3d.cube(vec3(0, 0, 0), vec3(2, 2, 2), draw.RED)
+        draw3d.sphere(vec3(-2.4, 2.4, 0), 0.8, draw.BLUE)
+        draw3d.line(vec3(1.5, -2.5, 0), vec3(-1.5, -2.5, 0), draw.GREEN)
         if n == 3 {
             window.screenshot("SHOT_PATH")
             window.close()
@@ -238,22 +259,30 @@ main() {
         (32, 19, BLACK, "above the cube"),
         (32, 45, BLACK, "below the cube"),
         (0, 0, BLACK, "the top-left corner"),
-        (63, 0, BLACK, "the top-right corner"),
+        (63, 0, BLACK, "the top-right corner, which the sphere stops short of"),
         (0, 63, BLACK, "the bottom-left corner"),
         (63, 63, BLACK, "the bottom-right corner"),
+        (52, 12, BLUE, "the sphere's centre"),
+        (48, 12, BLUE, "4 pixels left of it, inside the sphere"),
+        (56, 12, BLUE, "4 pixels right of it"),
+        (52, 8, BLUE, "4 pixels above it"),
+        (52, 24, BLACK, "below the sphere"),
+        (40, 12, BLACK, "left of the sphere"),
+        (32, 47, BLACK, "above the line, below the cube"),
+        (32, 58, BLACK, "below the line"),
     ],
-    inked: &[],
+    inked: &[(20, 51, 24, 4, "the one-pixel line from x = 19.5 to 44.5 along y = 52.85")],
     assets: &[],
 };
 
 #[test]
-fn a_cube_draws_under_the_jit() {
-    smoke(How::Jit, &CUBE);
+fn a_cube_a_sphere_and_a_line_draw_under_the_jit() {
+    smoke(How::Jit, &SHAPES_3D);
 }
 
 #[test]
-fn a_cube_draws_in_an_exe() {
-    smoke(How::Exe, &CUBE);
+fn a_cube_a_sphere_and_a_line_draw_in_an_exe() {
+    smoke(How::Exe, &SHAPES_3D);
 }
 
 /// Going between 2D and 3D in one frame, in a 64 by 64 window, with the camera of `CUBE`:
