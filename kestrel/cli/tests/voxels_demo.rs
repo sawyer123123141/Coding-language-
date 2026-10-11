@@ -58,7 +58,10 @@ fn the_world_makes_the_benchmarks_faces_wound_and_coloured_right() {
     expected += "depth [true, true, true, true, true]\n";
     expected += "snow true true\n";
     expected += "ao true true true true [0, 1, 2, 0, 2, 3]\n";
-    expected += "flip true true [1, 2, 3, 1, 3, 0] true\n";
+    expected += "flip true true true true [1, 2, 3, 1, 3, 0] true\n";
+    expected += "side ao true true true true [0, 1, 2, 0, 2, 3] true\n";
+    expected += "side flip true true true true [1, 2, 3, 1, 3, 0] true\n";
+    expected += "rows true true true\n";
     expected += "far vec3(x: 38, y: 70, z: 103) true\n";
     expected += "world 463749 1854996 1854996 0 2782494\n";
     assert_eq!(out, expected);

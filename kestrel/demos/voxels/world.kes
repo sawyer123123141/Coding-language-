@@ -120,7 +120,8 @@ pub pure layer(depth: int, y: int) -> Color {
 }
 
 // A brightness of 0.97 to 1.03 for world block (x, y, z), the same for all its
-// faces, so flat ground isn't one flat colour.
+// faces, so flat ground isn't one flat colour. It must not push a block colour
+// past 1, where make_mesh would clip it: the brightest, SNOW's blue, reaches 0.9991.
 pub pure variation(x: int, y: int, z: int) -> float {
     1.0 + 0.06 * (lattice(x, y, z, VARIATION_SEED) - 0.5)
 }

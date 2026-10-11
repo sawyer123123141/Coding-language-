@@ -1,7 +1,7 @@
 // The check of demos/voxels/world.kes that voxels_demo.rs runs next to a copy of it: faces,
 // winding, layers, colour variation, ambient occlusion and the diagonal flip, and the whole
 // world's face count. voxels_demo.rs holds what it must print.
-use { chunk_mesh, mesh_of, layer, variation, shaded, PAD, ROWS, LAYERS, STONE, DIRT, GRASS, SNOW from world }
+use { chunk_mesh, mesh_of, solids, layer, variation, shaded, PAD, ROWS, LAYERS, STONE, DIRT, GRASS, SNOW from world }
 use { Color from draw }
 use { MeshData from draw3d }
 
@@ -166,7 +166,50 @@ main() {
     corner[at(5, 6, 7)] = 1
     corner[at(4, 7, 6)] = 1
     let q = mesh_of(corner, 0, 0, 0)
-    print("flip", near(q.colors[8], shaded(top, 0.85)), near(q.colors[10], top), cut(q, 2), wound(q, 2, vec3(0, 1, 0)))
+    print("flip", near(q.colors[8], shaded(top, 0.85)), near(q.colors[9], top), near(q.colors[10], top), near(q.colors[11], top), cut(q, 2), wound(q, 2, vec3(0, 1, 0)))
+
+    // The same on side faces, whose edges u and v include -x, -z and +y. A's -x face is its second
+    // (vertices 4 to 7): first corner (5, 6, 8), u = -z, v = +y, so its corners a b c d are at
+    // (z+, y-), (z-, y-), (z-, y+) and (z+, y+), in the air layer at x 4. A block at (4, 7, 7) is
+    // straight above the cell in front, a side of c and d (ao 2) and of neither a nor b (ao 3).
+    // The sums are equal (3 + 2 both ways), so no flip.
+    var wall = empty()
+    wall[at(5, 6, 7)] = 1
+    wall[at(4, 7, 7)] = 1
+    let w = mesh_of(wall, 0, 0, 0)
+    let side_x = shaded(GRASS, 0.8 * variation(5, 6, 7))
+    print("side ao", near(w.colors[4], side_x), near(w.colors[5], side_x), near(w.colors[6], shaded(side_x, 0.85)), near(w.colors[7], shaded(side_x, 0.85)), cut(w, 1), wound(w, 1, vec3(-1, 0, 0)))
+
+    // A's +z face is its fifth (vertices 16 to 19): first corner (6, 6, 8), u = -x, v = +y, so its
+    // corners a b c d are at (x+, y-), (x-, y-), (x-, y+) and (x+, y+), in the air layer at z 8. A
+    // block at (4, 7, 8) is c's corner cell only (a's and d's cells are at x 5 to 6, b's at y 5 to
+    // 6), so c has ao 2 and a, b and d 3: a + c = 5 is less than b + d = 6, so the face is cut
+    // b c d, b d a.
+    var nook = empty()
+    nook[at(5, 6, 7)] = 1
+    nook[at(4, 7, 8)] = 1
+    let k = mesh_of(nook, 0, 0, 0)
+    let side_z = shaded(GRASS, 0.7 * variation(5, 6, 7))
+    print("side flip", near(k.colors[16], side_z), near(k.colors[17], side_z), near(k.colors[18], shaded(side_z, 0.85)), near(k.colors[19], side_z), cut(k, 4), wound(k, 4, vec3(0, 0, 1)))
+
+    // The rows above the chunk are filled: solids samples rows 33 to 35 of chunk (0, 0, 0), which
+    // are rows 1 to 3 of chunk (0, 1, 0) (world heights 32 to 34), and they hold both solid
+    // blocks and air there. A block at the chunk's top (local y 31) with solid blocks at local 32,
+    // 33 and 34 above it is three deep, so it is stone.
+    let below = solids(0, 0, 0, 1337)
+    let above = solids(0, 1, 0, 1337)
+    var rows_match = true
+    var rows_solid = 0
+    for i from 0 to PAD * PAD * 3 {
+        rows_match = rows_match and below[33 * PAD * PAD + i] == above[PAD * PAD + i]
+        rows_solid += int(below[33 * PAD * PAD + i])
+    }
+    var deep = empty()
+    for y from 31 to 35 {
+        deep[at(5, y, 7)] = 1
+    }
+    let d = mesh_of(deep, 0, 0, 0)
+    print("rows", rows_match, rows_solid > 0 and rows_solid < PAD * PAD * 3, all_corners(d, face_at(d, vec3(6, 31, 7)), shaded(STONE, 0.8 * variation(5, 31, 7))))
 
     // The lone block in chunk (1, 2, 3): its +x face starts at the block's world position plus
     // (1, 0, 0), which is (32 + 5 + 1, 64 + 6, 96 + 7). World height 70 is below the snow line, so

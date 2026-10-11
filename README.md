@@ -74,14 +74,14 @@ target/release/kestrel run --release demos/particles/particles.kes
 
 Move the mouse to pull the particles. Space adds 1,000 more. The window shows the update and draw times, and the demo prints them once a second. It draws all the dots with one `draw.rects` call: 200,000 dots draw in about 4.6 ms (a frame takes 5.4 ms), against about 29 ms when each dot was its own `draw.rect` call. `kestrel/demos/particles/results.md` has the numbers, and `kestrel/bench/particles/results.md` compares the demo with a Rust port on the same raylib (Kestrel is 2-7% behind there).
 
-The other showcase is a voxel viewer: fly through the 8x4x8-chunk world of `bench/voxels3d` (463,749 faces) in 3D. Blocks are grass, dirt, rock or snow by how deep they are, with soft shading in the corners where blocks meet, all baked into the vertex colours (there is no lighting).
+The other showcase is a voxel viewer: fly through the 8x4x8-chunk world of `bench/voxels3d` (463,749 faces) in 3D. The top block of each column is grass (snow on the peaks), with dirt under it and rock deeper down, and soft shading in the corners where blocks meet, all baked into the vertex colours (there is no lighting).
 
 ```bash
 target/release/kestrel run --release demos/voxels/voxels.kes
 ```
 
 - Hold the right mouse button and drag to look, WASD to move, Space and Shift to go up and down, the mouse wheel to change speed.
-- At start a `par for` builds every chunk's mesh on all cores (about 80 ms) and a loop copies them to the GPU (about 55 ms). Then each frame draws all 248 meshes, with an overlay of the fps, frame time and face count.
+- At start a `par for` builds every chunk's mesh on all cores (about 80 ms, estimated) and a loop copies them to the GPU (about 55 ms). Then each frame draws all 248 meshes, with an overlay of the fps, frame time and face count.
 - At the default size it holds 60 fps, the display's rate. That number is capped: every hidden window was held at 60 fps while the viewer was measured, so the headroom was found by growing the world (the constant `WIDTH` in `voxels.kes`). 60 fps (capped) still holds at 4.2 million faces, 9 times the world, and drops just below at 7.3 million. `kestrel/demos/voxels/results.md` has the numbers and what limits it.
 
 Two environment variables help with testing:
