@@ -310,3 +310,53 @@ fn owning_values_that_are_never_stored_are_dropped_when_their_block_ends() {
     }
     assert!(failures.is_empty(), "\n{}", failures.join("\n"));
 }
+
+/// Declarations for the `par for` cases. `make` is a `pure native`, so loop bodies may call it,
+/// and the hook is thread-safe (a `Mutex`), as the runtime asks of any hook.
+const PAR: &str = "struct Tex {
+    id: GpuHandle
+    w: int
+}
+pure native make(w: int) -> Tex
+pure width(t: Tex) -> int {
+    t.w
+}
+";
+
+/// Runs `body` after the `par for` declarations on several threads (unless the shell chose a
+/// number: the pool reads it once). Checks that each object made was dropped exactly once, and
+/// gives what `main` printed and how many were made.
+fn par_run(body: &str) -> (String, i64) {
+    if std::env::var_os("KESTREL_THREADS").is_none() {
+        std::env::set_var("KESTREL_THREADS", "4");
+    }
+    DROPPED.lock().unwrap().clear();
+    NEXT.store(1, Ordering::SeqCst);
+    let (out, made, mut dropped) = run(&format!("{PAR}{body}"));
+    dropped.sort_unstable();
+    assert_eq!(dropped, (1..=made).collect::<Vec<i64>>(), "each of the {made} objects is dropped once, in:\n{body}");
+    (out, made)
+}
+
+#[test]
+fn objects_made_and_dropped_in_par_for_iterations_are_each_dropped_once() {
+    let _turn = start();
+    // Each iteration makes two objects through a `pure` method: a local, and a temporary.
+    let body = "struct Item {\n n: int\n seen: int = 0\n\n pure probe(var self) {\n  let t = make(self.n)\n  self.seen = t.w + width(make(self.n + 1000))\n }\n}\n\
+                main() {\n var items = list[Item]()\n for i from 0 to 2000 {\n  items.add(Item(n: i))\n }\n par for it in items {\n  it.probe()\n }\n var total = 0\n for it in items {\n  total += it.seen\n }\n print(items.len, total)\n}\n";
+    let total: i64 = (0..2000).map(|n| 2 * n + 1000).sum();
+    assert_eq!(par_run(body), (format!("2000 {total}\n"), 4000));
+}
+
+#[test]
+fn held_temporaries_in_a_par_for_body_and_a_continue_through_them_drop_once() {
+    let _turn = start();
+    // The body holds a temporary in its own block, and one in an `if` block that `continue`s;
+    // `probe` makes a local and a temporary in a loop whose `continue` skips the temporary.
+    let body = "struct Item {\n n: int\n seen: int = 0\n\n pure probe(var self) {\n  for i from 0 to 4 {\n   let t = make(i)\n   if i == 1 { continue }\n   self.seen += width(make(i + 10)) + t.w\n  }\n }\n}\n\
+                main() {\n var items = list[Item]()\n for i from 0 to 300 {\n  items.add(Item(n: i))\n }\n par for it in items {\n  let w = width(make(it.n))\n  if it.n % 3 == 0 {\n   it.seen = width(make(it.n + 1000)) + w\n   continue\n  }\n  it.seen = w + width(make(it.n + 2000))\n  it.probe()\n }\n var total = 0\n for it in items {\n  total += it.seen\n }\n print(items.len, total)\n}\n";
+    // `probe` adds (10 + 0) + (12 + 2) + (13 + 3) = 40.
+    let total: i64 = (0..300).map(|n| if n % 3 == 0 { 2 * n + 1000 } else { 2 * n + 2040 }).sum();
+    // Items divisible by 3 make 2 objects, the others 1 + 1 + 4 + 3 = 9.
+    assert_eq!(par_run(body), (format!("300 {total}\n"), 100 * 2 + 200 * 9));
+}

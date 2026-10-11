@@ -1,0 +1,54 @@
+// expect: [99, 20, 30] [10, 20, 30]
+// expect: [98, 20, 30] [10, 20, 30]
+// expect: [97, 20, 30] [10, 20, 30]
+// expect: [96, 20, 30] [10, 20, 30]
+// expect: [[95, 20, 30], [10, 20, 30]] [10, 20, 30]
+// expect: {"k": [94, 20, 30]} [10, 20, 30]
+// A heap constant that is stored anywhere is copied, so changing the stored value leaves the
+// constant as it was: into a struct field, an enum payload, a `T?`, a list and a map value.
+let ITEMS = [10, 20, 30]
+
+struct Holder {
+    xs: [int]
+}
+
+enum Box {
+    Full { xs: [int] }
+    Empty
+}
+
+main() {
+    var h = Holder(xs: ITEMS)
+    h.xs[0] = 99
+    print(h.xs, ITEMS)
+
+    var b = Box.Full(ITEMS)
+    match b {
+        Full f { f.xs[0] = 98 }
+        else { }
+    }
+    match b {
+        Full f { print(f.xs, ITEMS) }
+        else { }
+    }
+
+    let o: [int]? = ITEMS
+    var unwrapped = o else { return }
+    unwrapped[0] = 97
+    print(unwrapped, ITEMS)
+
+    var lists = list[[int]]()
+    lists.add(ITEMS)
+    lists.add(ITEMS)
+    lists[0][0] = 96
+    print(lists[0], ITEMS)
+    lists[0][0] = 95
+    print(lists, ITEMS)
+
+    var table: map[string, [int]] = {}
+    table["k"] = ITEMS
+    for k, v in table {
+        v[0] = 94
+    }
+    print(table, ITEMS)
+}

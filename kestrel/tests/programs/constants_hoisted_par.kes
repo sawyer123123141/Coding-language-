@@ -1,0 +1,50 @@
+// expect: 200 18600 4400 600 8800
+// A `par for` body that names heap constants itself, not only through a `pure` function: a list
+// constant (`.len`, an element, a loop), a `list[T]` constant, and a map constant (`has`, `get`,
+// `for k, v in`, `.len`). Every iteration reads the one value that was built before `main`.
+let ITEMS = [10, 20, 30]
+let QUEUE: list[int] = [5, 6, 7, 8, 9]
+let COSTS = {"a": 1, "b": 2}
+let NESTED = [[1, 2], [3]]
+
+struct Cell {
+    a: int = 0
+    b: int = 0
+    c: int = 0
+    d: int = 0
+}
+
+main() {
+    var cells = list[Cell]()
+    for i from 0 to 200 {
+        cells.add(Cell())
+    }
+    par for cell in cells {
+        cell.a = ITEMS.len + ITEMS[2]
+        for x in ITEMS {
+            cell.a += x
+        }
+        cell.b = COSTS.len
+        if COSTS.has("a") {
+            cell.b += COSTS.get("b", 0) * 10
+        }
+        for k, v in COSTS {
+            cell.c += v
+        }
+        cell.d = QUEUE.len + NESTED[0].len + NESTED.len
+        for q in QUEUE {
+            cell.d += q
+        }
+    }
+    var a = 0
+    var b = 0
+    var c = 0
+    var d = 0
+    for cell in cells {
+        a += cell.a
+        b += cell.b
+        c += cell.c
+        d += cell.d
+    }
+    print(cells.len, a, b, c, d)
+}
