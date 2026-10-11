@@ -311,6 +311,33 @@ fn heap_constants_become_globals_built_once() {
 }
 
 #[test]
+fn the_init_builds_inside_one_guard_and_never_returns_early() {
+    let m = lower_src("let ITEMS = [1, 2, 3]\nmain() {\n print(ITEMS[0])\n}\n");
+    let init = &m.funcs[m.init.expect("a used heap constant needs the init function").0 as usize];
+    // No `return` anywhere, so it stays correct if the inliner ever splices it into `main`.
+    let mut returns = 0;
+    visit::walk(&init.body, &mut |n| returns += matches!(n, visit::Node::Stmt(Stmt::Return(_))) as usize);
+    assert_eq!(returns, 0, "{:#?}", init.body);
+    // The binds, then one `if` on the built flag that holds the whole build.
+    let Some((Stmt::If { cond, then_body, else_body }, binds)) = init.body.split_last() else { panic!("{:#?}", init.body) };
+    assert!(binds.iter().all(|s| matches!(s, Stmt::BindGlobal(..))), "{:#?}", init.body);
+    let built = bound_globals(init).into_iter().find(|&(_, g)| g == GlobalIdx(0)).expect("the built flag is bound").0;
+    assert!(
+        matches!(&cond.kind, ExprKind::Unary(UnOp::Not, flag) if matches!(&flag.kind, ExprKind::Load(p) if *p == Place::local(built))),
+        "{cond:#?}"
+    );
+    assert!(else_body.is_empty());
+    // It sets the flag first, builds in an arena that is never freed, and assigns each constant.
+    assert!(
+        matches!(&then_body[0], Stmt::Assign(p, Expr { kind: ExprKind::Bool(true), .. }) if *p == Place::local(built)),
+        "{then_body:#?}"
+    );
+    assert!(matches!(&then_body[1], Stmt::PushArena(Some(_))), "{then_body:#?}");
+    assert!(then_body[2..then_body.len() - 1].iter().all(|s| matches!(s, Stmt::Assign(..))), "{then_body:#?}");
+    assert_eq!(then_body.last(), Some(&Stmt::PopArena { free: false }));
+}
+
+#[test]
 fn unused_heap_constants_are_not_built() {
     let m = lower_src("let UNUSED = [9]\nmain() {}\n");
     assert!(m.init.is_none());
@@ -325,11 +352,12 @@ fn a_constant_used_by_another_is_built_first() {
     let m = lower_src("let NESTED = [ITEMS, [4]]\nlet ITEMS = [1, 2]\nmain() {\n print(NESTED[0][1])\n}\n");
     let init = &m.funcs[m.init.expect("a used heap constant needs the init function").0 as usize];
     let nested = bound_globals(func(&m, "main"))[0].1;
-    // Every constant of the init is bound at its start; the assignments follow in build order.
+    // Every constant of the init is bound at its start; the assignments follow in build order,
+    // inside the guard on the built flag.
     let bound = bound_globals(init);
     let global_of = |local: LocalIdx| bound.iter().find(|(l, _)| *l == local).expect("bound at the start").1;
-    let built: Vec<GlobalIdx> = init
-        .body
+    let Some(Stmt::If { then_body, .. }) = init.body.last() else { panic!("{:#?}", init.body) };
+    let built: Vec<GlobalIdx> = then_body
         .iter()
         .filter_map(|s| if let Stmt::Assign(Place { root, path }, _) = s { path.is_empty().then(|| global_of(*root)) } else { None })
         .filter(|g| g.0 >= 2)

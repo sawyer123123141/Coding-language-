@@ -91,3 +91,21 @@ fn functions_with_early_returns_stay_calls() {
     let m = lower_inlined(src);
     assert_eq!(calls(&func(&m, "f").body), 1);
 }
+
+#[test]
+fn the_constants_init_is_correct_whether_or_not_it_is_inlined_into_main() {
+    let m = lower_inlined("let ITEMS = [1, 2, 3]\nmain() {\n print(ITEMS[0])\n print(\"after\")\n}\n");
+    let main = func(&m, "main");
+    let init = m.init.expect("a used heap constant needs the init function");
+    let (mut returns, mut prints, mut pops) = (0, 0, 0);
+    visit::walk(&main.body, &mut |n| match n {
+        visit::Node::Stmt(Stmt::Return(_)) => returns += 1,
+        visit::Node::Stmt(Stmt::Print(_)) => prints += 1,
+        visit::Node::Stmt(Stmt::PopArena { .. }) => pops += 1,
+        _ => {}
+    });
+    // Still called, or spliced in with its build; either way nothing in it ends `main` early.
+    assert!(main.body.contains(&Stmt::Call(init, Vec::new())) || pops == 1, "{:#?}", main.body);
+    assert_eq!(returns, 0, "{:#?}", main.body);
+    assert_eq!(prints, 2, "{:#?}", main.body);
+}

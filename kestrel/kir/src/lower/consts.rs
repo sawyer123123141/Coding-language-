@@ -134,25 +134,29 @@ pub(super) fn lower_init(program: &Program, t: &Tables, lines: &LineIndex, helpe
     let arena = cx.ref_local("arena", KTy::Arena);
     let locals: Vec<LocalIdx> = order.iter().map(|&c| cx.const_local(c)).collect();
 
+    // The whole build is inside one `if`, with no `return`, so the function is still correct if
+    // the inliner splices it into `main`: an early return there would end `main`.
     let flag = |ty, kind| Expr { kind, ty, line: 0 };
-    let mut body = vec![Stmt::BindGlobal(built, BUILT), Stmt::BindGlobal(arena, ARENA)];
-    body.extend(cx.const_binds());
-    body.push(Stmt::If {
-        cond: flag(KTy::Bool, ExprKind::Load(Place::local(built))),
-        then_body: vec![Stmt::Return(None)],
-        else_body: Vec::new(),
-    });
-    body.push(Stmt::Assign(Place::local(built), flag(KTy::Bool, ExprKind::Bool(true))));
-    // Created on the first push, and never freed: the constants live as long as the program.
-    body.push(Stmt::PushArena(Some(Place::local(arena))));
+    let loaded = flag(KTy::Bool, ExprKind::Load(Place::local(built)));
+    let mut build = vec![
+        Stmt::Assign(Place::local(built), flag(KTy::Bool, ExprKind::Bool(true))),
+        // Created on the first push, and never freed: the constants live as long as the program.
+        Stmt::PushArena(Some(Place::local(arena))),
+    ];
     for (&c, &local) in order.iter().zip(&locals) {
         let value = cx.value(&decl(program, t, c).value);
-        body.push(Stmt::Assign(Place::local(local), value));
+        build.push(Stmt::Assign(Place::local(local), value));
     }
-    body.push(Stmt::PopArena { free: false });
+    build.push(Stmt::PopArena { free: false });
+    let mut body = vec![Stmt::BindGlobal(built, BUILT), Stmt::BindGlobal(arena, ARENA)];
+    body.extend(cx.const_binds());
+    let cond = flag(KTy::Bool, ExprKind::Unary(UnOp::Not, Box::new(loaded)));
+    body.push(Stmt::If { cond, then_body: build, else_body: Vec::new() });
+    // This checks membership only, not order: the order itself comes from `build_order`. A
+    // constant outside it would have no local bound at the start of the init.
     assert!(
         cx.const_locals.keys().all(|c| order.contains(c)),
-        "a constant used while building constants was not ordered before its user"
+        "a constant used while building constants is missing from the build order"
     );
 
     let func = Func {
