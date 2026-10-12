@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use kestrel_syntax::ast::{Arg, AssignOp, Binding, Block, Expr, ExprKind, TypeExpr};
 use kestrel_syntax::Span;
 
-use super::{BodyChecker, Expect};
+use super::BodyChecker;
 use crate::collect::{map_ty, resolve_type};
 use crate::tables::Res;
 use crate::ty::Ty;
@@ -155,9 +155,8 @@ impl<'a> BodyChecker<'a> {
                 self.declare(var, k, false, false, false);
             }
         }
-        self.loop_breaks.push(false);
-        self.check_block(body, Expect::Discard);
-        self.loop_breaks.pop();
+        let entry = self.moved.clone();
+        self.loop_body(entry, body, true);
         self.scopes.pop();
     }
 }

@@ -181,6 +181,17 @@ fn every_way_out_of_a_scope_and_every_container_drops_each_object_once() {
              main() {\n let s = make_sprite(1)\n print(s.frames.len, s.name, dropped())\n var sprites = list[Sprite]()\n sprites.add(make_sprite(2))\n sprites.add(pick(3))\n sprites.add(pick(300))\n let moved = s\n sprites.add(moved)\n arena {\n  var tmp = make_sprite(4)\n  tmp = make_sprite(5)\n  print(tmp.name, dropped())\n }\n print(sprites.len, dropped())\n}\n",
             "1 s1 0\ns5 2\n4 3\n",
         ),
+        // A value moved on one path is dropped once, by whoever has it then.
+        (
+            "pick(c: bool) -> int {\n var keep = list[Tex]()\n let t = make(1)\n if c {\n  keep.add(t)\n }\n keep.len\n}\n\
+             main() {\n print(pick(true), pick(false), dropped())\n}\n",
+            "1 0 2\n",
+        ),
+        // A loop that moves its variable and gives it a new value each time around.
+        (
+            "main() {\n var keep = list[Tex]()\n var t = make(1)\n var i = 0\n while i < 3 {\n  keep.add(t)\n  t = make(i + 2)\n  i += 1\n }\n print(keep.len, t.w, dropped())\n}\n",
+            "3 4 0\n",
+        ),
     ];
     let _turn = start();
     for (body, expected) in cases {

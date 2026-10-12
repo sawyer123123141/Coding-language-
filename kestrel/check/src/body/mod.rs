@@ -6,6 +6,7 @@ mod enums;
 mod expr;
 mod maps;
 mod matching;
+mod moves;
 mod nested;
 mod par;
 mod place;
@@ -47,8 +48,12 @@ pub(crate) struct BodyChecker<'a> {
     local_ctx: HashMap<LocalId, (usize, usize)>,
     /// `for ... in` elements: views into a collection, not storage.
     views: HashSet<LocalId>,
-    /// Owning locals that were moved and can't be used again.
-    moved: HashSet<LocalId>,
+    /// Owning locals that may have been moved by now, following the code's paths (see `moves`).
+    moved: moves::Moved,
+    /// The loops being checked, outermost first: where each started, and its `break`s.
+    loop_moves: Vec<moves::LoopMoves>,
+    /// Moves already reported as moved inside a loop, so an enclosing loop doesn't repeat them.
+    loop_move_errors: HashSet<Span>,
     /// `match` arms whose bindings are reading a place right now.
     match_guards: Vec<regions::MatchGuard>,
     /// Enclosing `par for` bodies, outermost first.
@@ -85,10 +90,27 @@ pub(crate) fn check_fn(program: &Program, fn_id: FnId, t: &mut Tables, diags: &m
 impl<'a> BodyChecker<'a> {
     fn new(t: &'a mut Tables, diags: &'a mut Vec<Diagnostic>, fn_id: Option<FnId>, ret: Ty, is_pure: bool) -> Self {
         let ctxs = vec![regions::Ctx::Function];
-        let (local_ctx, views, moved) = (HashMap::new(), HashSet::new(), HashSet::new());
+        let (local_ctx, views, moved) = (HashMap::new(), HashSet::new(), HashMap::new());
         let (scopes, loop_breaks, match_guards) = (Vec::new(), Vec::new(), Vec::new());
+        let (loop_moves, loop_move_errors) = (Vec::new(), HashSet::new());
         let par = Vec::new();
-        BodyChecker { t, diags, fn_id, scopes, loop_breaks, ret, is_pure, ctxs, local_ctx, views, moved, match_guards, par }
+        BodyChecker {
+            t,
+            diags,
+            fn_id,
+            scopes,
+            loop_breaks,
+            ret,
+            is_pure,
+            ctxs,
+            local_ctx,
+            views,
+            moved,
+            loop_moves,
+            loop_move_errors,
+            match_guards,
+            par,
+        }
     }
 
     /// A type as it reads in messages.
@@ -246,12 +268,13 @@ impl<'a> BodyChecker<'a> {
                 Ty::Unit
             }
             Stmt::While { cond, body, .. } => {
+                // The condition runs each time around, so the loop starts before it.
+                let entry = self.moved.clone();
                 self.check_value(cond, Some(Ty::Bool));
-                self.loop_breaks.push(false);
-                self.check_block(body, Expect::Discard);
-                let broke = self.loop_breaks.pop().expect("pushed above");
+                let forever = matches!(cond.kind, ExprKind::Bool(true));
+                let broke = self.loop_body(entry, body, !forever);
                 // `while true` with no `break` can only be left by `return`.
-                if matches!(cond.kind, ExprKind::Bool(true)) && !broke {
+                if forever && !broke {
                     Ty::Never
                 } else {
                     Ty::Unit
@@ -277,9 +300,8 @@ impl<'a> BodyChecker<'a> {
                 };
                 self.scopes.push(HashMap::new());
                 self.declare(var, var_ty, false, false, false);
-                self.loop_breaks.push(false);
-                self.check_block(body, Expect::Discard);
-                self.loop_breaks.pop();
+                let entry = self.moved.clone();
+                self.loop_body(entry, body, true);
                 self.scopes.pop();
                 Ty::Unit
             }
@@ -306,6 +328,11 @@ impl<'a> BodyChecker<'a> {
                         let word = if is_break { "break" } else { "continue" };
                         self.error(*span, format!("`{word}` outside a loop"));
                     }
+                }
+                if is_break {
+                    self.note_break();
+                } else {
+                    self.back_edge();
                 }
                 Ty::Never
             }

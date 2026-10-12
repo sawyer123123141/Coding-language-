@@ -183,10 +183,11 @@ impl<'a> BodyChecker<'a> {
                 Ty::Error
             }
         };
-        self.consume(value);
+        // The `else` block runs when `value` is `none`: nothing has been unwrapped or moved yet.
         if self.check_block(otherwise, Expect::Discard) != Ty::Never {
             self.error_help(otherwise.span, "the `else` block has to leave", "end it with `return`, `break` or `continue`");
         }
+        self.consume(value);
         self.declare(bind, inner, is_var, false, false);
     }
 
@@ -227,9 +228,8 @@ impl<'a> BodyChecker<'a> {
             let collection = self.path_key(iter);
             self.par.push(super::par::ParBody::new(v, collection, root, first_local, self.loop_breaks.len() + 1));
         }
-        self.loop_breaks.push(false);
-        self.check_block(body, Expect::Discard);
-        self.loop_breaks.pop();
+        let entry = self.moved.clone();
+        self.loop_body(entry, body, true);
         if par {
             self.end_par();
         }

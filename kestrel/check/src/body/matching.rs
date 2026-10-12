@@ -12,6 +12,8 @@ impl<'a> BodyChecker<'a> {
     pub(crate) fn check_match(&mut self, e: &Expr, expect: Expect) -> Ty {
         let ExprKind::Match { scrutinee, arms } = &e.kind else { unreachable!("check_match on non-match") };
         let scrutinee_ty = self.check_expr(scrutinee, None);
+        let before = self.moved.clone();
+        let mut ends = Vec::with_capacity(arms.len());
         let enum_id = match scrutinee_ty {
             Ty::Enum(id) => Some(id),
             Ty::Error => None,
@@ -41,6 +43,7 @@ impl<'a> BodyChecker<'a> {
             Expect::Discard => None,
         };
         for arm in arms {
+            self.moved = before.clone();
             if has_else {
                 self.error(arm.span, "this arm can never run: the `else` above matches everything");
             }
@@ -88,11 +91,13 @@ impl<'a> BodyChecker<'a> {
                 }
             }
             tys.push(ty);
+            ends.push((ty, std::mem::take(&mut self.moved)));
             if guarded {
                 self.match_guards.pop();
             }
             self.scopes.pop();
         }
+        self.join(before, ends);
         let missing: Vec<String> =
             variants.iter().zip(&seen).filter(|(_, done)| !**done).map(|((n, _), _)| format!("`{n}`")).collect();
         if enum_id.is_some() && !has_else && !missing.is_empty() {

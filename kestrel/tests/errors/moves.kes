@@ -1,0 +1,24 @@
+struct Bag {
+    mem: Arena = Arena()
+    n: int = 0
+}
+
+go(c: bool) {
+    var keep = list[Bag]()
+    let t = Bag()
+    if c {
+        keep.add(t)
+    }
+    print(t.n)
+    let u = Bag()
+    for i from 0 to 3 {
+        keep.add(u)
+    }
+}
+
+main() {
+    go(true)
+}
+
+// error 12: `t` may have been moved earlier, so it can't be used here
+// error 15: `u` is moved inside a loop, so the next time around it would already be gone

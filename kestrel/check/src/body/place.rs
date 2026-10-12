@@ -59,7 +59,16 @@ impl<'a> BodyChecker<'a> {
             self.check_expr(value, None);
             return;
         }
+        // `t = value` gives a moved variable its value back; naming it here isn't a use.
+        let reinit = match (&target.kind, op) {
+            (ExprKind::Ident(name), AssignOp::Set) => self.lookup_local(name),
+            _ => None,
+        };
+        let was = reinit.and_then(|l| self.moved.remove(&l));
         let target_ty = self.check_expr(target, None);
+        if let (Some(l), Some(at)) = (reinit, was) {
+            self.moved.insert(l, at);
+        }
         let Some(root) = self.place_root(target) else {
             if let (ExprKind::Ident(name), Some(Res::Const(_) | Res::Builtin(_))) = (&target.kind, self.t.res.get(&target.id)) {
                 let msg = format!("can't change constant `{name}`");
@@ -120,6 +129,9 @@ impl<'a> BodyChecker<'a> {
         self.check_value(value, Some(target_ty));
         self.consume(value);
         self.check_store(target, value);
+        if let Some(l) = reinit {
+            self.moved.remove(&l);
+        }
     }
 
     /// `v += w`, `v *= 2.0`: the value is a vector of the same size, or a number.

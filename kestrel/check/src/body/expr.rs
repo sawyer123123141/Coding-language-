@@ -90,8 +90,14 @@ impl<'a> BodyChecker<'a> {
     fn ident(&mut self, e: &Expr, name: &str, want: Option<Ty>) -> Ty {
         if let Some(local) = self.lookup_local(name) {
             self.t.res.insert(e.id, Res::Local(local));
-            if self.moved.contains(&local) {
-                self.error(e.span, format!("`{name}` was moved earlier, so it can't be used here"));
+            match self.moved.get(&local).copied() {
+                Some(at) if at.every => self.error(e.span, format!("`{name}` was moved earlier, so it can't be used here")),
+                Some(_) => self.error_help(
+                    e.span,
+                    format!("`{name}` may have been moved earlier, so it can't be used here"),
+                    "it's moved on some paths to this line; give it a new value first",
+                ),
+                None => {}
             }
             let ty = self.t.locals[local.0 as usize].ty;
             if let Ty::Variant(..) = ty {
@@ -162,7 +168,7 @@ impl<'a> BodyChecker<'a> {
         match op {
             BinaryOp::And | BinaryOp::Or => {
                 self.check_value(lhs, Some(Ty::Bool));
-                self.check_value(rhs, Some(Ty::Bool));
+                self.check_sometimes(rhs, Some(Ty::Bool));
                 Ty::Bool
             }
             // A shift's result has the left side's type; the amount is any integer.
@@ -275,13 +281,17 @@ impl<'a> BodyChecker<'a> {
     pub(crate) fn check_if(&mut self, e: &Expr, expect: Expect) -> Ty {
         let ExprKind::If { cond, then_block, else_block } = &e.kind else { unreachable!("check_if on non-if") };
         self.check_value(cond, Some(Ty::Bool));
+        let before = self.moved.clone();
         match expect {
             Expect::Discard => {
                 let t1 = self.check_block(then_block, Expect::Discard);
+                let after_then = std::mem::replace(&mut self.moved, before.clone());
                 let t2 = match else_block {
                     Some(b) => self.check_block(b, Expect::Discard),
                     None => Ty::Unit,
                 };
+                let after_else = std::mem::take(&mut self.moved);
+                self.join(before, vec![(t1, after_then), (t2, after_else)]);
                 if t1 == Ty::Never && t2 == Ty::Never {
                     Ty::Never
                 } else {
@@ -296,8 +306,11 @@ impl<'a> BodyChecker<'a> {
                     return Ty::Error;
                 };
                 let t1 = self.check_block(then_block, Expect::Value(want));
+                let after_then = std::mem::replace(&mut self.moved, before.clone());
                 let hint = want.or(if is_value_ty(t1) { Some(t1) } else { None });
                 let t2 = self.check_block(else_block, Expect::Value(hint));
+                let after_else = std::mem::take(&mut self.moved);
+                self.join(before, vec![(t1, after_then), (t2, after_else)]);
                 // A branch that finishes without a value would bypass the value checks.
                 let mut missing = false;
                 for (ty, block) in [(t1, then_block), (t2, else_block)] {

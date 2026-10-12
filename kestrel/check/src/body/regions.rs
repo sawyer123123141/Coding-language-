@@ -1,5 +1,5 @@
-//! Moves of owning values and the arena escape check: which arena a value's
-//! memory lives in (its region), and where such a value may be stored.
+//! The arena escape check: which arena a value's memory lives in (its region), and where
+//! such a value may be stored. Moves are in `moves`.
 
 use kestrel_syntax::ast::{Block, Expr, ExprKind, Stmt};
 
@@ -66,7 +66,7 @@ fn bit(i: usize) -> u64 {
     1 << i.min(63)
 }
 
-fn tail(block: &Block) -> Option<&Expr> {
+pub(crate) fn tail(block: &Block) -> Option<&Expr> {
     match block.stmts.last() {
         Some(Stmt::Expr(e)) => Some(e),
         _ => None,
@@ -334,63 +334,5 @@ impl<'a> BodyChecker<'a> {
             _ => "can't return memory from an `arena { }` block: it's freed at the block's end".to_string(),
         };
         self.error(value.span, msg);
-    }
-
-    /// `v` is stored somewhere new. An owning value (one holding an `Arena` or a GPU object)
-    /// can't be copied, only moved, and only whole variables move.
-    pub(crate) fn consume(&mut self, v: &Expr) {
-        let ty = self.t.ty(v.id);
-        if !self.t.is_owning(ty) {
-            return;
-        }
-        match &v.kind {
-            ExprKind::If { then_block, else_block, .. } => {
-                for b in std::iter::once(then_block).chain(else_block.as_ref()) {
-                    if let Some(t) = tail(b) {
-                        self.consume(t);
-                    }
-                }
-            }
-            ExprKind::Match { arms, .. } => {
-                for a in arms {
-                    if let Some(t) = tail(&a.body) {
-                        self.consume(t);
-                    }
-                }
-            }
-            ExprKind::Ident(_) => {
-                let Some(&Res::Local(l)) = self.t.res.get(&v.id) else { return };
-                let info = self.t.local(l);
-                let name = info.name.clone();
-                let loops = self.local_ctx.get(&l).map_or(0, |&(_, loops)| loops);
-                if info.is_param {
-                    let what = self.t.owns_what(ty);
-                    let msg = format!("can't move parameter `{name}`: it belongs to the caller, and it holds {what}, so it can't be copied");
-                    self.error(v.span, msg);
-                } else if self.views.contains(&l) {
-                    let what = self.t.owns_what(ty);
-                    let msg = format!("can't move `{name}` out of its collection: it holds {what}, so it can't be copied");
-                    self.error(v.span, msg);
-                } else if self.loop_breaks.len() > loops {
-                    let msg = format!("`{name}` is moved inside a loop, so the next time around it would already be gone");
-                    self.error_help(v.span, msg, "declare it inside the loop");
-                } else {
-                    self.moved.insert(l);
-                    self.t.moves.insert(v.id);
-                }
-            }
-            // A part of a variable, or of a temporary (a call's result, a construction). `Enum.Variant`
-            // is a field access that builds a value; it isn't a part of anything.
-            ExprKind::Field { .. } | ExprKind::Index { .. } if !matches!(self.t.res.get(&v.id), Some(Res::Variant(..))) => {
-                let what = self.t.owns_what(ty);
-                let msg = format!("can't move this out: it holds {what}, so it can't be copied, and only whole variables move");
-                let help = match self.place_root(v) {
-                    Some(_) => "move the whole variable that holds it",
-                    None => "use the part in place, or keep the whole value in a variable",
-                };
-                self.error_help(v.span, msg, help);
-            }
-            _ => {}
-        }
     }
 }
