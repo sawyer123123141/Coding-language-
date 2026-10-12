@@ -64,6 +64,33 @@ fn struct_stores_to_memory_go_one_field_at_a_time() {
 }
 
 #[test]
+fn a_struct_store_goes_one_field_at_a_time_in_a_function_with_no_struct_locals() {
+    // `set` returns early, so it isn't inlined, and it holds no struct local to split.
+    let src = "set(var xs: [vec2]) {\n if xs.len == 0 { return }\n xs[0] = vec2(1, 2)\n}\nmain() {\n var xs = [vec2(0, 0)]\n set(var xs)\n print(xs)\n}\n";
+    let m = optimized(src);
+    let f = func(&m, "set");
+    let mut stores = 0;
+    visit::walk(&f.body, &mut |n| {
+        if let visit::Node::Stmt(Stmt::Assign(p, e)) = n {
+            assert!(!matches!(e.ty, KTy::Struct(_)), "{p:?} = {e:#?}");
+            stores += 1;
+        }
+    });
+    assert_eq!(stores, 2);
+}
+
+#[test]
+fn a_struct_with_exactly_16_fields_at_the_bottom_is_split() {
+    let src = "struct W {\n a: vec3\n b: vec3\n c: vec3\n d: vec3\n e: vec3\n f: float\n}\nmain() {\n var w = W(a: vec3(1, 1, 1), b: vec3(1, 1, 1), c: vec3(1, 1, 1), d: vec3(1, 1, 1), e: vec3(1, 1, 1), f: 1)\n w.f = w.f + 1\n print(w)\n}\n";
+    let m = optimized(src);
+    let f = func(&m, "main");
+    assert!(struct_slots(f).is_empty(), "{:#?}", f.locals);
+    let w = f.locals.iter().find(|l| l.name == "w").unwrap();
+    assert_eq!(w.kind, LocalKind::Unused);
+    assert!(f.locals.iter().any(|l| l.name == "w.e.z" && l.kind == LocalKind::Value), "{:#?}", f.locals);
+}
+
+#[test]
 fn a_struct_with_more_than_16_fields_at_the_bottom_stays_in_memory() {
     let src = "struct W {\n a: vec3\n b: vec3\n c: vec3\n d: vec3\n e: vec3\n f: vec2\n}\nmain() {\n var w = W(a: vec3(1, 1, 1), b: vec3(1, 1, 1), c: vec3(1, 1, 1), d: vec3(1, 1, 1), e: vec3(1, 1, 1), f: vec2(1, 1))\n w.f = w.f.yx\n print(w)\n}\n";
     assert_eq!(struct_slots(func(&optimized(src), "main")), vec!["w"]);

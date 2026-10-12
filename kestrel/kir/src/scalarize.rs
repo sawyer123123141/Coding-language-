@@ -38,9 +38,7 @@ pub fn scalarize(m: &mut Module) {
             f.locals[i].kind = LocalKind::Unused;
             roots.insert(l, Split { leaves: all, locals });
         }
-        if roots.is_empty() {
-            continue;
-        }
+        // Even with no split locals, stores of plain struct values to memory go leaf by leaf.
         let mut rw = Rewriter { structs, locals: &mut f.locals, roots };
         rw.visit_stmts(&mut f.body);
     }

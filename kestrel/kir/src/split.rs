@@ -111,7 +111,7 @@ impl Rewriter<'_> {
                 let p = self.stable(p, out);
                 all.iter().map(|l| self.hold(Expr { kind: ExprKind::Load(leaf_place(&p, l)), ty: l.ty, line }, out)).collect()
             }
-            ExprKind::FieldOf(base, i) => {
+            ExprKind::FieldOf(base, i) if is_plain_struct(self.structs, base.ty) => {
                 let base_ty = base.ty;
                 let vals = self.split(*base, out);
                 let all = leaves(self.structs, base_ty).expect("a plain struct");

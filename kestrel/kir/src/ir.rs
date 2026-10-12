@@ -183,7 +183,10 @@ pub struct Local {
 pub enum LocalKind {
     /// Lives in a register.
     Value,
-    /// Needs a memory slot: passed as a `var` argument somewhere, or a struct.
+    /// Needs a memory slot: lowering (and inlining) assigns it to a struct, or to a local passed
+    /// as a `var` argument somewhere. `scalarize` may turn it into `Value` (a number whose `var`
+    /// argument inlining removed) or `Unused` (a plain struct, split into one `Value` local per
+    /// field).
     Addressed,
     /// Holds a pointer to the caller's value: a `var` parameter, or any
     /// aggregate parameter (read-only ones are passed by pointer too). Also

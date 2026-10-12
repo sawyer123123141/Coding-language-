@@ -1,0 +1,24 @@
+// expect: vec2(x: 4, y: 3)
+// expect: vec2(x: 3, y: 2)
+// expect: 3
+// expect: vec2(x: 6, y: 7)
+// Fields of struct values that aren't places, from a struct that is not plain (it holds a string).
+struct Ent {
+    pos: vec2
+    name: string
+}
+
+make(x: float) -> Ent {
+    Ent(pos: vec2(x, 2), name: "a")
+}
+
+main() {
+    var v = vec2(1, 1)
+    print(make(3).pos + v)
+    let p = make(3).pos
+    print(p)
+    let x = make(3).pos.x
+    print(x)
+    v = Ent(pos: vec2(5, 6), name: "a").pos + v
+    print(v)
+}

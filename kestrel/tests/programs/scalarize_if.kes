@@ -9,6 +9,9 @@
 // expect: eval 2
 // expect: Pair(a: vec2(x: 3, y: 4), b: vec2(x: 6, y: 5))
 // expect: 3 -1
+// expect: eval 2
+// expect: eval 1
+// expect: [vec2(x: 0, y: 0), vec2(x: 6, y: 5)]
 // Struct values made by `if`, by vector methods, and from places whose index has side effects.
 struct Pair {
     a: vec2
@@ -44,4 +47,8 @@ main() {
     var q = Pair(a: vs[noisy(1)], b: vs[noisy(2)].yx)
     print(q)
     print(first_or_stop([vec2(1, 2)]), first_or_stop(array[vec2](0)))
+    // The value's side effects come before the destination's.
+    var ws = [vec2(0, 0), vec2(0, 0)]
+    ws[noisy(1)] = vs[noisy(2)].yx
+    print(ws)
 }
