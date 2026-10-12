@@ -137,12 +137,13 @@ impl<'a> BodyChecker<'a> {
     }
 
     fn check_user_call(&mut self, e: &Expr, fid: FnId, args: &[Arg]) -> Ty {
-        self.check_args(e, fid, args, 0, Vec::new())
+        self.check_args(e, fid, args, 0, Vec::new(), None)
     }
 
     /// Checks a call's arguments against `fid`'s parameters after the first
     /// `skip` (1 for a method's `self`). `var_roots` holds variables the call
-    /// already changes (a `var self` receiver).
+    /// already changes (a `var self` receiver); `read_root` is the variable a
+    /// receiver that isn't `var` is passed from, by pointer.
     pub(crate) fn check_args(
         &mut self,
         e: &Expr,
@@ -150,6 +151,7 @@ impl<'a> BodyChecker<'a> {
         args: &[Arg],
         skip: usize,
         mut var_roots: Vec<(LocalId, Option<usize>)>,
+        read_root: Option<LocalId>,
     ) -> Ty {
         let info = &self.t.fns[fid.0 as usize];
         let (params, ret, fname) = (info.params[skip..].to_vec(), info.ret, info.name.clone());
@@ -196,7 +198,7 @@ impl<'a> BodyChecker<'a> {
         if scratch {
             self.ctxs.pop();
         }
-        self.check_exclusive(args, &var_roots);
+        self.check_exclusive(args, &var_roots, read_root);
         // Arguments run in source order; one passed by pointer earlier must
         // not be changed by a later one.
         for (i, a) in args.iter().enumerate() {
@@ -334,12 +336,20 @@ impl<'a> BodyChecker<'a> {
     /// it by reference: no second `var` use, and no aggregate argument (those
     /// are passed by pointer, so they would see the change). Number
     /// arguments are copied before the call, so they're fine.
-    fn check_exclusive(&mut self, args: &[Arg], var_roots: &[(LocalId, Option<usize>)]) {
+    fn check_exclusive(&mut self, args: &[Arg], var_roots: &[(LocalId, Option<usize>)], read_root: Option<LocalId>) {
         for (i, &(root, ai)) in var_roots.iter().enumerate() {
             if let (true, Some(ai)) = (var_roots[..i].iter().any(|&(r, _)| r == root), ai) {
                 let name = self.t.local(root).name.clone();
                 let msg = format!("`{name}` is passed as `var` and also used in another argument of the same call");
                 self.error(args[ai].span, msg);
+            }
+        }
+        // A receiver that isn't `var` is passed by pointer too, so it would see the change.
+        for &(root, ai) in var_roots {
+            if let (true, Some(ai)) = (read_root == Some(root), ai) {
+                let name = self.t.local(root).name.clone();
+                let msg = format!("`{name}` is passed as `var` and is also the receiver of this call");
+                self.error_help(args[ai].span, msg, "copy what the method needs into a separate variable first");
             }
         }
         for (bi, b) in args.iter().enumerate() {

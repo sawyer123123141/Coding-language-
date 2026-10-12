@@ -157,12 +157,15 @@ impl<'a> BodyChecker<'a> {
         self.check_callee_purity(*name_span, fid);
         let mut var_roots = Vec::new();
         let by_pointer = self.t.func(fid).params[0].is_var || receiver_ty.is_aggregate();
+        let mut read_root = None;
         if self.t.func(fid).params[0].is_var {
             if let Some(root) = self.receiver_root(receiver, name) {
                 var_roots.push((root, None));
             }
+        } else if receiver_ty.is_aggregate() {
+            read_root = self.place_root(receiver);
         }
-        let ret = self.check_args(e, fid, args, 1, var_roots);
+        let ret = self.check_args(e, fid, args, 1, var_roots, read_root);
         if by_pointer {
             let later: Vec<&Expr> = args.iter().map(|a| &a.value).collect();
             self.check_changed_later(&[receiver], &later);

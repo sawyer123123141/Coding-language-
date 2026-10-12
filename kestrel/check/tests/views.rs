@@ -68,6 +68,56 @@ fn a_view_and_what_it_reads_cant_move() {
     // After the block that declares the view, the root may move.
     let later = "main() {\n var keep = list[Holder]()\n let h = Holder(b: Bag())\n if true {\n  let b = h.b else {\n   return\n  }\n  print(b.n)\n }\n keep.add(h)\n}\n";
     assert_eq!(errors(later), none());
+    // At the end of a block or function, where the value moves out after the block has closed.
+    let moved_in = "can't move `b`: it's inside parameter `h`, which belongs to the caller, and it holds an `Arena`, so it can't be copied";
+    let tail = "f(h: Holder) -> Bag {\n let b = h.b else {\n  return Bag()\n }\n b\n}\nmain() {}\n";
+    assert_eq!(errors(tail), vec![moved_in.to_string()]);
+    let tail_if = "f(h: Holder, c: bool) -> Bag {\n let b = h.b else {\n  return Bag()\n }\n if c { b } else { Bag() }\n}\nmain() {}\n";
+    assert_eq!(errors(tail_if), vec![moved_in.to_string()]);
+    let local_tail = "f() -> Bag {\n let h = Holder(b: Bag())\n let b = h.b else {\n  return Bag()\n }\n b\n}\nmain() {}\n";
+    assert_eq!(errors(local_tail), vec!["can't move `b`: it's inside `h`, and it holds an `Arena`, so it can't be copied".to_string()]);
+}
+
+/// `main` with a view of `h.b` inside `shape`'s block (`loop`, `if` or `match`), with `inside` between the
+/// view and its use, `sibling` in the branch beside the block (if it has one), and `after` once it is over.
+fn guarded(shape: &str, inside: &str, sibling: &str, after: &str) -> String {
+    let view = format!("let b = h.b else {{\n   return\n  }}\n  {inside}\n  print(b.n)\n");
+    let block = match shape {
+        "loop" => format!(" for i from 0 to 1 {{\n  {view} }}\n"),
+        "if" => format!(" if true {{\n  {view} }} else {{\n  {sibling}\n }}\n"),
+        _ => format!(" match s {{\n  Empty {{\n  {view} }}\n  else {{\n  {sibling}\n }}\n }}\n"),
+    };
+    format!("main() {{\n var keep = list[Holder]()\n let h = Holder(b: Bag())\n let s = Slot.Empty\n{block} {after}\n}}\n")
+}
+
+#[test]
+fn a_view_guards_its_root_only_until_its_block_ends() {
+    for shape in ["loop", "if", "match"] {
+        // After the block, or in the branch beside it, the root may move.
+        assert_eq!(errors(&guarded(shape, "", "", "keep.add(h)")), none(), "{shape}: after the block");
+        if shape != "loop" {
+            assert_eq!(errors(&guarded(shape, "", "keep.add(h)", "")), none(), "{shape}: in the other branch");
+        }
+        // While the view is live it may not.
+        let inside = errors(&guarded(shape, "keep.add(h)", "", ""));
+        assert_eq!(inside, vec!["can't move `h` here: `b` reads from it".to_string()], "{shape}: inside the block");
+    }
+}
+
+#[test]
+fn a_receiver_cant_also_be_passed_as_var() {
+    let cell = "struct Cell {\n b: Bag?\n\n poke(self, var other: Cell) -> int {\n  let b = self.b else {\n   return 0\n  }\n  other.b = none\n  b.n\n }\n\n bump(var self, other: Cell) {\n  self.b = none\n }\n}\n";
+    // `poke` takes `self` by pointer, so changing `c` through `other` would change what `self` reads.
+    let poke = format!("{cell}main() {{\n var c = Cell(b: Bag())\n print(c.poke(var c))\n}}\n");
+    assert_eq!(errors(&poke), vec!["`c` is passed as `var` and is also the receiver of this call".to_string()]);
+    // A different variable is fine.
+    let apart = format!("{cell}main() {{\n var c = Cell(b: Bag())\n var d = Cell(b: Bag())\n print(c.poke(var d))\n print(d.poke(var c))\n}}\n");
+    assert_eq!(errors(&apart), none());
+    // The plain function form, and a `var self` receiver that is also read, were already refused.
+    let free = format!("{cell}both(a: Cell, var b: Cell) {{\n}}\nmain() {{\n var c = Cell(b: Bag())\n both(c, var c)\n}}\n");
+    assert_eq!(errors(&free), vec!["`c` is passed as `var` and also used in another argument of the same call".to_string()]);
+    let bump = format!("{cell}main() {{\n var c = Cell(b: Bag())\n c.bump(c)\n}}\n");
+    assert_eq!(errors(&bump), vec!["`c` is changed by this call, so it can't also be passed to it".to_string()]);
 }
 
 #[test]

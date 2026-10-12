@@ -158,8 +158,8 @@ impl<'a> BodyChecker<'a> {
                     let what = self.t.owns_what(ty);
                     let msg = format!("can't move parameter `{name}`: it belongs to the caller, and it holds {what}, so it can't be copied");
                     self.error(v.span, msg);
-                } else if let Some(g) = self.let_guards.iter().find(|g| g.view == l).cloned() {
-                    let root = self.t.local(g.root);
+                } else if self.t.let_else_views.contains(&l) {
+                    let root = self.t.local(self.t.local(l).alias.expect("a let-else view reads from a root"));
                     let inside = if root.is_param {
                         format!("parameter `{}`, which belongs to the caller", root.name)
                     } else {

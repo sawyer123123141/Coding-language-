@@ -1,5 +1,6 @@
 // expect: 3 7
 // expect: 2 [7, 0]
+// expect: first first 1
 // expect: none
 // `let ... else` reads an optional parameter or field in place, even when it owns an arena.
 struct Pool {
@@ -34,6 +35,16 @@ struct Tagged {
     n: int
 }
 
+struct Note {
+    text: string?
+}
+
+// Counts its calls, to show that the index of a view is worked out once.
+tick(var calls: int) -> int {
+    calls += 1
+    0
+}
+
 main() {
     var pool = Pool()
     in pool.mem {
@@ -55,6 +66,14 @@ main() {
         }
     }
     print(lens.len, lens)
+    // An index with an effect runs once, where the view is declared, however often the view is used.
+    let notes = [Note(text: "first"), Note(text: none)]
+    var calls = 0
+    let note = notes[tick(var calls)].text else {
+        print("no text")
+        return
+    }
+    print(note, note, calls)
     let empty = Level(pool: none)
     let p = empty.pool else {
         print("none")

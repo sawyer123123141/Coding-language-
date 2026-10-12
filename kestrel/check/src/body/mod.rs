@@ -47,7 +47,8 @@ pub(crate) struct BodyChecker<'a> {
     ctxs: Vec<regions::Ctx>,
     /// Per local: the context and loop depth it was declared in.
     local_ctx: HashMap<LocalId, (usize, usize)>,
-    /// `for ... in` elements: views into a collection, not storage.
+    /// Views, which read a place without copying it: `for ... in` elements, map loop values and
+    /// `let ... else` unwraps (`match` bindings are tracked by `match_guards` instead).
     views: HashSet<LocalId>,
     /// Owning locals that may have been moved by now, following the code's paths (see `moves`).
     moved: moves::Moved,
