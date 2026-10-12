@@ -192,6 +192,12 @@ fn every_way_out_of_a_scope_and_every_container_drops_each_object_once() {
             "main() {\n var keep = list[Tex]()\n var t = make(1)\n var i = 0\n while i < 3 {\n  keep.add(t)\n  t = make(i + 2)\n  i += 1\n }\n print(keep.len, t.w, dropped())\n}\n",
             "3 4 0\n",
         ),
+        // `let ... else` over a parameter or a field reads in place: its owner drops the object once.
+        (
+            "struct Frame {\n t: Tex?\n}\nwidth(o: Tex?) -> int {\n let t = o else {\n  return 0\n }\n t.w\n}\n\
+             main() {\n let f = Frame(t: make(7))\n let t = f.t else {\n  return\n }\n print(width(f.t), t.w, dropped())\n}\n",
+            "7 7 0\n",
+        ),
     ];
     let _turn = start();
     for (body, expected) in cases {

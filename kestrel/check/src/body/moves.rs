@@ -158,10 +158,29 @@ impl<'a> BodyChecker<'a> {
                     let what = self.t.owns_what(ty);
                     let msg = format!("can't move parameter `{name}`: it belongs to the caller, and it holds {what}, so it can't be copied");
                     self.error(v.span, msg);
+                } else if let Some(g) = self.let_guards.iter().find(|g| g.view == l).cloned() {
+                    let root = self.t.local(g.root);
+                    let inside = if root.is_param {
+                        format!("parameter `{}`, which belongs to the caller", root.name)
+                    } else {
+                        format!("`{}`", root.name)
+                    };
+                    let what = self.t.owns_what(ty);
+                    self.error(v.span, format!("can't move `{name}`: it's inside {inside}, and it holds {what}, so it can't be copied"));
                 } else if self.views.contains(&l) {
                     let what = self.t.owns_what(ty);
                     let msg = format!("can't move `{name}` out of its collection: it holds {what}, so it can't be copied");
                     self.error(v.span, msg);
+                } else if let Some(g) = self.match_guards.iter().find(|g| g.root == l).cloned() {
+                    let binding = self.t.local(g.binding).name.clone();
+                    self.error_help(
+                        v.span,
+                        format!("can't move `{name}` here: this `match` arm's `{binding}` reads from it"),
+                        format!("move it after the `match`, or copy what you need out of `{binding}` first"),
+                    );
+                } else if let Some(g) = self.let_guards.iter().find(|g| g.root == l).cloned() {
+                    let view = self.t.local(g.view).name.clone();
+                    self.error_help(v.span, format!("can't move `{name}` here: `{view}` reads from it"), format!("move it after the block that declares `{view}`"));
                 } else {
                     self.moved.insert(l, MoveAt { span: v.span, every });
                     self.t.moves.insert(v.id);

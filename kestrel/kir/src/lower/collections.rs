@@ -1,6 +1,7 @@
 //! Arrays and lists: indexing, `.len`, `for ... in`, and the copies value
 //! semantics needs when a value is stored somewhere new.
 
+use kestrel_check::LocalId;
 use kestrel_syntax::ast;
 
 use super::helpers::{has_heap, owning};
@@ -159,6 +160,11 @@ impl<'a> FnLowerer<'a> {
     /// it's `none` the `else` block runs (and leaves), otherwise its value
     /// moves out into `x` (the temporary is fresh, so nothing is shared).
     pub(crate) fn let_else(&mut self, bind: &ast::Binding, value: &ast::Expr, otherwise: &ast::Block, out: &mut Vec<Stmt>) {
+        if let Some(&var) = self.t.bind_local.get(&bind.id) {
+            if self.t.let_else_views.contains(&var) {
+                return self.let_else_view(var, value, otherwise, out);
+            }
+        }
         let line = self.line(value.span);
         let v = self.value(value);
         let opt = self.temp(v.ty);
@@ -173,6 +179,23 @@ impl<'a> FnLowerer<'a> {
         let payload = Place { root: opt, path: vec![Proj::Payload] };
         out.push(Stmt::Let(idx, Expr { kind: ExprKind::Load(payload), ty, line }));
         self.declared(idx);
+    }
+
+    /// `let x = opt else { ... }` where the checker made `x` a view (see
+    /// `Tables::let_else_views`): uses of `x` read the payload of `opt` in place. Nothing is
+    /// copied and `x` isn't dropped: whoever owns `opt` drops it.
+    fn let_else_view(&mut self, var: LocalId, value: &ast::Expr, otherwise: &ast::Block, out: &mut Vec<Stmt>) {
+        let line = self.line(value.span);
+        // A copy here would drop an owning payload twice, so a view must be a place.
+        let mut opt = self.place(value).expect("the checker makes views only of places");
+        self.stabilize(&mut opt, out);
+        let tag = Expr { kind: ExprKind::Tag(opt.clone()), ty: KTy::U8, line };
+        let zero = Expr { kind: ExprKind::Int(0), ty: KTy::U8, line };
+        let cond = Expr { kind: ExprKind::Binary(BinOp::Eq, Box::new(tag), Box::new(zero)), ty: KTy::Bool, line };
+        let then_body = self.block_stmts(otherwise);
+        out.push(Stmt::If { cond, then_body, else_body: Vec::new() });
+        opt.path.push(Proj::Payload);
+        self.elems.insert(var, opt);
     }
 
     /// `e` lowered as a value about to be stored somewhere new.

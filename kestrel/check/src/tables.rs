@@ -193,6 +193,9 @@ pub struct Tables {
     /// can't change there (a `let`, a read-only parameter, anything shared
     /// in a `par for` body) don't, so many threads may read one at once.
     pub locked_map_loops: HashSet<ExprId>,
+    /// `let x = opt else` bindings that read the optional's payload in place (views), instead of
+    /// moving or copying it. KIR maps uses of `x` to the payload's place and doesn't drop `x`.
+    pub let_else_views: HashSet<LocalId>,
     pub elem_ids: HashMap<Ty, ElemId>,
     pub fn_by_name: HashMap<String, FnId>,
     pub const_by_name: HashMap<String, ConstId>,

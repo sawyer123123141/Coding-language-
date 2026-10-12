@@ -1,0 +1,64 @@
+// expect: 3 7
+// expect: 2 [7, 0]
+// expect: none
+// `let ... else` reads an optional parameter or field in place, even when it owns an arena.
+struct Pool {
+    mem: Arena = Arena()
+    items: list[int] = []
+}
+
+struct Level {
+    pool: Pool?
+
+    size(self) -> int {
+        let p = self.pool else {
+            return 0
+        }
+        p.items.len
+    }
+}
+
+total(o: Pool?) -> int {
+    let p = o else {
+        return -1
+    }
+    var sum = 0
+    for v in p.items {
+        sum += v
+    }
+    sum
+}
+
+struct Tagged {
+    tag: string?
+    n: int
+}
+
+main() {
+    var pool = Pool()
+    in pool.mem {
+        pool.items = [1, 2, 4]
+    }
+    let level = Level(pool: pool)
+    print(level.size(), total(level.pool))
+    // A view inside a `par for` body, over an item's field of a list that can't change.
+    let tagged = [Tagged(tag: "seven", n: 7), Tagged(tag: none, n: 9)]
+    var lens = [0, 0]
+    par for i, out in lens {
+        let t = tagged[i].tag else {
+            continue
+        }
+        if t == "seven" {
+            out = 7
+        } else {
+            out = 1
+        }
+    }
+    print(lens.len, lens)
+    let empty = Level(pool: none)
+    let p = empty.pool else {
+        print("none")
+        return
+    }
+    print(p.items.len)
+}

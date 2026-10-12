@@ -3,10 +3,10 @@
 
 use std::collections::HashMap;
 
-use kestrel_syntax::ast::{Arg, Binding, Block, Expr, ExprKind, TypeExpr};
+use kestrel_syntax::ast::{Arg, Binding, Block, Expr, ExprKind};
 use kestrel_syntax::Span;
 
-use super::{BodyChecker, Expect};
+use super::BodyChecker;
 use crate::collect::resolve_type;
 use crate::tables::Res;
 use crate::ty::Ty;
@@ -166,32 +166,6 @@ impl<'a> BodyChecker<'a> {
             }
         }
         Ty::Unit
-    }
-
-    /// `let x = opt else { ... }`: `x` is the value inside the optional;
-    /// the `else` block runs when it's `none`, and must leave.
-    pub(crate) fn check_let_else(&mut self, is_var: bool, bind: &Binding, ty: Option<&TypeExpr>, value: &Expr, otherwise: &Block) {
-        let ann = ty.map(|t| resolve_type(t, self.t, self.diags));
-        let want = ann.map(|t| if t == Ty::Error { t } else { Ty::Optional(self.t.intern_elem(t)) });
-        let found = self.check_value(value, want);
-        let inner = match found {
-            Ty::Optional(e) => self.t.elem(e),
-            Ty::Error => Ty::Error,
-            other => {
-                let msg = format!("`let ... else` unwraps an optional (`T?`), but this is {}", self.tn(other));
-                self.error(value.span, msg);
-                Ty::Error
-            }
-        };
-        // The `else` block runs when `value` is `none`: nothing has been unwrapped or moved yet.
-        // It always leaves, so what it moves doesn't flow past it.
-        let before = self.moved.clone();
-        if self.check_block(otherwise, Expect::Discard) != Ty::Never {
-            self.error_help(otherwise.span, "the `else` block has to leave", "end it with `return`, `break` or `continue`");
-        }
-        self.moved = before;
-        self.consume(value);
-        self.declare(bind, inner, is_var, false, false);
     }
 
     /// `for v in xs` / `for i, v in xs`. `v` aliases `xs[i]`, so it can

@@ -4,6 +4,7 @@ mod collections;
 mod consts;
 mod enums;
 mod expr;
+mod let_else;
 mod maps;
 mod matching;
 mod moves;
@@ -56,6 +57,8 @@ pub(crate) struct BodyChecker<'a> {
     loop_move_errors: HashSet<Span>,
     /// `match` arms whose bindings are reading a place right now.
     match_guards: Vec<regions::MatchGuard>,
+    /// `let ... else` views in scope: nothing may move what they read.
+    let_guards: Vec<let_else::LetGuard>,
     /// Enclosing `par for` bodies, outermost first.
     par: Vec<par::ParBody>,
 }
@@ -93,7 +96,7 @@ impl<'a> BodyChecker<'a> {
         let (local_ctx, views, moved) = (HashMap::new(), HashSet::new(), HashMap::new());
         let (scopes, loop_breaks, match_guards) = (Vec::new(), Vec::new(), Vec::new());
         let (loop_moves, loop_move_errors) = (Vec::new(), HashSet::new());
-        let par = Vec::new();
+        let (par, let_guards) = (Vec::new(), Vec::new());
         BodyChecker {
             t,
             diags,
@@ -109,6 +112,7 @@ impl<'a> BodyChecker<'a> {
             loop_moves,
             loop_move_errors,
             match_guards,
+            let_guards,
             par,
         }
     }
@@ -242,6 +246,9 @@ impl<'a> BodyChecker<'a> {
             };
         }
         self.scopes.pop();
+        // The block's `let ... else` views end with it.
+        let depth = self.scopes.len();
+        self.let_guards.retain(|g| g.depth <= depth);
         ty
     }
 
