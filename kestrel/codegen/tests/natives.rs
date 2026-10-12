@@ -168,7 +168,7 @@ fn objects_import_natives_by_their_symbol() {
     let (t, d) = kestrel_check::check(&p);
     assert!(d.is_empty());
     let mut m = kestrel_kir::lower(&p, &t.unwrap(), &LineIndex::new(src));
-    kestrel_kir::inline::inline_small(&mut m);
+    kestrel_kir::optimize(&mut m);
     let obj = emit_object(&m, Options::default()).expect("object");
     let has = |needle: &[u8]| obj.windows(needle.len()).any(|w| w == needle);
     assert!(has(b"kestrel_twice"), "the object imports the native's symbol");

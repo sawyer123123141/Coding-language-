@@ -102,7 +102,7 @@ pub fn compile_as(path: &str, src: &str, style: DiagStyle, needs_main: bool) -> 
     let Some(tables) = tables else { return (None, text) };
     let parts: Vec<(u32, &str)> = files.iter().map(|f| (f.base, f.src.as_str())).collect();
     let mut module = kestrel_kir::lower(&program, &tables, &LineIndex::for_files(&parts));
-    kestrel_kir::inline::inline_small(&mut module);
+    kestrel_kir::optimize(&mut module);
     let files = files.iter().map(|f| SourceFile::new(Path::new(&f.path))).collect();
     (Some(Compiled { module, files, builtins }), text)
 }

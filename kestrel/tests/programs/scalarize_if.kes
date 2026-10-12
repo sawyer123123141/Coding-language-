@@ -1,0 +1,47 @@
+// expect: vec2(x: 2, y: 4) vec2(x: 6, y: 8)
+// expect: vec2(x: 0, y: 0) vec2(x: 0.6, y: 0.8)
+// expect: Pair(a: vec2(x: 4, y: 6), b: vec2(x: 2, y: 3))
+// expect: Pair(a: vec2(x: 4, y: 6), b: vec2(x: 4, y: 1))
+// expect: eval 2
+// expect: eval 0
+// expect: vec2(x: 6, y: 8)
+// expect: eval 1
+// expect: eval 2
+// expect: Pair(a: vec2(x: 3, y: 4), b: vec2(x: 6, y: 5))
+// expect: 3 -1
+// Struct values made by `if`, by vector methods, and from places whose index has side effects.
+struct Pair {
+    a: vec2
+    b: vec2
+}
+
+noisy(n: int) -> int {
+    print("eval", n)
+    n
+}
+
+pick(c: bool) -> vec2 {
+    let v = if c { vec2(1, 2) } else { vec2(3, 4) }
+    v * 2
+}
+
+first_or_stop(xs: [vec2]) -> float {
+    let v = if xs.len > 0 { xs[0] } else { return -1.0 }
+    v.x + v.y
+}
+
+main() {
+    print(pick(true), pick(false))
+    print(vec2(0, 0).normalized(), vec2(3, 4).normalized())
+    var p = Pair(a: vec2(1, 1), b: vec2(2, 3))
+    p.a = if p.a.x > 0 { p.b * 2 } else { p.b }
+    print(p)
+    p.b = if p.a.x > 100 { p.b } else { p.a.yx - p.b }
+    print(p)
+    let vs = [vec2(1, 2), vec2(3, 4), vec2(5, 6)]
+    let s = vs[noisy(2)] + vs[noisy(0)]
+    print(s)
+    var q = Pair(a: vs[noisy(1)], b: vs[noisy(2)].yx)
+    print(q)
+    print(first_or_stop([vec2(1, 2)]), first_or_stop(array[vec2](0)))
+}

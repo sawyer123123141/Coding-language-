@@ -1,0 +1,35 @@
+// expect: vec2(x: 2, y: 1)
+// expect: vec3(x: 3, y: 2, z: 1)
+// expect: vec3(x: 5, y: 3, z: 4)
+// expect: vec2(x: 5, y: 5) vec2(x: 4, y: 3)
+// expect: 5 100
+// expect: vec2(x: 100, y: 5) vec2(x: 3, y: 4) vec2(x: 3, y: 4)
+// Struct values that read the place they replace: every field is read before any is stored.
+struct Body {
+    pos: vec2
+    vel: vec2
+}
+
+main() {
+    var v = vec2(1, 2)
+    v = v.yx
+    print(v)
+    var w = vec3(1, 2, 3)
+    w = w.zyx
+    print(w)
+    w = w.yzx + w
+    print(w)
+    var b = Body(pos: vec2(1, 2), vel: vec2(3, 4))
+    b.vel = b.vel.yx
+    b.pos = b.pos + b.vel
+    print(b.pos, b.vel)
+    // A copy is its own value.
+    var c = b
+    c.pos.x = 100
+    print(b.pos.x, c.pos.x)
+    var bs = [b, c]
+    bs[1].vel = bs[1].vel.yx
+    bs[0] = bs[1]
+    bs[1].pos = bs[0].vel
+    print(bs[0].pos, bs[0].vel, bs[1].pos)
+}

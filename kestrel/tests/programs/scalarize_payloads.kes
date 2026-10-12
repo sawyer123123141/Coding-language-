@@ -1,0 +1,55 @@
+// expect: Shape.Dot(at: vec2(x: 11, y: 22))
+// expect: 5
+// expect: Shape.Line(a: vec2(x: 1, y: 1), b: vec2(x: 5, y: 4)) 5
+// expect: Holder(spot: vec2(x: 6, y: 4))
+// expect: vec2(x: 2, y: 1) none
+// expect: vec2(x: 3, y: 2)
+// Plain structs stored inside enum variants and optionals, built from values kept in registers.
+enum Shape {
+    Dot { at: vec2 }
+    Line { a: vec2, b: vec2 }
+
+    pure length(self) -> float {
+        match self {
+            Line l { l.a.distance_to(l.b) }
+            else { 0 }
+        }
+    }
+
+    shift(var self, by: vec2) {
+        match self {
+            Dot d { d.at = d.at + by }
+            Line l {
+                l.a = l.a + by
+                l.b = l.b.yx + by
+            }
+        }
+    }
+}
+
+struct Holder {
+    spot: vec2?
+}
+
+pure middle(a: vec2, b: vec2) -> vec2? {
+    if a.x > b.x { none } else { (a + b) * 0.5 }
+}
+
+main() {
+    var d = Shape.Dot(at: vec2(1, 2))
+    d.shift(vec2(10, 20))
+    print(d)
+    var l = Shape.Line(a: vec2(0, 0), b: vec2(3, 4))
+    print(l.length())
+    l.shift(vec2(1, 1))
+    print(l, l.length())
+    var h = Holder(spot: none)
+    let v = vec2(2, 3) * 2
+    h.spot = v.yx
+    print(h)
+    let m = middle(vec2(0, 0), vec2(4, 2)) else { return }
+    print(m, middle(vec2(5, 0), vec2(1, 1)))
+    var maybe: vec2? = none
+    maybe = m + vec2(1, 1)
+    print(maybe)
+}

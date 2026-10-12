@@ -32,6 +32,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             Slot::Stack(ss) => self.b.ins().stack_addr(self.ptr, ss, 0),
             Slot::Ptr(v) => self.b.use_var(v),
             Slot::Var(_) => unreachable!("KIR puts every addressed local in memory"),
+            Slot::Unused => unreachable!("nothing refers to an unused local"),
         };
         let mut ty = self.f.locals[p.root.0 as usize].ty;
         let mut offset = 0;

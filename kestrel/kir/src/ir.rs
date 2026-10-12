@@ -189,6 +189,8 @@ pub enum LocalKind {
     /// aggregate parameter (read-only ones are passed by pointer too). Also
     /// a `for ... in` element (`Stmt::Bind`) or a heap constant (`Stmt::BindGlobal`).
     RefParam,
+    /// Nothing refers to it any more: a struct `scalarize` split into one local per field.
+    Unused,
 }
 
 #[derive(Clone, Debug, PartialEq)]

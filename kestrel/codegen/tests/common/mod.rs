@@ -10,7 +10,7 @@ pub fn jit_with(src: &str, opts: Options) -> JitProgram {
     let (t, d) = kestrel_check::check(&p);
     assert!(d.is_empty(), "check: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
     let mut m = kestrel_kir::lower(&p, &t.unwrap(), &LineIndex::new(src));
-    kestrel_kir::inline::inline_small(&mut m);
+    kestrel_kir::optimize(&mut m);
     built(JitProgram::compile(&m, opts).expect("codegen"))
 }
 
@@ -61,7 +61,7 @@ fn jit_natives_as(src: &str, extra: &[(&str, *const u8)], opts: Options, builtin
     let (t, d) = kestrel_check::check(&p);
     assert!(d.is_empty(), "check: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
     let mut m = kestrel_kir::lower(&p, &t.unwrap(), &LineIndex::new(src));
-    kestrel_kir::inline::inline_small(&mut m);
+    kestrel_kir::optimize(&mut m);
     JitProgram::compile_with(&m, opts, extra).map(built)
 }
 
@@ -80,6 +80,6 @@ pub fn optimized(src: &str) -> kestrel_kir::Module {
     let (t, d) = kestrel_check::check(&p);
     assert!(d.is_empty(), "check: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
     let mut m = kestrel_kir::lower(&p, &t.unwrap(), &LineIndex::new(src));
-    kestrel_kir::inline::inline_small(&mut m);
+    kestrel_kir::optimize(&mut m);
     m
 }

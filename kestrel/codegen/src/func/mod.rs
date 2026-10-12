@@ -80,6 +80,8 @@ enum Slot {
     Stack(StackSlot),
     /// Variable holding a pointer to the value.
     Ptr(Variable),
+    /// A local nothing uses (see `LocalKind::Unused`).
+    Unused,
 }
 
 pub(crate) struct Shared<'a> {
@@ -139,6 +141,7 @@ pub(crate) fn lower_func<M: Module>(
                 Slot::Ptr(v)
             }
             LocalKind::Addressed => Slot::Stack(stack_slot(&mut b, shared.kir, local.ty)),
+            LocalKind::Unused => Slot::Unused,
         };
         slots.push(slot);
     }
@@ -148,6 +151,7 @@ pub(crate) fn lower_func<M: Module>(
             Slot::Stack(ss) => {
                 b.ins().stack_store(val, ss, 0);
             }
+            Slot::Unused => unreachable!("a parameter is used"),
         }
     }
 

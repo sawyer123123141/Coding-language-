@@ -16,3 +16,14 @@ fn dump_names_a_missing_function() {
     let m = common::optimized("main() {}\n");
     assert_eq!(dump(&m, RELEASE, "nope").unwrap_err(), "no function named `nope`");
 }
+
+/// The particle demo's step, without the window.
+const STEP: &str = "let PULL = 900.0\nlet BOUNCE = 0.7\nstruct Particle {\n pos: vec2\n vel: vec2\n pure step(var self, dt: float, target: vec2, keep: float) {\n  self.vel += (target - self.pos).normalized() * PULL * dt\n  self.vel *= keep\n  self.pos += self.vel * dt\n  if self.pos.x < 0 {\n   self.pos.x = 0\n   self.vel.x = abs(self.vel.x) * BOUNCE\n  } else if self.pos.x > 1280 {\n   self.pos.x = 1280\n   self.vel.x = -abs(self.vel.x) * BOUNCE\n  }\n  if self.pos.y < 0 {\n   self.pos.y = 0\n   self.vel.y = abs(self.vel.y) * BOUNCE\n  } else if self.pos.y > 720 {\n   self.pos.y = 720\n   self.vel.y = -abs(self.vel.y) * BOUNCE\n  }\n }\n}\nrun(var ps: list[Particle], dt: float, target: vec2, keep: float) {\n par for p in ps {\n  p.step(dt, target, keep)\n }\n}\nmain() {}\n";
+
+#[test]
+fn the_particle_step_in_a_par_for_uses_no_stack_slots() {
+    let m = common::optimized(STEP);
+    let body = &m.funcs[m.par_bodies[0].0 as usize].name;
+    let code = dump(&m, RELEASE, body).unwrap();
+    assert!(!code.contains("explicit_slot"), "{code}");
+}

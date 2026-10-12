@@ -1,0 +1,63 @@
+// expect: 5000000009.25
+// expect: Cell(solid: true, kind: 7, n: 4, big: 15000000000, w: 0.25, at: vec3(x: 2, y: 4, z: 6))
+// expect: cell 4 15000000000 vec3(x: 2, y: 4, z: 6)
+// expect: false 8
+// expect: 4 2
+// expect: 25
+// Plain structs split into one local per field, crossing calls, prints, lists and `var`.
+struct Cell {
+    solid: bool
+    kind: u8
+    n: int
+    big: i64
+    w: f64
+    at: vec3
+}
+
+// More than 16 fields at the bottom: stays in memory.
+struct Wide {
+    a: vec3
+    b: vec3
+    c: vec3
+    d: vec3
+    e: vec3
+    f: vec2
+}
+
+pure sum(c: Cell) -> f64 {
+    c.w + c.at.x + c.at.y + c.at.z + c.n + c.big
+}
+
+pure grow(c: Cell) -> Cell {
+    var d = c
+    d.n += 1
+    d.big *= 3
+    d.at = d.at * 2
+    d
+}
+
+bump(var c: Cell) {
+    c.kind += 1
+    c.solid = not c.solid
+}
+
+pure total(w: Wide) -> float {
+    w.a.x + w.b.y + w.c.z + w.d.x + w.e.y + w.f.x + w.f.y
+}
+
+main() {
+    var c = Cell(solid: true, kind: 7, n: 3, big: 5000000000, w: 0.25, at: vec3(1, 2, 3))
+    print(sum(c))
+    let g = grow(c)
+    print(g)
+    print("cell {g.n} {g.big} {g.at}")
+    bump(var c)
+    print(c.solid, c.kind)
+    var cells = list[Cell]()
+    cells.add(c)
+    cells.add(grow(c))
+    print(cells[1].n, cells.len)
+    var wide = Wide(a: vec3(1, 2, 3), b: vec3(4, 5, 6), c: vec3(7, 8, 9), d: vec3(1, 1, 1), e: vec3(2, 2, 2), f: vec2(3, 3))
+    wide.f = wide.f.yx + vec2(1, 0)
+    print(total(wide))
+}
