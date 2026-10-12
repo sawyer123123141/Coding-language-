@@ -726,9 +726,12 @@ impl<'a> BodyChecker<'a> {
             }
         };
         // The `else` block runs when `value` is `none`: nothing has been unwrapped or moved yet.
+        // It must leave, so what it moves doesn't flow past it.
+        let before = self.moved.clone();
         if self.check_block(otherwise, Expect::Discard) != Ty::Never {
             self.error_help(otherwise.span, "the `else` block has to leave", "end it with `return`, `break` or `continue`");
         }
+        self.moved = before;
         let root = if inner == Ty::Error || is_var { None } else { self.view_root(value, inner) };
         if root.is_none() {
             self.consume(value);
