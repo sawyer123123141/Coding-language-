@@ -163,6 +163,38 @@ From the voxel viewer and its measurements (`kestrel/demos/voxels/results.md`). 
 - **The viewer's bottom overlay line follows the window's height, but the particles demo's doesn't.** The window is always resizable (`real.rs` sets `FLAG_WINDOW_RESIZABLE`), so a constant `HEIGHT - 28` (`particles.kes:132`) leaves that line mid-screen in a maximised window. The viewer now uses `window.size().y - 28`; the particles demo was left as it was.
 - **The voxel smoke test's exact pixel depends on the GPU's sample positions.** `window_smoke_voxels.rs` checks pixel (32, 30), where the column of peaks is about 7 pixels wide in a 64×64 window drawn with 4x MSAA (`FLAG_MSAA_4X_HINT`). It is stable on the development machine; a GPU or driver that places samples differently could put an edge on that pixel and fail the test with no bug (a guess; it was not tried on another GPU).
 
+## Found while building scalar replacement (2026-10-11)
+
+From `docs/superpowers/specs/2026-10-11-scalar-replacement-design.md` (its "As built" section) and `kestrel/bench/kernels/results.md`. The work met its three targets for the step (within 1.2x of Rust, within 5% of the hand-written version, `pow` within 1.15x). Not fixed:
+
+**Not in the design (open, in the design's words):**
+- **Vectorizing.** Rust's last bit of the step (about 7% in the spike: it pairs `x` and `y` in one register). This is the SIMD half of sub-project 3.
+- **Bounds checks and list-header reloads.** A plain `for i` loop over `parts[i]` adds about 1 ns per particle (8 checks, with the list's length and data pointer re-read for each), and the copy loop takes 1.1 ns an element against Rust's 0.23 (see the next section).
+  - Tagging list elements and list headers as separate memory for Cranelift has a trap: a list's header can itself be an element of another list, so a careless split would let Cranelift reuse a stale header.
+  - Promoting an inlined `var self` call on a checked indexed place (`parts[i].step()` in a plain `for i`) belongs with this work, because its bounds check would move.
+- **Range analysis for overflow checks** (the 3D world's 2.4x cost with checks on; see "Performance" below).
+
+**Found by this work:**
+- **The draw copy got slower, 0.80 to 1.11 ns an element** (`copy.kes`, and the same loop `positions[i] = p.pos` in the particles demo: 0.06 ms of its 5.4 ms frame at 200,000). `promote` keeps `p.pos` in two registers, so the copy becomes a store of a `StructLit` and `scalarize`'s struct-store rule writes it as one store per field, each with its own bounds check on `positions[i]` and its own reload of the list's length and data pointer. Before, it was one copy from place to place with one check. The old loop was somewhat lucky with code layout (next item): 0.70-0.77 ns on three layouts, 0.94-1.06 on a fourth, against the new loop's 0.92-1.04 on all four. Two ways to fix it, neither tried:
+  - **Evaluate an indexed destination once.** A struct store to `xs[i]` (or `xs[i].pos`) would do the bounds check and read the data pointer once and store every leaf through it. That needs a way to name a place's address inside KIR (what `Stmt::Bind` does for loops). It is the same work as the header-reload item above, and it also makes the 8 checks of the plain `for i` loop cheaper.
+  - **Don't promote what is only copied.** A leaf group whose only whole-value use is as the source of a memory-to-memory copy could stay in memory, so the copy stays one aggregate copy. Cheaper, but only covers this shape.
+- **Where the compiler puts code moves timings by 6-30% on this machine.** Adding unused functions to a program, which only moves the code, shifted these: `bench/heightmap --release` (old compiler / new) went from 49.8 / 55.7 ms as written to 52.4 / 49.3 with two unused functions added, so the order flipped; the new compiler's `bench/2a` particles exe took 148-158 ms or 167-196 ms depending on the layout (and its `--release` exe was slower than the checked one on three of four layouts and faster on one), where the old compiler's took 351-366 ms on all four; `copy.kes` on the old compiler took 0.70-0.77 ns on three layouts and 0.94-1.06 on one. The loops in question are tiny, and the likely cause is the alignment of a hot loop or branch target (not checked at the instruction level). Two consequences: a difference under about 10% between two builds of a small program means nothing until it survives adding an unused function; and it may be worth seeing whether Cranelift can align loop headers (not looked at). All comparisons in `bench/kernels/results.md` were taken old against new, taking turns, for this reason.
+- **Costs the design accepted, to revisit if a benchmark shows them:**
+  - A call's struct result, and a whole struct passed or returned at a call boundary, still go through memory.
+  - Plain structs have at most 16 leaves; a bigger one stays in memory.
+  - `promote` loads every leaf it uses at the start of a region and writes back every changed leaf at every exit, including an early `return` that changed nothing. Not measured.
+  - A panic in the middle of a promoted region loses the fields not yet written back. Nothing can see it today (a panic ends the process, or the Godot add-on throws the memory away); a future way to recover from a panic and keep the program's memory would have to write back first.
+- **`promote` leaves a loop element in memory when its region can return after freeing memory** (the review's segfault; "As built" in the design has the reason). The check is broader than it needs to be: any call with a `var` argument (a copy function, say) or a scratch-arena pop in a loop that returns turns promotion off. A narrower check would look at whether the freed memory could be the element's. And a map-value loop with a `return` never promotes (`MapUnlock` counts as a second route to the memory), which was true before the fix.
+- **Review findings left as they were (minor):**
+  - `visit_mut` visits a `par for`'s arguments before its count and `visit` visits the count first. `visit_mut` matches the order codegen uses, so nothing is wrong, but the two walkers disagree.
+  - `kir/tests/promote.rs` counts `(2, 6)` loads and stores including the dead trailing write-back; it breaks if that append becomes conditional (a comment says so).
+  - `region()` makes a local for every leaf but loads only the ones used; the rest are never referenced.
+  - `promote_exits.kes`'s `int_loop` has no `break` (its `float_loop` has one).
+  - Four older documents under `docs/superpowers/` still name `kestrel_rt_math`, which is gone. They are history.
+- **`bench/2a` particles is now faster than Rust -O3** (163-209 ms against 322-329, C at 132). Not looked into; the Rust loop's dependency chain may be longer (LLVM may be using a select where Kestrel branches).
+- **`bench/maps` was unreadable on 2026-10-11:** times swung from 305 to 2,557 ms for the same program in the same hour, against 229-242 ms in the quiet hour of the saved baseline. The scalar replacement passes can't be seen in it, but it should be run again on a quiet machine before its numbers are used.
+- **The `collatz` JIT cell fell 13%** (318 to 278 ms) while its exe cells moved 2-4%; unexplained, probably noise.
+
 ## Maps (built 2026-10-09)
 
 - **Not yet:**
@@ -207,8 +239,9 @@ From the voxel viewer and its measurements (`kestrel/demos/voxels/results.md`). 
 ## Performance (from kestrel/bench/2a/results.md)
 
 - **Division and remainder by a constant** emit a real `idiv` behind the zero and `MIN/-1` checks; Rust/C use shifts or magic multiplies. Collatz is 5.2x slower than Rust because of this (Rust with a hidden divisor: 407 ms vs Kestrel 518 ms). Fix in codegen: a non-zero constant divisor other than -1 skips the checks and strength-reduces. Power-of-two shifts + check elision done in 59dd0f2 (collatz 518 → 237 ms). Still open: magic-number multiply for other constants; `x % 2^k == 0` as a mask test.
-- **Call overhead** on recursive code (fib 2.3x vs Rust): no inlining in Cranelift. Sub-project 5 (release backend) or a small KIR inliner for pure leaf functions.
+- **Call overhead** on recursive code (fib 2.3x vs Rust): Cranelift doesn't inline or transform recursion. The KIR inliner (below) took small functions and methods, but not recursion. A release backend (a second code generator, sub-project 5) is the open route.
 - **Checks cost 2.4x on the 3D voxel world** (kestrel/bench/voxels3d/results.md: 1.2 s checked vs 0.49 s `--release`). Every overflow check is a branch that keeps its work in the loop. Range analysis would drop many (`h & 0x7FFFFFFF` times a 31-bit constant can't overflow an `i64`), and a loop-invariant check could be hoisted with its value.
+- **Scalar replacement is done (2026-10-11):** small structs and the fields of `var` parameters and loop elements stay in registers, so the particle step is within 15% of Rust (it was 3.4x). What is left of sub-project 5 is listed under "Found while building scalar replacement" above: bounds checks and list-header reloads (the draw copy is still about 4.5x Rust and got 0.3 ns an element slower), vectorizing, and range analysis for overflow checks.
 - **The KIR inliner** takes callees up to 256 nodes, at most 8 deep, with a budget of 4,096 added nodes per caller. A smarter heuristic (bonus for constant arguments, single call sites) may beat a flat limit.
 
 ## Measured
