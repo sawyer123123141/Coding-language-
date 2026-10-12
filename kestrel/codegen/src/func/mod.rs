@@ -91,6 +91,8 @@ pub(crate) struct Shared<'a> {
     pub rt: &'a RtFuncs,
     /// The data of each global, by `GlobalIdx`.
     pub globals: &'a [DataId],
+    /// Each source file's `FileName` record, by the file index in a KIR line.
+    pub files: &'a [DataId],
     pub opts: Options,
     /// The whole program: struct layouts and callees' signatures.
     pub kir: &'a kir::Module,

@@ -55,6 +55,11 @@ impl LineIndex {
         (global - first) as u32
     }
 
+    /// Index of the file containing `offset`, in the order the files were given to `for_files`.
+    pub fn file(&self, offset: u32) -> usize {
+        self.files.iter().rposition(|(base, _)| *base <= offset).unwrap_or(0)
+    }
+
     /// 1-based (line, column); column counts characters, not bytes.
     pub fn line_col(&self, src: &str, offset: u32) -> (u32, u32) {
         let line = self.line(offset);

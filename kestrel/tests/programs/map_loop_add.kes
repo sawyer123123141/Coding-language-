@@ -1,6 +1,6 @@
 // expect: 1 2
 // expect-exit: 101
-// expect-stderr: can't add a key to a map while looping over it (line 13)
+// expect-stderr: can't add a key to a map while looping over it (line 13 of map_loop_add.kes)
 main() {
     var m = {1: 1}
     for k, v in m {

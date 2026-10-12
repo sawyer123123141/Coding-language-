@@ -102,8 +102,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         self.b.ins().brif(bad, fail, &[], ok, &[]);
         self.b.switch_to_block(fail);
         self.b.set_cold_block(fail);
-        let line = self.b.ins().iconst(types::I32, line as i64);
-        self.call_id(self.shared.rt.panic_index, &[i, len, line]);
+        let (l, f) = self.loc_args(line);
+        self.call_id(self.shared.rt.panic_index, &[i, len, l, f]);
         self.b.ins().trap(TrapCode::unwrap_user(2));
         self.b.switch_to_block(ok);
     }

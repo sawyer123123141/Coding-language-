@@ -39,6 +39,8 @@ pub(crate) struct RtFuncs {
     pub gpu_drop: FuncId,
     /// The runtime's `kestrel_rt_call_line`, the line of the latest call into a built-in function.
     pub call_line: DataId,
+    /// The runtime's `kestrel_rt_call_file`, the file of that call.
+    pub call_file: DataId,
 }
 
 impl RtFuncs {
@@ -46,6 +48,7 @@ impl RtFuncs {
         let cc = module.isa().default_call_conv();
         let ptr = module.target_config().pointer_type();
         let call_line = module.declare_data("kestrel_rt_call_line", Linkage::Import, true, false).map_err(|e| e.to_string())?;
+        let call_file = module.declare_data("kestrel_rt_call_file", Linkage::Import, true, false).map_err(|e| e.to_string())?;
         let mut decl = |name: &str, params: &[Type], ret: Option<Type>| -> Result<FuncId, String> {
             let mut sig = Signature::new(cc);
             // The C ABI leaves an i8 argument's upper bits undefined unless the caller extends it.
@@ -68,20 +71,20 @@ impl RtFuncs {
             print_str: decl("kestrel_rt_print_str", &[ptr, I64], None)?,
             print_space: decl("kestrel_rt_print_space", &[], None)?,
             print_newline: decl("kestrel_rt_print_newline", &[], None)?,
-            panic: decl("kestrel_rt_panic", &[I32, I32], None)?,
+            panic: decl("kestrel_rt_panic", &[I32, I32, ptr], None)?,
             fmod_f32: decl("kestrel_rt_fmod_f32", &[F32, F32], Some(F32))?,
             fmod_f64: decl("kestrel_rt_fmod_f64", &[F64, F64], Some(F64))?,
-            alloc: decl("kestrel_rt_alloc", &[I64, I64, I64, I32], Some(ptr))?,
+            alloc: decl("kestrel_rt_alloc", &[I64, I64, I64, I32, ptr], Some(ptr))?,
             dup: decl("kestrel_rt_dup", &[ptr, I64, I64], Some(ptr))?,
             list_grow: decl("kestrel_rt_list_grow", &[ptr, I64, I64], None)?,
             current_arena: decl("kestrel_rt_current_arena", &[], Some(ptr))?,
-            panic_index: decl("kestrel_rt_panic_index", &[I64, I64, I32], None)?,
+            panic_index: decl("kestrel_rt_panic_index", &[I64, I64, I32, ptr], None)?,
             arena_new: decl("kestrel_rt_arena_new", &[], Some(ptr))?,
             arena_free: decl("kestrel_rt_arena_free", &[ptr], None)?,
             arena_push: decl("kestrel_rt_arena_push", &[ptr], None)?,
             arena_pop: decl("kestrel_rt_arena_pop", &[], Some(ptr))?,
             map_find: decl("kestrel_rt_map_find", &[ptr, ptr, I32, I64], Some(ptr))?,
-            map_insert: decl("kestrel_rt_map_insert", &[ptr, ptr, I32, I64, I64, I32], Some(ptr))?,
+            map_insert: decl("kestrel_rt_map_insert", &[ptr, ptr, I32, I64, I64, I32, ptr], Some(ptr))?,
             map_remove: decl("kestrel_rt_map_remove", &[ptr, ptr, I32, I64], Some(I8))?,
             map_dup: decl("kestrel_rt_map_dup", &[ptr, I64, I64], None)?,
             str_eq: decl("kestrel_rt_str_eq", &[ptr, I64, ptr, I64], Some(I8))?,
@@ -94,6 +97,7 @@ impl RtFuncs {
             str_end: decl("kestrel_rt_str_end", &[ptr], None)?,
             gpu_drop: decl("kestrel_rt_gpu_drop", &[I64], None)?,
             call_line,
+            call_file,
         })
     }
 }
@@ -159,6 +163,7 @@ pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
         ("kestrel_rt_str_end", print::kestrel_rt_str_end as *const u8),
         ("kestrel_rt_gpu_drop", gpu::kestrel_rt_gpu_drop as *const u8),
         ("kestrel_rt_call_line", std::ptr::addr_of!(panic::kestrel_rt_call_line).cast::<u8>()),
+        ("kestrel_rt_call_file", std::ptr::addr_of!(panic::kestrel_rt_call_file).cast::<u8>()),
     ]
 }
 

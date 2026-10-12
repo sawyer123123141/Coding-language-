@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicPtr, Ordering};
 
 pub const PANIC_OVERFLOW: i32 = 1;
 pub const PANIC_DIV_ZERO: i32 = 2;
@@ -40,6 +40,29 @@ pub fn fail(msg: &str) -> ! {
 #[allow(non_upper_case_globals)]
 pub static kestrel_rt_call_line: AtomicI32 = AtomicI32::new(0);
 
+/// A source file's name as compiled code passes it to a runtime error: static data holding a
+/// pointer to the name's bytes and its length. Compiled code passes null when it has no name.
+#[repr(C)]
+pub struct FileName {
+    ptr: *const u8,
+    len: i64,
+}
+
+/// " of geom.kes" for an error in that file, or nothing for null.
+pub(crate) fn of_file(file: *const FileName) -> String {
+    if file.is_null() {
+        return String::new();
+    }
+    // SAFETY: compiled code passes a pointer to its static `FileName`, whose bytes are static too.
+    let name = unsafe { std::slice::from_raw_parts((*file).ptr, (*file).len as usize) };
+    format!(" of {}", String::from_utf8_lossy(name))
+}
+
+/// The file of the call whose line is in `kestrel_rt_call_line`, stored with it.
+#[no_mangle]
+#[allow(non_upper_case_globals)]
+pub static kestrel_rt_call_file: AtomicPtr<FileName> = AtomicPtr::new(std::ptr::null_mut());
+
 /// Fails with `msg` and the line of the call into the built-in function that is
 /// failing: "draw.circle was called before window.open on line 12".
 ///
@@ -49,17 +72,17 @@ pub static kestrel_rt_call_line: AtomicI32 = AtomicI32::new(0);
 pub fn fail_at_call(msg: &str) -> ! {
     match kestrel_rt_call_line.load(Ordering::Relaxed) {
         0 => fail(msg),
-        line => fail(&format!("{msg} on line {line}")),
+        line => fail(&format!("{msg} on line {line}{}", of_file(kestrel_rt_call_file.load(Ordering::Relaxed)))),
     }
 }
 
 #[no_mangle]
-pub extern "C" fn kestrel_rt_panic_index(index: i64, len: i64, line: i32) -> ! {
-    fail(&format!("index {index} out of bounds for length {len} on line {line}"));
+pub extern "C" fn kestrel_rt_panic_index(index: i64, len: i64, line: i32, file: *const FileName) -> ! {
+    fail(&format!("index {index} out of bounds for length {len} on line {line}{}", of_file(file)));
 }
 
 #[no_mangle]
-pub extern "C" fn kestrel_rt_panic(kind: i32, line: i32) -> ! {
+pub extern "C" fn kestrel_rt_panic(kind: i32, line: i32, file: *const FileName) -> ! {
     let what = match kind {
         PANIC_OVERFLOW => "integer overflow",
         PANIC_DIV_ZERO => "division by zero",
@@ -69,7 +92,7 @@ pub extern "C" fn kestrel_rt_panic(kind: i32, line: i32) -> ! {
         PANIC_MAP_CHANGED => "a map was replaced while looping over it",
         _ => "runtime error",
     };
-    fail(&format!("{what} on line {line}"));
+    fail(&format!("{what} on line {line}{}", of_file(file)));
 }
 
 #[no_mangle]

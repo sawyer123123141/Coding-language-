@@ -172,9 +172,9 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let kind = self.b.ins().iconst(types::I32, l.key_kind as i64);
         let size = self.b.ins().iconst(types::I64, l.entry_size as i64);
         let align = self.b.ins().iconst(types::I64, l.entry_align as i64);
-        let line = self.b.ins().iconst(types::I32, line as i64);
+        let (line, file) = self.loc_args(line);
         let count = if copy_key { Some(self.load_i64(header, COUNT)) } else { None };
-        let entry = self.call_id(self.shared.rt.map_insert, &[header, k, kind, size, align, line]).expect("returns a pointer");
+        let entry = self.call_id(self.shared.rt.map_insert, &[header, k, kind, size, align, line, file]).expect("returns a pointer");
         if let Some(before) = count {
             self.own_new_key(header, entry, before);
         }
@@ -227,8 +227,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             self.b.switch_to_block(fail);
             self.b.set_cold_block(fail);
             let kind = self.b.ins().iconst(types::I32, PANIC_MAP_CHANGED as i64);
-            let line = self.b.ins().iconst(types::I32, at.line as i64);
-            self.call_id(self.shared.rt.panic, &[kind, line]);
+            let (line, file) = self.loc_args(at.line);
+            self.call_id(self.shared.rt.panic, &[kind, line, file]);
             self.b.ins().trap(TrapCode::unwrap_user(2));
             self.b.switch_to_block(ok);
         }

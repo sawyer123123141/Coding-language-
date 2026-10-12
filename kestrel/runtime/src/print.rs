@@ -135,7 +135,7 @@ pub unsafe extern "C" fn kestrel_rt_str_end(out: *mut u8) {
     let ptr = if buf.is_empty() {
         std::ptr::null_mut()
     } else {
-        let p = crate::arena::kestrel_rt_alloc(buf.len() as i64, 1, 1, 0);
+        let p = crate::arena::kestrel_rt_alloc(buf.len() as i64, 1, 1, 0, std::ptr::null());
         // SAFETY: `p` has room for `buf.len()` bytes and is fresh, so it can't overlap `buf`.
         unsafe { std::ptr::copy_nonoverlapping(buf.as_ptr(), p, buf.len()) };
         p

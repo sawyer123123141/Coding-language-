@@ -105,13 +105,34 @@ fn a_module_may_start_with_a_byte_order_mark() {
 }
 
 #[test]
-fn runtime_errors_report_the_line_in_their_own_file() {
+fn runtime_errors_report_the_line_and_their_own_file() {
     let main = "use { at from geom }\nmain() {\n    print(at([1, 2], 5))\n}\n";
     let dir = project("modules_runtime", &[("main.kes", main), ("geom.kes", GEOM)]);
+    // `xs[i]` is on line 24 of geom.kes; the check is inlined into `main`, and still names geom.kes.
+    let want = "index 5 out of bounds for length 2 on line 24 of geom.kes";
     let out = kestrel(&["run"], &dir.join("main.kes"));
     assert_eq!(out.status.code(), Some(101));
-    // `xs[i]` is on line 24 of geom.kes.
-    assert!(String::from_utf8_lossy(&out.stderr).contains("index 5 out of bounds for length 2 on line 24"));
+    assert!(String::from_utf8_lossy(&out.stderr).contains(want), "{}", String::from_utf8_lossy(&out.stderr));
+    // A built program carries the name too (only the file's name, not its folder).
+    let exe = dir.join("main_runtime.exe");
+    let built = kestrel(&["build", "-o", exe.to_str().unwrap()], &dir.join("main.kes"));
+    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+    let run = std::process::Command::new(&exe).output().expect("run the built program");
+    assert_eq!(run.status.code(), Some(101));
+    let err = String::from_utf8_lossy(&run.stderr);
+    assert!(err.contains(want), "{err}");
+    assert!(!err.contains(dir.to_str().unwrap()), "the built program mustn't carry the folder: {err}");
+}
+
+#[test]
+fn a_native_error_names_the_module_file_that_called_it() {
+    let shapes = "use draw\nuse { WHITE from draw }\n\npub dot() {\n    draw.circle(vec2(1, 1), 2, WHITE)\n}\n";
+    let main = "use { dot from shapes }\nmain() {\n    dot()\n}\n";
+    let dir = project("modules_native_error", &[("main.kes", main), ("shapes.kes", shapes)]);
+    let out = kestrel(&["run"], &dir.join("main.kes"));
+    assert_eq!(out.status.code(), Some(101));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("on line 5 of shapes.kes"), "{err}");
 }
 
 const SHADE: &str = "pub struct Tint {

@@ -43,8 +43,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let n = self.expr(len)?;
         let n = self.widen_i64(n, len.ty);
         let (s, a) = (self.b.ins().iconst(types::I64, size), self.b.ins().iconst(types::I64, align));
-        let l = self.b.ins().iconst(types::I32, line as i64);
-        let p = self.call_id(self.shared.rt.alloc, &[n, s, a, l]).expect("returns a pointer");
+        let (l, f) = self.loc_args(line);
+        let p = self.call_id(self.shared.rt.alloc, &[n, s, a, l, f]).expect("returns a pointer");
         self.store(p, dest, PTR);
         self.store(n, dest, LEN);
         Ok(())
@@ -58,8 +58,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             self.b.ins().iconst(self.ptr, 0)
         } else {
             let (s, a) = (self.b.ins().iconst(types::I64, size), self.b.ins().iconst(types::I64, align));
-            let l = self.b.ins().iconst(types::I32, line as i64);
-            self.call_id(self.shared.rt.alloc, &[n, s, a, l]).expect("returns a pointer")
+            let (l, f) = self.loc_args(line);
+            self.call_id(self.shared.rt.alloc, &[n, s, a, l, f]).expect("returns a pointer")
         };
         for (k, item) in items.iter().enumerate() {
             self.store_at(item, p, (k as i64 * size) as i32)?;

@@ -245,6 +245,7 @@ pub unsafe extern "C" fn kestrel_rt_map_insert(
     entry_size: i64,
     entry_align: i64,
     line: i32,
+    file: *const crate::panic::FileName,
 ) -> *mut u8 {
     let m = &mut *map;
     let k = read_key(key, kind);
@@ -258,7 +259,8 @@ pub unsafe extern "C" fn kestrel_rt_map_insert(
     }
     if m.locks > 0 {
         fail(&format!(
-            "can't add a key to a map while looping over it (line {line}); collect the keys in a list and change the map after the loop"
+            "can't add a key to a map while looping over it (line {line}{}); collect the keys in a list and change the map after the loop",
+            crate::panic::of_file(file)
         ));
     }
     if m.used == m.cap {
@@ -361,7 +363,7 @@ mod tests {
 
     fn set(m: &mut Map, k: i32, v: i32) {
         unsafe {
-            let e = kestrel_rt_map_insert(m, &k as *const i32 as *const u8, 1, SIZE, 8, 1);
+            let e = kestrel_rt_map_insert(m, &k as *const i32 as *const u8, 1, SIZE, 8, 1, std::ptr::null());
             *(e.add(VAL) as *mut i32) = v;
         }
     }
@@ -452,7 +454,7 @@ mod tests {
         let a = String::from("sword");
         let b = String::from("sword");
         unsafe {
-            let e = kestrel_rt_map_insert(&mut m, key(&a).as_ptr() as *const u8, STRING, 32, 8, 1);
+            let e = kestrel_rt_map_insert(&mut m, key(&a).as_ptr() as *const u8, STRING, 32, 8, 1, std::ptr::null());
             *(e.add(24) as *mut i32) = 30;
             let found = kestrel_rt_map_find(&m, key(&b).as_ptr() as *const u8, STRING, 32);
             assert_eq!(*(found.add(24) as *const i32), 30);

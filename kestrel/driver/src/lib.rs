@@ -102,8 +102,10 @@ pub fn compile_as(path: &str, src: &str, style: DiagStyle, needs_main: bool) -> 
     let Some(tables) = tables else { return (None, text) };
     let parts: Vec<(u32, &str)> = files.iter().map(|f| (f.base, f.src.as_str())).collect();
     let mut module = kestrel_kir::lower(&program, &tables, &LineIndex::for_files(&parts));
+    // Runtime errors name the file by its base name only: a built program mustn't carry the folders.
+    module.files = files.iter().map(|f| base_name(&f.path)).collect();
     kestrel_kir::optimize(&mut module);
-    let files = files.iter().map(|f| SourceFile::new(Path::new(&f.path))).collect();
+    let files =files.iter().map(|f| SourceFile::new(Path::new(&f.path))).collect();
     (Some(Compiled { module, files, builtins }), text)
 }
 
@@ -221,6 +223,11 @@ fn report(files: &[File], diags: &[Diagnostic], style: DiagStyle) -> String {
         out.push_str(&format!("{errors} error{}\n", if errors == 1 { "" } else { "s" }));
     }
     out
+}
+
+/// `geom.kes` for `C:\game\geom.kes` (and `draw.kes` for a built-in module's `<builtin>/draw.kes`).
+fn base_name(path: &str) -> String {
+    Path::new(path).file_name().map_or_else(|| path.to_string(), |n| n.to_string_lossy().into_owned())
 }
 
 #[cfg(test)]

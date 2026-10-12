@@ -6,6 +6,24 @@ use std::collections::HashMap;
 use crate::layout::{EnumLayout, StructLayout};
 pub use crate::ops::{MapOp, MathOp};
 
+/// Bits of a KIR line (`Expr::line`, `Stmt::SetLine`) that hold the line within its file; the
+/// bits above hold the file's index in `Module::files`. Bit 31 stays clear.
+pub const LINE_BITS: u32 = 21;
+/// The file index that means "no name" (a file past the 1,023rd).
+pub const NO_FILE: u32 = 1023;
+
+/// A source position as KIR keeps it: the line within its file, and the file's index. A line
+/// past 2,097,151 is clamped; a file index past 1,022 becomes `NO_FILE`.
+pub fn pack_line(file: usize, line: u32) -> u32 {
+    let file = u32::try_from(file).unwrap_or(NO_FILE).min(NO_FILE);
+    (file << LINE_BITS) | line.min((1 << LINE_BITS) - 1)
+}
+
+/// The line and the file index of a packed KIR line (see `pack_line`).
+pub fn unpack_line(loc: u32) -> (u32, u32) {
+    (loc & ((1 << LINE_BITS) - 1), loc >> LINE_BITS)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum KTy {
     Bool,
@@ -103,6 +121,10 @@ pub struct Module {
     pub init: Option<FuncIdx>,
     /// `None` for a library (see `kestrel_check::check_with`).
     pub main: Option<FuncIdx>,
+    /// The source files' names (base names, like `geom.kes`), by the file index in each line
+    /// (see `pack_line`). Empty when the compiler wasn't given names: runtime errors then give
+    /// only the line.
+    pub files: Vec<String>,
 }
 
 /// A memory location: a local, or a path of fields and elements inside one.
@@ -248,8 +270,9 @@ pub enum Stmt {
     /// many threads. Its parameters are `args` (pointers to the variables
     /// the body uses), then the start and end of a range of indexes.
     ParFor { func: FuncIdx, args: Vec<Arg>, count: Expr },
-    /// Records the line of the call that follows, from the program's own code to a built-in
-    /// function that isn't `pure`, for the errors that function raises.
+    /// Records the line (a packed line, see `pack_line`) of the call that follows, from the
+    /// program's own code to a built-in function that isn't `pure`, for the errors that function
+    /// raises.
     SetLine(u32),
 }
 
@@ -266,7 +289,7 @@ pub enum PrintArg {
 pub struct Expr {
     pub kind: ExprKind,
     pub ty: KTy,
-    /// Source line, for runtime error messages.
+    /// Source line and file, packed (see `pack_line`), for runtime error messages.
     pub line: u32,
 }
 

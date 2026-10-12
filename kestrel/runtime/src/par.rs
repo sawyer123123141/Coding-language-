@@ -302,7 +302,7 @@ mod tests {
     extern "C" fn allocate(env: *const u8, start: i64, end: i64) {
         let slots = env as *mut usize;
         for i in start..end {
-            let p = arena::kestrel_rt_alloc(8, 8, 8, 0) as *mut i64;
+            let p = arena::kestrel_rt_alloc(8, 8, 8, 0, std::ptr::null()) as *mut i64;
             // SAFETY: `p` holds 8 i64s; the env holds a slot per index.
             unsafe {
                 *p = i * 3;
@@ -316,7 +316,7 @@ mod tests {
         let mut slots = vec![0usize; 5000];
         run(5000, allocate, slots.as_mut_ptr() as *const u8, 8).unwrap();
         // The threads' arenas are freed by now; their blocks belong to this thread's.
-        let filler: Vec<*mut u8> = (0..5000).map(|_| arena::kestrel_rt_alloc(8, 8, 8, 0)).collect();
+        let filler: Vec<*mut u8> = (0..5000).map(|_| arena::kestrel_rt_alloc(8, 8, 8, 0, std::ptr::null())).collect();
         assert!(!filler.is_empty());
         for (i, &p) in slots.iter().enumerate() {
             // SAFETY: each slot points at an i64 that should still be alive.

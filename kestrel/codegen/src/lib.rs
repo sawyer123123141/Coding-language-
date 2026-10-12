@@ -60,7 +60,8 @@ pub(crate) fn define_module<M: Module>(
     }
     let par_thunks = par_thunk::define_par_thunks(module, m, &ids)?;
     let globals = globals::define_globals(module, m)?;
-    let shared = func::Shared { funcs: &ids, par_thunks: &par_thunks, rt: &rt, globals: &globals, opts, kir: m };
+    let files = globals::define_file_names(module, m)?;
+    let shared = func::Shared { funcs: &ids, par_thunks: &par_thunks, rt: &rt, globals: &globals, files: &files, opts, kir: m };
     let mut strings = func::Strings::default();
     let mut ctx = module.make_context();
     let mut fb_ctx = FunctionBuilderContext::new();

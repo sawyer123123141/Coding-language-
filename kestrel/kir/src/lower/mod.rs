@@ -38,7 +38,7 @@ pub fn lower(program: &Program, t: &Tables, lines: &LineIndex) -> Module {
         funcs[main.0 as usize].body.insert(0, Stmt::Call(init, Vec::new()));
     }
     let globals = helpers.consts.into_globals();
-    Module { funcs, structs, enums, elems, print_fns: helpers.print, par_bodies: helpers.par_bodies, globals, init, main }
+    Module { funcs, structs, enums, elems, print_fns: helpers.print, par_bodies: helpers.par_bodies, globals, init, main, files: Vec::new() }
 }
 
 pub(crate) fn kty(ty: Ty) -> KTy {
@@ -155,7 +155,7 @@ impl<'a> FnLowerer<'a> {
     }
 
     pub(crate) fn line(&self, span: Span) -> u32 {
-        self.lines.line(span.start)
+        crate::ir::pack_line(self.lines.file(span.start), self.lines.line(span.start))
     }
 
     fn bind_local(&self, bind: &ast::Binding) -> LocalIdx {

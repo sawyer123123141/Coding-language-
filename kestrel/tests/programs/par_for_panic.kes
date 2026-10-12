@@ -1,5 +1,5 @@
 // expect-exit: 101
-// expect-stderr: index 8 out of bounds for length 8 on line 16
+// expect-stderr: index 8 out of bounds for length 8 on line 16 of par_for_panic.kes
 // A failing iteration fails the program, like it would in a plain `for`.
 struct C {
     x: int

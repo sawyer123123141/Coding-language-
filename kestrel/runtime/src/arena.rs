@@ -167,12 +167,12 @@ pub extern "C" fn kestrel_rt_arena_pop() -> *mut Arena {
 
 /// Room for `count` zeroed elements of `elem_size` bytes in the current arena.
 #[no_mangle]
-pub extern "C" fn kestrel_rt_alloc(count: i64, elem_size: i64, align: i64, line: i32) -> *mut u8 {
+pub extern "C" fn kestrel_rt_alloc(count: i64, elem_size: i64, align: i64, line: i32, file: *const crate::panic::FileName) -> *mut u8 {
     if count < 0 {
-        crate::panic::fail(&format!("negative array length {count} on line {line}"));
+        crate::panic::fail(&format!("negative array length {count} on line {line}{}", crate::panic::of_file(file)));
     }
     let Some(size) = count.checked_mul(elem_size).and_then(|s| usize::try_from(s).ok()) else {
-        crate::panic::fail(&format!("an array of {count} elements is too large (line {line})"));
+        crate::panic::fail(&format!("an array of {count} elements is too large (line {line}{})", crate::panic::of_file(file)));
     };
     // SAFETY: the current arena is alive while it's on the stack.
     unsafe { (*kestrel_rt_current_arena()).alloc(size, align as usize) }
@@ -323,7 +323,7 @@ mod tests {
         let a = kestrel_rt_arena_new();
         kestrel_rt_arena_push(a);
         assert_eq!(kestrel_rt_current_arena(), a);
-        let p = kestrel_rt_alloc(4, 8, 8, 0);
+        let p = kestrel_rt_alloc(4, 8, 8, 0, std::ptr::null());
         // SAFETY: `a` is live and was just used.
         assert!(unsafe { (*a).blocks.iter().any(|(b, l)| (*b as usize..*b as usize + l.size()).contains(&(p as usize))) });
         assert_eq!(kestrel_rt_arena_pop(), a);
