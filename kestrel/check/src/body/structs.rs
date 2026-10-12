@@ -4,7 +4,7 @@ use kestrel_syntax::Diagnostic;
 use super::place::Immutable;
 use super::{is_const_expr, BodyChecker};
 use crate::builtins::Builtin;
-use crate::tables::{LocalId, Res, StructId, Tables, BUILTIN_STRUCTS};
+use crate::tables::{LocalId, Res, StructId, Tables, BUILTIN_STRUCTS, VEC2, VEC3};
 use crate::ty::Ty;
 
 /// Field defaults are constant expressions of the field's type (see `is_const_expr`), built again
@@ -69,11 +69,27 @@ impl<'a> BodyChecker<'a> {
             self.check_value(&a.value, Some(info.fields[fi].ty));
             self.consume(&a.value);
         }
-        for (fi, slot) in slots.iter().enumerate() {
-            if slot.is_none() && bound && !info.fields[fi].has_default {
-                self.error(e.span, format!("missing field `{}` for `{}`", info.fields[fi].name, info.name));
-                ok = false;
+        // `vec2()` and `vec3()` are zero vectors, like Godot's `Vector2()`.
+        let vector = matches!(sid, VEC2 | VEC3);
+        let zero_vector = vector && args.is_empty();
+        let missing: Vec<String> = slots
+            .iter()
+            .enumerate()
+            .filter(|&(fi, slot)| slot.is_none() && !info.fields[fi].has_default && !zero_vector)
+            .map(|(fi, _)| format!("`{}`", info.fields[fi].name))
+            .collect();
+        if bound && !missing.is_empty() {
+            let msg = match missing.as_slice() {
+                [one] => format!("missing field {one} for `{}`", info.name),
+                [init @ .., last] => format!("missing fields {} and {last} for `{}`", init.join(", "), info.name),
+                [] => unreachable!("not empty"),
+            };
+            if vector {
+                self.error_help(e.span, msg, format!("give every component, or none for a zero vector: `{}()`", info.name));
+            } else {
+                self.error(e.span, msg);
             }
+            ok = false;
         }
         if ok {
             self.t.ctor_args.insert(e.id, slots);

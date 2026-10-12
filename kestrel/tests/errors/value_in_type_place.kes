@@ -1,0 +1,10 @@
+struct Ball {
+    velocity: vec3()
+}
+
+main() {
+    var speed: vec3()
+}
+
+// error 2: a type goes after `:`, and the value after `=`
+// error 6: a type goes after `:`, and the value after `=`

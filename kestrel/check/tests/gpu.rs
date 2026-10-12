@@ -180,7 +180,7 @@ fn a_gpu_handle_cannot_be_built_compared_or_copied() {
     let cases: &[(&str, &str)] = &[
         ("let a = make(1)\n let b = make(2)\n print(a.id == b.id)", "`==` needs numbers, found GpuHandle and GpuHandle"),
         ("let a = make(1)\n print(a.id + 1)", "`+` needs numbers, found GpuHandle and int"),
-        ("let a = GpuHandle()", "unknown function `GpuHandle`"),
+        ("let a = GpuHandle()", "unknown struct `GpuHandle`"),
         ("let a = make(1)\n let x = a.id", moved_out),
         ("let a = make(1)\n var t = make(2)\n t.id = a.id", moved_out),
     ];

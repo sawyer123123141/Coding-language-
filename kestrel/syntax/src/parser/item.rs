@@ -307,6 +307,9 @@ impl Parser {
             return Err(());
         }
         let ty = self.type_expr()?;
+        if self.at(&Tok::LParen) {
+            return self.value_in_type_place(&name, &ty);
+        }
         let default = if self.eat(&Tok::Assign) { Some(self.expr()?) } else { None };
         fields.push(FieldDecl { name, name_span, ty, default });
         Ok(())

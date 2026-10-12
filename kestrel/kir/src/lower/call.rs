@@ -191,11 +191,13 @@ impl<'a> FnLowerer<'a> {
                     Some(v) => v,
                     None => self.value(&args[*ai].value),
                 },
-                None => {
-                    // Only user structs have defaults; built-in ones have no declaration.
-                    let ast::Item::Struct(decl) = &program.items[t.strukt(sid).item] else { unreachable!("a struct with defaults") };
-                    self.value(decl.fields[fi].default.as_ref().expect("checker requires a default for a missing field"))
-                }
+                None => match program.items.get(t.strukt(sid).item) {
+                    Some(ast::Item::Struct(decl)) => {
+                        self.value(decl.fields[fi].default.as_ref().expect("checker requires a default for a missing field"))
+                    }
+                    // `vec2()` and `vec3()`: a built-in vector's components start at zero.
+                    _ => Expr { kind: ExprKind::Float(0.0), ty: super::kty(t.strukt(sid).fields[fi].ty), line: self.line(e.span) },
+                },
             });
         }
         (pre, ExprKind::StructLit(StructIdx(sid.0), fields))

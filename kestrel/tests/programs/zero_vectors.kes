@@ -1,0 +1,18 @@
+// expect: vec2(x: 0, y: 0) vec3(x: 0, y: 0, z: 0)
+// expect: Ball(velocity: vec3(x: 0, y: 0, z: 0), spin: vec2(x: 0, y: 0))
+// expect: vec3(x: 0, y: 0, z: 0)
+// `vec2()` and `vec3()` are zero vectors, like Godot's `Vector2()` and `Vector3()`.
+let ORIGIN = vec3()
+
+struct Ball {
+    velocity: vec3 = vec3()
+    spin: vec2 = vec2()
+}
+
+main() {
+    let a = vec2()
+    let b = vec3()
+    print(a, b)
+    print(Ball())
+    print(ORIGIN)
+}

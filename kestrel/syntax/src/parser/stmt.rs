@@ -83,6 +83,10 @@ impl Parser {
         let (name, name_span) = self.expect_ident("a variable name")?;
         let bind = self.binding(name, name_span);
         let ty = if self.eat(&Tok::Colon) { Some(self.type_expr()?) } else { None };
+        if let (Some(t), true) = (&ty, self.at(&Tok::LParen)) {
+            let kw = if is_var { "var" } else { "let" };
+            return self.value_in_type_place(&format!("{kw} {}", bind.name), t);
+        }
         self.expect(&Tok::Assign, "`=`")?;
         let value = self.expr()?;
         let else_block = if self.eat(&Tok::Else) { Some(self.block()?) } else { None };

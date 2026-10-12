@@ -43,7 +43,15 @@ impl<'a> BodyChecker<'a> {
             return self.check_construct(e, sid, args);
         }
         let Some(&fid) = self.t.fn_by_name.get(name) else {
-            self.error(*name_span, format!("unknown function `{name}`"));
+            if name.starts_with(|c: char| c.is_ascii_uppercase()) {
+                self.error_help(
+                    *name_span,
+                    format!("unknown struct `{name}`"),
+                    format!("declare it at the top level of a file (`struct {name} {{ ... }}`), or bring it in from a module with `use {{ {name} from m }}`"),
+                );
+            } else {
+                self.error(*name_span, format!("unknown function `{name}`"));
+            }
             for a in args {
                 self.check_expr(&a.value, None);
             }

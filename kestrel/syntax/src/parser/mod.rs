@@ -2,7 +2,7 @@ mod expr;
 mod item;
 mod stmt;
 
-use crate::ast::{BindId, Binding, Expr, ExprId, ExprKind, Program};
+use crate::ast::{BindId, Binding, Expr, ExprId, ExprKind, Program, TypeExpr, TypeKind};
 use crate::diag::Diagnostic;
 use crate::span::Span;
 use crate::token::{Tok, Token};
@@ -117,6 +117,18 @@ impl Parser {
         Binding { id, name, span }
     }
 
+    /// `name: vec3()` where `=` should follow the type: the value was written where the type
+    /// goes. `decl` is what comes before the `:` (`var velocity`, or a field's name).
+    fn value_in_type_place<T>(&mut self, decl: &str, ty: &TypeExpr) -> PResult<T> {
+        let mut d = Diagnostic::error(self.span(), "a type goes after `:`, and the value after `=`");
+        if let TypeKind::Named { .. } = ty.kind {
+            let t = type_text(ty);
+            d = d.with_help(format!("write `{decl}: {t} = {t}()`"));
+        }
+        self.diags.push(d);
+        Err(())
+    }
+
     /// Skips to the end of the current statement: a newline or `;` at this
     /// nesting level, or the `}` that closes the enclosing block.
     fn recover_stmt(&mut self) {
@@ -147,5 +159,15 @@ impl Parser {
             }
             self.bump();
         }
+    }
+}
+
+/// A type as written: `vec3`, `list[int]`, `[int]`, `Color?`.
+fn type_text(t: &TypeExpr) -> String {
+    match &t.kind {
+        TypeKind::Named { name, args } if args.is_empty() => name.clone(),
+        TypeKind::Named { name, args } => format!("{name}[{}]", args.iter().map(type_text).collect::<Vec<_>>().join(", ")),
+        TypeKind::Array(inner) => format!("[{}]", type_text(inner)),
+        TypeKind::Optional(inner) => format!("{}?", type_text(inner)),
     }
 }

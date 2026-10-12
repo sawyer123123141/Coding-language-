@@ -1,0 +1,9 @@
+main() {
+    let a = vec3(1)
+    let b = vec2(x: 1)
+    let c = Paddle(pos: vec2(0, 0))
+}
+
+// error 2: missing fields `y` and `z` for `vec3`
+// error 3: missing field `y` for `vec2`
+// error 4: unknown struct `Paddle`
