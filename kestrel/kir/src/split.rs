@@ -1,6 +1,7 @@
 //! The rewrite `scalarize` and `promote` share. Every place rooted at a chosen local (a **split
-//! root**) becomes the local holding that leaf, and every store of a plain struct value is done
-//! one leaf at a time, with all of the value's leaves computed before any is stored.
+//! root**) becomes the local holding that leaf. Every store of a plain struct value computes all
+//! of the value's leaves first. A store into a split root then goes one leaf at a time; a store
+//! into memory is one `Assign` of a struct built from those leaves.
 
 use std::collections::HashMap;
 
@@ -166,9 +167,13 @@ impl Rewriter<'_> {
         body
     }
 
-    /// `dest = e`, rewritten: a leaf of a split root is stored in its local, and a plain struct
-    /// value is stored one leaf at a time after all of its leaves are computed. `dest`'s index
-    /// expressions run after `e`, as codegen orders a store.
+    /// `dest = e`, rewritten. All of `e`'s leaves are computed first, then:
+    /// - a leaf of a split root is stored in its local, and a plain struct value into a split root
+    ///   is stored one leaf at a time;
+    /// - a plain struct value into memory is one `Assign` of a `StructLit` of those leaves, which
+    ///   codegen stores with a single place computation (one bounds check).
+    ///
+    /// `dest`'s index expressions run after `e`, as codegen orders a store.
     fn store(&mut self, dest: Place, e: Expr, out: &mut Vec<Stmt>) {
         let mut dest = dest;
         if !e.ty.is_aggregate() {
@@ -182,9 +187,15 @@ impl Rewriter<'_> {
             out.push(Stmt::Assign(dest, e));
             return;
         }
-        let ty = e.ty;
+        let (ty, line) = (e.ty, e.line);
         let vals = self.split(e, out);
         self.visit_place(&mut dest);
+        if !self.roots.contains_key(&dest.root) {
+            // Every leaf is a constant or a local by now, so this one store reads no memory. Codegen
+            // finds `dest` once and runs its index expressions here, after the leaves are computed.
+            out.push(Stmt::Assign(dest, rebuild(self.structs, ty, &mut vals.into_iter(), line)));
+            return;
+        }
         let dest = self.stable(dest, out);
         for (leaf, v) in leaves(self.structs, ty).expect("a plain struct").iter().zip(vals) {
             let p = leaf_place(&dest, leaf);

@@ -79,11 +79,13 @@ Measured on 2026-10-11 with the compiler at commit 04358c9 (the end of the scala
 | `step.kes` within 1.2x of Rust's step | **Met:** 1.15x (4.88 against 4.25; `measure.py`: 1.12x). It was 3.4x. |
 | `step.kes` within 5% of `step_scalar.kes` | **Met:** +2% (4.88 against 4.79; `measure.py`: -1%). The compiler now reaches the speed of the hand-written version by itself. |
 | `step_pow.kes` within 1.15x of Rust's `pow` version | **Met:** 1.07x (19.12 against 17.84; `measure.py`: 1.06x). It was 1.55x. |
-| No other kernel slower beyond noise | **Not met:** `copy.kes` is 0.3 ns an element slower (see below). Nothing else was. |
+| No other kernel slower beyond noise | **Not met at this commit:** `copy.kes` is 0.3 ns an element slower (see below). Nothing else was. **Met after Task 6** (the section "After the one-check struct store" below): `copy.kes` is back to the speed it had before scalar replacement, within noise. |
 
 `step.kes` has no stack slots now (`--dump par` shows no `explicit_slot` lines), and its loop is the same arithmetic as `step_scalar.kes`. On 16 threads `step.kes` is 2.5 times faster (2.10 to 0.85) and `step_pow.kes` 1.5 times (3.84 to 2.59). The math change alone (the last commit of the plan) moved `step_pow.kes` by about 1%, inside the noise, so the `pow` gain is the struct work. The cost of the `pow` call itself (`step_pow.kes` minus `step.kes`) is 13.2 ns before and 14.2 after, and 13.6 for Rust: the call costs what it did, and everything around it got cheaper.
 
 ### The copy loop got slower, and is still about 4.5 times Rust
+
+(This section is what was found at commit 04358c9. The slowdown is fixed by Task 6; see "After the one-check struct store" below.)
 
 `copy.kes` takes 1.11 ns an element on one thread where it took 0.80 (0.3 ns, or 39%, more; every one of the 7 rounds agrees, on one thread and on 16, since this kernel has no `par for`). Rust takes 0.22-0.26, so the loop is now 4.2-4.8 times Rust's time; it was 3.5 times.
 
@@ -95,6 +97,43 @@ Why the loop is still far from Rust, which does it in about one cycle an element
 - it moves 8 bytes as two 4-byte moves, where Rust's single 8-byte move (and, after vectorising, wider ones) does the same work.
 
 The old number is also somewhat lucky. The copy loop is sensitive to where the compiler puts the code. Adding an unused function before `spawn` (four layouts, 0 to 3 unused functions, 3 runs each) moved the old compiler's loop between 0.70 and 0.77 ns on three layouts and to 0.94-1.06 on the fourth, while the new compiler's loop stayed between 0.92 and 1.04 on all four. So the slowdown is 0.2-0.3 ns when the old code was lucky, and none when it wasn't. In the particles demo the copy runs once a frame over 200,000 particles, so 0.3 ns is 0.06 ms of a 5.4 ms frame.
+
+### After the one-check struct store (Task 6)
+
+**The fix.** The two passes' struct-store rule used to write a built struct into memory as one `Assign` per leaf, and codegen computed the place again for each one: its own bounds check on `positions[i]` and its own reload of the list's length and data pointer. Now `split.rs` writes a plain struct value into memory as ONE `Assign` of a `StructLit` whose fields are constants and `Value` locals (all computed first, so the value still can't read a half-written place, and the destination's index expressions still run after the value), and codegen builds that `StructLit` straight into the place, which it finds once. A store into a split local is still one assignment per leaf. `positions[i] = p.pos` is one bounds check again (`a_struct_store_into_a_list_checks_the_index_once` counts the `trap user2` paths in the IR: 2 before the fix, 1 after).
+
+**How it was measured.** Three harnesses built from three commits, run one after another in a rotating order in each round, one thread (`KESTREL_THREADS=1`), `--release`, the same iteration counts as `measure.py`; two runs of 11 rounds, pooled to 22. They are the compiler before scalar replacement (f329f57), at the end of the scalar replacement plan (c4fac4a, the "After" above) and with this fix. **The machine was loaded** by another program (a game) for the whole hour, so everything below is 35-40% slower than the tables above (Rust's copy kernel, the gauge, took 0.31 ns against 0.23 then), and the 16-thread runs had ranges of 40% or more, so they are not given. Compare cells inside this table only. The cells are the median of the 22 rounds with the range in brackets, in ns per item.
+
+| Kernel, one thread | Before scalar replacement | Without the fix | With the fix |
+|---|---:|---:|---:|
+| `copy.kes` (the draw copy) | 1.17 (0.87-1.53) | 1.72 (1.26-2.11) | **1.27** (0.86-1.67) |
+| `step.kes` | 20.45 (16.05-24.68) | 6.59 (5.53-7.76) | 6.58 (5.67-7.55) |
+| `step_pow.kes` | 40.03 (30.90-46.52) | 25.95 (20.85-32.46) | 26.37 (21.09-30.60) |
+| `step_scalar.kes` | 6.76 (5.41-8.02) | 6.40 (5.58-8.16) | 6.39 (5.44-7.82) |
+| Rust copy (from the two newer builds' binaries) | | 0.31 (0.28-0.43) | 0.32 (0.28-0.39) |
+
+Round by round (the same round, so the same load), the new time over the old time:
+
+| | Median | Range |
+|---|---:|---:|
+| `copy.kes`, with the fix over without | **0.72** | 0.62-0.90 |
+| `copy.kes`, with the fix over before scalar replacement | **1.01** | 0.77-1.27 |
+| `step.kes`, with the fix over without | 0.99 | 0.88-1.14 |
+| `step_pow.kes`, with the fix over without | 0.98 | 0.81-1.27 |
+| `step_scalar.kes`, with the fix over without | 0.98 | 0.82-1.30 |
+
+- **`copy.kes`** takes 28% less time than at the end of the plan, and the same time as before scalar replacement within what this machine can tell (the paired ratio is 1.01; the two medians in the table are 8% apart, and the ranges overlap almost completely). The draw copy is no longer slower than it was.
+- **The loop is the same work per element as before scalar replacement** (`kernels.exe copy.kes --release --dump bench`): one load of the particles' data pointer, two 4-byte loads of `p.pos`, one bounds check (a load of the list's length, a compare, a branch), a load of the destination's data pointer, two 4-byte stores. The only difference is the order: both loads of `p.pos` now come before the check, because `promote` loads them at the top of the iteration.
+- **It is still about 4 times Rust** (1.27 against 0.31 in this run; 3.8 times for the compiler before scalar replacement, 5.5 times without the fix). The reasons are the ones listed above: the list header is reloaded for each check, the index is checked, and 8 bytes move as two 4-byte moves. They belong to the bounds-check and vectorizing follow-ups, not to this work.
+- **`step.kes`, `step_pow.kes` and `step_scalar.kes` did not move** (paired ratios 0.98-0.99, with ranges that cross 1). The particle step's write-backs to the element are stores through the element pointer, which have no bounds check, so this change doesn't touch them, and the particle step still has no stack slots (the codegen test `the_particle_step_in_a_par_for_uses_no_stack_slots` passes).
+- **`bench/2a` `particles` and `swarm`** (`kestrel build` exes and `kestrel run`, 7 rounds, old compiler at c4fac4a against new, taking turns, ms, loaded machine; the Rust -O3 column of these runs was 437-494 ms for particles and 358-554 for swarm, against 322-329 and 99-114 in the table above, so only compare old against new):
+
+  | | exe (checked) | exe (`--release`) | `kestrel run` |
+  |---|---:|---:|---:|
+  | `particles`, without the fix → with it | 270 → 273 | 371 → 347 | 355 → 358 |
+  | `swarm`, without the fix → with it | 531 → 538 | 519 → 525 | 477 → 522 |
+
+  All differences are inside the ranges of the rounds (`particles` 225-463 ms for the checked exe; `swarm` 434-811 ms across its cells), so neither moved beyond noise. The one `bench/2a/run.ps1` run on the new compiler (checked / `--release` / JIT) gave `particles` 265 / 328 / 385 ms and `swarm` 319 / 398 / 346 ms, against Rust -O3's 521 and 213 (the release-default column) in that run. As a multiple of Rust's time in the same run, `particles` is 0.51 / 0.63 / 0.74 (0.51 / 0.63 / 0.65 at the end of the plan) and `swarm` is 1.5 / 1.9 / 1.6 (1.8 / 1.8 / 1.9). The JIT cells include the compile time, so they are the least comparable with a Rust run. The absolute figures are higher than in the plan's table because the machine was loaded.
 
 ### `bench/2a`, `heightmap`, `voxels3d`, `maps`
 
@@ -180,4 +219,4 @@ This matches the kernels: `step_pow.kes` is 1.44 times faster on one thread and 
 
 ### In short
 
-Faster: the demo's step (3.0x on one thread, 2.5x on 16, to within 15% of Rust), the `pow` version of it (1.4-1.5x), `bench/2a`'s `particles` (1.7-2.2x) and `swarm` (1.1-1.4x), and the particles demo's update at 200,000 (29-31%). The same: `fib`, `loop`, `collatz`, `mandelbrot`, `sieve`, `heightmap`, `voxels3d`, compile time, and (as far as this machine could say) `maps`. Slower: `copy.kes`, the demo's draw copy, by 0.2-0.3 ns an element (two bounds checks where there was one); the matching loop in the particles demo (`positions[i] = p.pos`) is the same code. Not slower but worth knowing: this machine's results move by 6-30% with where the compiler puts the code, which is why every comparison here is old against new taking turns.
+Faster: the demo's step (3.0x on one thread, 2.5x on 16, to within 15% of Rust), the `pow` version of it (1.4-1.5x), `bench/2a`'s `particles` (1.7-2.2x) and `swarm` (1.1-1.4x), and the particles demo's update at 200,000 (29-31%). The same: `fib`, `loop`, `collatz`, `mandelbrot`, `sieve`, `heightmap`, `voxels3d`, compile time, and (as far as this machine could say) `maps`. Slower at the end of the plan: `copy.kes`, the demo's draw copy, by 0.2-0.3 ns an element (two bounds checks where there was one); the matching loop in the particles demo (`positions[i] = p.pos`) is the same code. Task 6 fixed it (one bounds check again; the copy takes the same time as before scalar replacement within noise, and about 4 times Rust's). Not slower but worth knowing: this machine's results move by 6-30% with where the compiler puts the code, which is why every comparison here is old against new taking turns.

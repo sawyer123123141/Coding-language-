@@ -27,3 +27,12 @@ fn the_particle_step_in_a_par_for_uses_no_stack_slots() {
     let code = dump(&m, RELEASE, body).unwrap();
     assert!(!code.contains("explicit_slot"), "{code}");
 }
+
+#[test]
+fn a_struct_store_into_a_list_checks_the_index_once() {
+    let src = "struct P {\n pos: vec2\n vel: vec2\n}\ncopy(var dst: list[vec2], src: list[P]) {\n for i, p in src {\n  dst[i] = p.pos\n }\n}\nmain() {}\n";
+    let m = common::optimized(src);
+    let code = dump(&m, RELEASE, "copy").unwrap();
+    // One bounds check on `dst[i]` (its failure path ends in `trap user2`), not one per field.
+    assert_eq!(code.matches("trap user2").count(), 1, "{code}");
+}

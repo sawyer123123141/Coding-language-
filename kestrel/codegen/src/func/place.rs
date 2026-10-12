@@ -172,6 +172,16 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         }
     }
 
+    /// Whether `e` is made only of constants and locals kept in registers.
+    fn reads_only_locals(&self, e: &kir::Expr) -> bool {
+        match &e.kind {
+            kir::ExprKind::StructLit(_, fields) => fields.iter().all(|f| self.reads_only_locals(f)),
+            kir::ExprKind::Int(_) | kir::ExprKind::Float(_) | kir::ExprKind::Bool(_) => true,
+            kir::ExprKind::Load(q) => q.path.is_empty() && matches!(self.slots[q.root.0 as usize], Slot::Var(_)),
+            _ => false,
+        }
+    }
+
     pub(crate) fn assign(&mut self, p: &Place, e: &kir::Expr) -> Result<(), String> {
         if !e.ty.is_aggregate() {
             let v = self.expr(e)?;
@@ -180,6 +190,12 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let src = match &e.kind {
             // Two places of one type are the same memory or don't overlap.
             kir::ExprKind::Load(from) => self.place_addr(from)?,
+            // Built only from locals and constants, so it can't read the place it replaces: built
+            // straight into it, with the place found once.
+            kir::ExprKind::StructLit(..) if self.reads_only_locals(e) => {
+                let dst = self.place_addr(p)?;
+                return self.lower_into(e, dst);
+            }
             // Built in a temporary first: the new value may read the place it replaces.
             _ => {
                 let tmp = self.temp_addr(e.ty);

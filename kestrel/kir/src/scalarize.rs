@@ -1,7 +1,7 @@
 //! Keeps plain structs in registers. After inlining, a local of a plain struct type that nothing
 //! needs the address of is split into one `Value` local per leaf (`vec2` into `.x` and `.y`), and
-//! every struct store becomes one store per leaf (see `split`). A number that had to live in
-//! memory only for a `var` argument that inlining removed goes back to being a `Value`.
+//! every struct store reads all of its leaves before storing any (see `split`). A number that had
+//! to live in memory only for a `var` argument that inlining removed goes back to being a `Value`.
 
 use std::collections::{HashMap, HashSet};
 
@@ -38,7 +38,7 @@ pub fn scalarize(m: &mut Module) {
             f.locals[i].kind = LocalKind::Unused;
             roots.insert(l, Split { leaves: all, locals });
         }
-        // Even with no split locals, stores of plain struct values to memory go leaf by leaf.
+        // Even with no split locals, a plain struct value stored to memory is built from locals first.
         let mut rw = Rewriter { structs, locals: &mut f.locals, roots };
         rw.visit_stmts(&mut f.body);
     }

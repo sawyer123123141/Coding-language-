@@ -47,36 +47,55 @@ fn a_number_passed_as_var_to_an_inlined_call_goes_back_to_a_register() {
 }
 
 #[test]
-fn struct_stores_to_memory_go_one_field_at_a_time() {
+fn struct_stores_to_memory_read_every_field_before_storing() {
     let src = "struct B {\n pos: vec2\n vel: vec2\n}\nmain() {\n var bs = [B(pos: vec2(1, 2), vel: vec2(3, 4))]\n bs[0].vel = bs[0].vel.yx + bs[0].pos\n bs[0].pos = bs[0].vel\n print(bs)\n}\n";
     let m = optimized(src);
-    let mut copies = 0;
-    visit::walk(&func(&m, "main").body, &mut |n| {
+    let main = func(&m, "main");
+    let (mut copies, mut built) = (0, 0);
+    visit::walk(&main.body, &mut |n| {
         if let visit::Node::Stmt(Stmt::Assign(p, e)) = n {
             if let KTy::Struct(_) = e.ty {
-                // Only a copy from one place in memory to another stays whole.
-                assert!(matches!(e.kind, ExprKind::Load(_)), "{p:?} = {e:#?}");
-                copies += 1;
+                match &e.kind {
+                    // A copy from one place in memory to another.
+                    ExprKind::Load(_) => copies += 1,
+                    // A value built from locals and constants only, so it can't read the place half-written.
+                    ExprKind::StructLit(..) => {
+                        assert!(only_locals(main, e), "{p:?} = {e:#?}");
+                        built += 1;
+                    }
+                    _ => panic!("{p:?} = {e:#?}"),
+                }
             }
         }
     });
-    assert_eq!(copies, 1);
+    assert_eq!((copies, built), (1, 1));
+}
+
+/// Whether `e` is made only of constants and loads of `Value` locals.
+fn only_locals(f: &Func, e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::StructLit(_, fields) => fields.iter().all(|x| only_locals(f, x)),
+        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) => true,
+        ExprKind::Load(p) => p.path.is_empty() && f.locals[p.root.0 as usize].kind == LocalKind::Value,
+        _ => false,
+    }
 }
 
 #[test]
-fn a_struct_store_goes_one_field_at_a_time_in_a_function_with_no_struct_locals() {
+fn a_struct_store_reads_every_field_first_in_a_function_with_no_struct_locals() {
     // `set` returns early, so it isn't inlined, and it holds no struct local to split.
-    let src = "set(var xs: [vec2]) {\n if xs.len == 0 { return }\n xs[0] = vec2(1, 2)\n}\nmain() {\n var xs = [vec2(0, 0)]\n set(var xs)\n print(xs)\n}\n";
+    let src = "set(var xs: [vec2]) {\n if xs.len == 0 { return }\n xs[0] = vec2(xs[0].y, xs[0].x)\n}\nmain() {\n var xs = [vec2(0, 0)]\n set(var xs)\n print(xs)\n}\n";
     let m = optimized(src);
     let f = func(&m, "set");
     let mut stores = 0;
     visit::walk(&f.body, &mut |n| {
         if let visit::Node::Stmt(Stmt::Assign(p, e)) = n {
-            assert!(!matches!(e.ty, KTy::Struct(_)), "{p:?} = {e:#?}");
+            // One store, of a value built from locals: the fields were read into locals first.
+            assert!(matches!(e.kind, ExprKind::StructLit(..)) && only_locals(f, e), "{p:?} = {e:#?}");
             stores += 1;
         }
     });
-    assert_eq!(stores, 2);
+    assert_eq!(stores, 1);
 }
 
 #[test]
