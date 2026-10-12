@@ -186,9 +186,7 @@ pure step(v: vec3) -> int {
 }
 
 // A chunk's mesh being built: MeshData plus a face whose corners get their own
-// colours, like a Godot SurfaceTool with a colour per vertex. (It is a struct
-// with a `var self` method because a pure function can't yet call a free
-// function that fills one of its locals.)
+// colours, like a Godot SurfaceTool with a colour per vertex.
 struct Builder {
     data: MeshData
 

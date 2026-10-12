@@ -26,9 +26,9 @@ Done in 2b-i: labelled arguments evaluate in source order; `func/mod.rs` split; 
 
 ## Found while building the Godot demo (2026-10-10)
 
-- **A `pure` function can't call a helper that only changes a `var` argument rooted at its own local** (for example `quad(var out, ...)` filling a local list). This is observationally pure, but the checker rejects it because the helper has `MutatesParams`. Allow calls whose `var` arguments are all rooted at the caller's locals.
-- **`let x = opt else` always moves or copies.** Unwrapping an owning optional parameter is therefore an error; a view (like a `match` binding) would fix it.
-- **Runtime errors don't name the file** in multi-file programs, only the line.
+- **A `pure` function can't call a helper that only changes a `var` argument rooted at its own local** (for example `quad(var out, ...)` filling a local list). This is observationally pure, but the checker rejects it because the helper has `MutatesParams`. Allow calls whose `var` arguments are all rooted at the caller's locals. Resolved (found 2026-10-12): it has worked since 4073379 when the helper is `pure` (`tests/programs/pure_var.kes`); this note was written earlier the same day. A helper that isn't marked `pure` stays refused by design.
+- **`let x = opt else` always moves or copies.** Unwrapping an owning optional parameter is therefore an error; a view (like a `match` binding) would fix it. Done in the first language pass (2026-10-12): it reads in place when the optional is a place that can't change; `var`, a `var` root, or a whole owning local still move or copy.
+- **Runtime errors don't name the file** in multi-file programs, only the line. Done in the first language pass: "on line 24 of geom.kes".
 - **The Godot add-on is built and tested on Windows only.** The `.gdextension` file lists Linux and macOS library names, but they've never been built.
 
 ## Found while building strings anywhere (2026-10-10)
@@ -66,7 +66,7 @@ From plan 2's reviews and the particles demo. The window spec is `docs/superpowe
 
 - **Natives' runtime errors don't name the line**, only the function ("draw.circle was called before window.open"). The call site's line isn't passed to the native. Done in plan 1 of the 3D work (Task 6): a call from the program's own files to a built-in function that isn't `pure` stores its line first, and a native's error ends with "on line N".
 - **Hoist heap constants: decide in the 3D spec.** Done in plan 1 of the 3D work (Task 4): an array, list or map constant (or one that holds one) is built once, before `main`, and every use reads that one value in place; storing it copies. Original note: an array, list or map constant (or a struct constant that holds one) is re-lowered and re-allocated at every use (`kir/src/lower/expr.rs`, `const_value`). Measured: `let PALETTE = [draw.RED, draw.GREEN, draw.BLUE]` with `PALETTE[n % 3]` in a frame loop grew the program arena by 4.78 MB over 100,000 frames. Today the window spec tells the user to wrap the loop body in `arena { }` or copy the constant into a `let` before the loop. A real fix builds each such constant once (read-only, never freed, shared), but then a copy of it must still copy, and that is a design question for when 3D programs hold meshes and palettes in constants.
-- **Struct-valued field defaults are unavailable** (`tint: Color = RED` is an error: "field defaults can't use struct values yet; set the field when you build it"). Constants may construct structs, and field defaults may construct only `vec2` and `vec3`. The check is conservative: `name: string? = NAME` is rejected too, though it would be safe.
+- **Struct-valued field defaults are unavailable** (`tint: Color = RED` is an error: "field defaults can't use struct values yet; set the field when you build it"). Constants may construct structs, and field defaults may construct only `vec2` and `vec3`. The check is conservative: `name: string? = NAME` is rejected too, though it would be safe. Done in the first language pass: defaults and constants take struct and enum values (not owning ones), with a loop check.
 - **A native's type-error help text overstates the allowed struct fields.** It says "a struct of those", but a struct field may not be an enum. Done in plan 1 of the 3D work (Task 2): the help text now lists what a native can take and return, and says a struct field may be a `list[T]` but not an enum.
 - **A field or variant called `native`** reports "native functions can't be methods", which doesn't say what is wrong. (`native` is a keyword, so the name can't be used; the message should say that.)
 
@@ -95,7 +95,7 @@ From the whole-branch review of plan 1. It found no memory-safety bug, double dr
   - A mixed `if` used as a read-only argument: `show(if c { make(i) } else { t }, ..)`, or an `if` or `match` arm that has its own locals: `width(if c { let q = make(1); make(2) } else { make(3) })`.
   - A fresh owning value in a `while` condition: one is made each time round, and only the last is dropped.
   - The workaround is to store the value in a `let` first. Fix idea: zero-initialise the held temporaries at scope entry, and drop before reassigning in loops.
-- **Moves are flow-insensitive.** `if i % 2 == 0 { a.add(c) } else { b.add(c) }` reports "`c` was moved earlier", because move checking ignores that the two branches are exclusive. This was already so before plan 1, and textures and meshes will make it an everyday pattern.
+- **Moves are flow-insensitive.** `if i % 2 == 0 { a.add(c) } else { b.add(c) }` reports "`c` was moved earlier", because move checking ignores that the two branches are exclusive. This was already so before plan 1, and textures and meshes will make it an everyday pattern. Done in the first language pass (2026-10-12): moves follow the program's paths (branches, loops, `break`/`continue`, assignment).
 - **`k_export_<name>` and `k_thunk_*` symbols** have the same collision shape against user names that `__kestrel_` names had (those are reserved now). Kestrel items are `k_<name>`, so a user function `export_foo` gets the symbol of the export thunk of `foo`, and `thunk___kestrel_par_0` the symbol of a `par for` body's thunk. Prefixing the generated symbols with `__`, as the init thunk's is, would fix both.
 - **Each reload of a file with heap constants leaks the previous constants arena** in the Godot add-on. It happens only at dev time, when a file is reloaded.
 
@@ -192,6 +192,41 @@ From `docs/superpowers/specs/2026-10-11-scalar-replacement-design.md` (its "As b
 - **`bench/2a` particles is now faster than Rust -O3** (163-209 ms against 322-329, C at 132). Not looked into; the Rust loop's dependency chain may be longer (LLVM may be using a select where Kestrel branches).
 - **`bench/maps` was unreadable on 2026-10-11:** times swung from 305 to 2,557 ms for the same program in the same hour, against 229-242 ms in the quiet hour of the saved baseline. The scalar replacement passes can't be seen in it, but it should be run again on a quiet machine before its numbers are used.
 - **The `collatz` JIT cell fell 13%** (318 to 278 ms) while its exe cells moved 2-4%; unexplained, probably noise.
+
+## Found while building the first language pass (2026-10-12)
+
+From `docs/superpowers/specs/2026-10-12-language-pass-1-design.md` (its "As built" section) and the task reviews. None blocks anything. Not fixed:
+
+**Moves (part A):**
+- A later "some paths" move of a local overwrites an earlier "every path" record, so a use after an already-reported error may say "may have been moved". Cosmetic.
+- After a reported loop error, a `for` loop's exit state is the plain entry state, so a later use isn't flagged again. The program is already rejected.
+- No tests yet for `break` or `continue` inside a `match` arm, inside `or`, or for a new value on one branch only. All were checked by hand.
+
+**Views (part B):**
+- Each `let ... else` view still gets an addressed KIR local that nothing uses (like `for` items).
+- Exclusivity is whole-variable: `p.x.m(var p.y)` and `f(p.x, var p.y)` are refused though the fields are disjoint. This is an older rule.
+- `check_exclusive`'s doc comment doesn't mention the receiver case (`c.poke(var c)`).
+
+**Defaults and constants (part C):**
+- A default that builds the same default twice (`kids: [Node] = [Node(), Node()]`) reports the loop twice.
+- `let A = Arena()` with `mem: Arena = A` compiled before this pass and is refused now; the spec exempts only a direct `Arena()`.
+- A non-owning variant of an enum that has an owning variant (`E2.Plain(1)`) is reported as owning.
+- Defaults that allocate nothing but have a heap type (`Kit.Empty`, a struct holding only a string literal) still count as allocating.
+- Missing regression tests: a struct- or enum-valued default dangling in `arena { }`; `builds_owning`'s negatives (`[]`, `none`, a fieldless variant); cycles through an enum payload, an optional or a map.
+
+**File names (part E):**
+- No automated test for a native error from a built exe, the arena messages' file, the map-changed panic's file, an array literal's allocation, `LineIndex::file`, or the base name of `<builtin>/draw.kes`. All were run by hand and are correct.
+- `of_file` would print " of " for an empty name.
+- A synthesized line-0 expression would name file 0. Unreachable today.
+- The record layout assumes a 64-bit little-endian target.
+- `kestrel_rt_call_file` could point into freed JIT memory after a hot reload if window natives ever reach the Godot add-on. They can't today.
+
+**File sizes** (the 400-line guide): `check/src/body/mod.rs` is 397 lines, `check/src/collect.rs` 389, `kir/src/ir.rs` 405 and `runtime/src/map.rs` 494.
+
+**Known limits, by design:**
+- Views over a `var` root still copy. They would need guards until the end of the block and on every write.
+- A "may have been moved" message can't point at the move, because the checker has no line numbers and diagnostics have no secondary labels.
+- `var x: T` with no value (starting at zero, like GDScript) is a syntax question put to the user on 2026-10-12.
 
 ## Maps (built 2026-10-09)
 
