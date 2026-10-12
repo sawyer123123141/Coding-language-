@@ -1,0 +1,21 @@
+// expect: 11 21
+// expect: 12 32
+// expect-exit: 101
+// expect-stderr: index 7 out of bounds for length 3 on line 17
+// A panic in the middle of a loop whose item is kept in registers: the program stops the same way.
+struct P {
+    x: float
+    y: float
+}
+
+main() {
+    var ps = [P(x: 1, y: 1), P(x: 2, y: 2), P(x: 3, y: 3)]
+    let lookup = [10.0, 20.0, 30.0]
+    let idx = [0, 1, 7]
+    for i, p in ps {
+        p.x += 10
+        p.y = p.x + lookup[idx[i]]
+        print(p.x, p.y)
+    }
+    print("not reached")
+}

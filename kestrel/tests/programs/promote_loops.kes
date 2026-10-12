@@ -1,0 +1,78 @@
+// expect: -317
+// expect: 460
+// expect: 2035
+// expect: 4710
+// expect: {1: vec2(x: 2, y: 2), 2: vec2(x: 4, y: 5)}
+// Loop items whose fields are kept in registers for one pass of the loop, and loops where they
+// can't be because the item's memory is reachable another way.
+struct P {
+    x: float
+    y: float
+    vx: float
+    vy: float
+}
+
+total(ps: list[P]) -> float {
+    var t = 0.0
+    for i, p in ps {
+        t += (p.x + p.y * 2 + p.vx * 3 + p.vy * 5) * (i + 1)
+    }
+    t
+}
+
+main() {
+    var ps = list[P]()
+    for i from 0 to 6 {
+        ps.add(P(x: i, y: 10, vx: 1, vy: -4))
+    }
+    // `continue` after a change, and a `break` out of an inner loop.
+    for i, p in ps {
+        p.vy -= 1
+        p.y += p.vy
+        if i == 1 {
+            p.x = -1
+            continue
+        }
+        for k from 0 to 10 {
+            p.x += 1
+            if k == 2 {
+                break
+            }
+        }
+        if p.y < 6 {
+            p.y = -p.y
+        }
+        if i == 4 {
+            break
+        }
+    }
+    print(total(ps))
+    // The body reads the list it changes: the first item's new speed is seen by the rest.
+    for i, p in ps {
+        p.vx = ps[0].vx + i
+        if i == 0 {
+            p.vx = 10
+        }
+    }
+    print(total(ps))
+    // Two loops over the same list, one inside the other.
+    for a in ps {
+        for b in ps {
+            a.x += b.vx
+        }
+    }
+    print(total(ps))
+    // A `par for` over the items.
+    par for p in ps {
+        p.x = p.x * 2 + p.y
+        p.vy = -p.vy
+    }
+    print(total(ps))
+    // Map values.
+    var m = {1: vec2(1, 2), 2: vec2(3, 4)}
+    for k, v in m {
+        v.x += k
+        v = v.yx
+    }
+    print(m)
+}

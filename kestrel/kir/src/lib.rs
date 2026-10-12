@@ -5,6 +5,7 @@ mod leaves;
 mod lower;
 mod native;
 mod ops;
+pub mod promote;
 mod rename;
 pub mod scalarize;
 mod split;
@@ -16,9 +17,10 @@ pub use layout::*;
 pub use lower::lower;
 pub use native::native_symbol;
 
-/// Inlines small functions, then keeps plain structs in registers (see `scalarize`). The driver
-/// runs it on every program.
+/// Inlines small functions, then keeps plain structs and the fields of `var` parameters and loop
+/// elements in registers (see `scalarize` and `promote`). The driver runs it on every program.
 pub fn optimize(m: &mut Module) {
     inline::inline_small(m);
     scalarize::scalarize(m);
+    promote::promote(m);
 }

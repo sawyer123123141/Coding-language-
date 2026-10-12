@@ -1,0 +1,106 @@
+// expect: 12 Ball(pos: vec2(x: 24, y: 0), vel: vec2(x: 2, y: 0.375), hits: 3)
+// expect: 3 Ball(pos: vec2(x: 102, y: 994), vel: vec2(x: 0, y: -3), hits: 0)
+// expect: 78 78
+// expect: 14 1
+// expect: 21 -1
+// expect: 10 -1 1
+// expect: 12
+// expect: 6
+// `var self` methods that return early are never inlined, so `self` stays a pointer whose fields
+// are kept in registers for the whole call and written back at every way out.
+struct Ball {
+    pos: vec2
+    vel: vec2
+    hits: int
+
+    fall(var self, ground: float, steps: int) -> int {
+        var n = 0
+        while n < steps {
+            n += 1
+            self.vel.y -= 1
+            self.pos += self.vel
+            if self.pos.y < ground {
+                self.pos.y = ground
+                self.vel.y = -self.vel.y * 0.5
+                self.hits += 1
+                if self.hits == 3 {
+                    return n
+                }
+                continue
+            }
+            if self.pos.x > 100 {
+                break
+            }
+        }
+        self.vel.x = 0
+        n
+    }
+
+    // The loop's condition reads `self`, and the method returns from inside the loop.
+    climb(var self, top: float) {
+        while self.pos.y < top {
+            self.pos.y += 7
+            if self.pos.y > 15 {
+                self.hits = -1
+                return
+            }
+        }
+        self.hits = 1
+    }
+
+    next(var self) -> int {
+        self.hits += 1
+        self.hits
+    }
+
+    // The value returned changes `self` while it is computed (`next` is inlined into it).
+    tick(var self, stop: int) -> int {
+        if self.hits >= stop {
+            return -1
+        }
+        return self.next() * 10
+    }
+
+    // Read-only: `self` and `other` are passed by pointer and only read.
+    gap(self, other: Ball) -> float {
+        if other.pos.x > self.pos.x {
+            return other.pos.x - self.pos.x
+        }
+        self.pos.x - other.pos.x
+    }
+}
+
+// A `var` number.
+count_to(var n: int, limit: int) {
+    while n < limit {
+        n += 3
+        if n > 10 {
+            return
+        }
+    }
+}
+
+main() {
+    var a = Ball(pos: vec2(0, 10), vel: vec2(2, 0), hits: 0)
+    let steps = a.fall(0, 50)
+    print(steps, a)
+    var b = Ball(pos: vec2(90, 1000), vel: vec2(4, 0), hits: 0)
+    let more = b.fall(0, 50)
+    print(more, b)
+    print(a.gap(b), b.gap(a))
+    var c = Ball(pos: vec2(0, 0), vel: vec2(0, 0), hits: 0)
+    c.climb(10)
+    print(c.pos.y, c.hits)
+    c.climb(40)
+    print(c.pos.y, c.hits)
+    var d = Ball(pos: vec2(0, 0), vel: vec2(0, 0), hits: 0)
+    let first = d.tick(5)
+    let second = d.tick(1)
+    print(first, second, d.hits)
+    var k = 0
+    count_to(var k, 100)
+    print(k)
+    var m = 0
+    count_to(var m, 5)
+    print(m)
+}
