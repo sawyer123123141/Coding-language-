@@ -237,9 +237,23 @@ impl VisitMut for Exits<'_> {
     }
 
     fn visit_stmt(&mut self, s: &mut Stmt) {
-        let inner = matches!(s, Stmt::While { .. } | Stmt::ForRange { .. });
-        self.depth += inner as u32;
-        walk_stmt(self, s);
-        self.depth -= inner as u32;
+        // A loop's header (a `while`'s condition, a `for`'s bounds) runs before the loop starts, so a
+        // `break` or `continue` there leaves the enclosing loop: only the body is one level deeper.
+        match s {
+            Stmt::While { cond, body } => {
+                self.visit_expr(cond);
+                self.depth += 1;
+                self.visit_stmts(body);
+                self.depth -= 1;
+            }
+            Stmt::ForRange { start, end, body, .. } => {
+                self.visit_expr(start);
+                self.visit_expr(end);
+                self.depth += 1;
+                self.visit_stmts(body);
+                self.depth -= 1;
+            }
+            _ => walk_stmt(self, s),
+        }
     }
 }

@@ -212,4 +212,65 @@ main() {
     print(let_else_continue(var vs), vs)
     var ws: list[V] = [V(x: 1, y: 1), V(x: 2, y: 2), V(x: 3, y: 3)]
     print(let_else_return(var ws), ws)
+    var hs: list[P] = [P(x: 1, y: 1), P(x: 2, y: 2)]
+    break_in_while_condition(var hs)
+    print(hs)
+    var js: list[P] = [P(x: 1, y: 1), P(x: 2, y: 2)]
+    continue_in_while_condition(var js)
+    print(js)
+    var ks: list[P] = [P(x: 1, y: 1), P(x: 2, y: 2)]
+    break_in_for_bound(var ks)
+    print(ks)
+    var ms: list[P] = [P(x: 1, y: 1), P(x: 2, y: 2)]
+    continue_in_for_start(var ms)
+    print(ms)
 }
+
+// The header of a loop inside the item's loop runs outside that inner loop, so a `break` or
+// `continue` there leaves the item's loop. The item's changes must land first.
+break_in_while_condition(var ps: list[P]) {
+    var go = true
+    for p in ps {
+        p.x += 10
+        while (if go { go = false; true } else { break }) {
+        }
+    }
+}
+
+continue_in_while_condition(var ps: list[P]) {
+    var n = 0
+    for p in ps {
+        p.x += 10
+        while (if n < 1 { n += 1; true } else { continue }) {
+        }
+        p.y += 100
+    }
+}
+
+break_in_for_bound(var ps: list[P]) {
+    var c = 0
+    for p in ps {
+        p.x += 10
+        for i from 0 to (if c < 1 { 2 } else { break }) {
+            c += 1
+        }
+        p.y += 100
+    }
+}
+
+continue_in_for_start(var ps: list[P]) {
+    var e = 0
+    for p in ps {
+        p.x += 7
+        for i from (if e < 1 { 0 } else { continue }) to 1 {
+            e += 1
+        }
+        p.y += 1
+    }
+}
+
+// The output of the four loop header cases above, printed at the end of `main`:
+// expect: [P(x: 11, y: 1), P(x: 2, y: 2)]
+// expect: [P(x: 11, y: 1), P(x: 12, y: 2)]
+// expect: [P(x: 11, y: 101), P(x: 12, y: 2)]
+// expect: [P(x: 8, y: 2), P(x: 9, y: 2)]

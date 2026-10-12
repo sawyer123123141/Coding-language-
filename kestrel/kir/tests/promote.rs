@@ -133,3 +133,64 @@ fn a_read_only_struct_parameter_is_loaded_once_and_never_written() {
     assert_eq!(uses(&f.body, f.params[0]), (2, 0));
     assert_eq!(uses(&f.body, f.params[1]), (2, 0));
 }
+
+/// The `else` branches of every `if` expression that is a loop's condition (a `while`'s) or one
+/// of its bounds (a `for`'s), in `stmts`.
+fn header_else_bodies(stmts: &[Stmt]) -> Vec<Vec<Stmt>> {
+    let mut found = Vec::new();
+    let mut take = |e: &Expr| {
+        if let ExprKind::If { else_body, .. } = &e.kind {
+            found.push(else_body.clone());
+        }
+    };
+    visit::walk(stmts, &mut |n| match n {
+        visit::Node::Stmt(Stmt::While { cond, .. }) => take(cond),
+        visit::Node::Stmt(Stmt::ForRange { start, end, .. }) => {
+            take(start);
+            take(end);
+        }
+        _ => {}
+    });
+    found
+}
+
+/// Whether `body` is exactly a write of the element `root`, then `exit`.
+fn writes_back_then(body: &[Stmt], root: LocalIdx, exit: &Stmt) -> bool {
+    matches!(body, [Stmt::Assign(p, _), last] if p.root == root && last == exit)
+}
+
+#[test]
+fn a_break_in_an_inner_while_condition_leaves_the_item_loop_so_the_item_is_written_back_first() {
+    // The condition runs before the inner loop starts, so its `break` leaves the loop over `ps`.
+    let src = "struct P {\n x: float\n}\nmain() {\n var ps = [P(x: 1), P(x: 2)]\n var go = true\n for p in ps {\n  p.x += 10\n  while (if go { go = false; true } else { break }) {\n  }\n }\n print(ps)\n}\n";
+    let m = optimized(src);
+    let main = func(&m, "main");
+    let p_ref = local(main, "p_ref");
+    // The item's field is held in a local, written back at the end of the pass, and before the `break`.
+    assert!(main.locals.iter().any(|l| l.name == "p_ref.x"), "{:#?}", main.locals);
+    assert_eq!(uses(&main.body, p_ref).1, 2, "{:#?}", main.body);
+    let elses = header_else_bodies(&main.body);
+    assert_eq!(elses.len(), 1, "{elses:#?}");
+    assert!(writes_back_then(&elses[0], p_ref, &Stmt::Break), "{:#?}", elses[0]);
+}
+
+#[test]
+fn a_continue_in_an_inner_for_bound_leaves_the_item_pass_so_the_item_is_written_back_first() {
+    let src = "struct P {\n x: float\n}\nmain() {\n var ps = [P(x: 1), P(x: 2)]\n var e = 0\n for p in ps {\n  p.x += 7\n  for i from 0 to (if e < 1 { 1 } else { continue }) {\n   e += 1\n  }\n }\n print(ps)\n}\n";
+    let m = optimized(src);
+    let main = func(&m, "main");
+    let p_ref = local(main, "p_ref");
+    let elses = header_else_bodies(&main.body);
+    assert_eq!(elses.len(), 1, "{elses:#?}");
+    assert!(writes_back_then(&elses[0], p_ref, &Stmt::Continue), "{:#?}", elses[0]);
+}
+
+#[test]
+fn a_break_in_the_body_of_an_inner_loop_leaves_only_that_loop_so_it_needs_no_write_back() {
+    let src = "struct P {\n x: float\n}\nmain() {\n var ps = [P(x: 1), P(x: 2)]\n var n = 0\n for p in ps {\n  p.x += 10\n  while n < 3 {\n   n += 1\n   if n == 2 {\n    break\n   }\n  }\n }\n print(ps)\n}\n";
+    let m = optimized(src);
+    let main = func(&m, "main");
+    let p_ref = local(main, "p_ref");
+    // One write-back, at the end of the pass: the inner `break` has none.
+    assert_eq!(uses(&main.body, p_ref).1, 1, "{:#?}", main.body);
+}
