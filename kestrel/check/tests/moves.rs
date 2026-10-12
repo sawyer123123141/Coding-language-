@@ -65,6 +65,27 @@ fn the_else_block_of_let_else_still_has_the_optional() {
 }
 
 #[test]
+fn the_else_block_of_let_else_leaves_so_its_moves_dont_flow_past_it() {
+    let body = "go(var keep: list[Bag]) {\n let t = Bag()\n let o: Bag? = Bag()\n let x = o else {\n  keep.add(t)\n  return\n }\n keep.add(x)\n print(t.n)\n}\n";
+    assert_eq!(errors(body), none());
+}
+
+#[test]
+fn a_move_in_a_while_condition_stays_moved_after_the_loop() {
+    // The body always leaves, so no back edge reports it; the condition's move still happened
+    // on the way to the end of the loop.
+    assert_eq!(
+        errors("go() {\n let t = Bag()\n while Pair(b: t).b.n > 100 {\n  return\n }\n print(t.n)\n}\n"),
+        vec![MOVED.to_string()]
+    );
+    // The right side of `or` runs only sometimes.
+    assert_eq!(
+        errors("go(c: bool) {\n let t = Bag()\n while c or Pair(b: t).b.n > 100 {\n  return\n }\n print(t.n)\n}\n"),
+        vec![MAYBE.to_string()]
+    );
+}
+
+#[test]
 fn a_use_after_a_move_on_some_paths_is_an_error() {
     assert_eq!(errors("go(c: bool, var keep: list[Bag]) {\n let t = Bag()\n if c { keep.add(t) }\n print(t.n)\n}\n"), vec![MAYBE.to_string()]);
     assert_eq!(errors("go(c: bool) {\n let t = Bag()\n let ok = c and Pair(b: t).b.n > 0\n print(t.n)\n}\n"), vec![MAYBE.to_string()]);

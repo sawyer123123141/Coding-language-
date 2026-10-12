@@ -66,10 +66,12 @@ impl<'a> BodyChecker<'a> {
     }
 
     /// Checks a loop's body, which runs any number of times. `entry` is the state where the
-    /// loop starts (before a `while` loop's condition, which runs each time around);
-    /// `exits_at_start` says whether the loop can end there (its condition false), not only at a
-    /// `break`. Returns whether a `break` leaves the loop.
-    pub(crate) fn loop_body(&mut self, entry: Moved, body: &Block, exits_at_start: bool) -> bool {
+    /// loop starts (before a `while` loop's condition, which runs each time around): a local
+    /// moved since then and not given a value again is moved inside the loop. `exit_at_start`
+    /// is the state where the loop can end without a `break` (a `while` condition false, the
+    /// state after the condition ran), or `None` when only a `break` leaves. Returns whether a
+    /// `break` leaves the loop.
+    pub(crate) fn loop_body(&mut self, entry: Moved, exit_at_start: Option<Moved>, body: &Block) -> bool {
         self.loop_breaks.push(false);
         self.loop_moves.push(LoopMoves { entry, breaks: Vec::new() });
         if self.check_block(body, Expect::Discard) != Ty::Never {
@@ -78,9 +80,7 @@ impl<'a> BodyChecker<'a> {
         let broke = self.loop_breaks.pop().expect("pushed above");
         let frame = self.loop_moves.pop().expect("pushed above");
         let mut exits = frame.breaks;
-        if exits_at_start {
-            exits.push(frame.entry);
-        }
+        exits.extend(exit_at_start);
         if let Some(after) = merge(exits) {
             self.moved = after;
         }

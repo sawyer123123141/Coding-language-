@@ -156,7 +156,7 @@ impl<'a> BodyChecker<'a> {
             }
         }
         let entry = self.moved.clone();
-        self.loop_body(entry, body, true);
+        self.loop_body(entry.clone(), Some(entry), body);
         self.scopes.pop();
     }
 }

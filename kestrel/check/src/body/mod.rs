@@ -272,7 +272,9 @@ impl<'a> BodyChecker<'a> {
                 let entry = self.moved.clone();
                 self.check_value(cond, Some(Ty::Bool));
                 let forever = matches!(cond.kind, ExprKind::Bool(true));
-                let broke = self.loop_body(entry, body, !forever);
+                // The loop ends when the condition is false, after it has run (and moved what it moves).
+                let after_cond = if forever { None } else { Some(self.moved.clone()) };
+                let broke = self.loop_body(entry, after_cond, body);
                 // `while true` with no `break` can only be left by `return`.
                 if forever && !broke {
                     Ty::Never
@@ -301,7 +303,7 @@ impl<'a> BodyChecker<'a> {
                 self.scopes.push(HashMap::new());
                 self.declare(var, var_ty, false, false, false);
                 let entry = self.moved.clone();
-                self.loop_body(entry, body, true);
+                self.loop_body(entry.clone(), Some(entry), body);
                 self.scopes.pop();
                 Ty::Unit
             }
