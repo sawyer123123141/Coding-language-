@@ -99,6 +99,25 @@ fn a_struct_store_reads_every_field_first_in_a_function_with_no_struct_locals() 
 }
 
 #[test]
+fn a_call_result_stored_into_a_list_is_built_from_locals() {
+    // `make` returns early, so it isn't inlined: its result comes back in memory, and the store
+    // must still build its value from locals, not from that memory.
+    let src = "make(k: float) -> vec2 {\n if k > 100 { return vec2(0, 0) }\n vec2(k, k + 1)\n}\nstore(var xs: list[vec2], i: int, k: float) {\n xs[i] = make(k)\n}\nmain() {}\n";
+    let m = optimized(src);
+    let f = func(&m, "store");
+    let mut stores = 0;
+    visit::walk(&f.body, &mut |n| {
+        if let visit::Node::Stmt(Stmt::Assign(p, e)) = n {
+            if let KTy::Struct(_) = e.ty {
+                assert!(matches!(e.kind, ExprKind::StructLit(..)) && only_locals(f, e), "{p:?} = {e:#?}");
+                stores += 1;
+            }
+        }
+    });
+    assert_eq!(stores, 1);
+}
+
+#[test]
 fn a_struct_with_exactly_16_fields_at_the_bottom_is_split() {
     let src = "struct W {\n a: vec3\n b: vec3\n c: vec3\n d: vec3\n e: vec3\n f: float\n}\nmain() {\n var w = W(a: vec3(1, 1, 1), b: vec3(1, 1, 1), c: vec3(1, 1, 1), d: vec3(1, 1, 1), e: vec3(1, 1, 1), f: 1)\n w.f = w.f + 1\n print(w)\n}\n";
     let m = optimized(src);

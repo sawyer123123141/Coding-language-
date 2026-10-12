@@ -182,6 +182,24 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         }
     }
 
+    /// The scalars of `e`, a `StructLit` that `reads_only_locals` (nested ones included), read in
+    /// field order as `(offset from the struct's start, value)`.
+    fn read_leaves(&mut self, e: &kir::Expr, base: i32, out: &mut Vec<(i32, Value)>) -> Result<(), String> {
+        match &e.kind {
+            kir::ExprKind::StructLit(s, fields) => {
+                let layouts = self.shared.kir;
+                for (f, layout) in fields.iter().zip(&layouts.layout(*s).fields) {
+                    self.read_leaves(f, base + layout.offset as i32, out)?;
+                }
+            }
+            _ => {
+                let v = self.expr(e)?;
+                out.push((base, v));
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn assign(&mut self, p: &Place, e: &kir::Expr) -> Result<(), String> {
         if !e.ty.is_aggregate() {
             let v = self.expr(e)?;
@@ -190,11 +208,17 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let src = match &e.kind {
             // Two places of one type are the same memory or don't overlap.
             kir::ExprKind::Load(from) => self.place_addr(from)?,
-            // Built only from locals and constants, so it can't read the place it replaces: built
-            // straight into it, with the place found once.
+            // Built only from locals and constants, so it can't read the place it replaces, and
+            // needs no temporary: the values are read first, then the place is found once (its
+            // index expressions can change a local the value reads) and each value is stored.
             kir::ExprKind::StructLit(..) if self.reads_only_locals(e) => {
+                let mut leaves = Vec::new();
+                self.read_leaves(e, 0, &mut leaves)?;
                 let dst = self.place_addr(p)?;
-                return self.lower_into(e, dst);
+                for (offset, v) in leaves {
+                    self.b.ins().store(MemFlags::trusted(), v, dst, offset);
+                }
+                return Ok(());
             }
             // Built in a temporary first: the new value may read the place it replaces.
             _ => {

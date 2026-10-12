@@ -148,7 +148,9 @@ impl Rewriter<'_> {
                 out.push(Stmt::Let(t, e));
                 let at = Place::local(t);
                 let all = leaves(self.structs, ty).expect("a plain struct");
-                all.iter().map(|l| Expr { kind: ExprKind::Load(leaf_place(&at, l)), ty: l.ty, line }).collect()
+                // Read each leaf into a local now, so every leaf is a local and a store of the
+                // result into memory is built from locals.
+                all.iter().map(|l| self.hold(Expr { kind: ExprKind::Load(leaf_place(&at, l)), ty: l.ty, line }, out)).collect()
             }
         }
     }
@@ -196,7 +198,7 @@ impl Rewriter<'_> {
             out.push(Stmt::Assign(dest, rebuild(self.structs, ty, &mut vals.into_iter(), line)));
             return;
         }
-        let dest = self.stable(dest, out);
+        // A split root's places are field paths, with no index expressions to hold.
         for (leaf, v) in leaves(self.structs, ty).expect("a plain struct").iter().zip(vals) {
             let p = leaf_place(&dest, leaf);
             let p = match self.leaf_local(&p) {

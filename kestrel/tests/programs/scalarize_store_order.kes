@@ -1,0 +1,51 @@
+// expect: 0 0 1
+// expect: 0 0 0 1
+// A struct with 17 leaves isn't plain, so it is stored whole. The value is read before the
+// destination's index runs, even when the index changes a local that the value reads.
+struct Big {
+    a: int
+    b: int
+    c: int
+    d: int
+    e: int
+    f: int
+    g: int
+    h: int
+    i: int
+    j: int
+    k: int
+    l: int
+    m: int
+    n: int
+    o: int
+    p: int
+    q: int
+}
+
+next(var n: int) -> int {
+    n += 1
+    n
+}
+
+z() -> Big {
+    Big(a: 0, b: 0, c: 0, d: 0, e: 0, f: 0, g: 0, h: 0, i: 0, j: 0, k: 0, l: 0, m: 0, n: 0, o: 0, p: 0, q: 0)
+}
+
+by_block() {
+    var xs = [z(), z()]
+    var s = 0
+    xs[if s == 0 { s += 1; 1 } else { 0 }] = Big(a: s, b: s, c: s, d: s, e: s, f: s, g: s, h: s, i: s, j: s, k: s, l: s, m: s, n: s, o: s, p: s, q: s)
+    print(xs[0].a, xs[1].a, s)
+}
+
+by_call() {
+    var xs = [z(), z(), z()]
+    var s = 0
+    xs[next(var s)] = Big(a: s, b: s, c: s, d: s, e: s, f: s, g: s, h: s, i: s, j: s, k: s, l: s, m: s, n: s, o: s, p: s, q: s)
+    print(xs[0].a, xs[1].a, xs[2].a, s)
+}
+
+main() {
+    by_block()
+    by_call()
+}
