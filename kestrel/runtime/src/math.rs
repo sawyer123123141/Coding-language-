@@ -1,38 +1,60 @@
 //! Math and random numbers. Compiled code does `sqrt`, `floor` and the like
-//! with Cranelift instructions; the rest (trigonometry, exponentials) comes
-//! here through one dispatcher, so there's a single import for all of them.
+//! with Cranelift instructions; the rest (trigonometry, exponentials) calls
+//! one function here per operation, in `f64`.
 
 use std::cell::Cell;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub const SIN: i32 = 1;
-pub const COS: i32 = 2;
-pub const TAN: i32 = 3;
-pub const ASIN: i32 = 4;
-pub const ACOS: i32 = 5;
-pub const ATAN: i32 = 6;
-pub const ATAN2: i32 = 7;
-pub const EXP: i32 = 8;
-pub const LOG: i32 = 9;
-pub const POW: i32 = 10;
-
-/// One float operation. `b` is used only by `ATAN2` (`a` is y) and `POW`.
-/// An unknown `op` gives NaN.
 #[no_mangle]
-pub extern "C" fn kestrel_rt_math(op: i32, a: f64, b: f64) -> f64 {
-    match op {
-        SIN => a.sin(),
-        COS => a.cos(),
-        TAN => a.tan(),
-        ASIN => a.asin(),
-        ACOS => a.acos(),
-        ATAN => a.atan(),
-        ATAN2 => a.atan2(b),
-        EXP => a.exp(),
-        LOG => a.ln(),
-        POW => a.powf(b),
-        _ => f64::NAN,
-    }
+pub extern "C" fn kestrel_rt_sin(a: f64) -> f64 {
+    a.sin()
+}
+
+#[no_mangle]
+pub extern "C" fn kestrel_rt_cos(a: f64) -> f64 {
+    a.cos()
+}
+
+#[no_mangle]
+pub extern "C" fn kestrel_rt_tan(a: f64) -> f64 {
+    a.tan()
+}
+
+#[no_mangle]
+pub extern "C" fn kestrel_rt_asin(a: f64) -> f64 {
+    a.asin()
+}
+
+#[no_mangle]
+pub extern "C" fn kestrel_rt_acos(a: f64) -> f64 {
+    a.acos()
+}
+
+#[no_mangle]
+pub extern "C" fn kestrel_rt_atan(a: f64) -> f64 {
+    a.atan()
+}
+
+/// The angle of the point (`x`, `y`).
+#[no_mangle]
+pub extern "C" fn kestrel_rt_atan2(y: f64, x: f64) -> f64 {
+    y.atan2(x)
+}
+
+#[no_mangle]
+pub extern "C" fn kestrel_rt_exp(a: f64) -> f64 {
+    a.exp()
+}
+
+/// The natural logarithm.
+#[no_mangle]
+pub extern "C" fn kestrel_rt_log(a: f64) -> f64 {
+    a.ln()
+}
+
+#[no_mangle]
+pub extern "C" fn kestrel_rt_pow(a: f64, b: f64) -> f64 {
+    a.powf(b)
 }
 
 thread_local! {
@@ -91,13 +113,16 @@ mod tests {
 
     #[test]
     fn math_ops() {
-        assert_eq!(kestrel_rt_math(SIN, 0.0, 0.0), 0.0);
-        assert_eq!(kestrel_rt_math(COS, 0.0, 0.0), 1.0);
-        assert_eq!(kestrel_rt_math(ATAN2, 0.0, 1.0), 0.0);
-        assert_eq!(kestrel_rt_math(POW, 2.0, 10.0), 1024.0);
-        assert_eq!(kestrel_rt_math(EXP, 0.0, 0.0), 1.0);
-        assert_eq!(kestrel_rt_math(LOG, 1.0, 0.0), 0.0);
-        assert!(kestrel_rt_math(99, 1.0, 1.0).is_nan());
+        assert_eq!(kestrel_rt_sin(0.0), 0.0);
+        assert_eq!(kestrel_rt_cos(0.0), 1.0);
+        assert_eq!(kestrel_rt_tan(0.0), 0.0);
+        assert_eq!(kestrel_rt_asin(0.0), 0.0);
+        assert_eq!(kestrel_rt_acos(1.0), 0.0);
+        assert_eq!(kestrel_rt_atan(0.0), 0.0);
+        assert_eq!(kestrel_rt_atan2(0.0, 1.0), 0.0);
+        assert_eq!(kestrel_rt_exp(0.0), 1.0);
+        assert_eq!(kestrel_rt_log(1.0), 0.0);
+        assert_eq!(kestrel_rt_pow(2.0, 10.0), 1024.0);
     }
 
     #[test]

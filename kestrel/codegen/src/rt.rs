@@ -1,5 +1,6 @@
 use cranelift_codegen::ir::{types, AbiParam, Signature, Type};
 use cranelift_module::{DataId, FuncId, Linkage, Module};
+use kestrel_kir::MathOp;
 
 /// Runtime functions, declared as imports in a module.
 pub(crate) struct RtFuncs {
@@ -28,7 +29,8 @@ pub(crate) struct RtFuncs {
     pub map_dup: FuncId,
     pub str_eq: FuncId,
     pub par_for: FuncId,
-    pub math: FuncId,
+    /// The function for each float operation the runtime does (see `MATH`).
+    pub math: Vec<(MathOp, FuncId)>,
     pub rand_float: FuncId,
     pub rand_int: FuncId,
     pub rand_seed: FuncId,
@@ -84,7 +86,7 @@ impl RtFuncs {
             map_dup: decl("kestrel_rt_map_dup", &[ptr, I64, I64], None)?,
             str_eq: decl("kestrel_rt_str_eq", &[ptr, I64, ptr, I64], Some(I8))?,
             par_for: decl("kestrel_rt_par_for", &[I64, ptr, ptr], None)?,
-            math: decl("kestrel_rt_math", &[I32, F64, F64], Some(F64))?,
+            math: MATH.iter().map(|&(op, name, args)| Ok((op, decl(name, &[F64, F64][..args], Some(F64))?))).collect::<Result<_, String>>()?,
             rand_float: decl("kestrel_rt_rand_float", &[], Some(F64))?,
             rand_int: decl("kestrel_rt_rand_int", &[I64, I64], Some(I64))?,
             rand_seed: decl("kestrel_rt_rand_seed", &[I64], None)?,
@@ -95,6 +97,20 @@ impl RtFuncs {
         })
     }
 }
+
+/// The float operations the runtime does: each one's function and how many `f64`s it takes.
+pub(crate) const MATH: [(MathOp, &str, usize); 10] = [
+    (MathOp::Sin, "kestrel_rt_sin", 1),
+    (MathOp::Cos, "kestrel_rt_cos", 1),
+    (MathOp::Tan, "kestrel_rt_tan", 1),
+    (MathOp::Asin, "kestrel_rt_asin", 1),
+    (MathOp::Acos, "kestrel_rt_acos", 1),
+    (MathOp::Atan, "kestrel_rt_atan", 1),
+    (MathOp::Atan2, "kestrel_rt_atan2", 2),
+    (MathOp::Exp, "kestrel_rt_exp", 1),
+    (MathOp::Log, "kestrel_rt_log", 1),
+    (MathOp::Pow, "kestrel_rt_pow", 2),
+];
 
 /// Addresses of every runtime export, for registering with the JIT.
 pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
@@ -126,7 +142,16 @@ pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
         ("kestrel_rt_map_dup", map::kestrel_rt_map_dup as *const u8),
         ("kestrel_rt_str_eq", map::kestrel_rt_str_eq as *const u8),
         ("kestrel_rt_par_for", par::kestrel_rt_par_for as *const u8),
-        ("kestrel_rt_math", math::kestrel_rt_math as *const u8),
+        ("kestrel_rt_sin", math::kestrel_rt_sin as *const u8),
+        ("kestrel_rt_cos", math::kestrel_rt_cos as *const u8),
+        ("kestrel_rt_tan", math::kestrel_rt_tan as *const u8),
+        ("kestrel_rt_asin", math::kestrel_rt_asin as *const u8),
+        ("kestrel_rt_acos", math::kestrel_rt_acos as *const u8),
+        ("kestrel_rt_atan", math::kestrel_rt_atan as *const u8),
+        ("kestrel_rt_atan2", math::kestrel_rt_atan2 as *const u8),
+        ("kestrel_rt_exp", math::kestrel_rt_exp as *const u8),
+        ("kestrel_rt_log", math::kestrel_rt_log as *const u8),
+        ("kestrel_rt_pow", math::kestrel_rt_pow as *const u8),
         ("kestrel_rt_rand_float", math::kestrel_rt_rand_float as *const u8),
         ("kestrel_rt_rand_int", math::kestrel_rt_rand_int as *const u8),
         ("kestrel_rt_rand_seed", math::kestrel_rt_rand_seed as *const u8),
