@@ -243,10 +243,15 @@ fn default_allocates(default: &Expr, ty: Ty, t: &Tables) -> bool {
     if !t.has_heap(ty) {
         return false;
     }
+    // A `T?` default is a `T` or `none`.
+    let inner = match ty {
+        Ty::Optional(e) => t.elem(e),
+        other => other,
+    };
     match &default.kind {
         ExprKind::None | ExprKind::Str(_) => false,
-        ExprKind::Ident(name) if ty == Ty::Str => !t.consts.iter().any(|c| &c.name == name),
-        ExprKind::ArrayLit(items) if items.is_empty() => matches!(ty, Ty::List(_)),
+        ExprKind::Ident(name) if inner == Ty::Str => !t.consts.iter().any(|c| &c.name == name),
+        ExprKind::ArrayLit(items) if items.is_empty() => matches!(inner, Ty::List(_)),
         _ => true,
     }
 }

@@ -35,6 +35,10 @@ pub fn check_with(program: &Program, needs_main: bool) -> (Option<Tables>, Vec<D
     t.compute_owning();
     body::check_consts(program, &mut t, &mut diags);
     body::check_field_defaults(program, &mut t, &mut diags);
+    // Defaults that build each other would recurse forever in KIR; this needs a clean check so far.
+    if !diags.iter().any(|d| d.is_error()) {
+        body::check_default_cycles(program, &t, &mut diags);
+    }
     for f in 0..t.fns.len() {
         body::check_fn(program, FnId(f as u32), &mut t, &mut diags);
     }

@@ -1,0 +1,21 @@
+// expect: Kit.Bag(ids: [3, 4])
+// expect: S(name: n, kit: Kit.Bag(ids: [3, 4]))
+// An enum value's payload may name a heap constant declared after it; it is built first.
+enum Kit {
+    Empty
+    Bag { ids: [int] }
+}
+
+let LOADOUT = Kit.Bag(IDS)
+let IDS = [3, 4]
+let NAME = "n"
+
+struct S {
+    name: string? = NAME
+    kit: Kit = LOADOUT
+}
+
+main() {
+    print(LOADOUT)
+    print(S())
+}

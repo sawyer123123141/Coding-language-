@@ -29,7 +29,6 @@ main() {
     print(keep.xs)
 }
 
-// error 6: field defaults can only use literals, operators and constants
-// error 10: field defaults can only use literals, operators and constants
-// error 14: field defaults can't use struct values yet; set the field when you build it
+// error 10: field defaults build each other in a loop: Node.kids -> Node.kids; set the field when you build it, or start it empty (`[]`)
+// error 14: field defaults build each other in a loop: Tree.kids -> KIDS -> Tree.kids; set the field when you build it, or start it empty (`[]`)
 // error 27: this memory is freed at the end of the `arena { }` block, but `keep` lives longer

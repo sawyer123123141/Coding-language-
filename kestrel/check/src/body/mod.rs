@@ -2,6 +2,7 @@ mod builtins;
 mod call;
 mod collections;
 mod consts;
+mod default_cycles;
 mod enums;
 mod expr;
 mod let_else;
@@ -14,7 +15,8 @@ mod place;
 mod regions;
 mod structs;
 
-pub(crate) use consts::{builds_user_struct, check_consts, is_const_expr, uses_struct_constant};
+pub(crate) use consts::{check_consts, is_const_expr};
+pub(crate) use default_cycles::check_default_cycles;
 pub(crate) use structs::check_field_defaults;
 
 use std::collections::{HashMap, HashSet};

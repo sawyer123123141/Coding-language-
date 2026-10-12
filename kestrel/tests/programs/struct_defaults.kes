@@ -1,0 +1,59 @@
+// expect: Player(tint: Color(r: 1, g: 0, b: 0), state: State.Idle, shape: Shape.Circle(r: 2), inv: Inventory(items: [1, 2]), loadout: Kit.Bag(ids: [3, 4]))
+// expect: Kit.Bag(ids: [3, 4]) 2
+// expect: [State.Idle, State.Run]
+// Field defaults and constants may be struct and enum values, including ones that hold lists.
+struct Color {
+    r: float
+    g: float
+    b: float
+}
+
+enum State {
+    Idle
+    Run
+}
+
+enum Shape {
+    Dot
+    Circle { r: float }
+}
+
+enum Kit {
+    Empty
+    Bag { ids: list[int] }
+}
+
+struct Inventory {
+    items: list[int] = [1, 2]
+}
+
+let RED = Color(1, 0, 0)
+let LOADOUT = Kit.Bag([3, 4])
+let ORDER = [State.Idle, State.Run]
+
+struct Player {
+    tint: Color = RED
+    state: State = State.Idle
+    shape: Shape = Shape.Circle(2)
+    inv: Inventory = Inventory()
+    loadout: Kit = LOADOUT
+}
+
+count(k: Kit) -> int {
+    match k {
+        Bag b {
+            b.ids.len
+        }
+        else {
+            0
+        }
+    }
+}
+
+main() {
+    var p = Player()
+    p.inv.items.add(9)
+    print(Player())
+    print(LOADOUT, count(LOADOUT))
+    print(ORDER)
+}

@@ -2,13 +2,14 @@ use kestrel_syntax::ast::{Arg, Expr, ExprKind, Item, Program};
 use kestrel_syntax::Diagnostic;
 
 use super::place::Immutable;
-use super::{builds_user_struct, is_const_expr, uses_struct_constant, BodyChecker};
+use super::{is_const_expr, BodyChecker};
 use crate::builtins::Builtin;
 use crate::tables::{LocalId, Res, StructId, Tables, BUILTIN_STRUCTS};
 use crate::ty::Ty;
 
-/// Field defaults are constant expressions of the field's type. They may not
-/// build or use structs of the program's own (see `is_const_expr`).
+/// Field defaults are constant expressions of the field's type (see `is_const_expr`), built again
+/// at every construction that leaves the field out. They can't build a value that owns an arena or
+/// a GPU object (other than a fresh `Arena()`).
 pub(crate) fn check_field_defaults(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
     let structs = program.items.iter().filter_map(|it| match it {
         Item::Struct(s) => Some(s),
@@ -21,18 +22,30 @@ pub(crate) fn check_field_defaults(program: &Program, t: &mut Tables, diags: &mu
             let Some(field) = t.structs[sid].fields.iter().find(|g| g.name == f.name) else { continue };
             let ty = field.ty;
             let mut bc = BodyChecker::new(t, diags, None, Ty::Unit, false);
-            if is_const_expr(default, bc.t, false) {
-                bc.check_value(default, Some(ty));
-                if uses_struct_constant(default, bc.t) {
-                    bc.error(default.span, "field defaults can't use struct values yet; set the field when you build it");
-                }
-            } else if builds_user_struct(default, bc.t) {
-                // The usual try is `tint: Color = Color(1, 1, 1)`; say what is allowed instead.
-                bc.error(default.span, "field defaults can only use literals, operators and constants (the one struct a default may build is a vec2 or vec3)");
-            } else {
-                bc.error(default.span, "field defaults can only use literals, operators and constants");
+            if !is_const_expr(default, bc.t) {
+                bc.error(default.span, "field defaults can only use literals, operators, constants, struct and enum values, and pure built-ins like `sqrt`");
+            } else if bc.check_value(default, Some(ty)) != Ty::Error && builds_owning(default, bc.t) {
+                bc.error(default.span, "field defaults can't build a value that owns an `Arena` or a GPU object; set the field when you build it");
             }
         }
+    }
+}
+
+/// Whether the checked default `e` builds a value that owns an `Arena` or a GPU object, other
+/// than a fresh `Arena()`.
+fn builds_owning(e: &Expr, t: &Tables) -> bool {
+    let any = |args: &[Arg]| args.iter().any(|a| builds_owning(&a.value, t));
+    match &e.kind {
+        ExprKind::Call { name, .. } if name == "Arena" => false,
+        ExprKind::Call { args, .. } | ExprKind::MethodCall { args, .. } => t.is_owning(t.ty(e.id)) || any(args),
+        // A constant is built again at each use, so naming an owning one builds one.
+        ExprKind::Ident(_) => matches!(t.res.get(&e.id), Some(Res::Const(_))) && t.is_owning(t.ty(e.id)),
+        ExprKind::TypeCall { args, .. } => any(args),
+        ExprKind::Unary { expr, .. } => builds_owning(expr, t),
+        ExprKind::Binary { lhs, rhs, .. } => builds_owning(lhs, t) || builds_owning(rhs, t),
+        ExprKind::ArrayLit(items) => items.iter().any(|i| builds_owning(i, t)),
+        ExprKind::MapLit(entries) => entries.iter().any(|(k, v)| builds_owning(k, t) || builds_owning(v, t)),
+        _ => false,
     }
 }
 

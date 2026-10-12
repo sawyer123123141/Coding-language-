@@ -75,7 +75,7 @@ fn struct_errors() {
         ("struct P {\n x: int\n x: int\n}\nmain() {}\n".into(), "`P` has two fields named `x`"),
         ("struct A {\n a: A\n}\nmain() {}\n".into(), "struct `A` contains itself"),
         ("struct A {\n a: A? = none\n}\nmain() {}\n".into(), "struct `A` contains itself"),
-        ("pure f() -> int { 1 }\nstruct P {\n x: int = f()\n}\nmain() {}\n".into(), "field defaults can only use literals, operators and constants"),
+        ("pure f() -> int { 1 }\nstruct P {\n x: int = f()\n}\nmain() {}\n".into(), FIELD_DEFAULT_MSG),
         ("struct P {\n x: int = true\n}\nmain() {}\n".into(), "expected int, found bool"),
         (format!("{p}main() {{\n let a = P()\n}}\n"), "missing field `x` for `P`"),
         (format!("{p}main() {{\n let a = P(1, 2)\n}}\n"), "`P` takes 1 argument(s), got 2"),
@@ -155,7 +155,7 @@ main() {{
 }
 #[test]
 fn struct_constants_need_constant_arguments() {
-    let msg = "constants can only use literals, operators and other constants";
+    let msg = "constants can only use literals, operators, other constants, struct and enum values, and pure built-ins like `sqrt`";
     let cases = [
         format!("{COLOR}f() -> float {{ 1 }}\nlet X = Color(1, 2, f())\nmain() {{}}\n"),
         format!("{COLOR}let X = Color(1, 2, randf())\nmain() {{}}\n"),
@@ -167,7 +167,7 @@ fn struct_constants_need_constant_arguments() {
     }
     // A field default is held to the same rule, with its own message.
     let src = format!("{COLOR}f() -> float {{ 1 }}\nstruct S {{\n c: Color = Color(1, 2, f())\n}}\nmain() {{}}\n");
-    assert_eq!(run(&src).1, vec![FIELD_DEFAULT_STRUCT.to_string()]);
+    assert_eq!(run(&src).1, vec![FIELD_DEFAULT_MSG.to_string()]);
 }
 
 #[test]
@@ -182,83 +182,61 @@ fn struct_constants_are_type_checked() {
     }
 }
 
-/// What a default that builds a struct of the program's own is told.
-const FIELD_DEFAULT_STRUCT: &str =
-    "field defaults can only use literals, operators and constants (the one struct a default may build is a vec2 or vec3)";
+/// What a field default that isn't a constant expression is told.
+const FIELD_DEFAULT_MSG: &str =
+    "field defaults can only use literals, operators, constants, struct and enum values, and pure built-ins like `sqrt`";
 
 #[test]
-fn field_defaults_cant_build_structs() {
-    // A default is built again at every construction, so one that builds a struct could build itself
-    // forever, and one that holds memory could outlive the arena it was built in.
-    let msg = FIELD_DEFAULT_STRUCT;
-    let cases = [
-        format!("{COLOR}struct Sprite {{
+fn field_defaults_may_build_structs() {
+    // Each construction builds its own default, so a struct (even one holding memory) is fine.
+    ok(&format!(
+        "{COLOR}struct Sprite {{
  tint: Color = Color(1, 1, 1)
 }}
-main() {{}}
-"),
-        "struct Inner {
+struct Inner {{
  xs: list[int] = [1, 2, 3]
-}
-struct Outer {
+}}
+struct Outer {{
  inner: Inner = Inner()
-}
-main() {}
-".to_string(),
-        "struct Node {
- next: [Node]? = [Node()]
-}
-main() {}
-".to_string(),
-        "struct Node {
- kids: list[Node] = [Node()]
-}
-main() {}
-".to_string(),
-        "struct Node {
- kids: [Node] = [Node(), Node()]
-}
-main() {}
-".to_string(),
-    ];
-    for src in cases {
-        assert_eq!(run(&src).1, vec![msg.to_string()], "source:
-{src}");
-    }
+}}
+struct Node {{
+ next: [Node]? = none
+ kids: [Node] = []
+}}
+main() {{
+    print(Sprite(), Outer(), Node())
+}}
+"
+    ));
 }
 
 #[test]
-fn field_defaults_cant_use_constants_that_hold_structs() {
-    let msg = "field defaults can't use struct values yet; set the field when you build it";
-    let cases = [
-        // A cycle through a constant: `N` is a `Node`, whose default is `N`.
-        "struct Node {
- kids: [Node] = N
-}
-let N = [Node([])]
-main() {}
-".to_string(),
-        format!("{COLOR}let RED = Color(1, 0, 0)
+fn field_defaults_may_use_struct_constants() {
+    ok(&format!(
+        "{COLOR}let RED = Color(1, 0, 0)
+let TINTS = [Color(1, 0, 0)]
 struct Sprite {{
  tint: Color = RED
 }}
-main() {{}}
-"),
-        format!("{COLOR}let TINTS = [Color(1, 0, 0)]
 struct Palette {{
  all: [Color] = TINTS
+ more: [Color] = [RED, RED]
 }}
-main() {{}}
-"),
-        format!("{COLOR}let RED = Color(1, 0, 0)
-struct Palette {{
- all: [Color] = [RED, RED]
+main() {{
+    print(Sprite(), Palette())
 }}
-main() {{}}
-"),
+"
+    ));
+}
+
+#[test]
+fn field_defaults_must_still_be_constant() {
+    let cases = [
+        format!("{COLOR}f() -> float {{ 1 }}\nstruct S {{\n c: Color = Color(1, 2, f())\n}}\nmain() {{}}\n"),
+        format!("{COLOR}struct S {{\n c: float = Color(1, 2, 3).r\n}}\nmain() {{}}\n"),
+        format!("{COLOR}struct S {{\n c: float = randf()\n}}\nmain() {{}}\n"),
     ];
     for src in cases {
-        assert_eq!(run(&src).1, vec![msg.to_string()], "source:
-{src}");
+        assert_eq!(run(&src).1, vec![FIELD_DEFAULT_MSG.to_string()], "source:\n{src}");
     }
 }

@@ -238,7 +238,9 @@ fn uses_in(program: &Program, t: &Tables, e: &ast::Expr, out: &mut Vec<ConstId>)
                 }
             }
         }
-        ast::ExprKind::TypeCall { args, .. } => all(args, out),
+        // A method call in a constant expression is an enum value (`Kit.Bag([3, 4])`): its payload
+        // may name a heap constant that must be built first.
+        ast::ExprKind::TypeCall { args, .. } | ast::ExprKind::MethodCall { args, .. } => all(args, out),
         ast::ExprKind::Unary { expr, .. } => uses_in(program, t, expr, out),
         ast::ExprKind::Binary { lhs, rhs, .. } => {
             uses_in(program, t, lhs, out);
