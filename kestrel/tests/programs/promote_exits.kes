@@ -1,0 +1,215 @@
+// expect: 1
+// expect: 0
+// expect: 30
+// expect: 3 [P(x: 11, y: 22), P(x: 12, y: 24), P(x: 13, y: 26), P(x: 14, y: 28)]
+// expect: -1 [P(x: 21, y: 42), P(x: 22, y: 44), P(x: 23, y: 46), P(x: 24, y: 48)]
+// expect: 27 [P(x: 22, y: 5), P(x: 22, y: 44), P(x: 23, y: 46), P(x: 24, y: 48)]
+// expect: 8 [P(x: 1, y: 0), P(x: 2, y: 0), P(x: 3, y: 5)]
+// expect: 8
+// expect: {1: P(x: 2, y: 2), 2: P(x: 9, y: 99), 3: P(x: 6, y: 8), 4: P(x: 8, y: -4), 5: P(x: 9, y: 9)}
+// expect: 7
+// expect: {1: P(x: 3, y: 1), 2: P(x: 10, y: 2), 3: P(x: 7, y: 7), 4: P(x: 8, y: -4), 5: P(x: 9, y: 9)}
+// expect: 5 [4, 6, 0, 8, 10, 6, 6, 7, 8]
+// expect: 4 [4, 6, 0, 8, 10, 51, 6]
+// expect: 17 [4, 3, 8, 10, 12, 6, 7]
+// expect: 18 [10, 8, 18, 10, 12, 6, 7]
+// expect: 0 [V(x: 11, y: 0), V(x: 12, y: -1), V(x: 13, y: 1), V(x: 14, y: -1), V(x: 15, y: 2), V(x: 6, y: 6)]
+// expect: 1 [V(x: 11, y: 0), V(x: 12, y: -1), V(x: 3, y: 3)]
+// Every way out of a loop whose item is kept in registers (`return`, `break`, `continue`, a
+// `let ... else` that returns): the changes made to the item before it must all have landed.
+struct P {
+    x: float
+    y: float
+}
+
+struct V {
+    x: float
+    y: float
+}
+
+// A `return` inside an `arena` block frees the arena the list lives in right before returning.
+// Here the item has to stay in memory, or the write-back would store into freed memory.
+first_in_arena(n: int) -> float {
+    arena {
+        var a = array[P](n)
+        for p in a {
+            p.x += 1
+            if p.x > 0 {
+                return p.x
+            }
+        }
+    }
+    0.0
+}
+
+// The same, with the list built in the arena and read after the loop's changes.
+sum_in_arena(n: int) -> float {
+    arena {
+        var a = array[P](n)
+        for i, p in a {
+            p.x = i
+            p.y = p.x * 2
+        }
+        var total = 0.0
+        for p in a {
+            total += p.x + p.y
+            if total > 20 {
+                p.y = -1
+                return total
+            }
+        }
+        return total
+    }
+}
+
+// A `return` from inside the loop after changing the item, with nothing to free.
+bump_until(var ps: list[P], stop: float) -> int {
+    for i, p in ps {
+        p.x += 10
+        p.y = p.x * 2
+        if p.x > stop {
+            return i
+        }
+    }
+    -1
+}
+
+// The value returned is computed from the item after it changed.
+bump_value(var ps: list[P]) -> float {
+    for p in ps {
+        p.x += 1
+        if p.x > 2 {
+            p.y = 5
+            return p.x + p.y
+        }
+    }
+    0.0
+}
+
+// Values of a map: `break`, `continue`, and `return` after a change.
+map_loop(var m: map[int, P]) -> float {
+    var t = 0.0
+    for k, v in m {
+        v.x += k
+        if v.x > 8 {
+            v.y = 99
+            continue
+        }
+        if k == 4 {
+            v.y = -4
+            break
+        }
+        t += v.x
+        v.y = t
+    }
+    t
+}
+
+map_return(var m: map[int, P]) -> float {
+    for k, v in m {
+        v.x += 1
+        if k == 3 {
+            v.y = 7
+            return v.x
+        }
+        v.y = k
+    }
+    -1
+}
+
+// Lists of numbers: the item is the number itself.
+float_loop(var xs: list[float], limit: float) -> int {
+    var n = 0
+    for x in xs {
+        x += 1
+        if x > limit {
+            return n
+        }
+        if x < 0 {
+            x = 0
+            continue
+        }
+        n += 1
+        if n > 4 {
+            break
+        }
+        x *= 2
+    }
+    n
+}
+
+int_loop(var xs: list[int]) -> int {
+    var c = 0
+    for x in xs {
+        x += 1
+        if x == 3 {
+            continue
+        }
+        c += x
+        x *= 2
+        if c > 12 {
+            return c
+        }
+    }
+    c
+}
+
+half(x: int) -> float? {
+    if x % 2 == 0 { x / 2 } else { none }
+}
+
+// A `let ... else` that continues, and one that returns, after the item changed.
+let_else_continue(var vs: list[V]) -> int {
+    for i, v in vs {
+        v.x += 10
+        let h = half(i) else {
+            v.y = -1
+            continue
+        }
+        v.y = h
+        if i == 4 {
+            break
+        }
+    }
+    0
+}
+
+let_else_return(var vs: list[V]) -> int {
+    for i, v in vs {
+        v.x += 10
+        let h = half(i) else {
+            v.y = -1
+            return i
+        }
+        v.y = h
+    }
+    0
+}
+
+main() {
+    print(first_in_arena(5))
+    print(first_in_arena(0))
+    print(sum_in_arena(5))
+    var ps: list[P] = [P(x: 1, y: 1), P(x: 2, y: 2), P(x: 3, y: 3), P(x: 4, y: 4)]
+    print(bump_until(var ps, 13.0), ps)
+    print(bump_until(var ps, 100.0), ps)
+    print(bump_value(var ps), ps)
+    var qs: list[P] = [P(x: 0, y: 0), P(x: 1, y: 0), P(x: 2, y: 0)]
+    print(bump_value(var qs), qs)
+    var m: map[int, P] = {1: P(x: 1, y: 1), 2: P(x: 7, y: 2), 3: P(x: 3, y: 3), 4: P(x: 4, y: 4), 5: P(x: 9, y: 9)}
+    print(map_loop(var m))
+    print(m)
+    print(map_return(var m))
+    print(m)
+    var xs: list[float] = [1.0, 2.0, -5.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
+    print(float_loop(var xs, 20.0), xs)
+    var ys: list[float] = [1.0, 2.0, -5.0, 3.0, 4.0, 50.0, 6.0]
+    print(float_loop(var ys, 20.0), ys)
+    var zs: list[int] = [1, 2, 3, 4, 5, 6, 7]
+    print(int_loop(var zs), zs)
+    print(int_loop(var zs), zs)
+    var vs: list[V] = [V(x: 1, y: 1), V(x: 2, y: 2), V(x: 3, y: 3), V(x: 4, y: 4), V(x: 5, y: 5), V(x: 6, y: 6)]
+    print(let_else_continue(var vs), vs)
+    var ws: list[V] = [V(x: 1, y: 1), V(x: 2, y: 2), V(x: 3, y: 3)]
+    print(let_else_return(var ws), ws)
+}

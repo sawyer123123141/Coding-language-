@@ -9,7 +9,9 @@
 //! argument whose variable appears in another argument of the same call, and there are no
 //! global variables that change. A region that reaches the place another way (passing it on as
 //! `var`, a `par for`, or for a loop element its collection or another element of it) is left
-//! alone. A runtime panic loses the fields not yet written back, which nothing can observe.
+//! alone, and so is a loop element's region that returns after freeing memory (see
+//! `returns_after_freeing`). A runtime panic loses the fields not yet written back, which
+//! nothing can observe.
 
 use std::collections::{HashMap, HashSet};
 
@@ -17,7 +19,7 @@ use crate::ir::*;
 use crate::layout::StructLayout;
 use crate::leaves::{field_path, leaf_name, leaf_place, leaves, load, under, Leaf};
 use crate::split::{Rewriter, Split};
-use crate::visit::{walk, walk_expr, Node};
+use crate::visit::{places, walk, walk_expr, Node};
 use crate::visit_mut::{walk_stmt, VisitMut};
 
 pub fn promote(m: &mut Module) {
@@ -98,7 +100,7 @@ fn region(
 ) -> Vec<Stmt> {
     let (name, ty) = (locals[root.0 as usize].name.clone(), locals[root.0 as usize].ty);
     let Some(all) = leaves(structs, ty) else { return stmts };
-    if !exclusive(&stmts, root, homes) {
+    if !exclusive(&stmts, root, homes) || (in_loop && returns_after_freeing(&stmts)) {
         return stmts;
     }
     let (used, dirty) = usage(&stmts, root, &all);
@@ -149,10 +151,28 @@ fn exclusive(stmts: &[Stmt], root: LocalIdx, homes: &HashMap<LocalIdx, LocalIdx>
     ok
 }
 
+/// Whether `stmts` contain a `return` and also a statement that can free memory: the end of an
+/// `arena`, a freed arena or GPU handle, or a call that takes something by `var` (the generated
+/// functions that drop a list's elements do). Lowering puts a `return`'s cleanup right before
+/// it, so a loop element's write-back placed there could land after the memory holding the
+/// element is freed. (A pointer parameter points into the caller's memory, which no `return` of
+/// this function frees, so only loop elements need this.)
+fn returns_after_freeing(stmts: &[Stmt]) -> bool {
+    let (mut returns, mut frees) = (false, false);
+    let by_ref = |args: &[Arg]| args.iter().any(|a| matches!(a, Arg::Ref(_)));
+    walk(stmts, &mut |n| match n {
+        Node::Stmt(Stmt::Return(_)) => returns = true,
+        Node::Stmt(Stmt::PopArena { free: true } | Stmt::FreeArena(_) | Stmt::DropGpu(_)) => frees = true,
+        Node::Stmt(Stmt::Call(_, a)) | Node::Expr(Expr { kind: ExprKind::Call(_, a), .. }) if by_ref(a) => frees = true,
+        _ => {}
+    });
+    returns && frees
+}
+
 /// The leaves `stmts` read or write, and the ones they write, by index into the root's leaves.
 fn usage(stmts: &[Stmt], root: LocalIdx, all: &[Leaf]) -> (Vec<usize>, Vec<usize>) {
     let (mut used, mut dirty) = (vec![false; all.len()], vec![false; all.len()]);
-    crate::visit::places(stmts, &mut |p, written| {
+    places(stmts, &mut |p, written| {
         if p.root == root {
             for k in under(all, &field_path(&p.path).expect("a plain place's path is fields")) {
                 used[k] = true;

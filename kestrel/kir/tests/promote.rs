@@ -77,6 +77,43 @@ fn a_loop_that_reads_its_list_keeps_the_item_in_memory() {
 }
 
 #[test]
+fn a_loop_element_whose_list_is_freed_before_a_return_stays_in_memory() {
+    // The `return` frees the arena that holds the list, right before it returns. A write-back put
+    // before the `return` would store into freed memory.
+    let src = "struct P {\n x: float\n}\nfind(n: int) -> float {\n arena {\n  var a = array[P](n)\n  for p in a {\n   p.x += 1\n   if p.x > 0 {\n    return p.x\n   }\n  }\n }\n 0.0\n}\nmain() {}\n";
+    let m = optimized(src);
+    let f = func(&m, "find");
+    assert!(!f.locals.iter().any(|l| l.name.starts_with("p_ref.")), "{:#?}", f.locals);
+    // `p.x += 1` stores to memory, and the other two uses read from it.
+    assert_eq!(uses(&f.body, local(f, "p_ref")), (3, 1), "{:#?}", f.body);
+}
+
+#[test]
+fn a_loop_element_returned_from_with_an_owning_local_to_drop_stays_in_memory() {
+    // Dropping `keep` is a call that takes it by pointer, right before the `return`.
+    let src = "struct P {\n x: float\n}\nstruct Chunk {\n n: int\n mem: Arena = Arena()\n}\nfind(var ps: list[P]) -> float {\n var keep = list[Chunk]()\n for p in ps {\n  p.x += 1\n  if p.x > 0 {\n   return p.x + keep.len\n  }\n }\n 0.0\n}\nmain() {}\n";
+    let m = optimized(src);
+    let f = func(&m, "find");
+    assert!(!f.locals.iter().any(|l| l.name.starts_with("p_ref.")), "{:#?}", f.locals);
+}
+
+#[test]
+fn a_loop_element_with_a_return_and_nothing_to_free_is_still_promoted() {
+    let src = "struct P {\n x: float\n}\nfind(var ps: list[P]) -> float {\n for p in ps {\n  p.x += 1\n  if p.x > 0 {\n   return p.x\n  }\n }\n 0.0\n}\nmain() {}\n";
+    let m = optimized(src);
+    let f = func(&m, "find");
+    assert!(f.locals.iter().any(|l| l.name == "p_ref.x"), "{:#?}", f.locals);
+}
+
+#[test]
+fn a_pointer_parameter_is_promoted_even_when_it_returns_after_freeing() {
+    // `self` belongs to the caller, so nothing the method frees can be what it points into.
+    let src = "struct C {\n n: int\n f(var self, k: int) -> int {\n  self.n += k\n  arena {\n   var a = array[int](k)\n   if self.n > 3 {\n    return a.len\n   }\n  }\n  self.n\n }\n}\nmain() {}\n";
+    let m = optimized(src);
+    assert!(func(&m, "C.f").locals.iter().any(|l| l.name == "self.n"), "{:#?}", func(&m, "C.f").locals);
+}
+
+#[test]
 fn var_self_passed_on_as_var_stays_in_memory() {
     // Both methods return early, so neither is inlined, and `twice` passes `self` on as `var`.
     let src = "struct C {\n n: int\n inc(var self) {\n  if self.n > 9 {\n   return\n  }\n  self.n += 1\n }\n twice(var self) {\n  if self.n < 0 {\n   return\n  }\n  self.inc()\n  self.n += 1\n  self.inc()\n }\n}\nmain() {}\n";
