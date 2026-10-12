@@ -1,0 +1,83 @@
+// `step.kes` written by hand with float locals: the fields are read once, the maths uses no
+// `vec2` values, and the fields are written once. The speed the compiler should reach on
+// `step.kes` by itself. `bench(n, iters)` steps `n` particles `iters` times.
+let WIDTH = 1280
+let HEIGHT = 720
+let PULL = 900.0
+let KEEP = 0.5
+let BOUNCE = 0.7
+
+struct Particle {
+    pos: vec2
+    vel: vec2
+
+    pure step(var self, dt: float, target: vec2, keep: float) {
+        var px = self.pos.x
+        var py = self.pos.y
+        var vx = self.vel.x
+        var vy = self.vel.y
+        let dx = target.x - px
+        let dy = target.y - py
+        let len = sqrt(dx * dx + dy * dy)
+        var nx = 0.0
+        var ny = 0.0
+        if len > 0 {
+            nx = dx / len
+            ny = dy / len
+        }
+        vx = (vx + nx * PULL * dt) * keep
+        vy = (vy + ny * PULL * dt) * keep
+        px += vx * dt
+        py += vy * dt
+        if px < 0 {
+            px = 0
+            vx = abs(vx) * BOUNCE
+        } else if px > WIDTH {
+            px = WIDTH
+            vx = -abs(vx) * BOUNCE
+        }
+        if py < 0 {
+            py = 0
+            vy = abs(vy) * BOUNCE
+        } else if py > HEIGHT {
+            py = HEIGHT
+            vy = -abs(vy) * BOUNCE
+        }
+        self.pos.x = px
+        self.pos.y = py
+        self.vel.x = vx
+        self.vel.y = vy
+    }
+}
+
+spawn(var parts: list[Particle], count: int) {
+    for i from 0 to count {
+        let pos = vec2(randf_range(0, WIDTH), randf_range(0, HEIGHT))
+        let vel = vec2(randf_range(-200, 200), randf_range(-200, 200))
+        parts.add(Particle(pos: pos, vel: vel))
+    }
+}
+
+pub bench(n: int, iters: int) -> float {
+    var sum = 0.0
+    arena {
+        var parts = list[Particle]()
+        spawn(var parts, n)
+        let dt = 1.0 / 60.0
+        let target = vec2(640, 360)
+        let keep = pow(KEEP, dt)
+        for k from 0 to iters {
+            par for p in parts {
+                p.step(dt, target, keep)
+            }
+        }
+        for p in parts {
+            sum += p.pos.x + p.pos.y
+        }
+    }
+    sum
+}
+
+main() {
+    print(bench(1000, 10))
+}

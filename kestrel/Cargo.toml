@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-exclude = ["godot", "bench/particles/rust"]
+exclude = ["godot", "bench/particles/rust", "bench/kernels"]
 members = ["syntax", "check", "kir", "runtime", "window", "codegen", "driver", "cli"]
 
 [workspace.package]

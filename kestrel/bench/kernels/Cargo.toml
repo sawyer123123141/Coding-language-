@@ -1,0 +1,15 @@
+[package]
+name = "kernels"
+version = "0.1.0"
+edition = "2021"
+
+# Its own workspace (and listed in the `kestrel/` workspace's `exclude`), like `bench/particles/rust`:
+# the compiler's tests shouldn't build it.
+[workspace]
+
+[dependencies]
+kestrel-driver = { path = "../../driver" }
+kestrel-codegen = { path = "../../codegen" }
+
+[profile.release]
+debug = false

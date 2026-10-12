@@ -1,0 +1,65 @@
+// The particles demo's step (`demos/particles/particles.kes`) with `pow(KEEP, dt)` worked out
+// once and passed in, over a list in a `par for`. `bench(n, iters)` steps `n` particles `iters`
+// times and returns a checksum; `bench/kernels` times it.
+let WIDTH = 1280
+let HEIGHT = 720
+let PULL = 900.0
+let KEEP = 0.5
+let BOUNCE = 0.7
+
+struct Particle {
+    pos: vec2
+    vel: vec2
+
+    pure step(var self, dt: float, target: vec2, keep: float) {
+        self.vel += (target - self.pos).normalized() * PULL * dt
+        self.vel *= keep
+        self.pos += self.vel * dt
+        if self.pos.x < 0 {
+            self.pos.x = 0
+            self.vel.x = abs(self.vel.x) * BOUNCE
+        } else if self.pos.x > WIDTH {
+            self.pos.x = WIDTH
+            self.vel.x = -abs(self.vel.x) * BOUNCE
+        }
+        if self.pos.y < 0 {
+            self.pos.y = 0
+            self.vel.y = abs(self.vel.y) * BOUNCE
+        } else if self.pos.y > HEIGHT {
+            self.pos.y = HEIGHT
+            self.vel.y = -abs(self.vel.y) * BOUNCE
+        }
+    }
+}
+
+spawn(var parts: list[Particle], count: int) {
+    for i from 0 to count {
+        let pos = vec2(randf_range(0, WIDTH), randf_range(0, HEIGHT))
+        let vel = vec2(randf_range(-200, 200), randf_range(-200, 200))
+        parts.add(Particle(pos: pos, vel: vel))
+    }
+}
+
+pub bench(n: int, iters: int) -> float {
+    var sum = 0.0
+    arena {
+        var parts = list[Particle]()
+        spawn(var parts, n)
+        let dt = 1.0 / 60.0
+        let target = vec2(640, 360)
+        let keep = pow(KEEP, dt)
+        for k from 0 to iters {
+            par for p in parts {
+                p.step(dt, target, keep)
+            }
+        }
+        for p in parts {
+            sum += p.pos.x + p.pos.y
+        }
+    }
+    sum
+}
+
+main() {
+    print(bench(1000, 10))
+}

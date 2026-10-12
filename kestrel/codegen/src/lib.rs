@@ -1,3 +1,4 @@
+mod dump;
 pub mod export;
 mod func;
 mod globals;
@@ -13,6 +14,8 @@ use cranelift_frontend::FunctionBuilderContext;
 use cranelift_module::{FuncId, Linkage, Module};
 use kestrel_kir as kir;
 
+#[doc(hidden)]
+pub use dump::dump;
 pub use export::{ExportInfo, ExportTy};
 pub use jit::JitProgram;
 pub use object::emit_object;
@@ -36,8 +39,14 @@ pub(crate) fn symbol(name: &str) -> String {
 
 /// Declares every function of `m` in `module` and defines the ones with bodies
 /// (natives are imports under their own symbols), and defines its globals. Returns
-/// the functions' ids, indexed by `FuncIdx`.
-pub(crate) fn define_module<M: Module>(module: &mut M, m: &kir::Module, opts: Options) -> Result<Vec<FuncId>, String> {
+/// the functions' ids, indexed by `FuncIdx`. With `dump`, the named function's code is
+/// recorded in it as it is compiled.
+pub(crate) fn define_module<M: Module>(
+    module: &mut M,
+    m: &kir::Module,
+    opts: Options,
+    mut dump: Option<&mut dump::Dump>,
+) -> Result<Vec<FuncId>, String> {
     let cc = module.isa().default_call_conv();
     let ptr = module.target_config().pointer_type();
     let rt = rt::RtFuncs::declare(module)?;
@@ -58,9 +67,14 @@ pub(crate) fn define_module<M: Module>(module: &mut M, m: &kir::Module, opts: Op
     for (f, &id) in m.funcs.iter().zip(&ids).filter(|(f, _)| f.native.is_none()) {
         ctx.func = Function::with_name_signature(Default::default(), func::signature(f, cc, ptr));
         func::lower_func(module, &mut strings, &shared, &mut ctx.func, &mut fb_ctx, f)?;
+        let dumping = dump.as_ref().is_some_and(|d| d.name == f.name);
+        ctx.set_disasm(dumping);
         module
             .define_function(id, &mut ctx)
             .map_err(|e| format!("codegen failed for `{}`: {e:?}", f.name))?;
+        if let Some(d) = dump.as_deref_mut().filter(|_| dumping) {
+            d.record(&ctx);
+        }
         module.clear_context(&mut ctx);
     }
     Ok(ids)

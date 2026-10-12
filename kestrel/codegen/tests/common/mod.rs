@@ -72,3 +72,14 @@ pub fn run_captured(p: &JitProgram) -> String {
     call0::<()>(p, "main");
     String::from_utf8(kestrel_runtime::print::take_output()).expect("print writes UTF-8")
 }
+
+/// `src` compiled to KIR and optimised, as the driver does.
+pub fn optimized(src: &str) -> kestrel_kir::Module {
+    let (p, d) = parse(src);
+    assert!(d.is_empty(), "parse: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
+    let (t, d) = kestrel_check::check(&p);
+    assert!(d.is_empty(), "check: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
+    let mut m = kestrel_kir::lower(&p, &t.unwrap(), &LineIndex::new(src));
+    kestrel_kir::inline::inline_small(&mut m);
+    m
+}

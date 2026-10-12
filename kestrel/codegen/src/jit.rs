@@ -39,7 +39,7 @@ impl JitProgram {
             builder.symbol(name, addr);
         }
         let mut module = JITModule::new(builder);
-        let ids = define_module(&mut module, m, opts)?;
+        let ids = define_module(&mut module, m, opts, None)?;
         let exports = define_thunks(&mut module, m, &ids)?;
         let init = define_init_thunk(&mut module, m, &ids)?;
         module.finalize_definitions().map_err(|e| e.to_string())?;
