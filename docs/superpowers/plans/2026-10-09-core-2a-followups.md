@@ -10,7 +10,7 @@ Input for writing plans 2b and 2c.
 
 ## Do before or at the start of 2b
 
-Done in 2b-i: labelled arguments evaluate in source order; `func/mod.rs` split; parenthesised spans include the parens; KIR has `Place` + aggregates (struct layouts, return slots, field-by-field copies); compound assignment takes its type from the place; exclusivity works on place roots. Still open from this list: recursion depth limits, interned `Ty` ids for enums, `Diagnostic` labels, `match` arm newline note, `list`/`array`/`map` type constructors, thin KIR-shape tests.
+Done in 2b-i: labelled arguments evaluate in source order; `func/mod.rs` split; parenthesised spans include the parens; KIR has `Place` + aggregates (struct layouts, return slots, field-by-field copies); compound assignment takes its type from the place; exclusivity works on place roots. Recursion depth limits were done on 2026-10-17 (below). Still open from this list: interned `Ty` ids for enums, `Diagnostic` labels, `match` arm newline note, `list`/`array`/`map` type constructors, thin KIR-shape tests.
 
 
 - **Labelled arguments evaluate in parameter order, not source order** (`kir/src/lower/expr.rs` `call_parts`). The ignored test `labelled_arguments_evaluate_in_source_order` in `codegen/tests/jit.rs` documents the expected behaviour. The fix needs synthetic temporaries, and the locals list must be able to grow during lowering. Struct construction with labels will hit the same problem.
@@ -200,7 +200,6 @@ From `docs/superpowers/specs/2026-10-12-language-pass-1-design.md` (its "As buil
 **Moves (part A):**
 - A later "some paths" move of a local overwrites an earlier "every path" record, so a use after an already-reported error may say "may have been moved". Cosmetic.
 - After a reported loop error, a `for` loop's exit state is the plain entry state, so a later use isn't flagged again. The program is already rejected.
-- No tests yet for `break` or `continue` inside a `match` arm, inside `or`, or for a new value on one branch only. All were checked by hand.
 
 **Views (part B):**
 - Each `let ... else` view still gets an addressed KIR local that nothing uses (like `for` items).
@@ -208,11 +207,9 @@ From `docs/superpowers/specs/2026-10-12-language-pass-1-design.md` (its "As buil
 - `check_exclusive`'s doc comment doesn't mention the receiver case (`c.poke(var c)`).
 
 **Defaults and constants (part C):**
-- A default that builds the same default twice (`kids: [Node] = [Node(), Node()]`) reports the loop twice.
-- `let A = Arena()` with `mem: Arena = A` compiled before this pass and is refused now; the spec exempts only a direct `Arena()`.
 - A non-owning variant of an enum that has an owning variant (`E2.Plain(1)`) is reported as owning.
 - Defaults that allocate nothing but have a heap type (`Kit.Empty`, a struct holding only a string literal) still count as allocating.
-- Missing regression tests: a struct- or enum-valued default dangling in `arena { }`; `builds_owning`'s negatives (`[]`, `none`, a fieldless variant); cycles through an enum payload, an optional or a map.
+- Missing regression tests: `builds_owning`'s negatives (`[]`, `none`, a fieldless variant); cycles through an enum payload, an optional or a map.
 
 **File names (part E):**
 - No automated test for a native error from a built exe, the arena messages' file, the map-changed panic's file, an array literal's allocation, `LineIndex::file`, or the base name of `<builtin>/draw.kes`. All were run by hand and are correct.
@@ -221,7 +218,14 @@ From `docs/superpowers/specs/2026-10-12-language-pass-1-design.md` (its "As buil
 - The record layout assumes a 64-bit little-endian target.
 - `kestrel_rt_call_file` could point into freed JIT memory after a hot reload if window natives ever reach the Godot add-on. They can't today.
 
-**File sizes** (the 400-line guide): `check/src/body/mod.rs` is 397 lines, `check/src/collect.rs` 389, `kir/src/ir.rs` 405 and `runtime/src/map.rs` 494.
+**From the final review's fix round (2026-10-17):**
+- **Nested range loops compile slowly.** `for i from 0 to 1` nested 100 deep takes 0.6 s to `run` in a debug build, 200 deep 3.3 s, 400 deep 21 s, and 1,000 deep over 300 s; `kestrel check` takes 0.27 s on the 1,000 case, so the time is in lowering or codegen. Nested `while` loops are instant. Older than this pass; only generated code nests this deep.
+- **The depth limit is checked on big stacks only.** 1,000 levels run on the CLI's 256 MiB thread in a debug build. In the Godot add-on (Godot's own, smaller stack) only parentheses, sums and a 1,000-term function were tried by hand, not nested blocks or types, and no test runs a 1,000-level program on a default 2 MiB debug test thread.
+- After a too-deep error the parser drops its own later errors, but lexer errors later in the file (an unterminated string) are still reported.
+- A `let ... else` view over a loop item of a `let` list reports "it's inside `hs`" (the list), not the item it follows.
+- `let files =files` is missing a space (`driver/src/lib.rs:108`).
+
+**File sizes** (the 400-line guide): `check/src/body/mod.rs` is 397 lines, `check/src/body/call.rs` 391, `check/src/collect.rs` 389, `kir/src/ir.rs` 405 and `runtime/src/map.rs` 494.
 
 **Known limits, by design:**
 - Views over a `var` root still copy. They would need guards until the end of the block and on every write.
