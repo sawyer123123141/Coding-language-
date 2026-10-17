@@ -324,3 +324,15 @@ fn a_value_in_the_type_place_says_where_it_goes() {
         assert_eq!(errs_help(src), vec![(msg.clone(), None)], "{src}");
     }
 }
+
+#[test]
+fn nesting_too_deep_is_one_error_and_the_rest_of_the_file_is_skipped() {
+    let too_deep = "this expression nests more than 1,000 levels deep; split it into smaller parts with `let`";
+    let sum = |terms: usize| format!("main() {{\n    let a = )\n    print({})\n    let b = )\n}}\n", vec!["1"; terms].join(" + "));
+    // The error before it stays; the one after it isn't reported.
+    assert_eq!(errs(&sum(1001)), vec!["expected an expression, found `)`", too_deep]);
+    assert_eq!(errs(&sum(1000)), vec!["expected an expression, found `)`", "expected an expression, found `)`"]);
+    let ty = |levels: usize| format!("f(x: {}int{}) {{}}\nmain() {{}}\n", "[".repeat(levels), "]".repeat(levels));
+    assert_eq!(errs(&ty(1001)), vec!["this type nests more than 1,000 levels deep; simplify it"]);
+    assert_eq!(errs(&ty(1000)), Vec::<String>::new());
+}

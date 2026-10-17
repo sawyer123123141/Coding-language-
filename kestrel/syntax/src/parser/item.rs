@@ -119,7 +119,7 @@ impl Parser {
         owner: Option<&str>,
     ) -> PResult<FnDecl> {
         let (params, ret, _) = self.signature(owner)?;
-        let body = self.block()?;
+        let body = self.fn_body()?.0;
         let span = start.to(body.span);
         Ok(FnDecl { name, name_span, is_pure, is_pub, is_native: false, params, ret, body, span })
     }
@@ -331,22 +331,29 @@ impl Parser {
 
     pub(crate) fn type_expr(&mut self) -> PResult<TypeExpr> {
         let start = self.span();
-        let mut ty = if self.eat(&Tok::LBracket) {
-            let inner = self.type_expr()?;
-            let end = self.expect(&Tok::RBracket, "`]`")?;
+        let mut ty = if self.at(&Tok::LBracket) {
+            let (inner, end) = self.nested_type(|p| {
+                p.bump();
+                let inner = p.type_expr()?;
+                Ok((inner, p.expect(&Tok::RBracket, "`]`")?))
+            })?;
             TypeExpr { kind: TypeKind::Array(Box::new(inner)), span: start.to(end) }
         } else {
             let (name, span) = self.expect_ident("a type")?;
             let mut args = Vec::new();
             let mut end = span;
-            if self.eat(&Tok::LBracket) {
-                loop {
-                    args.push(self.type_expr()?);
-                    if !self.eat(&Tok::Comma) {
-                        break;
+            if self.at(&Tok::LBracket) {
+                (args, end) = self.nested_type(|p| {
+                    p.bump();
+                    let mut args = Vec::new();
+                    loop {
+                        args.push(p.type_expr()?);
+                        if !p.eat(&Tok::Comma) {
+                            break;
+                        }
                     }
-                }
-                end = self.expect(&Tok::RBracket, "`]`")?;
+                    Ok((args, p.expect(&Tok::RBracket, "`]`")?))
+                })?;
             }
             TypeExpr { kind: TypeKind::Named { name, args }, span: start.to(end) }
         };

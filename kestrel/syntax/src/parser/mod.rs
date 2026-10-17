@@ -1,3 +1,5 @@
+mod branch;
+mod depth;
 mod expr;
 mod item;
 mod stmt;
@@ -15,6 +17,16 @@ pub struct Parser {
     diags: Vec<Diagnostic>,
     next_expr: u32,
     next_bind: u32,
+    /// Constructs open around the current token, and type levels (see `depth`).
+    depth: u32,
+    type_depth: u32,
+    /// Each expression's height, by id from `first_expr` (see `depth`).
+    heights: Vec<u32>,
+    first_expr: u32,
+    /// Per block being parsed, innermost last: the height of the tallest thing in it so far.
+    block_heights: Vec<u32>,
+    /// Set when code nested too deep: how many diagnostics to keep (the rest came after it).
+    too_deep_at: Option<usize>,
 }
 
 impl Parser {
@@ -26,13 +38,25 @@ impl Parser {
     /// Like `new`, numbering expressions and bindings from these values
     /// (so several files can share one set of side tables).
     pub fn with_ids(toks: Vec<Token>, next_expr: u32, next_bind: u32) -> Self {
-        Parser { toks, pos: 0, diags: Vec::new(), next_expr, next_bind }
+        Parser {
+            toks,
+            pos: 0,
+            diags: Vec::new(),
+            next_expr,
+            next_bind,
+            depth: 0,
+            type_depth: 0,
+            heights: Vec::new(),
+            first_expr: next_expr,
+            block_heights: Vec::new(),
+            too_deep_at: None,
+        }
     }
 
     pub fn parse_program(mut self) -> (Program, Vec<Diagnostic>) {
         let items = self.items();
         let program = Program { items, expr_count: self.next_expr, bind_count: self.next_bind, builtin_ranges: Vec::new() };
-        (program, self.diags)
+        (program, self.finish_diags())
     }
 
     fn peek(&self) -> &Tok {
@@ -106,6 +130,12 @@ impl Parser {
     }
 
     fn expr_node(&mut self, kind: ExprKind, span: Span) -> Expr {
+        self.expr_node_holding(kind, span, 0)
+    }
+
+    /// `expr_node` for an expression that holds blocks (`if`, `match`): `inner` is their height.
+    fn expr_node_holding(&mut self, kind: ExprKind, span: Span, inner: u32) -> Expr {
+        self.note_height(&kind, span, inner);
         let id = ExprId(self.next_expr);
         self.next_expr += 1;
         Expr { id, kind, span }

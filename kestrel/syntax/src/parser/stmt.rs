@@ -4,7 +4,25 @@ use crate::span::Span;
 use crate::token::Tok;
 
 impl Parser {
+    /// A block inside another one: a level deeper (see `depth`).
     pub(crate) fn block(&mut self) -> PResult<Block> {
+        Ok(self.block_with_height()?.0)
+    }
+
+    /// `block`, and its height.
+    pub(crate) fn block_with_height(&mut self) -> PResult<(Block, u32)> {
+        self.nested(Self::fn_body)
+    }
+
+    /// A function's body: the outermost block, so not a level of its own. Also gives its height.
+    pub(crate) fn fn_body(&mut self) -> PResult<(Block, u32)> {
+        self.open_block();
+        let block = self.block_contents();
+        let h = self.close_block();
+        Ok((block?, h))
+    }
+
+    fn block_contents(&mut self) -> PResult<Block> {
         let start = self.expect(&Tok::LBrace, "`{`")?;
         let mut stmts = Vec::new();
         self.skip_newlines();

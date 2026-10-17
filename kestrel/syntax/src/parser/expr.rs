@@ -1,5 +1,5 @@
 use super::{PResult, Parser};
-use crate::ast::{Arg, BinaryOp, Block, Expr, ExprKind, InterpPart, MatchArm, Pattern, Stmt, UnaryOp};
+use crate::ast::{Arg, BinaryOp, Expr, ExprKind, InterpPart, UnaryOp};
 use crate::span::Span;
 use crate::token::{StrPart, Tok, Token};
 
@@ -122,7 +122,7 @@ impl Parser {
             _ => return self.postfix(),
         };
         self.bump();
-        let inner = self.unary()?;
+        let inner = self.nested(Self::unary)?;
         let span = start.to(inner.span);
         Ok(self.expr_node(ExprKind::Unary { op, expr: Box::new(inner) }, span))
     }
@@ -144,11 +144,16 @@ impl Parser {
         toks.push(Token { tok: Tok::RBrace, span: close });
         toks.push(eof);
         let saved = (std::mem::replace(&mut self.toks, toks), std::mem::replace(&mut self.pos, 0));
-        let result = self.expr().and_then(|e| {
-            self.expect(&Tok::RBrace, "`}` after the expression")?;
+        let result = self.nested(|p| {
+            let e = p.expr()?;
+            p.expect(&Tok::RBrace, "`}` after the expression")?;
             Ok(e)
         });
         (self.toks, self.pos) = saved;
+        if self.stopped() {
+            // Too deep inside the string: the rest of the file is skipped too.
+            self.pos = self.toks.len() - 1;
+        }
         result
     }
 
@@ -156,9 +161,12 @@ impl Parser {
     fn postfix(&mut self) -> PResult<Expr> {
         let mut e = self.primary()?;
         loop {
-            if self.eat(&Tok::LBracket) {
-                let index = self.expr()?;
-                let end = self.expect(&Tok::RBracket, "`]`")?;
+            if self.at(&Tok::LBracket) {
+                let (index, end) = self.nested(|p| {
+                    p.bump();
+                    let index = p.expr()?;
+                    Ok((index, p.expect(&Tok::RBracket, "`]`")?))
+                })?;
                 let span = e.span.to(end);
                 e = self.expr_node(ExprKind::Index { base: Box::new(e), index: Box::new(index) }, span);
                 continue;
@@ -211,23 +219,30 @@ impl Parser {
                 return Ok(self.expr_node(ExprKind::Ident(name), span));
             }
             Tok::LParen => {
-                self.bump();
-                let mut inner = self.expr()?;
-                let end = self.expect(&Tok::RParen, "`)`")?;
-                inner.span = span.to(end);
-                return Ok(inner);
+                return self.nested(|p| {
+                    p.bump();
+                    let mut inner = p.expr()?;
+                    let end = p.expect(&Tok::RParen, "`)`")?;
+                    inner.span = span.to(end);
+                    Ok(inner)
+                });
             }
-            Tok::LBrace => return self.map_lit(span),
+            Tok::LBrace => {
+                let (entries, end) = self.nested(Self::map_entries)?;
+                return Ok(self.expr_node(ExprKind::MapLit(entries), span.to(end)));
+            }
             Tok::LBracket => {
-                self.bump();
-                let mut items = Vec::new();
-                while !self.at(&Tok::RBracket) {
-                    items.push(self.expr()?);
-                    if !self.eat(&Tok::Comma) {
-                        break;
+                let (items, end) = self.nested(|p| {
+                    p.bump();
+                    let mut items = Vec::new();
+                    while !p.at(&Tok::RBracket) {
+                        items.push(p.expr()?);
+                        if !p.eat(&Tok::Comma) {
+                            break;
+                        }
                     }
-                }
-                let end = self.expect(&Tok::RBracket, "`]` or `,`")?;
+                    Ok((items, p.expect(&Tok::RBracket, "`]` or `,`")?))
+                })?;
                 return Ok(self.expr_node(ExprKind::ArrayLit(items), span.to(end)));
             }
             Tok::SelfKw => {
@@ -252,7 +267,8 @@ impl Parser {
 
     /// `{k: v, ...}`. A `{` never starts a block expression, so here it's a
     /// map. Newlines inside it don't end anything.
-    fn map_lit(&mut self, start: Span) -> PResult<Expr> {
+    /// Returns the entries and the span of the closing `}`.
+    fn map_entries(&mut self) -> PResult<(Vec<(Expr, Expr)>, Span)> {
         self.bump();
         self.skip_newlines();
         let mut entries = Vec::new();
@@ -268,7 +284,7 @@ impl Parser {
             self.skip_newlines();
         }
         let end = self.expect(&Tok::RBrace, "`}` or `,`")?;
-        Ok(self.expr_node(ExprKind::MapLit(entries), start.to(end)))
+        Ok((entries, end))
     }
 
     /// `array[int](n)`: type arguments in brackets, then call arguments.
@@ -292,6 +308,10 @@ impl Parser {
 
     /// `(arg, ...)`; returns the arguments and the span of the closing `)`.
     fn call_args(&mut self) -> PResult<(Vec<Arg>, Span)> {
+        self.nested(Self::call_args_inside)
+    }
+
+    fn call_args_inside(&mut self) -> PResult<(Vec<Arg>, Span)> {
         self.expect(&Tok::LParen, "`(`")?;
         let mut args = Vec::new();
         while !self.at(&Tok::RParen) {
@@ -317,64 +337,5 @@ impl Parser {
         let is_var = self.eat(&Tok::Var);
         let value = self.expr()?;
         Ok(Arg { label, is_var, span: start.to(value.span), value })
-    }
-
-    /// `match value { Variant { ... } Variant name { ... } else { ... } }`
-    fn match_expr(&mut self) -> PResult<Expr> {
-        let start = self.expect(&Tok::Match, "`match`")?;
-        let scrutinee = self.expr()?;
-        self.expect(&Tok::LBrace, "`{`")?;
-        let mut arms = Vec::new();
-        loop {
-            self.skip_newlines();
-            if self.at(&Tok::RBrace) || self.at(&Tok::Eof) {
-                break;
-            }
-            match self.match_arm() {
-                Ok(arm) => arms.push(arm),
-                Err(()) => self.recover_stmt(),
-            }
-        }
-        let end = self.expect(&Tok::RBrace, "`}`")?;
-        Ok(self.expr_node(ExprKind::Match { scrutinee: Box::new(scrutinee), arms }, start.to(end)))
-    }
-
-    fn match_arm(&mut self) -> PResult<MatchArm> {
-        let start = self.span();
-        let pattern = if self.eat(&Tok::Else) {
-            Pattern::Else(start)
-        } else {
-            let (name, name_span) = self.expect_ident("a variant name or `else`")?;
-            let binding = match self.peek().clone() {
-                Tok::Ident(b) => {
-                    let span = self.bump().span;
-                    Some(self.binding(b, span))
-                }
-                _ => None,
-            };
-            Pattern::Variant { name, name_span, binding }
-        };
-        let body = self.block()?;
-        Ok(MatchArm { span: start.to(body.span), pattern, body })
-    }
-
-    pub(crate) fn if_expr(&mut self) -> PResult<Expr> {
-        let start = self.expect(&Tok::If, "`if`")?;
-        let cond = self.expr()?;
-        let then_block = self.block()?;
-        let else_block = if self.eat(&Tok::Else) {
-            if self.at(&Tok::If) {
-                let nested = self.if_expr()?;
-                let span = nested.span;
-                Some(Block { stmts: vec![Stmt::Expr(nested)], span })
-            } else {
-                Some(self.block()?)
-            }
-        } else {
-            None
-        };
-        let end = else_block.as_ref().map_or(then_block.span, |b| b.span);
-        let kind = ExprKind::If { cond: Box::new(cond), then_block, else_block };
-        Ok(self.expr_node(kind, start.to(end)))
     }
 }
