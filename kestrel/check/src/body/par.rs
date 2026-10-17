@@ -75,6 +75,7 @@ impl<'a> BodyChecker<'a> {
     /// A view (a loop element or `match` binding) declared over `of`: it
     /// belongs to an iteration when `of` does.
     pub(crate) fn note_view(&mut self, view: LocalId, of: &Expr) {
+        self.note_remove_view(view, of);
         let Some(key) = self.path_key(of) else { return };
         for i in 0..self.par.len() {
             if self.owned_by(&self.par[i], key.root) {

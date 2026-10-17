@@ -222,3 +222,66 @@ fn a_discarded_pop_of_an_owning_item_is_held_and_dropped() {
     let frees: Vec<_> = all_stmts(main).into_iter().filter(|s| matches!(s, Stmt::FreeArena(p) if p.path.first() == Some(&Proj::Payload))).collect();
     assert_eq!(frees.len(), 1, "{:#?}", main.body);
 }
+
+/// The statements of `f`'s loops' bodies and their nested statements, with the `ForRange` that holds a `List(Compact)` after it.
+fn removing_loop(f: &Func) -> (&Vec<Stmt>, usize) {
+    let at = f.body.iter().position(|s| matches!(s, Stmt::List(ListOp::Compact, ..))).expect("a compaction after the loop");
+    let Stmt::ForRange { body, .. } = &f.body[at - 1] else { panic!("{:#?}", f.body) };
+    (body, at)
+}
+
+#[test]
+fn remove_of_an_owning_item_drops_it_once() {
+    let m = lower_src(&format!("{POOLS}main() {{\n var ps: list[Pool] = []\n ps.add(Pool(n: 1))\n for p in ps {{ if p.n > 0 {{ remove p }} }}\n}}\n"));
+    let main = func(&m, "main");
+    let frees = all_stmts(main).into_iter().filter(|s| matches!(s, Stmt::FreeArena(_))).count();
+    // One for the removed item; the list's own drop at the end of `main` is a call to the drop helper.
+    assert_eq!(frees, 1, "{:#?}", main.body);
+    // The item is moved out of its slot (zeroing it) before it is dropped.
+    let moved = all_stmts(main).into_iter().any(|s| {
+        matches!(s, Stmt::Let(_, Expr { kind: ExprKind::Move(p), .. }) if matches!(p.path[..], [Proj::Index { checked: true, .. }]))
+    });
+    assert!(moved, "{:#?}", main.body);
+}
+
+#[test]
+fn a_removing_loop_reindexes_its_item_and_compacts_after() {
+    let m = lower_src("main() {\n var xs: list[int] = [1, 2, 3]\n for x in xs { if x == 2 { remove x } }\n print(xs)\n}\n");
+    let main = func(&m, "main");
+    let (body, at) = removing_loop(main);
+    assert!(!all_stmts(main).iter().any(|s| matches!(s, Stmt::Bind(..))), "{:#?}", main.body);
+    // Each pass starts with `removed = false` and ends with the keep step.
+    assert!(matches!(&body[0], Stmt::Assign(_, Expr { kind: ExprKind::Bool(false), .. })), "{body:#?}");
+    let Stmt::List(_, list, args) = &main.body[at] else { unreachable!() };
+    assert_eq!((list.root, list.path.len(), args.len()), (LocalIdx(0), 0, 2));
+}
+
+#[test]
+fn every_way_out_of_a_removing_loop_compacts_the_list() {
+    let src = "f(var xs: list[int]) -> int {\n for x in xs {\n  if x == 3 { return 3 }\n  if x == 2 { remove x; break }\n  for k from 0 to 2 { if k == 1 { break } }\n }\n 0\n}\nmain() {}\n";
+    let m = lower_src(src);
+    let f = func(&m, "f");
+    let compacts = all_stmts(f).into_iter().filter(|s| matches!(s, Stmt::List(ListOp::Compact, ..))).count();
+    // After the loop (its end and `break`), and before the `return`.
+    assert_eq!(compacts, 2, "{:#?}", f.body);
+}
+
+#[test]
+fn promote_leaves_a_removing_loops_item_in_memory() {
+    let src = "struct P {\n x: int\n y: int\n}\nmain() {\n var ps: list[P] = [P(x: 1, y: 2), P(x: 3, y: 4)]\n for p in ps {\n  p.x += 1\n  if p.y > 2 { remove p }\n }\n print(ps)\n}\n";
+    let (p, d) = kestrel_syntax::parse(src);
+    assert!(d.is_empty());
+    let (t, d) = kestrel_check::check(&p);
+    assert!(d.is_empty(), "{:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
+    let mut m = lower(&p, &t.unwrap(), &LineIndex::new(src));
+    optimize(&mut m);
+    let main = func(&m, "main");
+    let (body, _) = removing_loop(main);
+    assert!(!all_stmts(main).iter().any(|s| matches!(s, Stmt::Bind(..))), "{:#?}", main.body);
+    // `p.x += 1` writes the list's memory directly: nothing caches the item in a local.
+    let mut writes = 0;
+    kestrel_kir::visit::places(body, &mut |p, written| {
+        writes += usize::from(written && matches!(p.path[..], [Proj::Index { .. }, Proj::Field(0)]));
+    });
+    assert!(writes >= 1, "{body:#?}");
+}

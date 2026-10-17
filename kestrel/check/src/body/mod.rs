@@ -14,6 +14,7 @@ mod nested;
 mod par;
 mod place;
 mod regions;
+mod remove;
 mod structs;
 
 pub(crate) use consts::{check_consts, is_const_expr};
@@ -67,6 +68,8 @@ pub(crate) struct BodyChecker<'a> {
     par: Vec<par::ParBody>,
     /// Enclosing `for ... in` loops over lists and arrays that are places, outermost first.
     for_in_lists: Vec<lists::LoopList>,
+    /// Enclosing `for ... in` loops, for `remove`.
+    removing: remove::Removing,
 }
 
 pub(crate) fn check_fn(program: &Program, fn_id: FnId, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
@@ -121,6 +124,7 @@ impl<'a> BodyChecker<'a> {
             let_guards,
             par,
             for_in_lists,
+            removing: remove::Removing::default(),
         }
     }
 
@@ -374,28 +378,11 @@ impl<'a> BodyChecker<'a> {
                 }
                 Ty::Never
             }
-            Stmt::Expr(e) => self.check_discarded(e),
-        }
-    }
-
-    /// An expression whose value nobody uses.
-    fn check_discarded(&mut self, e: &Expr) -> Ty {
-        let ty = match &e.kind {
-            ExprKind::If { .. } => self.check_if(e, Expect::Discard),
-            ExprKind::Match { .. } => self.check_match(e, Expect::Discard),
-            ExprKind::Call { .. } | ExprKind::MethodCall { .. } => self.check_discarded_call(e),
-            _ => {
-                let ty = self.check_expr(e, None);
-                if ty != Ty::Error {
-                    self.error(e.span, "this line has no effect; did you mean to continue the line above?");
-                }
-                ty
+            Stmt::Remove { name, name_span, span } => {
+                self.check_remove(name, *name_span, *span);
+                Ty::Unit
             }
-        };
-        if ty == Ty::Never {
-            Ty::Never
-        } else {
-            Ty::Unit
+            Stmt::Expr(e) => self.check_discarded(e),
         }
     }
 }

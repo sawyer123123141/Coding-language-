@@ -51,4 +51,9 @@ pub enum ListOp {
     /// `[index, value]`: opens a slot at `index` (`index == len` adds at the end), moving the
     /// later ones up, and stores `value` in it. `value` is evaluated before anything moves.
     Insert,
+    /// `[kept, next]`: finishes a loop that removed items as it went (see `lower::remove`). Items
+    /// `[next, len)`, which the loop didn't reach, move down to `kept`, the slots they leave are
+    /// zeroed, and the length becomes `kept` plus their count. When `next` is past the length (the
+    /// list shrank meanwhile) the length becomes at most `kept`.
+    Compact,
 }

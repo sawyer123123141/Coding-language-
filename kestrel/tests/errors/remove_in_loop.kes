@@ -1,0 +1,92 @@
+struct World {
+    bricks: list[int]
+    score: int = 0
+}
+
+enum Shape {
+    Circle { r: int }
+    Dot
+}
+
+make() -> list[int] { [1, 2] }
+
+takes(w: World) {}
+
+main() {
+    let n = 3
+    remove n
+    var arr = [1, 2]
+    for a in arr { remove a }
+    var m = map[int, int]()
+    for k, v in m { remove v }
+    var ps: list[int] = [1, 2]
+    par for p in ps { remove p }
+    let fixed: list[int] = [1]
+    for f in fixed { remove f }
+    for t in make() { remove t }
+    var xs: list[int] = [1, 2, 3]
+    for a in xs { for b in xs { remove b } }
+    for x in xs { remove x; print(x) }
+    for x in xs { if x > 1 { remove x }; print(x) }
+    for x in xs { remove x; remove x }
+    var ys: list[int] = [1]
+    for y in ys { remove y; y = 5 }
+    for x in xs { var k = 0; while k < 3 { remove x; k += 1 } }
+    var shapes: list[Shape] = [Shape.Circle(r: 1), Shape.Dot]
+    for s in shapes {
+        match s {
+            Circle c { remove s }
+            Dot { }
+        }
+    }
+    for x in xs { print(xs.len); remove x }
+    for x in xs { print(xs[0]); remove x }
+    var w = World(bricks: [1, 2])
+    for b in w.bricks { takes(w); w.score += 1; remove b }
+}
+
+ro(ys: list[int]) {
+    for y in ys { remove y }
+}
+
+struct Pool {
+    mem: Arena = Arena()
+}
+
+pools(var ps: list[Pool]) {
+    for p in ps {
+        in p.mem { remove p }
+    }
+}
+
+struct Brick {
+    hits: list[int]
+}
+
+bricks(var bs: list[Brick]) {
+    for b in bs {
+        for h in b.hits {
+            if h > 3 { remove b; print(h); break }
+        }
+    }
+}
+
+// error 17: `remove` takes the item of a `for ... in` loop over a list; `n` isn't one
+// error 19: arrays have a fixed length; use a `list[int]` if items come and go
+// error 21: `remove` works in loops over a list; for a map, use `m.remove(k)`
+// error 23: `remove` can't be used in a `par for`: its iterations run at the same time
+// error 25: can't remove from `fixed`: it was declared with `let`
+// error 26: `remove` needs a loop over a list in a variable; store the list in a `var` first
+// error 28: can't remove from `xs` here: an outer loop is also looping over it
+// error 29: `x` was removed earlier
+// error 30: `x` may have been removed earlier
+// error 31: `x` was removed earlier
+// error 33: `y` was removed earlier
+// error 34: `x` is removed inside a loop, so the next pass would remove it again; leave the loop with `break` right after removing it
+// error 38: can't change `s` here: this `match` arm's `c` reads from it
+// error 42: this loop removes items from `xs`, so its items move while it runs; use the loop's item (`x`), or use `xs` after the loop
+// error 43: this loop removes items from `xs`, so its items move while it runs; use the loop's item (`x`), or use `xs` after the loop
+// error 45: this loop removes items from `w.bricks`, so its items move while it runs; use the loop's item (`b`), or use `w.bricks` after the loop
+// error 49: can't remove from parameter `ys`: it isn't `var`
+// error 58: can't remove `p` here: this `in` block is putting memory in `p`'s arena
+// error 69: `h` reads from `b`, which was removed earlier, so it can't be used here

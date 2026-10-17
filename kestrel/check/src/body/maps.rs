@@ -143,20 +143,21 @@ impl<'a> BodyChecker<'a> {
             self.t.locked_map_loops.insert(iter.id);
         }
         self.scopes.push(HashMap::new());
-        match key {
+        let item = match key {
             Some(key) => {
                 self.declare(key, k, false, false, false);
                 let value = self.declare(var, v, changeable, false, false);
                 self.t.locals[value.0 as usize].alias = root;
                 self.views.insert(value);
                 self.note_view(value, iter);
+                value
             }
-            None => {
-                self.declare(var, k, false, false, false);
-            }
-        }
+            None => self.declare(var, k, false, false, false),
+        };
+        self.enter_item_loop(item, super::remove::Over::Map, iter, body);
         let entry = self.moved.clone();
         self.loop_body(entry.clone(), Some(entry), body);
+        self.leave_item_loop();
         self.scopes.pop();
     }
 }

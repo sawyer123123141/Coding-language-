@@ -65,6 +65,14 @@ impl<'a> BodyChecker<'a> {
             _ => None,
         };
         let was = reinit.and_then(|l| self.moved.remove(&l));
+        // A removed loop item's slot is gone: assigning doesn't give it back, and naming it is a use.
+        let (reinit, was) = match (reinit, was) {
+            (Some(l), Some(at)) if at.removed => {
+                self.moved.insert(l, at);
+                (None, None)
+            }
+            other => other,
+        };
         let target_ty = self.check_expr(target, None);
         if let (Some(l), Some(at)) = (reinit, was) {
             self.moved.insert(l, at);

@@ -157,6 +157,8 @@ pub enum Stmt {
     Break(Span),
     Continue(Span),
     Return { value: Option<Expr>, span: Span },
+    /// `remove b`: removes the current item `b` of a `for b in xs` loop over a list.
+    Remove { name: String, name_span: Span, span: Span },
     Expr(Expr),
 }
 
@@ -349,7 +351,8 @@ impl Stmt {
             | Stmt::ForIn { span, .. }
             | Stmt::Arena { span, .. }
             | Stmt::In { span, .. }
-            | Stmt::Return { span, .. } => *span,
+            | Stmt::Return { span, .. }
+            | Stmt::Remove { span, .. } => *span,
             Stmt::Break(span) | Stmt::Continue(span) => *span,
             Stmt::Expr(e) => e.span,
         }

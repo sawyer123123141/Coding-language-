@@ -1,0 +1,97 @@
+// env: KESTREL_ARENA_COUNT=1
+// expect: [2, 4]
+// expect: [1, 3, 5]
+// expect: [10, 30, 50]
+// expect: [1, 2, 4, 5]
+// expect: [3, 4, 5]
+// expect: [3, 4, 5]
+// expect: []
+// expect: [1, 5]
+// expect-stderr: arenas alive at exit: 0
+enum Kind {
+    Soft
+    Hard { hp: int }
+}
+
+struct Pool {
+    mem: Arena = Arena()
+    n: int
+    kind: Kind = Kind.Soft
+}
+
+fill(var ps: list[Pool], count: int) {
+    for i from 1 to count + 1 {
+        if i % 2 == 0 {
+            ps.add(Pool(n: i, kind: Kind.Hard(hp: i)))
+        } else {
+            ps.add(Pool(n: i))
+        }
+    }
+}
+
+ns(ps: list[Pool]) -> list[int] {
+    var out: list[int] = []
+    for p in ps { out.add(p.n) }
+    out
+}
+
+drop_until(var ps: list[Pool], stop: int) {
+    for p in ps {
+        if p.n == stop { return }
+        remove p
+    }
+}
+
+main() {
+    var a: list[Pool] = []
+    fill(var a, 5)
+    for p in a { if p.n % 2 == 1 { remove p } }
+    print(ns(a))
+    var b: list[Pool] = []
+    fill(var b, 5)
+    for p in b {
+        match p.kind {
+            Hard { remove p }
+            Soft { }
+        }
+    }
+    print(ns(b))
+    var c: list[Pool] = []
+    fill(var c, 5)
+    for p in c {
+        if p.n % 2 == 0 { remove p; continue }
+        p.n *= 10
+    }
+    print(ns(c))
+    var d: list[Pool] = []
+    fill(var d, 5)
+    for p in d { if p.n == 3 { remove p; break } }
+    print(ns(d))
+    var e: list[Pool] = []
+    fill(var e, 5)
+    drop_until(var e, 3)
+    print(ns(e))
+    var f: list[Pool] = []
+    fill(var f, 5)
+    for p in f {
+        for k from 0 to 3 {
+            if k == p.n { remove p; break }
+        }
+    }
+    print(ns(f))
+    var g: list[Pool] = []
+    fill(var g, 5)
+    for p in g { remove p }
+    print(ns(g))
+    var h: list[Pool] = []
+    fill(var h, 5)
+    for p in h {
+        match p.kind {
+            Hard h2 { if h2.hp > 0 { p.n += 100 } }
+            Soft { }
+        }
+        if p.n > 100 { remove p; continue }
+        if p.n == 3 { remove p }
+    }
+    print(ns(h))
+}

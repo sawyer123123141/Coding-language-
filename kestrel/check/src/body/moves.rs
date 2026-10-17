@@ -18,15 +18,19 @@ use crate::ty::Ty;
 pub(crate) struct MoveAt {
     pub(crate) span: Span,
     pub(crate) every: bool,
+    /// A loop item taken out of its list by `remove`, rather than a moved variable.
+    pub(crate) removed: bool,
 }
 
 /// The owning locals that may have been moved at a point in the code.
 pub(crate) type Moved = HashMap<LocalId, MoveAt>;
 
-/// A loop being checked: the state where it starts, and the state at each of its `break`s.
+/// A loop being checked: the state where it starts, and the state at each of its `break`s. A
+/// `for ... in` loop's item may be removed: each pass has a new one.
 pub(crate) struct LoopMoves {
     entry: Moved,
     breaks: Vec<Moved>,
+    item: Option<LocalId>,
 }
 
 /// The state where paths meet: a local is moved if some path moved it, and moved on every
@@ -72,8 +76,14 @@ impl<'a> BodyChecker<'a> {
     /// state after the condition ran), or `None` when only a `break` leaves. Returns whether a
     /// `break` leaves the loop.
     pub(crate) fn loop_body(&mut self, entry: Moved, exit_at_start: Option<Moved>, body: &Block) -> bool {
+        self.item_loop_body(None, entry, exit_at_start, body)
+    }
+
+    /// `loop_body` for a `for ... in` loop whose item is `item`: removing it doesn't stop the loop
+    /// going around, since each pass has a new item.
+    pub(crate) fn item_loop_body(&mut self, item: Option<LocalId>, entry: Moved, exit_at_start: Option<Moved>, body: &Block) -> bool {
         self.loop_breaks.push(false);
-        self.loop_moves.push(LoopMoves { entry, breaks: Vec::new() });
+        self.loop_moves.push(LoopMoves { entry, breaks: Vec::new(), item });
         if self.check_block(body, Expect::Discard) != Ty::Never {
             self.back_edge();
         }
@@ -100,20 +110,29 @@ impl<'a> BodyChecker<'a> {
     pub(crate) fn back_edge(&mut self) {
         let Some(frame) = self.loop_moves.last() else { return };
         let depth = self.loop_breaks.len();
-        let mut gone: Vec<(LocalId, Span)> = self
+        // The loop's own item is a new one next time around, removed or not.
+        if let Some(item) = frame.item {
+            self.moved.remove(&item);
+        }
+        let mut gone: Vec<(LocalId, MoveAt)> = self
             .moved
             .iter()
             .filter(|(l, _)| !frame.entry.contains_key(l))
             .filter(|(l, _)| self.local_ctx.get(l).is_some_and(|&(_, loops)| loops < depth))
-            .map(|(&l, at)| (l, at.span))
+            .map(|(&l, &at)| (l, at))
             .collect();
-        gone.sort_by_key(|&(_, span)| span.start);
-        for (l, span) in gone {
+        gone.sort_by_key(|&(_, at)| at.span.start);
+        for (l, MoveAt { span, removed, .. }) in gone {
             // An inner loop may have reported this move already.
             if !self.loop_move_errors.insert(span) {
                 continue;
             }
             let name = self.t.local(l).name.clone();
+            if removed {
+                let msg = format!("`{name}` is removed inside a loop, so the next pass would remove it again; leave the loop with `break` right after removing it");
+                self.error(span, msg);
+                continue;
+            }
             // A `par for` body can't `return`; an ordinary loop inside it can still `break`.
             let leave = if self.par.is_empty() { "(`break` or `return`)" } else { "with `break`" };
             self.error_help(
@@ -192,7 +211,7 @@ impl<'a> BodyChecker<'a> {
                         "declare it inside the loop, so each iteration has its own",
                     );
                 } else {
-                    self.moved.insert(l, MoveAt { span: v.span, every });
+                    self.moved.insert(l, MoveAt { span: v.span, every, removed: false });
                     self.t.moves.insert(v.id);
                 }
             }

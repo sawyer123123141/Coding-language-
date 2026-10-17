@@ -19,6 +19,9 @@ pub(crate) struct Scope {
     /// A loop over a map: leaving it unlocks the map, restoring the lock
     /// count saved in the local.
     unlock: Option<(Place, LocalIdx)>,
+    /// Runs last on every way out: the end of a loop over a list that removes its item compacts
+    /// it (see `remove`).
+    finish: Vec<Stmt>,
 }
 
 impl<'a> FnLowerer<'a> {
@@ -36,6 +39,7 @@ impl<'a> FnLowerer<'a> {
             let saved = Expr { kind: ExprKind::Load(Place::local(*saved)), ty: KTy::I64, line: 0 };
             out.push(Stmt::MapUnlock(map.clone(), saved));
         }
+        out.extend(s.finish.iter().cloned());
         out
     }
 
@@ -47,6 +51,16 @@ impl<'a> FnLowerer<'a> {
         let stmts = lower(self);
         self.scopes.pop().expect("scopes balance");
         stmts
+    }
+
+    /// Lowers `lower` inside a scope whose way out runs `finish`. Only a `return` takes it: a
+    /// `break` or `continue` stops at a loop inside. The caller runs `finish` where the normal way
+    /// out arrives.
+    pub(crate) fn guarded<T>(&mut self, finish: Vec<Stmt>, lower: impl FnOnce(&mut Self) -> T) -> T {
+        self.scopes.push(Scope { finish, ..Scope::default() });
+        let lowered = lower(self);
+        self.scopes.pop().expect("scopes balance");
+        lowered
     }
 
     /// Cleanups for jumping out of every scope up to the innermost loop
@@ -63,8 +77,8 @@ impl<'a> FnLowerer<'a> {
         out
     }
 
-    fn scoped_block(&mut self, block: &ast::Block, arena: Option<bool>, is_loop: bool) -> Vec<Stmt> {
-        self.scopes.push(Scope { owning: Vec::new(), arena, is_loop, unlock: None });
+    fn scoped_block(&mut self, block: &ast::Block, scope: Scope) -> Vec<Stmt> {
+        self.scopes.push(scope);
         let mut out = Vec::new();
         for s in &block.stmts {
             self.stmt(s, &mut out);
@@ -75,11 +89,17 @@ impl<'a> FnLowerer<'a> {
     }
 
     pub(crate) fn block_stmts(&mut self, block: &ast::Block) -> Vec<Stmt> {
-        self.scoped_block(block, None, false)
+        self.scoped_block(block, Scope::default())
     }
 
     pub(crate) fn loop_block(&mut self, block: &ast::Block) -> Vec<Stmt> {
-        self.scoped_block(block, None, true)
+        self.scoped_block(block, Scope { is_loop: true, ..Scope::default() })
+    }
+
+    /// A loop body that runs `finish` on every way out of each pass: its end, `continue`, `break`
+    /// and `return`.
+    pub(crate) fn loop_block_finishing(&mut self, block: &ast::Block, finish: Vec<Stmt>) -> Vec<Stmt> {
+        self.scoped_block(block, Scope { is_loop: true, finish, ..Scope::default() })
     }
 
     /// A block used as a value: its statements and its tail value, which is
@@ -131,7 +151,7 @@ impl<'a> FnLowerer<'a> {
         let place = arena.map(|a| self.place_or_temp(a, out, true));
         let free = place.is_none();
         out.push(Stmt::PushArena(place));
-        let inner = self.scoped_block(body, Some(free), false);
+        let inner = self.scoped_block(body, Scope { arena: Some(free), ..Scope::default() });
         out.extend(inner);
     }
 

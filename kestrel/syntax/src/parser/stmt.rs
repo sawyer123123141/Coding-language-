@@ -90,6 +90,12 @@ impl Parser {
                 let span = value.as_ref().map_or(start, |v| start.to(v.span));
                 Ok(Stmt::Return { value, span })
             }
+            // `remove b`: `remove` isn't a keyword, so only a name right after it makes this statement.
+            Tok::Ident(kw) if kw == "remove" && matches!(self.peek_at(1), Tok::Ident(_)) => {
+                self.bump();
+                let (name, name_span) = self.expect_ident("a loop item's name")?;
+                Ok(Stmt::Remove { name, name_span, span: start.to(name_span) })
+            }
             _ => self.expr_or_assign(),
         }
     }

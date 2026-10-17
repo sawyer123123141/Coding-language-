@@ -12,6 +12,7 @@ mod map_helpers;
 mod maps;
 mod matching;
 mod par;
+mod remove;
 mod scopes;
 mod temps;
 mod vector;
@@ -85,6 +86,8 @@ pub(crate) struct FnLowerer<'a> {
     scratch_results: HashSet<LocalIdx>,
     /// The reference local of each heap constant this function uses (see `consts`).
     const_locals: HashMap<ConstId, LocalIdx>,
+    /// Enclosing loops that remove their item, innermost last (see `remove`).
+    removing: Vec<remove::RemoveLoop>,
     helpers: &'a mut Helpers,
 }
 
@@ -93,7 +96,23 @@ impl<'a> FnLowerer<'a> {
         let (local_map, locals, bindings, elems) = (HashMap::new(), Vec::new(), HashMap::new(), HashMap::new());
         let (origins, scopes) = (HashMap::new(), Vec::new());
         let (scratch_results, const_locals) = (HashSet::new(), HashMap::new());
-        FnLowerer { program, t, lines, fn_id, local_map, locals, bindings, elems, origins, scopes, scratch_results, const_locals, helpers }
+        let removing = Vec::new();
+        FnLowerer {
+            program,
+            t,
+            lines,
+            fn_id,
+            local_map,
+            locals,
+            bindings,
+            elems,
+            origins,
+            scopes,
+            scratch_results,
+            const_locals,
+            removing,
+            helpers,
+        }
     }
 
     fn lower(mut self) -> Func {
@@ -242,6 +261,7 @@ impl<'a> FnLowerer<'a> {
             ast::Stmt::Break(_) => return self.jump(Stmt::Break, out),
             ast::Stmt::Continue(_) => return self.jump(Stmt::Continue, out),
             ast::Stmt::Return { value, .. } => return self.return_stmt(value.as_ref(), out),
+            ast::Stmt::Remove { span, .. } => return self.remove_stmt(*span, out),
             ast::Stmt::Expr(e) => return self.expr_stmt(e, out),
         };
         out.push(lowered);

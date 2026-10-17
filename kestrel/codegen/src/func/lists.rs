@@ -9,8 +9,9 @@ use super::collections::LEN;
 use super::FuncLowerer;
 
 impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
-    /// `xs.remove_at(i)`, `xs.insert(i, v)` and `xs.clear()`. The arguments are evaluated first (`v` may read
-    /// `xs`, and `i` may be any integer type), then the runtime moves the items.
+    /// `xs.remove_at(i)`, `xs.insert(i, v)`, `xs.clear()`, and the compaction that ends a loop that
+    /// removes items. The arguments are evaluated first (`v` may read `xs`, and `i` may be any
+    /// integer type), then the runtime moves the items.
     pub(crate) fn list_op(&mut self, op: kir::ListOp, list: &Place, args: &[kir::Expr]) -> Result<(), String> {
         let ty = self.place_ty(list);
         let (size, align) = self.elem_size_align(ty);
@@ -18,6 +19,14 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             let header = self.place_addr(list)?;
             let size_v = self.b.ins().iconst(types::I64, size);
             self.call_id(self.shared.rt.list_clear, &[header, size_v]);
+            return Ok(());
+        }
+        if op == kir::ListOp::Compact {
+            let kept = self.expr(&args[0])?;
+            let next = self.expr(&args[1])?;
+            let header = self.place_addr(list)?;
+            let size_v = self.b.ins().iconst(types::I64, size);
+            self.call_id(self.shared.rt.list_compact, &[header, kept, next, size_v]);
             return Ok(());
         }
         let at = self.expr(&args[0])?;
@@ -29,7 +38,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 let header = self.place_addr(list)?;
                 self.call_id(self.shared.rt.list_remove, &[header, at, size_v, l, f]);
             }
-            kir::ListOp::Clear => unreachable!("handled above"),
+            kir::ListOp::Clear | kir::ListOp::Compact => unreachable!("handled above"),
             kir::ListOp::Insert => {
                 let value = &args[1];
                 let v = if value.ty.is_aggregate() {

@@ -1,22 +1,19 @@
 //! List methods (`add`, `remove_at`, `pop`, `insert`, `clear`, `has` and `find`), and the loop
 //! check that keeps a list from changing length while a `for ... in` loop runs over it.
 
-use kestrel_syntax::ast::{Arg, Expr, ExprId, ExprKind};
+use kestrel_syntax::ast::{Arg, Expr, ExprKind};
 
 use super::BodyChecker;
 use crate::tables::{ListMethod, LocalId, Res};
 use crate::ty::Ty;
 
 /// A step into a place: a field's name, or `None` for an index (which may be any index).
-type Step = Option<String>;
+pub(crate) type Step = Option<String>;
 
 /// A `for ... in` loop over a list or an array that is being checked.
 pub(crate) struct LoopList {
     /// The loop's item, which stands for one element of the list.
     pub(crate) item: LocalId,
-    /// The expression the loop iterates over.
-    #[allow(dead_code)] // read by `remove`, which needs the loop's list by expression
-    pub(crate) iter: ExprId,
     /// The variable the list belongs to, aliases followed.
     pub(crate) root: LocalId,
     /// The list's place inside `root`.
@@ -26,7 +23,7 @@ pub(crate) struct LoopList {
 /// Whether the list at `changed` is the list at `looped`, or holds it: `changed` is `looped` or
 /// a start of it, an index standing for any index. A list inside an element of the looped
 /// list (`row` while looping over `grid`) is a different list, and is free to change.
-fn covers(changed: &[Step], looped: &[Step]) -> bool {
+pub(crate) fn covers(changed: &[Step], looped: &[Step]) -> bool {
     changed.len() <= looped.len() && changed.iter().zip(looped).all(|(a, b)| a.is_none() || b.is_none() || a == b)
 }
 
@@ -40,7 +37,7 @@ enum Which {
 impl<'a> BodyChecker<'a> {
     /// The root variable and steps of a place, with a loop's item standing for an element of its
     /// list. Call after the expression has been checked.
-    fn list_place(&self, e: &Expr) -> Option<(LocalId, Vec<Step>)> {
+    pub(crate) fn list_place(&self, e: &Expr) -> Option<(LocalId, Vec<Step>)> {
         match &e.kind {
             ExprKind::Ident(_) => {
                 let Some(&Res::Local(l)) = self.t.res.get(&e.id) else { return None };
@@ -49,8 +46,10 @@ impl<'a> BodyChecker<'a> {
                     path.push(None);
                     return Some((x.root, path));
                 }
-                // A `match` binding or `let ... else` view stands for a part of its root that we
-                // don't track, so it counts as the whole root.
+                // A `match` binding or `let ... else` view stands for a part of the place it reads.
+                if let Some(p) = self.removing.views.get(&l) {
+                    return Some(p.clone());
+                }
                 Some((self.t.local(l).alias.unwrap_or(l), Vec::new()))
             }
             ExprKind::Field { .. } if self.t.swizzles.contains_key(&e.id) => None,
@@ -80,7 +79,7 @@ impl<'a> BodyChecker<'a> {
     /// Pushes the loop over `iter`, whose item is `item`, if `iter` is a place.
     pub(crate) fn enter_list_loop(&mut self, item: LocalId, iter: &Expr) {
         if let Some((root, path)) = self.list_place(iter) {
-            self.for_in_lists.push(LoopList { item, iter: iter.id, root, path });
+            self.for_in_lists.push(LoopList { item, root, path });
         }
     }
 
@@ -93,7 +92,7 @@ impl<'a> BodyChecker<'a> {
 
     /// The list a loop reads, as the loop's error names it: its variable and fields, up to the
     /// first index.
-    fn loop_list_name(&self, i: usize) -> String {
+    pub(crate) fn loop_list_name(&self, i: usize) -> String {
         let x = &self.for_in_lists[i];
         let mut name = self.t.local(x.root).name.clone();
         for step in x.path.iter().map_while(Option::as_ref) {

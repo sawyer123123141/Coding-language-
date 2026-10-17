@@ -336,3 +336,23 @@ fn nesting_too_deep_is_one_error_and_the_rest_of_the_file_is_skipped() {
     assert_eq!(errs(&ty(1001)), vec!["this type nests more than 1,000 levels deep; simplify it"]);
     assert_eq!(errs(&ty(1000)), Vec::<String>::new());
 }
+
+#[test]
+fn remove_and_a_name_is_a_remove_statement() {
+    assert_eq!(body("for b in xs {\n    remove b\n}"), "{(for-in b xs {(remove b)})}");
+    assert_eq!(body("for b in xs { if hit { remove b; continue } }"), "{(for-in b xs {(if hit {(remove b); continue})})}");
+    let p = ok("main() {\n    for b in xs { remove b }\n}");
+    let Stmt::ForIn { body, .. } = &fn_decl(&p, 0).body.stmts[0] else { panic!("a loop") };
+    let Stmt::Remove { name, name_span, span } = &body.stmts[0] else { panic!("{:?}", body.stmts[0]) };
+    assert_eq!(name, "b");
+    assert_eq!((name_span.end - name_span.start, span.end - span.start), (1, 8));
+}
+
+#[test]
+fn remove_is_still_a_name_everywhere_else() {
+    assert_eq!(body("remove(b)"), "{(call remove b)}");
+    assert_eq!(body("remove = 1"), "{(= remove 1)}");
+    assert_eq!(body("let remove = 2"), "{(let remove 2)}");
+    assert_eq!(body("x.remove(k)"), "{(.call x remove k)}");
+    assert_eq!(body("remove\nb"), "{remove; b}");
+}

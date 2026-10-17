@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use kestrel_syntax::ast::{Arg, Binding, Block, Expr, ExprKind};
 use kestrel_syntax::Span;
 
+use super::remove::Over;
 use super::BodyChecker;
 use crate::collect::resolve_type;
 use crate::ty::Ty;
@@ -169,8 +170,18 @@ impl<'a> BodyChecker<'a> {
             self.par.push(super::par::ParBody::new(v, collection, root, first_local, self.loop_breaks.len() + 1));
         }
         self.enter_list_loop(v, iter);
+        let over = match iter_ty {
+            Ty::List(_) => Over::List,
+            Ty::Array(_) => Over::Array,
+            Ty::Str => Over::Str,
+            _ => Over::Other,
+        };
+        self.enter_item_loop(v, over, iter, body);
         let entry = self.moved.clone();
-        self.loop_body(entry.clone(), Some(entry), body);
+        self.item_loop_body(Some(v), entry.clone(), Some(entry), body);
+        self.leave_item_loop();
+        // A `break` right after `remove v` leaves it removed; it's out of scope now anyway.
+        self.moved.remove(&v);
         self.leave_list_loop(v);
         if par {
             self.end_par();

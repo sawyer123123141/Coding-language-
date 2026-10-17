@@ -18,6 +18,7 @@ impl<'a> BodyChecker<'a> {
         self.t.expr_ty[e.id.0 as usize] = ty;
         if matches!(e.kind, ExprKind::Ident(_) | ExprKind::Field { .. } | ExprKind::Index { .. }) {
             self.note_par_read(e);
+            self.note_remove_read(e);
         }
         ty
     }
@@ -91,13 +92,20 @@ impl<'a> BodyChecker<'a> {
         if let Some(local) = self.lookup_local(name) {
             self.t.res.insert(e.id, Res::Local(local));
             match self.moved.get(&local).copied() {
+                Some(at) if at.removed && at.every => self.error(e.span, format!("`{name}` was removed earlier, so it can't be used here")),
+                Some(at) if at.removed => self.error_help(
+                    e.span,
+                    format!("`{name}` may have been removed earlier, so it can't be used here"),
+                    "it's removed on some paths to this line",
+                ),
                 Some(at) if at.every => self.error(e.span, format!("`{name}` was moved earlier, so it can't be used here")),
                 Some(_) => self.error_help(
                     e.span,
                     format!("`{name}` may have been moved earlier, so it can't be used here"),
                     "it's moved on some paths to this line; give it a new value first",
                 ),
-                None => {}
+                // A view into a loop item reads freed memory once the item is removed.
+                None => self.check_removed_view(local, e.span),
             }
             let ty = self.t.locals[local.0 as usize].ty;
             if let Ty::Variant(..) = ty {
@@ -332,6 +340,27 @@ impl<'a> BodyChecker<'a> {
                     t1
                 }
             }
+        }
+    }
+
+    /// An expression whose value nobody uses.
+    pub(crate) fn check_discarded(&mut self, e: &Expr) -> Ty {
+        let ty = match &e.kind {
+            ExprKind::If { .. } => self.check_if(e, Expect::Discard),
+            ExprKind::Match { .. } => self.check_match(e, Expect::Discard),
+            ExprKind::Call { .. } | ExprKind::MethodCall { .. } => self.check_discarded_call(e),
+            _ => {
+                let ty = self.check_expr(e, None);
+                if ty != Ty::Error {
+                    self.error(e.span, "this line has no effect; did you mean to continue the line above?");
+                }
+                ty
+            }
+        };
+        if ty == Ty::Never {
+            Ty::Never
+        } else {
+            Ty::Unit
         }
     }
 }

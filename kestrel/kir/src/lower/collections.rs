@@ -75,6 +75,9 @@ impl<'a> FnLowerer<'a> {
         if par {
             return self.par_for_in(index, var, iter, body, out);
         }
+        if self.t.removing_loops.contains(&iter.id) {
+            return self.removing_for_in(index, var, iter, body, out);
+        }
         let line = self.line(iter.span);
         let list = self.place_or_temp(iter, out, true);
         let len = Expr { kind: ExprKind::Len(list.clone()), ty: KTy::I64, line };

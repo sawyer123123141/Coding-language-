@@ -109,6 +109,8 @@ impl<'a> BodyChecker<'a> {
                     self.changed_in_block(body, out);
                 }
                 Stmt::Break(_) | Stmt::Continue(_) | Stmt::Return { value: None, .. } => {}
+                // Removing the loop's item changes its list.
+                Stmt::Remove { span, .. } => out.extend(self.t.removes.get(span).and_then(|&l| self.t.local(l).alias)),
             }
         }
     }
