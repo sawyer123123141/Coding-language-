@@ -160,6 +160,18 @@ impl<'a> BodyChecker<'a> {
             let msg = format!("can't remove `{name}` here: this `in` block is putting memory in `{name}`'s arena");
             return self.error_help(span, msg, "remove it after the block");
         }
+        // A removing loop between here and the item's loop, over a list inside the item, would
+        // compact that list on its way out, after the item is gone.
+        let inner = self.removing.loops[i + 1..].iter().find(|lp| {
+            lp.removing
+                && lp.key.is_some()
+                && (lp.key.as_ref().is_some_and(|k| views.contains(&k.root))
+                    || lp.list.as_ref().is_some_and(|(r, p)| *r == root && p.len() > path.len() && p.starts_with(&path)))
+        });
+        if let Some(key) = inner.and_then(|lp| lp.key.clone()) {
+            let msg = format!("can't remove `{name}` here: the loop over `{}` is removing items from it; leave that loop first", self.path_name(&key));
+            return self.error(span, msg);
+        }
         match self.moved.get(&item) {
             Some(at) if at.every => self.error(span, format!("`{name}` was removed earlier, so it can't be removed again")),
             Some(_) => self.error_help(

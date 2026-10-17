@@ -10,6 +10,7 @@
 // expect: [true, true]
 // expect: [vec2(x: 1, y: 2)]
 // expect: 10 2
+// expect: [[1, 2], [3]]
 // expect-stderr: arenas alive at exit: 0
 struct Pool {
     mem: Arena = Arena()
@@ -23,6 +24,10 @@ struct Bag {
     prune(var self, limit: int) {
         for p in self.items { if p.n > limit { remove p } }
     }
+}
+
+struct Brick {
+    hits: list[int]
 }
 
 struct World {
@@ -86,4 +91,14 @@ main() {
         if p.n == 4 { remove p; break }
     }
     print(total, nested.len)
+    // A plain inner loop over a part of the item may remove the item and leave.
+    var bricks: list[Brick] = [Brick(hits: [1, 2]), Brick(hits: [4, 1]), Brick(hits: [3])]
+    for b in bricks {
+        for h in b.hits {
+            if h > 3 { remove b; break }
+        }
+    }
+    var left: list[list[int]] = []
+    for b in bricks { left.add(b.hits) }
+    print(left)
 }

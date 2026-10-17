@@ -90,3 +90,20 @@ bricks(var bs: list[Brick]) {
 // error 49: can't remove from parameter `ys`: it isn't `var`
 // error 58: can't remove `p` here: this `in` block is putting memory in `p`'s arena
 // error 69: `h` reads from `b`, which was removed earlier, so it can't be used here
+
+nested(var bs: list[Brick], var grid: list[list[int]]) {
+    for b in bs {
+        for h in b.hits {
+            if h == 1 { remove h; continue }
+            if h > 3 { remove b; break }
+        }
+    }
+    for row in grid {
+        for x in row {
+            if x == 1 { remove x; continue }
+            if x == 5 { remove row; return }
+        }
+    }
+}
+// error 98: can't remove `b` here: the loop over `b.hits` is removing items from it; leave that loop first
+// error 104: can't remove `row` here: the loop over `row` is removing items from it; leave that loop first
