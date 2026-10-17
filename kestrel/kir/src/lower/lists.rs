@@ -49,7 +49,7 @@ impl<'a> FnLowerer<'a> {
             ListMethod::Clear => {
                 let list = self.place_or_temp(receiver, out, true);
                 out.extend(self.helpers.drop_stmts(list.clone(), list_ty, self.t));
-                out.push(Stmt::SetLen(list, int(0, KTy::I64, line)));
+                out.push(Stmt::List(ListOp::Clear, list, Vec::new()));
             }
             // The popped item is a value like any other: an owning one is held and dropped.
             ListMethod::Pop => {

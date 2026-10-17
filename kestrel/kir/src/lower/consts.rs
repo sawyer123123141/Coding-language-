@@ -140,7 +140,8 @@ pub(super) fn lower_init(program: &Program, t: &Tables, lines: &LineIndex, helpe
     let loaded = flag(KTy::Bool, ExprKind::Load(Place::local(built)));
     let mut build = vec![
         Stmt::Assign(Place::local(built), flag(KTy::Bool, ExprKind::Bool(true))),
-        // Created on the first push, and never freed: the constants live as long as the program.
+        // Never freed: the constants live as long as the program. (Not counted by `KESTREL_ARENA_COUNT`.)
+        Stmt::Assign(Place::local(arena), flag(KTy::Arena, ExprKind::StaticArena)),
         Stmt::PushArena(Some(Place::local(arena))),
     ];
     for (&c, &local) in order.iter().zip(&locals) {

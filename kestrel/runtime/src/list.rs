@@ -67,6 +67,23 @@ pub unsafe extern "C" fn kestrel_rt_list_insert(
     }
 }
 
+/// Empties the list: zeroes every item, so nothing stale can be read through a pointer to the
+/// list, and sets the length to 0. The capacity stays. Compiled code drops owning items first.
+///
+/// # Safety
+/// `list` must point to a valid `List` whose items are `elem_size` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kestrel_rt_list_clear(list: *mut List, elem_size: i64) {
+    // SAFETY: the caller guarantees `list`; its buffer holds `len` items.
+    unsafe {
+        let len = (*list).len as usize;
+        if len > 0 {
+            std::ptr::write_bytes((*list).ptr, 0, len * elem_size as usize);
+        }
+        (*list).len = 0;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,6 +142,21 @@ mod tests {
         }
         assert_eq!(items(&l), Vec::<i32>::new());
         assert_eq!(l.cap, 4, "the capacity stays");
+    }
+
+    #[test]
+    fn clear_zeroes_every_item_and_keeps_the_capacity() {
+        let mut l = list_of(&[7, 8, 9]);
+        let ptr = l.ptr as *const i32;
+        // SAFETY: `l` is a valid list of i32s; the buffer stays allocated.
+        unsafe {
+            kestrel_rt_list_clear(&mut l, 4);
+            assert_eq!(l.len, 0);
+            assert_eq!(l.cap, 4);
+            assert_eq!(std::slice::from_raw_parts(ptr, 3), &[0, 0, 0]);
+            kestrel_rt_list_clear(&mut l, 4);
+        }
+        assert_eq!(l.len, 0);
     }
 
     #[test]

@@ -149,6 +149,7 @@ pub(crate) fn rename_expr(e: &mut Expr, subst: &[Subst]) {
         | ExprKind::ListNew
         | ExprKind::MapNew
         | ExprKind::NewArena
+        | ExprKind::StaticArena
         | ExprKind::NoneLit
         | ExprKind::RandFloat => {}
     }

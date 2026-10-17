@@ -1,0 +1,10 @@
+// env: KESTREL_ARENA_COUNT=1
+// expect: 3 b
+// expect-stderr: arenas alive at exit: 0
+let NAMES = ["a", "b", "c"]
+
+main() {
+    var ps: list[string] = []
+    for n in NAMES { ps.add(n) }
+    print(ps.len, NAMES[1])
+}

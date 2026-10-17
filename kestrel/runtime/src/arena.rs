@@ -134,7 +134,8 @@ pub(crate) fn program_bytes() -> usize {
 
 /// The arenas made by `kestrel_rt_arena_new` and not freed yet: `Arena()` values and `arena { }`
 /// blocks. `KESTREL_ARENA_COUNT=1` reports it at exit, so tests can tell that every arena a
-/// program made was dropped exactly once.
+/// program made was dropped exactly once. Arenas that live until the program ends on purpose
+/// (the heap constants', made by `kestrel_rt_arena_new_static`) and the runtime's own are left out.
 static ALIVE: AtomicI64 = AtomicI64::new(0);
 
 /// How many counted arenas are alive now (see `ALIVE`).
@@ -152,6 +153,12 @@ pub(crate) fn new_uncounted() -> *mut Arena {
 #[no_mangle]
 pub extern "C" fn kestrel_rt_arena_new() -> *mut Arena {
     ALIVE.fetch_add(1, Ordering::Relaxed);
+    new_uncounted()
+}
+
+/// A new, empty arena that is never freed (the heap constants') and that `ALIVE` leaves out.
+#[no_mangle]
+pub extern "C" fn kestrel_rt_arena_new_static() -> *mut Arena {
     new_uncounted()
 }
 

@@ -45,6 +45,9 @@ pub enum ListOp {
     /// `[index]`: removes that item, moving the later ones down and zeroing the vacated slot. An
     /// owning item is dropped first; the runtime panics when the index is out of range.
     RemoveAt,
+    /// `[]`: empties the list, zeroing the items (an owning item was dropped first) and keeping the
+    /// capacity.
+    Clear,
     /// `[index, value]`: opens a slot at `index` (`index == len` adds at the end), moving the
     /// later ones up, and stores `value` in it. `value` is evaluated before anything moves.
     Insert,

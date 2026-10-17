@@ -117,6 +117,7 @@ pub fn walk_expr<V: VisitMut + ?Sized>(v: &mut V, e: &mut Expr) {
         | ExprKind::ListNew
         | ExprKind::MapNew
         | ExprKind::NewArena
+        | ExprKind::StaticArena
         | ExprKind::NoneLit
         | ExprKind::RandFloat => {}
     }

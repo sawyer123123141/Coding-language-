@@ -229,6 +229,7 @@ impl Inliner<'_> {
             | ExprKind::ListNew
             | ExprKind::MapNew
             | ExprKind::NewArena
+            | ExprKind::StaticArena
             | ExprKind::NoneLit
             | ExprKind::RandFloat => {}
         }

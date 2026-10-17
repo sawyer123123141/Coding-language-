@@ -156,7 +156,8 @@ fn pop_moves_the_item_out_and_drops_nothing_inside_the_list_op() {
         .collect();
     assert_eq!(moves.len(), 1, "{:#?}", main.body);
     assert!(matches!(&moves[0].kind, ExprKind::Move(p) if matches!(p.path[..], [Proj::Index { checked: true, .. }])), "{moves:?}");
-    // Then the length goes down. The move is all that happens to the item: nothing is freed or removed
+    // The move zeroes the slot it vacates (`Move` does, for every item that holds an arena), then
+    // the length goes down. The move is all that happens to the item: nothing is freed or removed
     // by the runtime there (the `let` drops what it holds at the end of `main`).
     let Some(Stmt::If { then_body, .. }) = stmts.iter().find(|s| matches!(s, Stmt::If { then_body, .. } if then_body.iter().any(|s| matches!(s, Stmt::SetLen(..))))) else {
         panic!("{:#?}", main.body)
@@ -166,12 +167,11 @@ fn pop_moves_the_item_out_and_drops_nothing_inside_the_list_op() {
 }
 
 #[test]
-fn clear_drops_the_items_then_sets_the_length() {
+fn clear_drops_the_items_then_empties_the_list() {
     let m = lower_src(&format!("{POOLS}main() {{\n var ps: list[Pool] = []\n ps.add(Pool(n: 1))\n ps.clear()\n}}\n"));
     let main = func(&m, "main");
-    let at = main.body.iter().position(|s| matches!(s, Stmt::SetLen(..))).expect("a set-length");
-    let Stmt::SetLen(_, zero) = &main.body[at] else { unreachable!() };
-    assert!(matches!(zero.kind, ExprKind::Int(0)));
+    // The runtime's clear zeroes every item and sets the length, so no freed arena stays reachable.
+    let at = main.body.iter().position(|s| matches!(s, Stmt::List(ListOp::Clear, _, args) if args.is_empty())).expect("a clear");
     assert!(matches!(&main.body[at - 1], Stmt::Call(f, _) if m.funcs[f.0 as usize].name.starts_with("__kestrel_drop_")), "{:#?}", main.body);
 }
 

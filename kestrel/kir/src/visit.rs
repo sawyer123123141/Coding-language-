@@ -116,6 +116,7 @@ pub fn walk_expr<'a>(e: &'a Expr, f: &mut impl FnMut(Node<'a>)) {
         | ExprKind::ListNew
         | ExprKind::MapNew
         | ExprKind::NewArena
+        | ExprKind::StaticArena
         | ExprKind::NoneLit
         | ExprKind::RandFloat => {}
         ExprKind::Move(p) => place(p, true, f),

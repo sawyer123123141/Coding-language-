@@ -332,8 +332,10 @@ fn the_init_builds_inside_one_guard_and_never_returns_early() {
         matches!(&then_body[0], Stmt::Assign(p, Expr { kind: ExprKind::Bool(true), .. }) if *p == Place::local(built)),
         "{then_body:#?}"
     );
-    assert!(matches!(&then_body[1], Stmt::PushArena(Some(_))), "{then_body:#?}");
-    assert!(then_body[2..then_body.len() - 1].iter().all(|s| matches!(s, Stmt::Assign(..))), "{then_body:#?}");
+    // The arena is a static one (not counted by `KESTREL_ARENA_COUNT`), then made current.
+    assert!(matches!(&then_body[1], Stmt::Assign(_, Expr { kind: ExprKind::StaticArena, .. })), "{then_body:#?}");
+    assert!(matches!(&then_body[2], Stmt::PushArena(Some(_))), "{then_body:#?}");
+    assert!(then_body[3..then_body.len() - 1].iter().all(|s| matches!(s, Stmt::Assign(..))), "{then_body:#?}");
     assert_eq!(then_body.last(), Some(&Stmt::PopArena { free: false }));
 }
 

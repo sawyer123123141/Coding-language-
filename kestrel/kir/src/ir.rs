@@ -324,6 +324,9 @@ pub enum ExprKind {
     Len(Place),
     /// `Arena()`: a new, empty arena.
     NewArena,
+    /// A new, empty arena that lives until the program ends and that `KESTREL_ARENA_COUNT` leaves
+    /// out: the one the heap constants are built in.
+    StaticArena,
     /// An optional holding this value.
     Some(Box<Expr>),
     /// `none`

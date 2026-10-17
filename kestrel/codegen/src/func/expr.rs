@@ -42,6 +42,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             | ExprKind::ListNew
             | ExprKind::MapNew
             | ExprKind::NewArena
+            | ExprKind::StaticArena
             | ExprKind::Some(_)
             | ExprKind::NoneLit
             | ExprKind::Move(_) => unreachable!("aggregate values are built in memory"),

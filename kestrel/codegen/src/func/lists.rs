@@ -9,11 +9,17 @@ use super::collections::LEN;
 use super::FuncLowerer;
 
 impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
-    /// `xs.remove_at(i)` and `xs.insert(i, v)`. The arguments are evaluated first (`v` may read
+    /// `xs.remove_at(i)`, `xs.insert(i, v)` and `xs.clear()`. The arguments are evaluated first (`v` may read
     /// `xs`, and `i` may be any integer type), then the runtime moves the items.
     pub(crate) fn list_op(&mut self, op: kir::ListOp, list: &Place, args: &[kir::Expr]) -> Result<(), String> {
         let ty = self.place_ty(list);
         let (size, align) = self.elem_size_align(ty);
+        if op == kir::ListOp::Clear {
+            let header = self.place_addr(list)?;
+            let size_v = self.b.ins().iconst(types::I64, size);
+            self.call_id(self.shared.rt.list_clear, &[header, size_v]);
+            return Ok(());
+        }
         let at = self.expr(&args[0])?;
         let at = self.widen_i64(at, args[0].ty);
         let (l, f) = self.loc_args(args[0].line);
@@ -23,6 +29,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 let header = self.place_addr(list)?;
                 self.call_id(self.shared.rt.list_remove, &[header, at, size_v, l, f]);
             }
+            kir::ListOp::Clear => unreachable!("handled above"),
             kir::ListOp::Insert => {
                 let value = &args[1];
                 let v = if value.ty.is_aggregate() {

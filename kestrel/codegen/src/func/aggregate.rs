@@ -47,6 +47,10 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 let a = self.new_arena();
                 self.b.ins().store(MemFlags::trusted(), a, dest, 0);
             }
+            ExprKind::StaticArena => {
+                let a = self.call_id(self.shared.rt.arena_new_static, &[]).expect("returns an arena");
+                self.b.ins().store(MemFlags::trusted(), a, dest, 0);
+            }
             ExprKind::StrLit(s) => {
                 let (p, n) = self.string(s)?;
                 self.b.ins().store(MemFlags::trusted(), p, dest, 0);
