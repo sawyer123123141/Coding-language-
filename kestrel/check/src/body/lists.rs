@@ -249,19 +249,33 @@ impl<'a> BodyChecker<'a> {
 
     /// A kept `pop` of owning items moves the item out without copying it (a non-owning item is
     /// copied into the current arena, like an indexed read). So it can't take the item from
-    /// inside a value that holds an `Arena`: the item's memory may be in that arena, which goes
-    /// when its owner is replaced or cleared. A discarded `pop` drops the item at once.
+    /// inside a value that holds an `Arena`, or from a list the caller passed in: the item's
+    /// memory may be in an owner's arena, which goes when the owner is replaced or cleared. Only
+    /// a list rooted in a local of this function hands one out. A discarded `pop` drops the item
+    /// at once.
     fn check_pop_owner(&mut self, e: &Expr, receiver: &Expr, elem: Ty) {
         if !self.t.is_owning(elem) || self.discarded == Some(e.id) {
             return;
         }
-        let Some(owner) = self.arena_owner(receiver) else { return };
         let list = written(receiver);
-        self.error_help(
-            e.span,
-            format!("can't take an item out of `{list}` with `pop`: it may point into `{owner}`'s arena"),
-            format!("read what you need with `{list}[i]`, then use `remove_at`"),
-        );
+        if let Some(owner) = self.arena_owner(receiver) {
+            return self.error_help(
+                e.span,
+                format!("can't take an item out of `{list}` with `pop`: it may point into `{owner}`'s arena"),
+                format!("read what you need with `{list}[i]`, then use `remove_at`"),
+            );
+        }
+        // A list the caller passed in (a `var` parameter or `var self`, or anything reached
+        // through one) may be inside an owner of the caller's, which it can replace while the
+        // item lives.
+        let from_caller = self.list_place(receiver).is_some_and(|(root, _)| self.t.local(root).is_param);
+        if from_caller {
+            self.error_help(
+                e.span,
+                format!("can't take an item out of `{list}` with `pop`: it may point into the caller's arena"),
+                "return the index and let the caller use `pop` or `remove_at`",
+            );
+        }
     }
 
     /// The outermost value holding an `Arena` that the place `e` is inside of (not `e` itself),

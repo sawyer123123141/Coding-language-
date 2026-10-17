@@ -212,3 +212,13 @@ fn a_program_may_reuse_the_names_of_built_in_parameters_and_locals() {
     assert_eq!(text, "");
     assert!(compiled.is_some());
 }
+
+#[test]
+fn a_global_with_a_built_in_name_gets_one_error_not_a_cascade() {
+    // `draw.kes` uses the type `float`. The program's own `float` is refused by name, and `link`
+    // doesn't also say that every `float` in `draw.kes` is hidden from it.
+    let dir = project("builtin_name_global", &[]);
+    let (compiled, text) = build(&dir, "use draw\nlet float = 1\nmain() {}\n");
+    assert!(compiled.is_none());
+    assert_eq!(text, "2:5: error: `float` is a built-in name; pick another\n");
+}

@@ -1,0 +1,37 @@
+// error 15: can't take an item out of `self.items` with `pop`: it may point into the caller's arena
+// error 20: can't take an item out of `items` with `pop`: it may point into the caller's arena
+// error 25: can't take an item out of `b.items` with `pop`: it may point into the caller's arena
+// An owning item popped from a list that belongs to the caller may point into an arena of an
+// owner the caller replaces while the item lives, so only a list rooted in a local of this
+// function hands one out. A discarded `pop` drops the item at once, which is fine anywhere.
+struct T {
+    mem: Arena
+    label: string
+}
+
+struct Bag {
+    items: list[T]
+    take(var self) -> T? {
+        self.items.pop()
+    }
+}
+
+take(var items: list[T]) -> T? {
+    items.pop()
+}
+
+take_first(var bags: list[Bag]) -> T? {
+    for b in bags {
+        return b.items.pop()
+    }
+    none
+}
+
+drop_last(var items: list[T]) {
+    items.pop()
+}
+
+main() {
+    var mine: list[T] = []
+    let t = mine.pop()
+}

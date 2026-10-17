@@ -23,6 +23,12 @@ pub(crate) fn is_builtin_name(name: &str) -> bool {
 /// `__kestrel_copy_N`, ...). A user name with it would collide with one of them.
 const COMPILER_PREFIX: &str = "__kestrel_";
 
+/// Whether no item, local or parameter may take `name`: a built-in name, or one that starts with
+/// `COMPILER_PREFIX` (see `reserved_name_error`).
+pub fn is_reserved_name(name: &str) -> bool {
+    is_builtin_name(name) || name.starts_with(COMPILER_PREFIX)
+}
+
 /// The error for a name an item, local or parameter can't take, if it is one: a built-in name,
 /// or one that starts with `COMPILER_PREFIX`. `shown` is the name as the message writes it.
 pub(crate) fn reserved_name_error(name: &str, shown: &str) -> Option<String> {

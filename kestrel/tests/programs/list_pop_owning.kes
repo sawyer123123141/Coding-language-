@@ -1,6 +1,7 @@
 // env: KESTREL_ARENA_COUNT=1
 // expect: item-1-label-that-is-long-enough
 // expect: 2
+// expect: 1
 // expect-stderr: arenas alive at exit: 0
 // An owning item moves out of a list that is a plain local: its memory is in its own arena,
 // so replacing the list doesn't free it. A discarded `pop` drops the item at once.
@@ -13,6 +14,11 @@ make(i: int) -> T {
     var t = T(mem: Arena(), label: "")
     in t.mem { t.label = "item-{i}-label-that-is-long-enough" }
     t
+}
+
+// A discarded `pop` is fine on a list the caller passed in.
+drop_last(var items: list[T]) {
+    items.pop()
 }
 
 struct Level {
@@ -36,5 +42,7 @@ main() {
     level = Level(mem: Arena(), items: [])
     level.items.add(make(7))
     level.items.add(make(8))
+    print(level.items.len)
+    drop_last(var level.items)
     print(level.items.len)
 }

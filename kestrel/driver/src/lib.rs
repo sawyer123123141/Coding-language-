@@ -88,7 +88,7 @@ pub fn compile_as(path: &str, src: &str, style: DiagStyle, needs_main: bool) -> 
     if diags.iter().any(Diagnostic::is_error) {
         return (None, report(&files, &diags, style));
     }
-    let (mut program, link_diags) = link(modules);
+    let (mut program, link_diags) = link(modules, kestrel_check::is_reserved_name);
     program.builtin_ranges = builtin_ranges(&files);
     diags.extend(link_diags);
     let tables = if diags.iter().any(Diagnostic::is_error) {

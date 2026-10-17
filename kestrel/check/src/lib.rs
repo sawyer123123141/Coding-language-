@@ -10,6 +10,7 @@ use kestrel_syntax::ast::Program;
 use kestrel_syntax::Diagnostic;
 
 pub use builtins::Builtin;
+pub use collect::is_reserved_name;
 pub use natives::wants_scratch;
 pub use tables::{
     ConstId, ConstInfo, EnumId, EnumInfo, FieldInfo, FnId, FnInfo, ListMethod, LocalId, LocalInfo, ParamSig, Res, StrMethod, StructId,

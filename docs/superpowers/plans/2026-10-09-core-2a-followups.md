@@ -250,7 +250,6 @@ From `docs/superpowers/specs/2026-10-17-lists-strings-design.md` (its "As built"
 - `find` and `split` search in O(n*m).
 - `list_insert` zeroes the slot it opens and codegen then overwrites it. Harmless.
 - The program-test harness reportedly hung on a test program that fails to compile (the compiler exits 1; the harness wasn't investigated).
-- Stale module header comments in `kir/src/lower/lists.rs:2-3` and `codegen/src/func/lists.rs:1` (`clear` now uses `ListOp::Clear`).
 
 **File sizes** (the 400-line guide): `kir/src/ir.rs` is 415 lines and `check/src/tables.rs` 401 (`check/src/body/mod.rs` went back to 389 in the `remove b` task).
 

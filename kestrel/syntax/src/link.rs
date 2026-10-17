@@ -38,8 +38,9 @@ enum Scoped {
 }
 
 /// Links `modules`, the entry file first. Their ids must already be
-/// distinct (see `parse_at`).
-pub fn link(modules: Vec<Module>) -> (Program, Vec<Diagnostic>) {
+/// distinct (see `parse_at`). `reserved` says which names no item may take (the checker
+/// refuses such an item, so `link` says nothing more about it).
+pub fn link(modules: Vec<Module>, reserved: fn(&str) -> bool) -> (Program, Vec<Diagnostic>) {
     let index: HashMap<String, usize> = modules.iter().enumerate().map(|(i, m)| (m.name.clone(), i)).collect();
     let exports: Vec<HashMap<String, Export>> = modules
         .iter()
@@ -67,7 +68,8 @@ pub fn link(modules: Vec<Module>) -> (Program, Vec<Diagnostic>) {
     for (i, m) in modules.into_iter().enumerate() {
         expr_count = expr_count.max(m.program.expr_count);
         bind_count = bind_count.max(m.program.bind_count);
-        let mut rw = Rewriter { scope: HashMap::new(), exports: &exports, names: &names, module: i, locals: Vec::new(), diags: Vec::new() };
+        let (scope, locals) = (HashMap::new(), Vec::new());
+        let mut rw = Rewriter { scope, exports: &exports, names: &names, module: i, locals, reserved, diags: Vec::new() };
         for (name, e) in &exports[i] {
             rw.scope.insert(name.clone(), Scoped::Own(e.qualified.clone()));
         }
@@ -95,6 +97,8 @@ struct Rewriter<'a> {
     module: usize,
     /// The locals and parameters in scope at this point of the module's code.
     locals: Vec<String>,
+    /// Names no item may take (see `link`).
+    reserved: fn(&str) -> bool,
     diags: Vec<Diagnostic>,
 }
 
@@ -183,7 +187,7 @@ impl Rewriter<'_> {
     /// names when linked, so without this another module could reach one it never imported.
     /// `local` is whether a local of that name would be what it means (not for a call or a type).
     fn unseen(&mut self, name: &str, span: Span, what: &str, local: bool) {
-        let hidden = self.module != 0 && self.exports[0].contains_key(name);
+        let hidden = self.module != 0 && self.exports[0].contains_key(name) && !(self.reserved)(name);
         if hidden && !(local && self.locals.iter().any(|l| l == name)) {
             let (entry, here) = (&self.names[0], &self.names[self.module]);
             let msg = format!("unknown {what} `{name}`: it's in {entry}.kes, which `{here}` can't see");
