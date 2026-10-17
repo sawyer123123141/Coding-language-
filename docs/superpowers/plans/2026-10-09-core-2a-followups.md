@@ -232,6 +232,29 @@ From `docs/superpowers/specs/2026-10-12-language-pass-1-design.md` (its "As buil
 - A "may have been moved" message can't point at the move, because the checker has no line numbers and diagnostics have no secondary labels.
 - `var x: T` with no value (starting at zero, like GDScript) is a syntax question put to the user on 2026-10-12.
 
+## Found while building list and string basics (2026-10-17)
+
+From `docs/superpowers/specs/2026-10-17-lists-strings-design.md` (its "As built" section) and the task reports. None blocks anything. Not fixed:
+
+**Follow-ups to build:**
+- **String views as an optimisation.** `s[i]`, `slice`, `trim`, `split` pieces and the characters of `for c in s` are copies in the current arena (spec ruling 2). Views into `s` would avoid the allocation (`for c in s` allocates two small strings per character), but need a stricter region rule: the design review found six ways a view outlives its bytes (returns from owning roots, `arena { }` blocks, loops whose string the body frees, later `var` arguments).
+- **`remove` inside a `par for` over a chunk's own list** would be safe but is refused (any `par for` around the statement is).
+- **`for x in xs { f(var xs) }` where `f` shrinks `xs`** is accepted by the checker. The runtime index panic is the safety net.
+
+**Gaps and rough edges:**
+- **A parameter name in a `draw.kes` function can't match a global of the user's program.** The shadowing check sees both: `use draw` with a global `color` gives "`color` is already defined" at `<builtin>/draw.kes`. `draw.fill`'s `r` made this more likely (the voxel fly test's `r` helper had to be renamed). Fix idea: let a parameter shadow a global from another module, or check shadowing within a module's own names.
+- `+` and string-method results passed straight to a native's arguments (`draw.text(a + b, ...)`, `draw.text(s.upper(), ...)`) get no scratch arena, because `wants_scratch` only looks for interpolation. They are allocated in the current arena. Not unsound.
+- A `par for` over a map gets the `par for` message, not the map one.
+- A `u64` index above `i64::MAX` shows as a negative index in the panic text. `str_char_len` wraps a negative position (only generated code calls it, with positions of 0 or more).
+- `to_float("1e-999")` (an `f32` underflow) gives 0 rather than `none`: "doesn't fit" means overflow.
+- `text()` and `str_case` use lossy UTF-8 conversion, while `str_trim` returns bytes unchanged (unreachable for valid strings).
+- `find` and `split` search in O(n*m).
+- `list_insert` zeroes the slot it opens and codegen then overwrites it. Harmless.
+- The program-test harness reportedly hung on a test program that fails to compile (the compiler exits 1; the harness wasn't investigated).
+- Stale module header comments in `kir/src/lower/lists.rs:2-3` and `codegen/src/func/lists.rs:1` (`clear` now uses `ListOp::Clear`).
+
+**File sizes** (the 400-line guide): `kir/src/ir.rs` is 415 lines and `check/src/tables.rs` 401 (`check/src/body/mod.rs` went back to 389 in the `remove b` task).
+
 ## Maps (built 2026-10-09)
 
 - **Not yet:**
@@ -255,7 +278,7 @@ From `docs/superpowers/specs/2026-10-12-language-pass-1-design.md` (its "As buil
 
 ## Do in 2c
 
-- **Strings (2b-ii scope).** Interpolated strings work anywhere now and live in arenas (see "Found while building strings anywhere"). `==` works on strings. Still missing: length, indexing and concatenation. Strings nested in a printed struct are quoted, but `"` inside them isn't escaped.
+- **Strings (2b-ii scope).** Interpolated strings work anywhere now and live in arenas (see "Found while building strings anywhere"). `==` works on strings. Length, indexing, concatenation and the string methods came with the list and string basics (2026-10-17). Strings nested in a printed struct are quoted, but `"` inside them isn't escaped.
 - **Exclusivity** only checks bare identifiers (`f(var a, a + 1)` passes; 3+ `var` uses of one local give duplicate diagnostics). Redesign it around place paths once aggregates are passed by pointer.
 - **Cleanup stack in codegen.** `break`/`continue`/`return` jump directly, but `arena { }` exits and scope-end drops need cleanup on every exit edge.
 - **Runtime stdout buffer is thread-local.** It must change before `par for` (sub-project 3).

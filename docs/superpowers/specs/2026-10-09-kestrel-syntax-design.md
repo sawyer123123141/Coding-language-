@@ -227,11 +227,11 @@ use {
 | `bool` | `true` / `false` |
 | `i8 i16 i64 u8 u16 u32 u64` | sized integers |
 | `f64` | 64-bit float |
-| `string` | text, a heap value like an array: copying a string copies its bytes into the current arena (literals stay in read-only data and belong to no arena) |
+| `string` | text, UTF-8, a heap value like an array: copying a string copies its bytes into the current arena (literals stay in read-only data and belong to no arena). `s.len` and `s[i]` count characters, not bytes. `+`, `join`, `split`, `slice`, `find`, `upper`, `trim`, `to_int` and the rest: see "Lists and strings" |
 | `vec2 vec3 vec4` | float vectors, SIMD-backed |
 | `ivec2 ivec3 ivec4` | int vectors (voxel coordinates) |
 | `[T]` | array of `T`, fixed length once created (fast, arena/SIMD friendly) |
-| `list[T]` | growable list |
+| `list[T]` | growable list: `add`, `remove_at`, `pop`, `insert`, `clear`, `has`, `find`, `join`, `.len`; `remove b` in a `for b in xs` loop. See "Lists and strings" |
 | `map[K, V]` | hash map: `m[k] = v`; `m[k]` is a `V?` (so `let v = m[k] else { ... }`); `m.has(k)`, `m.remove(k)`, `m.len`, `for k, v in m` (decided 2026-10-10). Literal `{"a": 1, "b": 2}`, empty `{}`; `m.get(k, default)`; `for k in m` gives keys (decided 2026-10-09). Insertion order. Details: `2026-10-09-map-design.md` |
 | `T?` | a `T` or `none` |
 | `Arena` | a memory bucket |
@@ -359,6 +359,68 @@ Anything else is a compile error naming the offending line, e.g.
 (chunking) and SIMD are sub-project 3. Details and the remaining
 rules: `2026-10-09-par-for-design.md`.
 
+## Lists and strings
+
+Design and rulings: `2026-10-17-lists-strings-design.md`. Names follow GDScript where a GDScript name fits.
+
+**List methods.** `has` and `find` also work on arrays; the rest need a `list[T]` held in a `var`.
+
+| Kestrel | Meaning |
+|---|---|
+| `xs.add(v)` | add at the end |
+| `xs.remove_at(i)` | remove item `i`; the rest keep their order |
+| `xs.pop()` | remove the last item and return it as a `T?` (`none` when the list is empty); GDScript's `pop_back` |
+| `xs.insert(i, v)` | put `v` at `i`, shifting the rest up; `i == xs.len` adds at the end |
+| `xs.clear()` | remove every item |
+| `xs.has(v)` | `true` when an item `== v` (numbers, bools and strings) |
+| `xs.find(v)` | the index of the first item `== v`, as an `int?` (GDScript returns -1) |
+| `parts.join(sep)` | one string from a list or array of strings |
+
+An index outside `0..xs.len` panics. `remove_at`, `pop`, `insert` and `clear` are refused inside a `for` loop over the same list, because the loop read the length once. `add` is allowed there; the loop doesn't see the new items.
+
+**`remove b`** removes the current item of a `for b in xs` loop over a list. The loop compacts the list in one pass, so items keep their order and none is skipped (in GDScript, `xs.erase(b)` inside `for b in xs` skips the next item).
+
+```
+for b in bricks {
+    if hits(ball, b) {
+        remove b
+    }
+}
+```
+
+- `remove` is not a keyword: `remove` followed by a name, on a line of its own, is this statement.
+- `b` is gone after `remove b`, so using it later is an error. The rest of the body still runs, so follow it with `continue` to skip that.
+- While a loop that uses `remove` runs, its body can't use the list except through `b` (not `xs`, `xs.len` or `xs[j]`), because the items are moving. Other fields of the same variable are fine.
+- Not allowed in `par for`, in a loop over an array, map, string or a temporary, or on a list declared with `let`.
+
+**Strings** are UTF-8. Lengths and indexes count characters (code points, as in GDScript), not bytes: `"héllo".len` is 5.
+
+| Kestrel | Result |
+|---|---|
+| `s.len` | `int`, the number of characters |
+| `s[i]` | the character at `i`, as a one-character `string` |
+| `for c in s`, `for i, c in s` | each character as a `string`, and its index |
+| `a + b`, `s += t` | a new string (both sides must be strings; use `"{n}"` for numbers) |
+| `s.split(sep)` | `list[string]`; `"".split(",")` is `[""]`; `sep` can't be empty |
+| `s.has(t)`, `s.starts_with(t)`, `s.ends_with(t)` | `bool` |
+| `s.find(t)` | the character index of the first match, as an `int?` |
+| `s.slice(from, to)` | the characters from `from` up to, not including, `to` (GDScript's `substr` takes a length instead) |
+| `s.upper()`, `s.lower()`, `s.trim()` | a new string (`trim` is `strip_edges`) |
+| `s.to_int()`, `s.to_float()` | `int?` / `float?`, `none` when the text isn't a number (GDScript returns 0) |
+
+- Strings can't be changed in place: `s[i] = x` is an error. Build a new string.
+- Every string these produce is new and lives in the current arena, like interpolation. Storing one in a longer-lived place needs `in x.mem { }`. In a frame loop, wrap the body in `arena { }` to free them each frame.
+- `.len`, `s[i]`, `slice` and `find` walk the string from its start, so `s[i]` inside a loop over `i` is slow on long text. `for c in s` is the linear way.
+- A bad `s[i]` or `slice` panics with the usual line and file.
+
+```
+var words: list[string] = []
+for part in "go, stop ,  jump".split(",") {
+    words.add(part.trim().upper())
+}
+print(words.join("-"))      // GO-STOP-JUMP
+```
+
 ## Memory
 
 ```
@@ -408,7 +470,7 @@ type      := IDENT ('[' type (',' type)* ']')? '?'? | '[' type ']' '?'?
 block     := '{' stmt* '}'
 stmt      := 'let' binding | 'var' binding | assign | if | while | for
            | 'par' for | match | arena | in | 'break' | 'continue'
-           | 'return' expr? | expr
+           | 'return' expr? | 'remove' IDENT | expr
 binding   := IDENT (':' type)? '=' expr ('else' block)?
 for       := 'for' IDENT ('from' expr 'to' expr | (',' IDENT)? 'in' expr) block
 arena     := 'arena' block
@@ -422,7 +484,7 @@ A `native` function has no block, and every other function has one. `native` is 
 ## Out of scope (later specs)
 
 User-defined generic types/functions, interfaces, closures/lambdas,
-string operations, error types beyond `?`, fixed-size arrays,
+sorting and `map`/`filter` on lists, error types beyond `?`, fixed-size arrays,
 C FFI declarations, GPU/shader code.
 
 ## Resolved in review

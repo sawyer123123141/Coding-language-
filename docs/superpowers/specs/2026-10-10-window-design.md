@@ -64,6 +64,7 @@ Pixels, origin top-left, y down (like Godot 2D). The colour is always the last a
 ```
 draw.clear(color: Color)
 draw.rect(pos: vec2, size: vec2, color: Color)
+draw.fill(r: Rect, color: Color)
 draw.rect_outline(pos: vec2, size: vec2, width: float, color: Color)
 draw.circle(center: vec2, radius: float, color: Color)
 draw.circle_outline(center: vec2, radius: float, width: float, color: Color)
@@ -73,6 +74,7 @@ draw.text(text: string, pos: vec2, size: float, color: Color)
 draw.text_width(text: string, size: float) -> float
 ```
 
+- `fill` draws a filled `Rect` (`pos` and `size`, like Godot's `Rect2` and `draw_rect`). It is written in Kestrel in `draw.kes` and calls `rect(r.pos, r.size, color)`, so headless output and errors (such as no window open) say `draw.rect`.
 - `line` takes `a, b`, because `from` and `to` are keywords.
 - `text` uses raylib's built-in font; `pos` is the top-left corner.
 - Circles are drawn with raylib's `DrawCircleSector` (it picks enough segments for the radius), outlines with `DrawRing`, so `circle_outline` and `rect_outline` borders sit inside the shape. `triangle` accepts either winding. A rectangle with a negative size draws nothing yet (a follow-up).

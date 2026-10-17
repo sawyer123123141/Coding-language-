@@ -71,18 +71,18 @@ fn the_world_makes_the_benchmarks_faces_wound_and_coloured_right() {
 const FLY_CHECK: &str = r#"use { Flyer, forward, right, view from fly }
 
 // Rounded to three decimals, with -0 made 0, so the printed numbers are exact.
-pure r(v: vec3) -> vec3 {
+pure round3(v: vec3) -> vec3 {
     vec3(round(v.x * 1000) / 1000 + 0.0, round(v.y * 1000) / 1000 + 0.0, round(v.z * 1000) / 1000 + 0.0)
 }
 
 main() {
-    print(r(forward(0, 0)), r(forward(90, 0)), r(forward(0, 90)))
-    print(r(right(0)), r(right(90)))
+    print(round3(forward(0, 0)), round3(forward(90, 0)), round3(forward(0, 90)))
+    print(round3(right(0)), round3(right(90)))
     var f = Flyer(pos: vec3(0, 0, 0), yaw: 0, pitch: 0)
     f.fly(vec3(0, 0, 1), vec2(0, 0), 0, 0.5)
-    print(r(f.pos))
+    print(round3(f.pos))
     f.fly(vec3(1, 1, 0), vec2(0, 0), 0, 0.5)
-    print(r(f.pos))
+    print(round3(f.pos))
     f.fly(vec3(0, 0, 0), vec2(-450, 0), 0, 0.1)
     print(f.yaw, f.pitch)
     f.fly(vec3(0, 0, 0), vec2(0, -10000), 0, 0.1)
@@ -96,7 +96,7 @@ main() {
     f.fly(vec3(0, 0, 0), vec2(0, 0), -100, 0.1)
     print(f.speed)
     let cam = view(f)
-    print(r(cam.pos), r(cam.target - cam.pos))
+    print(round3(cam.pos), round3(cam.target - cam.pos))
 }
 "#;
 

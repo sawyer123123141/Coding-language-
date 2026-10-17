@@ -29,6 +29,40 @@ main() {
 }
 ```
 
+Lists and strings have the everyday methods, named after GDScript's (`remove_at`, `pop`, `insert`, `clear`, `has`, `find`, `join`, `split`, `slice`, `upper`, `trim`, `to_int`). `remove b` inside a `for b in xs` loop removes the current item without skipping the next one, which is where `erase` in a GDScript loop goes wrong:
+
+```kestrel
+main() {
+    var bricks: list[int] = [1, 2, 3, 4, 5, 6]
+    var score = 0
+    for b in bricks {
+        if b % 2 == 0 {
+            score += b
+            remove b
+        }
+    }
+    print(bricks, score)    // [1, 3, 5] 12
+}
+```
+
+Strings are UTF-8, and lengths and indexes count characters, so `"héllo".len` is 5. Methods that can fail, like `find` and `to_int`, return an optional (`none`) where GDScript returns -1 or 0:
+
+```kestrel
+main() {
+    var words: list[string] = []
+    for part in "go, stop ,  jump".split(",") {
+        words.add(part.trim().upper())
+    }
+    print(words.join("-"), words.len)       // GO-STOP-JUMP 3
+    let name = "héllo"
+    print(name.len, name[1], name.slice(1, 4), name.find("l"))    // 5 é éll 2
+    let n = " 42 ".to_int() else { return }
+    print(n + 1)                            // 43
+}
+```
+
+The full list is in the "Lists and strings" section of `docs/superpowers/specs/2026-10-09-kestrel-syntax-design.md`.
+
 ## Use
 
 Needs Rust (stable) and, on Windows, Visual Studio's C++ build tools (for `link.exe`).
@@ -48,7 +82,7 @@ target/release/kestrel check program.kes      # errors only
 Four modules are built into the compiler (raylib underneath), and work under both `kestrel run` and `kestrel build`. Windows only for now.
 
 - `use window`: open the window, run the frame loop, time, screenshots.
-- `use draw`: shapes, text, textures and sprites, and `draw.rects` to draw thousands of rectangles in one call.
+- `use draw`: shapes (`draw.rect`, or `draw.fill` for a `Rect`), text, textures and sprites, and `draw.rects` to draw thousands of rectangles in one call.
 - `use draw3d`: a camera, meshes you build in Kestrel (`MeshData`, like filling an `ArrayMesh`) and upload to the GPU once, and a few shapes.
 - `use input`: keyboard and mouse.
 

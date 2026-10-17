@@ -1,0 +1,16 @@
+// env: KESTREL_HEADLESS=1
+// expect: window.open 64 64 "draw_fill"
+// expect: draw.rect vec2(x: 1, y: 2) vec2(x: 3, y: 4) Color(r: 1, g: 1, b: 1, a: 1)
+// expect: frames 1
+use window
+use draw
+
+main() {
+    window.open(64, 64, "draw_fill")
+    var frames = 0
+    while window.frame() {
+        frames += 1
+        draw.fill(draw.Rect(pos: vec2(1, 2), size: vec2(3, 4)), draw.WHITE)
+    }
+    print("frames", frames)
+}

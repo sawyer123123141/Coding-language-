@@ -44,6 +44,11 @@ pub native triangle(a: vec2, b: vec2, c: vec2, color: Color)
 pub native text(text: string, pos: vec2, size: float, color: Color)
 pub native text_width(text: string, size: float) -> float
 
+// Fills a Rect with a colour: rect(r.pos, r.size, color).
+pub fill(r: Rect, color: Color) {
+    rect(r.pos, r.size, color)
+}
+
 // Textures. A relative path means the program's folder, and the window has to be open first.
 // Pixels are given row by row from the top-left. A negative size mirrors the image, and the
 // tint multiplies its colours (WHITE leaves them alone).

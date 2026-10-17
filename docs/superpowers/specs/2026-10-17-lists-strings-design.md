@@ -128,3 +128,39 @@ What each costs if wrong:
 10. **`remove` and length changes are refused when any enclosing loop iterates an overlapping list,** not only the innermost one. Cost: nested loops over the same list must collect indexes and remove after.
 11. **`"".split(",")` is `[""]`.** Cost: a program that expects `[]` must check for an empty string first.
 12. **Assigning to a removed loop item is an error.** Cost: none; there is no slot to put it in.
+
+## As built
+
+Built 2026-10-17 in five tasks on `main` (commits 2281e7a, 58d5295, 3f81f0b, 2bd84b9, 9a7094d, 025677b and the last one that adds `draw.fill` and these docs). `cargo test --workspace --no-fail-fast` passes 681 tests and clippy is clean in `kestrel/` and `kestrel/godot`. The Godot add-on was rebuilt and its headless test passes: 31 ok, 0 failures. The program tests (`tests/programs/`, run as JIT and as exe) and error tests (`tests/errors/`) cover each operation, the panics, owning items, non-ASCII text and empty values. Everything in the design was built. What differs from it, or was added to it:
+
+**Lists**
+- **The overlap rule is one-directional.** `remove_at`, `pop`, `insert` and `clear` are refused only when the list they change is the looped list or contains it (the changed path is the start of the looped path; an index matches any index). `for row in grid { row.clear() }` and `for e in enemies { e.targets.clear() }` are fine, because they never change the length of the list being looped. `row.clear()` inside `for x in grid[0]` is refused, as the design says. A `match` binding or `let ... else` view counts as the place it reads, and a loop item counts as its list plus an index.
+- **The refusal names the list as written up to its first index** (`xs`, `w.items`, `grid` for `grid[0]`) and the innermost overlapping loop's item in "use `remove x`".
+- **Arrays** get `has` and `find`; `remove_at`, `pop`, `insert` and `clear` say "arrays have a fixed length; use a `list[T]` if items come and go". `add` keeps its old message. Unknown list methods get a help line listing the methods, `join` included.
+- **KIR.** The list operations are `ListOp { RemoveAt, Insert, Clear, Compact }` and `Stmt::SetLen`. `pop` is built from existing nodes plus `SetLen`, and `has` and `find` call one generated search function per item type. Every one of them is reported as a write of its list, pinned in `scalarize.rs`, and handled in `visit_mut`, `rename` and `inline`.
+- **Vacated slots are zeroed.** `clear` and `pop` zero what they vacate (as `remove_at` and `remove b` do), so no freed arena stays reachable from a spare slot.
+- **`KESTREL_ARENA_COUNT=1`** prints `arenas alive at exit: N` to stderr. It was added to prove that owning items are dropped exactly once. It counts user arenas only: the program arena, the `par for` workers' arenas and the arena for heap constants are left out (that one is built with `StaticArena`, a new KIR expression and runtime function).
+
+**`remove b`**
+- **Extra refusals** the design doesn't list:
+  - `remove b` inside `in b.mem { }` ("can't remove `b` here: this `in` block is putting memory in `b`'s arena");
+  - using a view of `b` (an inner loop's item over `b.parts`, a `match` binding) after `remove b` ("`h` reads from `b`, which was removed earlier");
+  - `remove b` while an inner loop is removing from a list inside `b` ("the loop over `b.hits` is removing items from it; leave that loop first").
+- **Uses of the list are refused in both directions** in a removing loop: `xs`, `xs.len`, `xs[0]` and `w` (when looping over `w.bricks`), not only a change that covers the looped list. Uses rooted at the item or its views are exempt.
+- **Wording** where the design gave only a stem: "`b` was removed earlier, so it can't be used here" (and "may have been removed earlier"), "... so it can't be removed again", "can't remove from parameter `xs`: it isn't `var`", "can't remove from `self`: the method takes `self`, not `var self`".
+- **`Tables::removing_loops` and `Tables::removes`** are the checker's result for lowering; `removes` is keyed by the statement's span.
+- **One test program changed.** The design's `drop_two_stop_at_three` used `x` after a conditional `remove x`, which the design's own rule refuses, so its two `if`s are swapped (same output).
+- **Not allowed:** `remove` in a `par for` over a chunk's own list would be safe but is refused (a follow-up).
+
+**Strings**
+- **String `+` is refused in constants and field defaults** ("a constant or field default can't join strings with `+`; write the text as one string"), as interpolation is, because the result is built in an arena at each use. String methods there were already refused (methods on non-enums aren't constant).
+- **`+` chains build one string:** `a + b + c` and `s += t` lower to one allocation.
+- **`s[i]`, `slice` and `s.len`'s index arguments** accept any integer type; a float says "an index must be an integer, found float". A negative index says "index -1 out of bounds for length N".
+- **Messages for loops and indexing name strings now:** "... needs an array, list, map or string" and "... only arrays, lists, maps and strings can be indexed".
+- **`to_float` accepts `.5` and `5.`** (at least one digit in the mantissa). `1e-999` (an `f32` underflow) gives 0 rather than `none`: "doesn't fit" means overflow.
+- **`find`, `starts_with` and `ends_with` search bytes,** which is valid because UTF-8 is self-synchronising; the result is converted to a character index.
+
+**Drawing**
+- **`draw.fill`** is Kestrel in `draw.kes`, as designed. Its parameter is called `r`, and this showed a limit that was already there: a parameter of a function in `draw.kes` can't have the same name as a global of the user's program ("`r` is already defined; Kestrel doesn't allow shadowing"), because the shadowing check sees both. `color` has had the same effect since the window was built. The voxel demo's fly test had a helper called `r`, which now fails with `use draw`; the helper is renamed `round3` in `cli/tests/voxels_demo.rs`. A user program with a global `r` that uses `draw` would now fail the same way; see the follow-ups.
+
+**Controller rulings** (Tasks 1-4): the overlap rule above; `ListOp` and `Stmt::SetLen` as above; `KESTREL_ARENA_COUNT` counts user arenas only; `clear` and `pop` zero what they vacate; the extra `remove b` refusals above; string `+` refused in constants and defaults; loop and index messages name strings; `to_float` accepts `.5` and `5.`.
