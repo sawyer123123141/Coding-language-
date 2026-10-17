@@ -250,6 +250,10 @@ From `docs/superpowers/specs/2026-10-17-lists-strings-design.md` (its "As built"
 - `find` and `split` search in O(n*m).
 - `list_insert` zeroes the slot it opens and codegen then overwrites it. Harmless.
 - The program-test harness reportedly hung on a test program that fails to compile (the compiler exits 1; the harness wasn't investigated).
+- A `.pop()` on a read-only parameter or `self` gets two errors: "isn't `var`" and "it may point into the caller's arena". The first is the useful one.
+- A kept `pop` of an owning item works only on a local list; a helper like `take(var self) -> T?` that pops owning items is refused (return the index instead). Lifting this needs a region for the popped value tied to the caller's owner.
+- `kestrel/godot/build.ps1` fails under Windows PowerShell 5.1, because cargo writes its progress to stderr. Run its two steps by hand meanwhile.
+- Error messages for a clash inside the entry file now come from `link`, so that file's other checker errors aren't shown until the clash is fixed.
 
 **File sizes** (the 400-line guide): `kir/src/ir.rs` is 415 lines and `check/src/tables.rs` 401 (`check/src/body/mod.rs` went back to 389 in the `remove b` task).
 
