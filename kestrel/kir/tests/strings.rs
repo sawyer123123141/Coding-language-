@@ -85,3 +85,58 @@ fn the_loop_steps_before_the_body_so_continue_lands_past_the_character() {
     assert!(matches!(&pass[2], Stmt::Assign(..)));
     assert!(matches!(&pass[5], Stmt::If { .. }), "{pass:#?}");
 }
+
+fn str_ops(m: &Module) -> Vec<StrOp> {
+    exprs(main_body(m)).into_iter().filter_map(|e| if let ExprKind::Str(op, _) = &e.kind { Some(*op) } else { None }).collect()
+}
+
+#[test]
+fn string_methods_are_string_operations() {
+    let m = lower_src("main() {\n let s = \"héllo\"\n let a = s.has(\"l\")\n let b = s.starts_with(\"h\")\n let c = s.ends_with(\"o\")\n let d = s.slice(1, 2)\n let e = s.trim()\n let f = s.upper()\n let g = s.lower()\n let h = s.split(\",\")\n let i = s.to_int()\n let j = s.to_float()\n}\n");
+    assert_eq!(
+        str_ops(&m),
+        [
+            StrOp::Find,
+            StrOp::Starts,
+            StrOp::Ends,
+            StrOp::Slice,
+            StrOp::Trim,
+            StrOp::Upper,
+            StrOp::Lower,
+            StrOp::Split,
+            StrOp::ToInt,
+            StrOp::ToFloat
+        ]
+    );
+}
+
+#[test]
+fn has_is_a_search_that_found_something() {
+    let m = lower_src("main() {\n let s = \"abc\"\n let a = s.has(\"b\")\n}\n");
+    let [_, Stmt::Let(_, a)] = main_body(&m) else { panic!("{:#?}", main_body(&m)) };
+    let ExprKind::Binary(BinOp::Ne, find, minus_one) = &a.kind else { panic!("{a:?}") };
+    assert!(matches!(&find.kind, ExprKind::Str(StrOp::Find, _)));
+    assert!(matches!(&minus_one.kind, ExprKind::Int(-1)));
+}
+
+#[test]
+fn find_makes_an_optional_from_the_search() {
+    let m = lower_src("main() {\n let s = \"abc\"\n let a = s.find(\"b\")\n}\n");
+    assert_eq!(str_ops(&m), [StrOp::Find]);
+    let mut somes = 0;
+    visit::walk(main_body(&m), &mut |n| {
+        if let visit::Node::Expr(Expr { kind: ExprKind::Some(_), .. }) = n {
+            somes += 1;
+        }
+    });
+    assert_eq!(somes, 1);
+}
+
+#[test]
+fn join_is_a_string_operation_on_the_list() {
+    let m = lower_src("main() {\n let parts = [\"a\", \"b\"]\n let j = parts.join(\",\")\n}\n");
+    let [_, Stmt::Let(_, j)] = main_body(&m) else { panic!("{:#?}", main_body(&m)) };
+    let ExprKind::Str(StrOp::Join, args) = &j.kind else { panic!("{j:?}") };
+    assert_eq!(args.len(), 2);
+    assert!(matches!(args[0].ty, KTy::Array(_)));
+}

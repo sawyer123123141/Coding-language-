@@ -2,6 +2,7 @@
 //! (`StrOp`); `+` is an interpolation of its two sides, so it builds a new string in the current
 //! arena, as `s += t` does.
 
+use kestrel_check::StrMethod;
 use kestrel_syntax::ast;
 
 use super::FnLowerer;
@@ -42,6 +43,52 @@ impl<'a> FnLowerer<'a> {
     pub(crate) fn str_at(&mut self, base: &ast::Expr, index: &ast::Expr) -> ExprKind {
         let (s, i) = (self.expr(base), self.expr(index));
         ExprKind::Str(StrOp::At, vec![s, i])
+    }
+
+    /// A string method call (`has`, `find`, `slice`, `split` ...): the receiver, then the arguments.
+    pub(crate) fn str_method(&mut self, method: StrMethod, receiver: &ast::Expr, args: &[ast::Arg], ty: KTy, line: u32) -> ExprKind {
+        let mut operands = vec![self.expr(receiver)];
+        operands.extend(args.iter().map(|a| self.expr(&a.value)));
+        let op = match method {
+            StrMethod::Has | StrMethod::Find => StrOp::Find,
+            StrMethod::StartsWith => StrOp::Starts,
+            StrMethod::EndsWith => StrOp::Ends,
+            StrMethod::Slice => StrOp::Slice,
+            StrMethod::Split => StrOp::Split,
+            StrMethod::Upper => StrOp::Upper,
+            StrMethod::Lower => StrOp::Lower,
+            StrMethod::Trim => StrOp::Trim,
+            StrMethod::ToInt => StrOp::ToInt,
+            StrMethod::ToFloat => StrOp::ToFloat,
+            StrMethod::Len | StrMethod::At => unreachable!("{method:?} is not a method call"),
+        };
+        match method {
+            // `-1` means no match.
+            StrMethod::Has => {
+                let found = Expr { kind: ExprKind::Str(op, operands), ty: KTy::I64, line };
+                ExprKind::Binary(BinOp::Ne, Box::new(found), Box::new(int(-1, line)))
+            }
+            StrMethod::Find => {
+                let (result, at) = (self.temp(ty), self.temp(KTy::I64));
+                let found = Expr { kind: ExprKind::Str(op, operands), ty: KTy::I64, line };
+                let some = Expr { kind: ExprKind::Cast(Box::new(load(at, KTy::I64, line))), ty: KTy::I32, line };
+                let some = Expr { kind: ExprKind::Some(Box::new(some)), ty, line };
+                let hit = Expr { kind: ExprKind::Binary(BinOp::Ge, Box::new(load(at, KTy::I64, line)), Box::new(int(0, line))), ty: KTy::Bool, line };
+                let pre = vec![
+                    Stmt::Let(result, Expr { kind: ExprKind::NoneLit, ty, line }),
+                    Stmt::Let(at, found),
+                    Stmt::If { cond: hit, then_body: vec![Stmt::Assign(Place::local(result), some)], else_body: Vec::new() },
+                ];
+                Self::with_pre(pre, ExprKind::Load(Place::local(result)), ty, line)
+            }
+            _ => ExprKind::Str(op, operands),
+        }
+    }
+
+    /// `xs.join(sep)` on a list or array of strings.
+    pub(crate) fn str_join(&mut self, list: &ast::Expr, sep: &ast::Expr) -> ExprKind {
+        let (list, sep) = (self.expr(list), self.expr(sep));
+        ExprKind::Str(StrOp::Join, vec![list, sep])
     }
 
     /// `a + b` on strings: the pieces of the two sides, in order.

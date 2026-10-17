@@ -30,11 +30,49 @@ impl<'a> BodyChecker<'a> {
         Ty::Error
     }
 
-    /// `s.name(...)`. The receiver is checked already.
-    pub(crate) fn str_method(&mut self, name: &str, name_span: Span, args: &[Arg]) -> Ty {
-        self.error_help(name_span, format!("string has no method `{name}`"), STR_METHODS);
-        self.check_loose_args(args);
-        Ty::Error
+    /// `s.name(...)`. The receiver is checked already. Every string a method gives is new, in the
+    /// current arena (that is `region`'s default for a call).
+    pub(crate) fn str_method(&mut self, e: &Expr, name: &str, name_span: Span, args: &[Arg]) -> Ty {
+        // The method, how its arguments are described when they're wrong, and how many it takes.
+        let (method, usage, count) = match name {
+            "has" => (StrMethod::Has, "`has` takes one value", 1),
+            "find" => (StrMethod::Find, "`find` takes one value", 1),
+            "starts_with" => (StrMethod::StartsWith, "`starts_with` takes one value", 1),
+            "ends_with" => (StrMethod::EndsWith, "`ends_with` takes one value", 1),
+            "split" => (StrMethod::Split, "`split` takes one value", 1),
+            "slice" => (StrMethod::Slice, "`slice` takes two values", 2),
+            "upper" => (StrMethod::Upper, "`upper` takes no arguments", 0),
+            "lower" => (StrMethod::Lower, "`lower` takes no arguments", 0),
+            "trim" => (StrMethod::Trim, "`trim` takes no arguments", 0),
+            "to_int" => (StrMethod::ToInt, "`to_int` takes no arguments", 0),
+            "to_float" => (StrMethod::ToFloat, "`to_float` takes no arguments", 0),
+            _ => {
+                self.error_help(name_span, format!("string has no method `{name}`"), STR_METHODS);
+                self.check_loose_args(args);
+                return Ty::Error;
+            }
+        };
+        if args.len() != count || args.iter().any(|a| a.label.is_some() || a.is_var) {
+            self.error(e.span, usage);
+            self.check_loose_args(args);
+            return Ty::Error;
+        }
+        self.t.res.insert(e.id, Res::Str(method));
+        match method {
+            StrMethod::Slice => args.iter().for_each(|a| self.check_int_index(&a.value)),
+            StrMethod::Has | StrMethod::Find | StrMethod::StartsWith | StrMethod::EndsWith | StrMethod::Split => {
+                self.check_value(&args[0].value, Some(Ty::Str));
+            }
+            _ => {}
+        }
+        match method {
+            StrMethod::Has | StrMethod::StartsWith | StrMethod::EndsWith => Ty::Bool,
+            StrMethod::Find | StrMethod::ToInt => Ty::Optional(self.t.intern_elem(Ty::Int)),
+            StrMethod::ToFloat => Ty::Optional(self.t.intern_elem(Ty::Float)),
+            StrMethod::Split => Ty::List(self.t.intern_elem(Ty::Str)),
+            StrMethod::Slice | StrMethod::Upper | StrMethod::Lower | StrMethod::Trim => Ty::Str,
+            StrMethod::Len | StrMethod::At => unreachable!("not a method"),
+        }
     }
 
     /// `s[i]`: the character at `i`, as a new one-character string.

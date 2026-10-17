@@ -119,6 +119,7 @@ impl<'a> FnLowerer<'a> {
                 }
                 Res::Builtin(b) => self.vector_method(b, receiver, args, ty, line),
                 Res::List(method) => self.list_value(method, receiver, args, ty, line),
+                Res::Str(method) => self.str_method(method, receiver, args, ty, line),
                 other => unreachable!("method call resolved to {other:?}"),
             },
             ast::ExprKind::Field { base, .. } if matches!(self.t.ty(base.id), Ty::Array(_) | Ty::List(_) | Ty::Map(..)) => {

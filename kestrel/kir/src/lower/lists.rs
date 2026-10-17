@@ -57,7 +57,7 @@ impl<'a> FnLowerer<'a> {
                 let kind = self.pop(receiver, ty, line);
                 self.keep(Expr { kind, ty, line }, out);
             }
-            ListMethod::Has | ListMethod::Find => unreachable!("the checker refuses a discarded `{method:?}`"),
+            ListMethod::Has | ListMethod::Find | ListMethod::Join => unreachable!("the checker refuses a discarded `{method:?}`"),
         }
     }
 
@@ -66,6 +66,7 @@ impl<'a> FnLowerer<'a> {
         match method {
             ListMethod::Pop => self.pop(receiver, ty, line),
             ListMethod::Find => self.find(receiver, &args[0].value, ty, line),
+            ListMethod::Join => self.str_join(receiver, &args[0].value),
             ListMethod::Has => {
                 // `find`, then whether it found something.
                 let opt = self.int_optional();

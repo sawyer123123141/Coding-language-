@@ -6,6 +6,8 @@ use kestrel_syntax::Span;
 use crate::builtins::Builtin;
 use crate::ty::Ty;
 
+pub use crate::str_method::StrMethod;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct LocalId(pub u32);
 
@@ -39,22 +41,15 @@ pub enum ListMethod {
     Clear,
     Has,
     Find,
+    /// `xs.join(sep)` on a list or array of strings.
+    Join,
 }
 
 impl ListMethod {
-    /// Whether the method changes its receiver; `has` and `find` only read it.
+    /// Whether the method changes its receiver; `has`, `find` and `join` only read it.
     pub fn changes_receiver(self) -> bool {
-        !matches!(self, ListMethod::Has | ListMethod::Find)
+        !matches!(self, ListMethod::Has | ListMethod::Find | ListMethod::Join)
     }
-}
-
-/// What a string field, index or method call refers to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum StrMethod {
-    /// `s.len`: the number of characters.
-    Len,
-    /// `s[i]`: the character at `i`, as a new string.
-    At,
 }
 
 /// What a name or call expression refers to.

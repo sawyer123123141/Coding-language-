@@ -160,7 +160,7 @@ impl<'a> BodyChecker<'a> {
             return self.map_method(e, receiver, receiver_ty, args);
         }
         if receiver_ty == Ty::Str {
-            return self.str_method(name, *name_span, args);
+            return self.str_method(e, name, *name_span, args);
         }
         if let (Some(_), Some(b)) = (self.t.vec_dims(receiver_ty), Builtin::vector_method(name)) {
             return self.check_vector_method(e, b, receiver, receiver_ty, args);

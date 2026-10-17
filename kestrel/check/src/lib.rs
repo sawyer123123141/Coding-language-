@@ -2,6 +2,7 @@ mod body;
 mod builtins;
 mod collect;
 mod natives;
+mod str_method;
 pub mod tables;
 pub mod ty;
 

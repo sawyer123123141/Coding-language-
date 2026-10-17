@@ -68,7 +68,7 @@ fn collection_errors() {
     let cases: &[(&str, &str)] = &[
         ("main() {\n let xs = []\n}\n", "can't tell what `[]` holds"),
         ("main() {\n let a = [1, true]\n}\n", "expected int, found bool"),
-        ("main() {\n let x = 5\n let y = x[0]\n}\n", "can't index int; only arrays, lists and maps can be indexed"),
+        ("main() {\n let x = 5\n let y = x[0]\n}\n", "can't index int; only arrays, lists, maps and strings can be indexed"),
         ("main() {\n let a = [1]\n let y = a[true]\n}\n", "an index must be an integer, found bool"),
         ("main() {\n let a = [1]\n a[0] = 2\n}\n", "can't change `a`: it was declared with `let`"),
         ("main() {\n var a = [1]\n a.add(2)\n}\n", "arrays have a fixed length; use a `list[int]` to add items"),
@@ -78,7 +78,7 @@ fn collection_errors() {
         ("main() {\n let a = array[int]()\n}\n", "`array[T](n)` takes one length"),
         ("main() {\n let l = list[int](3)\n}\n", "`list[T]()` takes no arguments"),
         ("main() {\n let a = array[int](1.5)\n}\n", "an array length must be an integer, found float"),
-        ("main() {\n for v in 5 { }\n}\n", "can't loop over int; `for ... in` needs an array, list or map"),
+        ("main() {\n for v in 5 { }\n}\n", "can't loop over int; `for ... in` needs an array, list, map or string"),
         ("main() {\n let a = [1]\n for v in a { v = 2 }\n}\n", "can't change `a`: it was declared with `let`"),
         ("main() {\n let list = 3\n}\n", "`list` is a built-in name; pick another"),
         ("f(xs: [int]) {\n xs[0] = 1\n}\nmain() {}\n", "can't change parameter `xs`"),

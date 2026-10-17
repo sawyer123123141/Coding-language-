@@ -69,7 +69,7 @@ impl<'a> BodyChecker<'a> {
             Some(elem) => elem,
             None if base_ty == Ty::Error => Ty::Error,
             None => {
-                let msg = format!("can't index {}; only arrays, lists and maps can be indexed", self.tn(base_ty));
+                let msg = format!("can't index {}; only arrays, lists, maps and strings can be indexed", self.tn(base_ty));
                 self.error(base.span, msg);
                 Ty::Error
             }
@@ -153,7 +153,7 @@ impl<'a> BodyChecker<'a> {
             Some(elem) => elem,
             None => {
                 if iter_ty != Ty::Error {
-                    let msg = format!("can't loop over {}; `for ... in` needs an array, list or map", self.tn(iter_ty));
+                    let msg = format!("can't loop over {}; `for ... in` needs an array, list, map or string", self.tn(iter_ty));
                     self.error(iter.span, msg);
                 }
                 Ty::Error

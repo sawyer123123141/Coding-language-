@@ -125,10 +125,11 @@ impl<'a> BodyChecker<'a> {
             "clear" => Which::Other(ListMethod::Clear),
             "has" => Which::Other(ListMethod::Has),
             "find" => Which::Other(ListMethod::Find),
+            "join" => Which::Other(ListMethod::Join),
             _ => {
                 let help = match recv_ty {
-                    Ty::List(_) => "lists have `add`, `remove_at`, `pop`, `insert`, `clear`, `has`, `find` and `.len`",
-                    _ => "arrays have `has`, `find` and `.len`",
+                    Ty::List(_) => "lists have `add`, `remove_at`, `pop`, `insert`, `clear`, `has`, `find`, `join` and `.len`",
+                    _ => "arrays have `has`, `find`, `join` and `.len`",
                 };
                 let msg = format!("`{}` has no method `{name}`", self.tn(recv_ty));
                 self.error_help(*name_span, msg, help);
@@ -160,6 +161,12 @@ impl<'a> BodyChecker<'a> {
             self.check_loose_args(args);
             return Ty::Error;
         }
+        if method == ListMethod::Join && !matches!(elem, Ty::Str | Ty::Error) {
+            let msg = format!("`join` needs a list of strings, found `{}`", self.tn(recv_ty));
+            self.error(*name_span, msg);
+            self.check_loose_args(args);
+            return Ty::Error;
+        }
         let usage = match method {
             ListMethod::RemoveAt => ("`remove_at` takes one index", 1),
             ListMethod::Pop => ("`pop` takes no arguments", 0),
@@ -167,6 +174,7 @@ impl<'a> BodyChecker<'a> {
             ListMethod::Clear => ("`clear` takes no arguments", 0),
             ListMethod::Has => ("`has` takes one value", 1),
             ListMethod::Find => ("`find` takes one value", 1),
+            ListMethod::Join => ("`join` takes one value", 1),
         };
         if args.len() != usage.1 || args.iter().any(|a| a.label.is_some() || a.is_var) {
             self.error(e.span, usage.0);
@@ -193,6 +201,9 @@ impl<'a> BodyChecker<'a> {
             ListMethod::Has | ListMethod::Find => {
                 self.check_value(&args[0].value, Some(elem));
             }
+            ListMethod::Join => {
+                self.check_value(&args[0].value, Some(Ty::Str));
+            }
             ListMethod::Pop | ListMethod::Clear => {}
         }
         match method {
@@ -203,6 +214,7 @@ impl<'a> BodyChecker<'a> {
                 self.t.intern_elem(Ty::Int);
                 Ty::Bool
             }
+            ListMethod::Join => Ty::Str,
             ListMethod::RemoveAt | ListMethod::Insert | ListMethod::Clear => Ty::Unit,
         }
     }

@@ -1,0 +1,9 @@
+// expect: 1
+// expect-exit: 101
+// expect-stderr: `split` needs a separator that isn't empty; to go through each character, use `for c in s` on line 8
+main() {
+    let s = "abc"
+    let sep = ""
+    print("a,b".split(",").len - 1)
+    print(s.split(sep))
+}

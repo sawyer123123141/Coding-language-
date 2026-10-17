@@ -58,8 +58,9 @@ pub enum ListOp {
     Compact,
 }
 
-/// What `ExprKind::Str` does with its string operand (always `args[0]`, a string value). The
-/// string may be zero-filled (null pointer, length 0), which is the empty string.
+/// What `ExprKind::Str` does with its string operand (`args[0]`, a string value; for `Join` a list
+/// or array of strings). A string may be zero-filled (null pointer, length 0), which is the empty
+/// string. Characters are Unicode code points; every string made is new, in the current arena.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StrOp {
     /// `[s]`: the number of characters (i64).
@@ -71,4 +72,28 @@ pub enum StrOp {
     CharLen,
     /// `[s, pos, n]`: a new string in the current arena of the bytes `pos..pos + n` (i64s).
     Piece,
+    /// `[s, sub]`: the character index (i64) of the first `sub` in `s`, or -1. An empty `sub` is 0.
+    Find,
+    /// `[s, sub]`: whether `s` starts with `sub` (bool).
+    Starts,
+    /// `[s, sub]`: whether `s` ends with `sub` (bool).
+    Ends,
+    /// `[s, from, to]`: a new string of the characters `from..to` (any integers); the runtime
+    /// panics unless `0 <= from <= to <= chars`.
+    Slice,
+    /// `[s]`: a new string without whitespace at either end.
+    Trim,
+    /// `[s]`: a new string in upper case.
+    Upper,
+    /// `[s]`: a new string in lower case.
+    Lower,
+    /// `[list, sep]`: a new string of the list's (or array's) strings with `sep` between them.
+    Join,
+    /// `[s, sep]`: a new `list[string]` of the pieces between the separators, all in the current
+    /// arena; the runtime panics when `sep` is empty.
+    Split,
+    /// `[s]`: an `int?`, `none` unless `s` is a whole number that fits.
+    ToInt,
+    /// `[s]`: a `float?`, `none` unless `s` is a finite number.
+    ToFloat,
 }

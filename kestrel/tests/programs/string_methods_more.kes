@@ -1,0 +1,58 @@
+// expect: 0 [""] true 0
+// expect: [||] none false
+// expect: 3 1 a 😀 ["a", "b"]
+// expect: -350 7 0.5 none none
+// expect: 9 none none none
+// expect: SS 2 strasse
+// expect: a+b+c a,b,c,z
+// expect: 3 7
+// expect: found 5 at 1
+// expect: 6 2 a-b
+// expect: x:1 y:2 z:3
+struct Row {
+    cells: list[string]
+}
+
+words(s: string) -> list[string] {
+    s.split(" ")
+}
+
+main() {
+    // A zero-filled string is the empty string.
+    let blank = array[string](1)
+    let z = blank[0]
+    print(z.find(""), z.split(","), z.has(""), z.len)
+    print("[{z.trim()}|{z.upper()}|{z.slice(0, 0)}]", z.to_int(), z.starts_with("a"))
+    // Emoji count as one character.
+    let e = "a😀b"
+    print(e.len, e.find("😀"), e.slice(0, 1), e.slice(1, 2), "a😀b".split("😀"))
+    print("-3.5e2".to_float(), " 7 ".to_float(), ".5".to_float(), "1_0".to_float(), "inf".to_float())
+    print("+9".to_int(), "2147483648".to_int(), "0x10".to_int(), "1_000".to_int())
+    print("ß".upper(), "ß".upper().len, "STRASSE".lower())
+    var parts = "a b c".split(" ")
+    let joined = parts.join("+")
+    parts = "a,b,c".split(",")
+    parts.add("z")
+    print(joined, parts.join(","))
+    // Methods on temporaries, and results flowing through functions and struct fields.
+    let row = Row(cells: words("p q r"))
+    print(row.cells.len, "  seven ".trim().len + 2)
+    var nums: list[int] = []
+    for piece in "10,20,x,30".split(",") {
+        let n = piece.to_int() else { continue }
+        nums.add(n)
+    }
+    let first = "xyz".find("y") else { return }
+    print("found", nums.len + first + 1, "at", first)
+    var total = 0
+    for i from 0 to 3 {
+        arena {
+            let p = "a,b,c".split(",")
+            total += p.len - 1
+        }
+    }
+    let pair = "a-b".split("-")
+    print(total, pair.len, pair.join("-"))
+    let cells = ["x:1", "y:2", "z:3"]
+    print(cells.join(" "))
+}

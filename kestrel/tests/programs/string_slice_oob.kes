@@ -1,0 +1,9 @@
+// expect: éll
+// expect-exit: 101
+// expect-stderr: slice 2 to 9 is out of bounds for a string of 5 characters on line 8
+main() {
+    let s = "héllo"
+    var hi = 9
+    print(s.slice(1, 4))
+    print(s.slice(2, hi))
+}

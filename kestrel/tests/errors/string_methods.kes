@@ -1,0 +1,20 @@
+// error 10: `join` needs a list of strings, found `[int]`
+// error 11: this only reads the string, so the line does nothing
+// error 12: `slice` takes two values
+// error 13: expected string, found int
+// error 14: `upper` takes no arguments
+// error 15: `has` takes one value
+// error 18: this memory is freed at the end of the `arena { }` block, but `keep` lives longer
+main() {
+    let s = "hello"
+    let j = [1, 2].join(",")
+    s.has("a")
+    let a = s.slice(1)
+    let b = s.find(1)
+    let c = s.upper(1)
+    let d = s.has("a", "b")
+    var keep = ""
+    arena {
+        keep = "a,b".split(",")[0]
+    }
+}

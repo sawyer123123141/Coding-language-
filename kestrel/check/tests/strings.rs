@@ -111,3 +111,78 @@ fn string_results_are_checked_as_new_memory() {
     // A literal belongs to no arena.
     ok("main() {\n var keep = \"\"\n arena {\n  keep = \"x\"\n }\n}\n");
 }
+
+#[test]
+fn string_methods_have_their_types() {
+    let t = ok("main() {\n let s = \"a,b\"\n let h = s.has(\"a\")\n let st = s.starts_with(\"a\")\n let en = s.ends_with(\"b\")\n let f = s.find(\"b\")\n let sl = s.slice(0, 1)\n let sp = s.split(\",\")\n let u = s.upper()\n let l = s.lower()\n let tr = s.trim()\n let i = s.to_int()\n let x = s.to_float()\n let parts = [\"a\", \"b\"]\n let j = parts.join(\", \")\n let ls: list[string] = []\n let j2 = ls.join(\"\")\n}\n");
+    let ty = |name: &str| t.locals.iter().find(|l| l.name == name).unwrap().ty;
+    let opt = |ty: Ty| Ty::Optional(t.elem_ids[&ty]);
+    for name in ["h", "st", "en"] {
+        assert_eq!(ty(name), Ty::Bool, "{name}");
+    }
+    for name in ["sl", "u", "l", "tr", "j", "j2"] {
+        assert_eq!(ty(name), Ty::Str, "{name}");
+    }
+    assert_eq!(ty("f"), opt(Ty::Int));
+    assert_eq!(ty("i"), opt(Ty::Int));
+    assert_eq!(ty("x"), opt(Ty::Float));
+    assert_eq!(ty("sp"), Ty::List(t.elem_ids[&Ty::Str]));
+}
+
+#[test]
+fn string_method_arguments_are_checked() {
+    let cases = [
+        ("s.slice(1)", "`slice` takes two values"),
+        ("s.slice(1, 2, 3)", "`slice` takes two values"),
+        ("s.find(1)", "expected string, found int"),
+        ("s.split(\",\", 1)", "`split` takes one value"),
+        ("s.upper(1)", "`upper` takes no arguments"),
+        ("s.has()", "`has` takes one value"),
+        ("s.slice(1.5, 2)", "an index must be an integer, found float"),
+        ("s.trim(x: 1)", "`trim` takes no arguments"),
+        ("parts.join(1)", "expected string, found int"),
+        ("parts.join()", "`join` takes one value"),
+    ];
+    for (call, want) in cases {
+        let src = format!("main() {{\n let s = \"abc\"\n let parts = [\"a\"]\n let r = {call}\n}}\n");
+        let (_, errs) = run(&src);
+        assert_eq!(errs, vec![want.to_string()], "{call}");
+    }
+}
+
+#[test]
+fn join_needs_strings() {
+    let (_, errs) = run("main() {\n let a = [1, 2].join(\",\")\n let l: list[int] = []\n let b = l.join(\",\")\n}\n");
+    assert_eq!(
+        errs,
+        vec!["`join` needs a list of strings, found `[int]`".to_string(), "`join` needs a list of strings, found `list[int]`".to_string()]
+    );
+}
+
+#[test]
+fn a_discarded_string_read_says_the_line_does_nothing() {
+    for call in ["s.has(\"a\")", "s.find(\"a\")", "s.upper()", "s.split(\",\")", "s.to_int()", "parts.join(\",\")"] {
+        let src = format!("main() {{\n let s = \"abc\"\n let parts = [\"a\"]\n {call}\n}}\n");
+        let (_, errs) = run(&src);
+        let want = if call.starts_with("parts") { "this only reads the list, so the line does nothing" } else { "this only reads the string, so the line does nothing" };
+        assert_eq!(errs, vec![want.to_string()], "{call}");
+    }
+}
+
+#[test]
+fn string_method_results_are_new_memory() {
+    let msg = "this memory is freed at the end of the `arena { }` block, but `keep` lives longer".to_string();
+    for value in ["\"a,b\".split(\",\")[0]", "\"abc\".slice(0, 1)", "\"abc\".upper()", "\"abc\".trim()", "[\"a\", \"b\"].join(\",\")"] {
+        let src = format!("main() {{\n var keep = \"\"\n arena {{\n  keep = {value}\n }}\n}}\n");
+        let (_, errs) = run(&src);
+        assert_eq!(errs, vec![msg.clone()], "{value}");
+    }
+    let (_, errs) = run("main() {\n var keep: list[string] = []\n arena {\n  keep = \"a,b\".split(\",\")\n }\n}\n");
+    assert_eq!(errs, vec![msg]);
+}
+
+#[test]
+fn a_constant_cannot_call_a_string_method() {
+    let (_, errs) = run("let UP = \"a\".upper()\nmain() {\n print(UP)\n}\n");
+    assert_eq!(errs.len(), 1, "{errs:?}");
+}
