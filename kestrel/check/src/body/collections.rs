@@ -61,6 +61,9 @@ impl<'a> BodyChecker<'a> {
         if let Some(kv) = self.map_of(base_ty) {
             return self.check_map_index(index, kv.0, kv.1);
         }
+        if base_ty == Ty::Str {
+            return self.check_str_index(e, index);
+        }
         self.check_int_index(index);
         match self.elem_of(base_ty) {
             Some(elem) => elem,
@@ -143,6 +146,9 @@ impl<'a> BodyChecker<'a> {
             }
             return self.check_map_for_in(iter, kv, index, var, body);
         }
+        if iter_ty == Ty::Str {
+            return self.check_str_for_in(par, index, var, iter, body);
+        }
         let elem = match self.elem_of(iter_ty) {
             Some(elem) => elem,
             None => {
@@ -173,7 +179,6 @@ impl<'a> BodyChecker<'a> {
         let over = match iter_ty {
             Ty::List(_) => Over::List,
             Ty::Array(_) => Over::Array,
-            Ty::Str => Over::Str,
             _ => Over::Other,
         };
         self.enter_item_loop(v, over, iter, body);

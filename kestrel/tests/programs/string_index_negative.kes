@@ -1,0 +1,6 @@
+// expect-exit: 101
+// expect-stderr: index -1 out of bounds for length 5 on line 5
+main() {
+    let s = "héllo"
+    print(s[0 - 1])
+}

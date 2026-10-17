@@ -20,8 +20,8 @@ impl<'a> FnLowerer<'a> {
                 Some(&Res::Const(c)) if hoisted(self.t, c) => Some(Place::local(self.const_local(c))),
                 _ => None,
             },
-            // `m[k]` is a lookup, not a place.
-            ast::ExprKind::Index { base, .. } if matches!(self.t.ty(base.id), kestrel_check::Ty::Map(..)) => None,
+            // `m[k]` is a lookup, and `s[i]` builds a new string: neither is a place.
+            ast::ExprKind::Index { base, .. } if matches!(self.t.ty(base.id), kestrel_check::Ty::Map(..) | kestrel_check::Ty::Str) => None,
             ast::ExprKind::Index { base, index } => {
                 let mut p = self.place(base)?;
                 p.path.push(Proj::Index { at: self.expr(index), checked: true });

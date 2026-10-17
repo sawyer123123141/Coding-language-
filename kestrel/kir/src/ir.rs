@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use crate::layout::{EnumLayout, StructLayout};
-pub use crate::ops::{ListOp, MapOp, MathOp};
+pub use crate::ops::{ListOp, MapOp, MathOp, StrOp};
 
 /// Bits of a KIR line (`Expr::line`, `Stmt::SetLine`) that hold the line within its file; the
 /// bits above hold the file's index in `Module::files`. Bit 31 stays clear.
@@ -320,8 +320,10 @@ pub enum ExprKind {
     MapNew,
     /// An operation on the map at a place; see `MapOp` for the arguments.
     Map(MapOp, Place, Vec<Expr>),
-    /// The length (i64) of the array or list at a place.
+    /// The length (i64) of the array or list at a place; of a string, its bytes.
     Len(Place),
+    /// An operation on a string value; see `StrOp` for the arguments.
+    Str(StrOp, Vec<Expr>),
     /// `Arena()`: a new, empty arena.
     NewArena,
     /// A new, empty arena that lives until the program ends and that `KESTREL_ARENA_COUNT` leaves

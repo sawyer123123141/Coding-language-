@@ -21,6 +21,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             ExprKind::Load(p) => self.load_place(p)?,
             ExprKind::Len(p) => self.len(p)?,
             ExprKind::Map(op, p, args) => self.map_op(*op, p, args)?,
+            ExprKind::Str(op, args) => self.str_scalar(*op, args)?,
             ExprKind::FieldOf(base, i) => {
                 let addr = self.field_addr(base, *i)?;
                 self.b.ins().load(ty, MemFlags::trusted(), addr, 0)

@@ -91,7 +91,6 @@ fn the_list_is_free_to_use_after_the_loop() {
 }
 
 #[test]
-#[ignore = "strings become loopable in Task 3; turn this on then"]
 fn removing_from_a_loop_over_a_string_is_refused() {
     let (_, errs) = run("main() {\n let s = \"abc\"\n for c in s { remove c }\n}\n");
     assert_eq!(errs, vec!["`remove` works in loops over a list; strings can't change, so build a new one".to_string()]);

@@ -98,7 +98,7 @@ fn errors_are_reported() {
         ("f() -> vec9 { }\nmain() {}\n", "unknown type `vec9`"),
         ("main() {\n let y: int = if true { return } else { return }\n}\n", NEVER_IF),
         ("f(x: int) {}\nmain() {\n f(if true { return } else { return })\n}\n", NEVER_IF),
-        ("main() {\n let s = \"a\" + \"b\"\n}\n", "`+` needs numbers, found string and string"),
+        ("main() {\n let s = \"a\" + 1\n}\n", "`+` needs two numbers or two strings, found string and int"),
     ];
     for (src, expected) in cases {
         let errs = errors(src);

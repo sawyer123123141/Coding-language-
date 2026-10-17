@@ -1,0 +1,75 @@
+// expect: 3
+// expect: ab
+// expect: found
+// expect: x1,x2,y1,y2,
+// expect: héy z
+// expect: a!b!
+// expect: 0 x x true
+// expect: ["abc", "bc"]
+// expect: abab
+// expect: lit
+// expect: xyxy
+struct Label {
+    text: string
+}
+
+shout(s: string) -> string {
+    var out = ""
+    for c in s {
+        out += c
+        out += "!"
+    }
+    out
+}
+
+main() {
+    let e = "a😀b"
+    print(e.len)
+    var kept = ""
+    for i, c in e {
+        if i == 1 { continue }
+        kept += c
+    }
+    print(kept)
+    for c in e {
+        if c == "😀" {
+            print("found")
+            break
+        }
+    }
+    var pairs = ""
+    for a in "xy" {
+        for b in "12" { pairs += a + b + "," }
+    }
+    print(pairs)
+    var l = Label("héy")
+    var seen = ""
+    for c in l.text {
+        l.text = "z"
+        seen += c
+    }
+    print(seen, l.text)
+    print(shout("ab"))
+    let blank = array[string](2)
+    var n = 0
+    for c in blank[0] { n += 1 }
+    for c in "" { n += 1 }
+    print(n, blank[0] + "x", "x" + blank[1], blank[0] == "")
+    var names: list[string] = ["a", "b"]
+    names[1] += "c"
+    names[0] = names[0] + names[1]
+    print(names)
+    var d = "ab"
+    d += d
+    print(d)
+    var keep = ""
+    arena {
+        var tmp = ""
+        for c in "héllo" { tmp += c }
+        keep = "lit"
+    }
+    print(keep)
+    var grow = "xy"
+    for c in grow { grow += c }
+    print(grow)
+}

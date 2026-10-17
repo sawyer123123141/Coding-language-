@@ -72,6 +72,9 @@ impl<'a> FnLowerer<'a> {
         if let kestrel_check::Ty::Map(..) = self.t.ty(iter.id) {
             return self.map_for_in(index, var, iter, body, out);
         }
+        if self.t.ty(iter.id) == kestrel_check::Ty::Str {
+            return self.str_for_in(index, var, iter, body, out);
+        }
         if par {
             return self.par_for_in(index, var, iter, body, out);
         }

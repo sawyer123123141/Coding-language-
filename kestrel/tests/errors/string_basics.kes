@@ -1,0 +1,28 @@
+// error 14: strings can't be changed in place; build a new one with `+` or `"{...}"`
+// error 15: only variables, fields and elements can be assigned to
+// error 16: `+` needs two numbers or two strings, found string and int
+// error 17: string has no field `size`
+// error 18: string has no method `reverse`
+// error 19: `par for` loops over an array or a list
+// error 22: this memory is freed at the end of the `arena { }` block, but `keep` lives longer
+// error 25: this memory is freed at the end of the `arena { }` block, but `keep` lives longer
+// error 27: an index must be an integer, found float
+main() {
+    let n = 3
+    var s = "abc"
+    var keep = ""
+    s[0] = "x"
+    s.len = 1
+    let u = "a" + 1
+    let w = s.size
+    s.reverse()
+    par for c in s { }
+    arena {
+        let q = "{n}"
+        keep = q[0]
+    }
+    arena {
+        keep += "x"
+    }
+    print(s[1.5])
+}

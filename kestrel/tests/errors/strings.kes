@@ -1,12 +1,12 @@
 // line 8 builds a string, which is allowed now
-// error 9: `+` needs numbers, found string and string
+// error 9: `+` needs two numbers or two strings, found string and int
 // error 10: expected string, found int
 // error 11: this has no value to print
 f() {}
 main() {
     let hp = 3
     let s = "hp {hp}"
-    let t = "a" + "b"
+    let t = "a" + 1
     let u: string = 5
     print("{f()}")
 }

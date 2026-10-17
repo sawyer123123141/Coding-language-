@@ -107,6 +107,9 @@ impl<'a> BodyChecker<'a> {
         if matches!(base_ty, Ty::Array(_) | Ty::List(_) | Ty::Map(..)) {
             return self.collection_field(base_ty, name, *name_span);
         }
+        if base_ty == Ty::Str {
+            return self.str_field(e, name, *name_span);
+        }
         let (owner, fields) = match base_ty {
             Ty::Struct(sid) => {
                 let info = self.t.strukt(sid);
@@ -155,6 +158,9 @@ impl<'a> BodyChecker<'a> {
         }
         if let Ty::Map(..) = receiver_ty {
             return self.map_method(e, receiver, receiver_ty, args);
+        }
+        if receiver_ty == Ty::Str {
+            return self.str_method(name, *name_span, args);
         }
         if let (Some(_), Some(b)) = (self.t.vec_dims(receiver_ty), Builtin::vector_method(name)) {
             return self.check_vector_method(e, b, receiver, receiver_ty, args);

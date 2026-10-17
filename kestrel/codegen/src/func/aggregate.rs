@@ -31,6 +31,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             ExprKind::ListNew => self.list_new(dest),
             ExprKind::MapNew => self.map_new(dest),
             ExprKind::Map(kir::MapOp::Get, p, args) => self.map_get_into(p, &args[0], e.ty, dest)?,
+            ExprKind::Str(op, args) => self.str_into(*op, args, e.line, dest)?,
             ExprKind::Move(p) => self.move_into(p, e.ty, dest)?,
             ExprKind::Some(v) => {
                 let KTy::Optional(el) = e.ty else { unreachable!("`Some` builds an optional") };

@@ -1,4 +1,4 @@
-use kestrel_check::{ConstId, Res, Tables, Ty};
+use kestrel_check::{ConstId, Res, StrMethod, Tables, Ty};
 use kestrel_syntax::ast;
 
 use super::builtins::constant_value;
@@ -70,6 +70,7 @@ impl<'a> FnLowerer<'a> {
                 };
                 ExprKind::Unary(op, Box::new(self.expr(expr)))
             }
+            ast::ExprKind::Binary { op: ast::BinaryOp::Add, lhs, rhs } if ty == KTy::Str => self.str_concat(lhs, rhs),
             ast::ExprKind::Binary { op, lhs, rhs } if self.vec_ty(e).is_some() => {
                 let (l, r) = (self.expr(lhs), self.expr(rhs));
                 self.vec_combine(binop(*op), l, r, ty, line)
@@ -123,8 +124,14 @@ impl<'a> FnLowerer<'a> {
             ast::ExprKind::Field { base, .. } if matches!(self.t.ty(base.id), Ty::Array(_) | Ty::List(_) | Ty::Map(..)) => {
                 self.len_value(base, line)
             }
+            ast::ExprKind::Field { base, .. } if matches!(self.t.res.get(&e.id), Some(Res::Str(StrMethod::Len))) => {
+                self.str_len(base, line)
+            }
             ast::ExprKind::Index { base, index } if matches!(self.t.ty(base.id), Ty::Map(..)) => {
                 self.map_get(base, index, ty, line)
+            }
+            ast::ExprKind::Index { base, index } if matches!(self.t.res.get(&e.id), Some(Res::Str(StrMethod::At))) => {
+                self.str_at(base, index)
             }
             ast::ExprKind::Index { base, index } => self.index_value(e, base, index, ty, line),
             ast::ExprKind::ArrayLit(items) => ExprKind::ArrayLit(items.iter().map(|i| self.value(i)).collect()),

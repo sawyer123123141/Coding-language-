@@ -1,0 +1,31 @@
+// expect: 5 5 0 0
+// expect: h é o
+// expect: h-é-l-l-o-
+// expect: 0h,1é,2l,3l,4o,
+// expect: héllo world
+// expect: ab!
+// expect: true
+// expect: héllo
+main() {
+    let s = "héllo"
+    let e = ""
+    let blank = array[string](1)
+    print(s.len, "hello".len, e.len, blank[0].len)
+    print(s[0], s[1], s[4])
+    var out = ""
+    for c in s { out += c + "-" }
+    print(out)
+    var line = ""
+    for i, c in s { line += "{i}{c}," }
+    print(line)
+    print(s + " " + "world")
+    var t = "a"
+    t += "b"
+    t = t + "!"
+    print(t)
+    print(s[1] == "é")
+    var u = "héllo"
+    var walked = ""
+    for c in u { u = "x"; walked += c }
+    print(walked)
+}

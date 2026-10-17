@@ -15,6 +15,7 @@ mod par;
 mod place;
 mod regions;
 mod remove;
+mod strings;
 mod structs;
 
 pub(crate) use consts::{check_consts, is_const_expr};

@@ -25,8 +25,9 @@ impl<'a> BodyChecker<'a> {
             },
             // A swizzle (`v.xz`) builds a new vector; it isn't a place.
             ExprKind::Field { .. } if self.t.swizzles.contains_key(&e.id) => None,
-            // `xs.len` is computed, not stored.
-            ExprKind::Field { base, .. } if matches!(self.t.ty(base.id), Ty::Array(_) | Ty::List(_) | Ty::Map(..)) => None,
+            // `xs.len` is computed, not stored; and a string has no places inside it.
+            ExprKind::Field { base, .. } if matches!(self.t.ty(base.id), Ty::Array(_) | Ty::List(_) | Ty::Map(..) | Ty::Str) => None,
+            ExprKind::Index { base, .. } if self.t.ty(base.id) == Ty::Str => None,
             ExprKind::Field { base, .. } | ExprKind::Index { base, .. } => self.place_root(base),
             _ => None,
         }
@@ -76,6 +77,12 @@ impl<'a> BodyChecker<'a> {
         let target_ty = self.check_expr(target, None);
         if let (Some(l), Some(at)) = (reinit, was) {
             self.moved.insert(l, at);
+        }
+        // A string is built whole: `s[i] = x` has nothing to change in place.
+        if matches!(&target.kind, ExprKind::Index { base, .. } if self.t.ty(base.id) == Ty::Str) {
+            self.error(target.span, super::strings::STR_IN_PLACE);
+            self.check_expr(value, None);
+            return;
         }
         let Some(root) = self.place_root(target) else {
             if let (ExprKind::Ident(name), Some(Res::Const(_) | Res::Builtin(_))) = (&target.kind, self.t.res.get(&target.id)) {
@@ -130,13 +137,19 @@ impl<'a> BodyChecker<'a> {
             let msg = format!("`{}` needs an integer, found {}", op.symbol(), self.tn(target_ty));
             self.error(target.span, msg);
         }
-        if op != AssignOp::Set && !target_ty.is_numeric() && target_ty != Ty::Error {
+        // `s += t` makes a new string from `s` and `t`.
+        let appends = op == AssignOp::Add && target_ty == Ty::Str;
+        if op != AssignOp::Set && !appends && !target_ty.is_numeric() && target_ty != Ty::Error {
             let msg = format!("`{}` needs a number, found {}", op.symbol(), self.tn(target_ty));
             self.error(target.span, msg);
         }
         self.check_value(value, Some(target_ty));
         self.consume(value);
-        self.check_store(target, value);
+        if appends {
+            self.check_store_new(target, value);
+        } else {
+            self.check_store(target, value);
+        }
         if let Some(l) = reinit {
             self.moved.remove(&l);
         }

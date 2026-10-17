@@ -107,3 +107,9 @@ nested(var bs: list[Brick], var grid: list[list[int]]) {
 }
 // error 98: can't remove `b` here: the loop over `b.hits` is removing items from it; leave that loop first
 // error 104: can't remove `row` here: the loop over `row` is removing items from it; leave that loop first
+
+chars() {
+    let s = "abc"
+    for c in s { remove c }
+}
+// error 113: `remove` works in loops over a list; strings can't change, so build a new one

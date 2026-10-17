@@ -48,6 +48,15 @@ impl ListMethod {
     }
 }
 
+/// What a string field, index or method call refers to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum StrMethod {
+    /// `s.len`: the number of characters.
+    Len,
+    /// `s[i]`: the character at `i`, as a new string.
+    At,
+}
+
 /// What a name or call expression refers to.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Res {
@@ -64,6 +73,8 @@ pub enum Res {
     ListAdd,
     /// `xs.remove_at(i)` and the other list methods besides `add` (see `ListMethod`).
     List(ListMethod),
+    /// `s.len`, `s[i]` and the string methods (see `StrMethod`).
+    Str(StrMethod),
     /// `m.remove(k)`: changes the map.
     MapRemove,
     /// `m.get(k, d)` / `m.has(k)`: reads the map.

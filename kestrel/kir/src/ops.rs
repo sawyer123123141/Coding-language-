@@ -1,4 +1,4 @@
-//! Operations that `ExprKind::Math` and `ExprKind::Map` perform.
+//! Operations that `ExprKind::Math`, `ExprKind::Map` and `ExprKind::Str` perform.
 
 /// Float operations: the operands and the result all have the expression's type (F32 or F64).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,4 +56,19 @@ pub enum ListOp {
     /// zeroed, and the length becomes `kept` plus their count. When `next` is past the length (the
     /// list shrank meanwhile) the length becomes at most `kept`.
     Compact,
+}
+
+/// What `ExprKind::Str` does with its string operand (always `args[0]`, a string value). The
+/// string may be zero-filled (null pointer, length 0), which is the empty string.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StrOp {
+    /// `[s]`: the number of characters (i64).
+    Chars,
+    /// `[s, i]`: the character at index `i` (any integer) as a new string in the current arena;
+    /// the runtime panics when `i` is out of range.
+    At,
+    /// `[s, pos]`: the byte length (i64) of the character starting at byte `pos` (i64).
+    CharLen,
+    /// `[s, pos, n]`: a new string in the current arena of the bytes `pos..pos + n` (i64s).
+    Piece,
 }

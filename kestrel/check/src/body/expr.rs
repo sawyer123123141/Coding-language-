@@ -211,6 +211,9 @@ impl<'a> BodyChecker<'a> {
                 let hint = want.filter(|t| t.is_numeric());
                 let lt = self.check_expr(lhs, hint);
                 let rt = self.check_expr(rhs, Some(lt).filter(|t| t.is_numeric()).or(hint));
+                if op == BinaryOp::Add && (lt == Ty::Str || rt == Ty::Str) {
+                    return self.str_concat(e, lt, rt);
+                }
                 if self.t.vec_dims(lt).is_some() || self.t.vec_dims(rt).is_some() {
                     return self.vec_binary(e, op, lhs, lt, rhs, rt);
                 }

@@ -53,7 +53,7 @@ impl<'a> BodyChecker<'a> {
                 Some((self.t.local(l).alias.unwrap_or(l), Vec::new()))
             }
             ExprKind::Field { .. } if self.t.swizzles.contains_key(&e.id) => None,
-            ExprKind::Field { base, .. } if matches!(self.t.ty(base.id), Ty::Array(_) | Ty::List(_) | Ty::Map(..)) => None,
+            ExprKind::Field { base, .. } if matches!(self.t.ty(base.id), Ty::Array(_) | Ty::List(_) | Ty::Map(..) | Ty::Str) => None,
             ExprKind::Field { base, name, .. } => {
                 let (root, mut path) = self.list_place(base)?;
                 path.push(Some(name.clone()));

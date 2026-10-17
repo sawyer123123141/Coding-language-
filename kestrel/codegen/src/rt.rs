@@ -33,6 +33,10 @@ pub(crate) struct RtFuncs {
     pub map_remove: FuncId,
     pub map_dup: FuncId,
     pub str_eq: FuncId,
+    pub str_chars: FuncId,
+    pub str_at: FuncId,
+    pub str_char_len: FuncId,
+    pub str_piece: FuncId,
     pub par_for: FuncId,
     /// The function for each float operation the runtime does (see `MATH`).
     pub math: Vec<(MathOp, FuncId)>,
@@ -98,6 +102,10 @@ impl RtFuncs {
             map_remove: decl("kestrel_rt_map_remove", &[ptr, ptr, I32, I64], Some(I8))?,
             map_dup: decl("kestrel_rt_map_dup", &[ptr, I64, I64], None)?,
             str_eq: decl("kestrel_rt_str_eq", &[ptr, I64, ptr, I64], Some(I8))?,
+            str_chars: decl("kestrel_rt_str_chars", &[ptr, I64], Some(I64))?,
+            str_at: decl("kestrel_rt_str_at", &[ptr, I64, I64, I32, ptr, ptr], None)?,
+            str_char_len: decl("kestrel_rt_str_char_len", &[ptr, I64, I64], Some(I64))?,
+            str_piece: decl("kestrel_rt_str_piece", &[ptr, I64, I64, I64, ptr], None)?,
             par_for: decl("kestrel_rt_par_for", &[I64, ptr, ptr], None)?,
             math: MATH.iter().map(|&(op, name, args)| Ok((op, decl(name, &[F64, F64][..args], Some(F64))?))).collect::<Result<_, String>>()?,
             rand_float: decl("kestrel_rt_rand_float", &[], Some(F64))?,
@@ -128,7 +136,7 @@ pub(crate) const MATH: [(MathOp, &str, usize); 10] = [
 
 /// Addresses of every runtime export, for registering with the JIT.
 pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
-    use kestrel_runtime::{arena, gpu, list, map, math, panic, par, print, start};
+    use kestrel_runtime::{arena, gpu, list, map, math, panic, par, print, start, string};
     vec![
         ("kestrel_rt_print_i64", print::kestrel_rt_print_i64 as *const u8),
         ("kestrel_rt_print_f32", print::kestrel_rt_print_f32 as *const u8),
@@ -160,6 +168,10 @@ pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
         ("kestrel_rt_map_remove", map::kestrel_rt_map_remove as *const u8),
         ("kestrel_rt_map_dup", map::kestrel_rt_map_dup as *const u8),
         ("kestrel_rt_str_eq", map::kestrel_rt_str_eq as *const u8),
+        ("kestrel_rt_str_chars", string::kestrel_rt_str_chars as *const u8),
+        ("kestrel_rt_str_at", string::kestrel_rt_str_at as *const u8),
+        ("kestrel_rt_str_char_len", string::kestrel_rt_str_char_len as *const u8),
+        ("kestrel_rt_str_piece", string::kestrel_rt_str_piece as *const u8),
         ("kestrel_rt_par_for", par::kestrel_rt_par_for as *const u8),
         ("kestrel_rt_sin", math::kestrel_rt_sin as *const u8),
         ("kestrel_rt_cos", math::kestrel_rt_cos as *const u8),

@@ -143,6 +143,8 @@ impl<'a> BodyChecker<'a> {
             // Moved elements bring their memory along.
             ExprKind::ArrayLit(items) => items.iter().fold(self.current(), |r, i| r | self.region(i, moving)),
             ExprKind::Field { .. } if matches!(self.t.res.get(&e.id), Some(Res::Variant(..))) => 0,
+            // A character is a new string, built in the current arena.
+            ExprKind::Index { base, .. } if self.t.ty(base.id) == Ty::Str => self.current(),
             ExprKind::Ident(_) | ExprKind::Field { .. } | ExprKind::Index { .. } => {
                 let ctx = |root: LocalId| self.local_ctx.get(&root).map(|&(c, _)| bit(c));
                 let local = match self.place_root(e) {
@@ -219,6 +221,17 @@ impl<'a> BodyChecker<'a> {
     /// the place `target` it's stored into.
     pub(crate) fn check_store(&mut self, target: &Expr, value: &Expr) {
         let r = self.region(value, false);
+        self.check_store_region(target, value, r);
+    }
+
+    /// `check_store` for a value that is built new in the current arena whatever `value` is:
+    /// `s += t` (its `value` is `t`, which is only read).
+    pub(crate) fn check_store_new(&mut self, target: &Expr, value: &Expr) {
+        let r = self.current();
+        self.check_store_region(target, value, r);
+    }
+
+    fn check_store_region(&mut self, target: &Expr, value: &Expr, r: u64) {
         let Some(root) = self.place_root(target) else { return };
         let path = self.path_key(target);
         let info = self.t.local(root);

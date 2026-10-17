@@ -1,0 +1,6 @@
+// expect-exit: 101
+// expect-stderr: index 0 out of bounds for length 0 on line 5
+main() {
+    let blank = array[string](1)
+    print(blank[0][0])
+}

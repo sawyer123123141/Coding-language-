@@ -1,0 +1,9 @@
+// expect: o
+// expect-exit: 101
+// expect-stderr: index 5 out of bounds for length 5 on line 8
+main() {
+    let s = "héllo"
+    var i = 5
+    print(s[4])
+    print(s[i])
+}

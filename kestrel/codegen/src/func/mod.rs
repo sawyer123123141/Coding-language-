@@ -12,6 +12,7 @@ mod math;
 mod par;
 mod place;
 mod print;
+mod strings;
 
 use std::collections::HashMap;
 

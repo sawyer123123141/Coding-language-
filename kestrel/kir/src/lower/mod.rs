@@ -14,6 +14,7 @@ mod matching;
 mod par;
 mod remove;
 mod scopes;
+mod strings;
 mod temps;
 mod vector;
 
@@ -238,7 +239,12 @@ impl<'a> FnLowerer<'a> {
                         let line = rhs.line;
                         let rhs = shift_amount(binop(bop), rhs, ty);
                         let cur = Expr { kind: ExprKind::Load(place.clone()), ty, line };
-                        let kind = if ty.is_aggregate() {
+                        let kind = if ty == KTy::Str {
+                            // `s += t` is `s = s + t`: a new string, built before it replaces `s`.
+                            let mut parts = vec![PrintArg::Value(cur)];
+                            parts.extend(strings::concat_pieces(rhs));
+                            ExprKind::Format(parts)
+                        } else if ty.is_aggregate() {
                             self.vec_combine(binop(bop), cur, rhs, ty, line)
                         } else {
                             ExprKind::Binary(binop(bop), Box::new(cur), Box::new(rhs))
