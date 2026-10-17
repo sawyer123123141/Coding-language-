@@ -1,11 +1,12 @@
 //! List methods: `remove_at`, `pop`, `insert`, `clear`, `has` and `find` (`add` is `Stmt::ListAdd`).
-//! The runtime moves items for `remove_at` and `insert` (`Stmt::List`); `pop` and `clear` are
-//! built from `SetLen` and drops; `has` and `find` call a generated search (see `list_helpers`).
+//! The runtime moves items for `remove_at` and `insert` and empties the list for `clear`
+//! (`Stmt::List`, after drops); `pop` is built from `SetLen` and a move, copy or drop of the last
+//! item; `has` and `find` call a generated search (see `list_helpers`).
 
 use kestrel_check::{ListMethod, Ty};
 use kestrel_syntax::ast;
 
-use super::helpers::{owning, with};
+use super::helpers::{has_heap, owning, with};
 use super::{kty, FnLowerer};
 use crate::ir::*;
 
@@ -51,11 +52,23 @@ impl<'a> FnLowerer<'a> {
                 out.extend(self.helpers.drop_stmts(list.clone(), list_ty, self.t));
                 out.push(Stmt::List(ListOp::Clear, list, Vec::new()));
             }
-            // The popped item is a value like any other: an owning one is held and dropped.
+            // The last item moves out (zeroing its slot) and is dropped at once, not when the
+            // block ends: an owner the list is inside of may be replaced before then.
             ListMethod::Pop => {
-                let ty = kty(self.t.ty(e.id));
-                let kind = self.pop(receiver, ty, line);
-                self.keep(Expr { kind, ty, line }, out);
+                let list = self.place_or_temp(receiver, out, true);
+                let n = self.temp(KTy::I64);
+                out.push(Stmt::Let(n, Expr { kind: ExprKind::Len(list.clone()), ty: KTy::I64, line }));
+                let last = binary(BinOp::Sub, load(n, KTy::I64, line), int(1, KTy::I64, line), KTy::I64, line);
+                let mut then_body = Vec::new();
+                if elem.is_aggregate() {
+                    let item = with(&list, Proj::Index { at: last.clone(), checked: true });
+                    let tmp = self.temp(elem);
+                    then_body.push(Stmt::Let(tmp, Expr { kind: ExprKind::Move(item), ty: elem, line }));
+                    then_body.extend(self.helpers.drop_stmts(Place::local(tmp), elem, self.t));
+                }
+                then_body.push(Stmt::SetLen(list, last));
+                let not_empty = binary(BinOp::Ne, load(n, KTy::I64, line), int(0, KTy::I64, line), KTy::Bool, line);
+                out.push(Stmt::If { cond: not_empty, then_body, else_body: Vec::new() });
             }
             ListMethod::Has | ListMethod::Find | ListMethod::Join => unreachable!("the checker refuses a discarded `{method:?}`"),
         }
@@ -96,8 +109,11 @@ impl<'a> FnLowerer<'a> {
         KTy::Optional(ElemIdx(id.0))
     }
 
-    /// `xs.pop()`: the last item moves out into an optional, or `none` for an empty list. The
-    /// slot is left zeroed by the move, and the length goes down after.
+    /// `xs.pop()`: the last item goes into an optional, or `none` for an empty list, and the
+    /// length goes down after. An owning item moves out (the checker makes sure no owner the
+    /// list is inside of holds its memory). Any other item is a read: it is copied into the
+    /// current arena like an indexed read, since the list's memory may belong to an owner that
+    /// is replaced or cleared while the item lives. Either way the slot is left zeroed.
     fn pop(&mut self, receiver: &ast::Expr, ty: KTy, line: u32) -> ExprKind {
         let mut pre = Vec::new();
         let list = self.place_or_temp(receiver, &mut pre, true);
@@ -108,14 +124,26 @@ impl<'a> FnLowerer<'a> {
         pre.push(Stmt::Let(n, len));
         let last = binary(BinOp::Sub, load(n, KTy::I64, line), int(1, KTy::I64, line), KTy::I64, line);
         let item = with(&list, Proj::Index { at: last.clone(), checked: true });
-        // Scalars are read, and anything with memory of its own moves.
-        let kind = if elem.is_aggregate() { ExprKind::Move(item) } else { ExprKind::Load(item) };
+        let mut then_body = Vec::new();
+        let is_owning = owning(elem, self.t);
+        let kind = if !elem.is_aggregate() {
+            ExprKind::Load(item)
+        } else if is_owning || !has_heap(elem, self.t) {
+            ExprKind::Move(item)
+        } else {
+            let copy = self.temp(elem);
+            then_body.push(Stmt::Let(copy, Expr { kind: ExprKind::Move(item), ty: elem, line }));
+            then_body.extend(self.helpers.fixup(Place::local(copy), elem, self.t));
+            ExprKind::Move(Place::local(copy))
+        };
         let some = Expr { kind: ExprKind::Some(Box::new(Expr { kind, ty: elem, line })), ty, line };
+        then_body.extend([Stmt::Assign(Place::local(result), some), Stmt::SetLen(list, last)]);
         let not_empty = binary(BinOp::Ne, load(n, KTy::I64, line), int(0, KTy::I64, line), KTy::Bool, line);
-        let then_body = vec![Stmt::Assign(Place::local(result), some), Stmt::SetLen(list, last)];
         pre.push(Stmt::If { cond: not_empty, then_body, else_body: Vec::new() });
-        // A new value that nothing holds yet (see `builds_new`).
-        self.scratch_results.insert(result);
+        if is_owning {
+            // A new owning value that nothing holds yet (see `builds_new`).
+            self.scratch_results.insert(result);
+        }
         Self::with_pre(pre, ExprKind::Move(Place::local(result)), ty, line)
     }
 

@@ -175,9 +175,12 @@ impl<'a> BodyChecker<'a> {
                 let start = if defaults { self.current() } else { 0 };
                 args.iter().fold(start, |r, a| r | self.region(&a.value, moving))
             }
-            // `pop` moves the last item out of the list's memory: it lives as long as the list,
+            // `pop` moves an owning item out of the list's memory: it lives as long as the list,
             // not in the current arena. (A list that is a loop's item may be either, like a view.)
-            ExprKind::MethodCall { receiver, .. } if matches!(self.t.res.get(&e.id), Some(Res::List(ListMethod::Pop))) => {
+            // Any other item is copied into the current arena, like an indexed read.
+            ExprKind::MethodCall { receiver, .. }
+                if matches!(self.t.res.get(&e.id), Some(Res::List(ListMethod::Pop))) && self.t.is_owning(ty) =>
+            {
                 let ctx = self.place_root(receiver).and_then(|root| self.local_ctx.get(&root)).map(|&(c, _)| bit(c));
                 let view = self.path_key(receiver).is_some_and(|p| self.views.contains(&p.root));
                 match ctx {

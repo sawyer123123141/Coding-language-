@@ -1,0 +1,39 @@
+// error 22: can't take an item out of `level.items` with `pop`: it may point into `level`'s arena
+// error 27: can't take an item out of `level.items` with `pop`: it may point into `level`'s arena
+// error 30: can't take an item out of `levels[0].items` with `pop`: it may point into `levels[0]`'s arena
+// error 32: can't take an item out of `l.items` with `pop`: it may point into `l`'s arena
+// error 35: can't take an item out of `p.items` with `pop`: it may point into `level`'s arena
+struct T {
+    mem: Arena
+    label: string
+}
+
+struct Pool {
+    items: list[T]
+}
+
+struct Level {
+    mem: Arena
+    items: list[T]
+    pools: list[Pool]
+}
+
+take(var level: Level) -> T? {
+    level.items.pop()
+}
+
+main() {
+    var level = Level(mem: Arena(), items: [], pools: [])
+    let t = level.items.pop() else { return }
+    level.items.pop()
+    var levels: list[Level] = []
+    let u = levels[0].items.pop()
+    for l in levels {
+        let v = l.items.pop()
+    }
+    for p in level.pools {
+        let w = p.items.pop()
+    }
+    var ts: list[T] = []
+    let x = ts.pop()
+}

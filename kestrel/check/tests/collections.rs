@@ -198,7 +198,7 @@ main() {
 }
 
 #[test]
-fn a_popped_value_lives_as_long_as_its_list() {
+fn a_popped_item_that_isnt_owning_is_copied_into_the_current_arena() {
     let src = "main() {
  var keep: string? = none
  var n = 1
@@ -209,11 +209,21 @@ fn a_popped_value_lives_as_long_as_its_list() {
   var inner: list[string] = []
   inner.add(\"{n}\")
   let own = inner.pop()
-  keep = outer.pop()
  }
 }
 ";
     assert_eq!(run(src).1, Vec::<String>::new());
+    // The copy is made in the `arena { }` block, even from a list that lives longer.
+    let copied = "main() {
+ var keep: string? = none
+ var n = 1
+ var outer: list[string] = []
+ outer.add(\"{n}\")
+ arena {
+  keep = outer.pop()
+ }
+}
+";
     let escape = "main() {
  var keep: string? = none
  var n = 1
@@ -224,7 +234,9 @@ fn a_popped_value_lives_as_long_as_its_list() {
  }
 }
 ";
-    let errs = run(escape).1;
-    assert_eq!(errs.len(), 1, "{errs:?}");
-    assert!(errs[0].starts_with("this memory is freed at the end of the `arena { }` block, but `keep` lives longer"), "{errs:?}");
+    for src in [copied, escape] {
+        let errs = run(src).1;
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert!(errs[0].starts_with("this memory is freed at the end of the `arena { }` block, but `keep` lives longer"), "{errs:?}");
+    }
 }

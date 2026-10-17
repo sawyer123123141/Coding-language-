@@ -24,7 +24,7 @@ pub(crate) use structs::check_field_defaults;
 
 use std::collections::{HashMap, HashSet};
 
-use kestrel_syntax::ast::{Binding, Block, Expr, ExprKind, Program, Stmt};
+use kestrel_syntax::ast::{Binding, Block, Expr, ExprId, ExprKind, Program, Stmt};
 use kestrel_syntax::{Diagnostic, Span};
 
 use crate::collect::resolve_type;
@@ -71,6 +71,8 @@ pub(crate) struct BodyChecker<'a> {
     for_in_lists: Vec<lists::LoopList>,
     /// Enclosing `for ... in` loops, for `remove`.
     removing: remove::Removing,
+    /// The call statement being checked, whose result is thrown away.
+    discarded: Option<ExprId>,
 }
 
 pub(crate) fn check_fn(program: &Program, fn_id: FnId, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
@@ -126,6 +128,7 @@ impl<'a> BodyChecker<'a> {
             par,
             for_in_lists,
             removing: remove::Removing::default(),
+            discarded: None,
         }
     }
 

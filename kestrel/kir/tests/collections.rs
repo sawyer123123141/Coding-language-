@@ -215,12 +215,28 @@ fn every_list_change_is_reported_as_a_write_of_the_list() {
 }
 
 #[test]
-fn a_discarded_pop_of_an_owning_item_is_held_and_dropped() {
+fn a_kept_pop_of_a_string_copies_it() {
+    // The list's memory may belong to an owner that goes before the popped item does.
+    let m = lower_src("main() {\n var xs: list[string] = [\"a\"]\n let s = xs.pop()\n print(s)\n}\n");
+    let main = func(&m, "main");
+    assert_eq!(all_stmts(main).iter().filter(|s| matches!(s, Stmt::Dup(_))).count(), 1, "{:#?}", main.body);
+}
+
+#[test]
+fn a_discarded_pop_of_an_owning_item_drops_it_at_once() {
     let m = lower_src(&format!("{POOLS}main() {{\n var ps: list[Pool] = []\n ps.add(Pool(n: 1))\n ps.pop()\n}}\n"));
     let main = func(&m, "main");
-    // The popped optional goes in a hidden local, and the end of `main` frees the arena in its payload.
-    let frees: Vec<_> = all_stmts(main).into_iter().filter(|s| matches!(s, Stmt::FreeArena(p) if p.path.first() == Some(&Proj::Payload))).collect();
-    assert_eq!(frees.len(), 1, "{:#?}", main.body);
+    // The item moves out of its slot and its arena is freed right there, before the length goes
+    // down: not at the end of the block, when an owner of the list may already be gone.
+    let popped = main.body.iter().find_map(|s| match s {
+        Stmt::If { then_body, .. } if then_body.iter().any(|s| matches!(s, Stmt::SetLen(..))) => Some(then_body),
+        _ => None,
+    });
+    let then_body = popped.unwrap_or_else(|| panic!("{:#?}", main.body));
+    let free = then_body.iter().position(|s| matches!(s, Stmt::FreeArena(_)));
+    let set_len = then_body.iter().position(|s| matches!(s, Stmt::SetLen(..)));
+    assert!(matches!((free, set_len), (Some(f), Some(l)) if f < l), "{then_body:#?}");
+    assert!(!all_stmts(main).iter().any(|s| matches!(s, Stmt::FreeArena(p) if p.path.first() == Some(&Proj::Payload))), "{:#?}", main.body);
 }
 
 /// The statements of `f`'s loops' bodies and their nested statements, with the `ForRange` that holds a `List(Compact)` after it.

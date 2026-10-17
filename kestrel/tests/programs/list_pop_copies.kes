@@ -1,0 +1,64 @@
+// env: KESTREL_ARENA_COUNT=1
+// expect: level-1-second-name-long-enough
+// expect: ["tag-3-c-long-enough-to-matter"] tag-3-c-long-enough-to-matter tag-2-c-long-enough-to-matter
+// expect: [vec2(x: 1, y: 2)] ["n-0"]
+// expect-stderr: arenas alive at exit: 0
+// A popped item that isn't owning is copied out of the list, so it outlives an owner that
+// is replaced or cleared, whose arena held the item's memory.
+struct Level {
+    mem: Arena
+    names: list[string]
+}
+
+load(i: int) -> Level {
+    var l = Level(mem: Arena(), names: [])
+    in l.mem {
+        l.names.add("level-{i}-first-name-long-enough")
+        l.names.add("level-{i}-second-name-long-enough")
+    }
+    l
+}
+
+struct Thing {
+    mem: Arena
+    tags: list[string]
+}
+
+make(i: int) -> Thing {
+    var t = Thing(mem: Arena(), tags: [])
+    in t.mem {
+        t.tags = "tag-{i}-a-long-enough-to-matter,tag-{i}-b-long-enough-to-matter,tag-{i}-c-long-enough-to-matter".split(",")
+    }
+    t
+}
+
+struct Row {
+    points: list[vec2]
+    names: list[string]
+}
+
+main() {
+    var level = load(1)
+    let last = level.names.pop() else { return }
+    level = load(2)
+    level = load(3)
+    print(last)
+    var xs = list[Thing]()
+    for i from 0 to 4 { xs.add(make(i)) }
+    let a = xs[3].tags.pop() else { return }
+    var holder = list[string]()
+    holder.add(a)
+    let b = xs[2].tags.pop() else { return }
+    xs.clear()
+    for i from 0 to 4 { xs.add(make(i + 100)) }
+    print(holder, a, b)
+    // A popped struct that holds lists gets its own copy of them.
+    arena {
+        var built: list[Row] = []
+        built.add(Row(points: [vec2(1, 2)], names: ["n-{0}"]))
+        let r = built.pop() else { return }
+        print(r.points, r.names)
+    }
+    level.names.pop()
+    xs[0].tags.pop()
+}

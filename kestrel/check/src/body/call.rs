@@ -78,6 +78,7 @@ impl<'a> BodyChecker<'a> {
 
     /// A call statement whose result is thrown away.
     pub(crate) fn check_discarded_call(&mut self, e: &Expr) -> Ty {
+        self.discarded = Some(e.id);
         let ty = self.check_expr(e, None);
         match self.t.res.get(&e.id).copied() {
             // A pure function changes nothing but its `var` arguments.
