@@ -161,6 +161,7 @@ Built 2026-10-17 in five tasks on `main` (commits 2281e7a, 58d5295, 3f81f0b, 2bd
 - **`s[i]`, `slice` and `s.len`'s index arguments** accept any integer type; a float says "an index must be an integer, found float". A negative index says "index -1 out of bounds for length N".
 - **Messages for loops and indexing name strings now:** "... needs an array, list, map or string" and "... only arrays, lists, maps and strings can be indexed".
 - **`to_float` accepts `.5` and `5.`** (at least one digit in the mantissa). `1e-999` (an `f32` underflow) gives 0 rather than `none`: "doesn't fit" means overflow.
+- **Strings built for a native's argument use its scratch arena** (the final review's fix). `wants_scratch` only knew interpolation, so `draw.text(name + ": " + "{hp}", ...)` grew the program arena by 720,896 bytes over 20,000 headless frames and `draw.text(name.upper(), ...)` by 589,824. Now a string `+`, a string method that gives a string (`s[i]` included) and a list's `join` count too: 0 bytes. `wants_scratch` needs the checked types, so lowering asks it; the checker decides before checking the arguments with `may_want_scratch`, which says yes for any argument shaped like a `+`, a method call or an index. That is a superset, so the checker is never less strict than the arena lowering uses (`cli/tests/text_memory.rs` and `tests/errors/native_text_escape_built.kes` pin both).
 - **`find`, `starts_with` and `ends_with` search bytes,** which is valid because UTF-8 is self-synchronising; the result is converted to a character index.
 
 **Drawing**

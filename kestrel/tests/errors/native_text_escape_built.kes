@@ -1,0 +1,26 @@
+// A string `+`, a string method, `s[i]` or `join` built for a native's argument goes in the
+// same scratch arena as interpolated text, so nothing made while the arguments run may be kept.
+use draw
+
+tag(n: int) -> string {
+    return "kept outside the call, number {n}"
+}
+
+main() {
+    var last = ""
+    let n = 1
+    let name = "player"
+    let parts: list[string] = []
+    draw.text(name + tag(if n > 0 { last = tag(n); 1 } else { 2 }), vec2(0, 0), 10, draw.WHITE)
+    draw.text(tag(if n > 0 { last = tag(n); 1 } else { 2 }).upper(), vec2(0, 0), 10, draw.WHITE)
+    draw.text(name[if n > 0 { last = tag(n); 0 } else { 0 }], vec2(0, 0), 10, draw.WHITE)
+    draw.text(parts.join(if n > 0 { last = tag(n); last } else { name }), vec2(0, 0), 10, draw.WHITE)
+    // A read of a list's item is no new string, but it may look like one before checking.
+    draw.text(parts[if n > 0 { last = tag(n); 0 } else { 0 }], vec2(0, 0), 10, draw.WHITE)
+    print(last)
+}
+// error 14: this memory is freed when the call to `draw.text` returns, but `last` lives longer
+// error 15: this memory is freed when the call to `draw.text` returns, but `last` lives longer
+// error 16: this memory is freed when the call to `draw.text` returns, but `last` lives longer
+// error 17: this memory is freed when the call to `draw.text` returns, but `last` lives longer
+// error 19: this memory is freed when the call to `draw.text` returns, but `last` lives longer

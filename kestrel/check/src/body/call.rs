@@ -5,7 +5,7 @@ use super::place::Immutable;
 use super::regions::Ctx;
 use super::BodyChecker;
 use crate::builtins::Builtin;
-use crate::natives::wants_scratch;
+use crate::natives::may_want_scratch;
 use crate::tables::{FnId, LocalId, ParamSig, Res};
 use crate::ty::Ty;
 
@@ -184,9 +184,9 @@ impl<'a> BodyChecker<'a> {
     ) -> Ty {
         let info = &self.t.fns[fid.0 as usize];
         let (params, ret, fname) = (info.params[skip..].to_vec(), info.ret, info.name.clone());
-        // Text built for a native's arguments is freed when the call returns (see `wants_scratch`),
+        // Text built for a native's arguments may be freed when the call returns (see `wants_scratch`),
         // so memory made while checking them can't be kept past the call.
-        let scratch = wants_scratch(info, args);
+        let scratch = may_want_scratch(info, args);
         let native = info.is_native;
         let names: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
         let (slots, mut ok) = self.bind_args(&fname, &names, args, "parameter");

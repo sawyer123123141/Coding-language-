@@ -1,10 +1,10 @@
 //! The types a `native` function may use. Rust reads its arguments straight
 //! from memory, so they are limited to values with a plain layout.
 
-use kestrel_syntax::ast::{Arg, ExprKind, Program};
+use kestrel_syntax::ast::{Arg, BinaryOp, Expr, ExprKind, Program};
 use kestrel_syntax::Diagnostic;
 
-use crate::tables::{FnInfo, Tables};
+use crate::tables::{FnInfo, ListMethod, Res, Tables};
 use crate::ty::Ty;
 
 const BAD_TYPE: &str = "native functions can only take numbers, bools, strings, vectors, arrays of plain values, and enums or structs of those";
@@ -17,15 +17,44 @@ const BAD_TYPE_HELP: &str = concat!(
 
 /// Whether a call to `f` with these arguments builds its text in a scratch arena that is
 /// freed when the call returns: `f` is a native, which only reads its arguments during the
-/// call, and some argument is directly an interpolated string. So `draw.text("fps {fps}", ...)`
-/// in a frame loop frees its text every frame instead of growing the arena it runs in. Text
-/// kept in a variable first is not covered.
+/// call, and some argument directly builds a new string: an interpolated string, a string `+`,
+/// a string method that gives a string (`s[i]` included) or a list's `join`. So
+/// `draw.text("fps {fps}", ...)` or `draw.text(name + ": " + hp, ...)` in a frame loop frees
+/// its text every frame instead of growing the arena it runs in. Text kept in a variable first
+/// is not covered.
 ///
-/// The checker (which treats the call's arguments as a region that is freed at the call's
-/// end, like an `arena { }` block) and KIR lowering (which pushes and pops the arena) both
-/// ask this, so they always agree on where the memory goes.
-pub fn wants_scratch(f: &FnInfo, args: &[Arg]) -> bool {
-    f.is_native && args.iter().any(|a| matches!(a.value.kind, ExprKind::Interp(_)))
+/// It needs the arguments' types, so it is asked once they are checked: KIR lowering asks it
+/// to push and pop the arena. The checker, which treats the call's arguments as a region that
+/// is freed at the call's end (like an `arena { }` block), has to decide before checking them,
+/// so it asks `may_want_scratch`, which says yes whenever this may.
+pub fn wants_scratch(f: &FnInfo, args: &[Arg], t: &Tables) -> bool {
+    f.is_native && args.iter().any(|a| builds_text(&a.value, t))
+}
+
+/// Whether `wants_scratch` may say yes once the arguments are checked: `f` is a native and some
+/// argument has the shape of one that builds a string. Saying yes when `wants_scratch` then
+/// doesn't only makes the checker stricter about memory built inside the arguments.
+pub(crate) fn may_want_scratch(f: &FnInfo, args: &[Arg]) -> bool {
+    let shaped = |e: &Expr| {
+        matches!(
+            e.kind,
+            ExprKind::Interp(_) | ExprKind::Binary { op: BinaryOp::Add, .. } | ExprKind::MethodCall { .. } | ExprKind::Index { .. }
+        )
+    };
+    f.is_native && args.iter().any(|a| shaped(&a.value))
+}
+
+/// Whether checked expression `e` builds a new string (see `wants_scratch`).
+fn builds_text(e: &Expr, t: &Tables) -> bool {
+    match &e.kind {
+        ExprKind::Interp(_) => true,
+        _ if t.ty(e.id) != Ty::Str => false,
+        ExprKind::Binary { op: BinaryOp::Add, .. } => true,
+        ExprKind::MethodCall { .. } | ExprKind::Index { .. } => {
+            matches!(t.res.get(&e.id), Some(Res::Str(_) | Res::List(ListMethod::Join)))
+        }
+        _ => false,
+    }
 }
 
 /// Checks every native's parameters and result. Run once all types are

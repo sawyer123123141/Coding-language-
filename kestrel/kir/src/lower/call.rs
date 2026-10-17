@@ -119,7 +119,7 @@ impl<'a> FnLowerer<'a> {
     /// Whether a call to `f` builds text in a scratch arena (see `wants_scratch` in the
     /// checker, which also treats the arguments as memory freed at the call's end).
     pub(crate) fn wants_scratch(&self, f: FnId, args: &[ast::Arg]) -> bool {
-        kestrel_check::wants_scratch(self.t.func(f), args)
+        kestrel_check::wants_scratch(self.t.func(f), args, self.t)
     }
 
     /// The pieces of a call to native `f` made inside a scratch arena: the statements

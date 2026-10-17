@@ -242,7 +242,7 @@ From `docs/superpowers/specs/2026-10-17-lists-strings-design.md` (its "As built"
 - **`for x in xs { f(var xs) }` where `f` shrinks `xs`** is accepted by the checker. The runtime index panic is the safety net.
 
 **Gaps and rough edges:**
-- `+` and string-method results passed straight to a native's arguments (`draw.text(a + b, ...)`, `draw.text(s.upper(), ...)`) get no scratch arena, because `wants_scratch` only looks for interpolation. They are allocated in the current arena. Not unsound.
+- **The checker decides on a native's scratch arena before it knows the arguments' types,** so it treats any argument shaped like a `+`, a method call or an index as built in the scratch arena; lowering pushes one only when the argument really builds a string (see `wants_scratch`). A list read like `draw.text(names[if c { last = tag(n); 0 } else { 0 }], ...)` is then refused, though it would be safe. Only a block inside an argument can show the difference.
 - A `par for` over a map gets the `par for` message, not the map one.
 - A `u64` index above `i64::MAX` shows as a negative index in the panic text. `str_char_len` wraps a negative position (only generated code calls it, with positions of 0 or more).
 - `to_float("1e-999")` (an `f32` underflow) gives 0 rather than `none`: "doesn't fit" means overflow.

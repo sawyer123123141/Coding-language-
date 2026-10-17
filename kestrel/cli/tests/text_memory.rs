@@ -95,3 +95,24 @@ fn text_kept_in_a_variable_does_grow_it() {
         "expected more than 1 MiB of growth, got {few} bytes ({FEW_FRAMES} frames) and {many} bytes ({MANY_FRAMES} frames)"
     );
 }
+
+#[test]
+fn text_built_with_plus_or_a_string_method_for_a_native_does_not_grow_the_program_arena() {
+    // Every argument that builds a new string goes in the scratch arena, not only `"{...}"`:
+    // a string `+`, a string method, a list's `join` and `s[i]`. Before, `+` grew the arena by
+    // about 36 bytes a frame and `upper` by about 29.
+    let setup = "    let name = \"player-one-with-a-long-name\"\n    let parts: list[string] = [\"left-part-of-the-text\", \"right-part-of-the-text\"]\n";
+    let body = concat!(
+        "        draw.text(name + \": \" + \"{n}\", vec2(0, 0), 10, draw.WHITE)\n",
+        "        draw.text(name.upper(), vec2(0, 0), 10, draw.WHITE)\n",
+        "        draw.text(name.slice(0, n % 20), vec2(0, 0), 10, draw.WHITE)\n",
+        "        draw.text(parts.join(\", \"), vec2(0, 0), 10, draw.WHITE)\n",
+        "        draw.text(name[n % 20], vec2(0, 0), 10, draw.WHITE)\n",
+    );
+    let exe = build("text_built_scratch", &frame_loop(setup, body));
+    let (few, many) = (arena_bytes(&exe, FEW_FRAMES), arena_bytes(&exe, MANY_FRAMES));
+    assert!(
+        few.abs_diff(many) < 64 * 1024,
+        "the program arena grew from {few} bytes ({FEW_FRAMES} frames) to {many} bytes ({MANY_FRAMES} frames)"
+    );
+}
