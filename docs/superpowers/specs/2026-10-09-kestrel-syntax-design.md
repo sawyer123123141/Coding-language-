@@ -214,7 +214,7 @@ use {
 - **Names must be unique.** An imported name can't collide with the file's own items, another import, or a local variable.
 - **Printing** shows a type's own name (`Point`), not `geom.Point`.
 - **Types from another module** must be imported by name; `geom.Point` doesn't work in a type position yet.
-- **Runtime errors** give the line in their own file, but not the file name yet.
+- **Runtime errors** name the line and the file it is in: "index 5 out of bounds for length 2 on line 24 of geom.kes" (implemented 2026-10-12).
 
 (Implemented 2026-10-10.)
 
@@ -240,7 +240,7 @@ use {
   int]`.
 - **Creating generic values:** `list[vec3]()`, `array[int](n)`, or
   annotate and use a literal: `var tris: list[vec3] = []`.
-- **Vectors:** `vec3(1, 2, 3)`, operators `+ - * /` component-wise and
+- **Vectors:** `vec3(1, 2, 3)`; `vec2()` and `vec3()` with no arguments are zero vectors (like Godot's `Vector3()`), and giving only some components is an error; operators `+ - * /` component-wise and
   with scalars, swizzles `v.xz`, `v.zyx`.
 - **Conversions:** integer -> float and narrower -> wider integer are
   implicit. Float -> integer and wider -> narrower require an explicit
