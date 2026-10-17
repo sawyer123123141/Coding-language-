@@ -75,3 +75,29 @@ fn a_string_optional_default_from_a_constant_points_at_no_arena() {
     let body = "let NAME = \"n\"\nstruct S {\n name: string? = NAME\n}\nmain() {\n var keep = S()\n arena {\n  keep = S()\n }\n print(keep)\n}\n";
     assert_eq!(errors(body), none());
 }
+
+#[test]
+fn a_constant_that_is_an_arena_may_be_a_default() {
+    assert_eq!(errors("let A = Arena()\nstruct Pool {\n mem: Arena = A\n}\nmain() {}\n"), none());
+    // A constant that holds an arena inside a struct still builds an owning value.
+    assert_eq!(
+        errors("struct Pool {\n mem: Arena = Arena()\n}\nlet P = Pool()\nstruct World {\n pool: Pool = P\n}\nmain() {}\n"),
+        vec!["field defaults can't build a value that owns an `Arena` or a GPU object; set the field when you build it".to_string()]
+    );
+}
+
+#[test]
+fn a_loop_through_the_same_default_twice_is_reported_once() {
+    assert_eq!(
+        errors("struct Node {\n kids: [Node] = [Node(), Node()]\n}\nmain() {}\n"),
+        vec![format!("field defaults build each other in a loop: Node.kids -> Node.kids{LOOP_HELP}")]
+    );
+    // Two fields that each close a loop through the same constant are two loops, each reported once.
+    assert_eq!(
+        errors("struct Tree {\n kids: [Tree] = KIDS\n more: [Tree] = KIDS\n}\nlet KIDS = [Tree(), Tree()]\nmain() {}\n"),
+        vec![
+            format!("field defaults build each other in a loop: Tree.kids -> KIDS -> Tree.kids{LOOP_HELP}"),
+            format!("field defaults build each other in a loop: KIDS -> Tree.more -> KIDS{LOOP_HELP}"),
+        ]
+    );
+}

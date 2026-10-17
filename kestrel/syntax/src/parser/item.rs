@@ -320,6 +320,9 @@ impl Parser {
         let (name, name_span) = self.expect_ident("a constant name")?;
         let bind = self.binding(name, name_span);
         let ty = if self.eat(&Tok::Colon) { Some(self.type_expr()?) } else { None };
+        if let (Some(t), true) = (&ty, self.at(&Tok::LParen)) {
+            return self.value_in_type_place(&format!("let {}", bind.name), t);
+        }
         self.expect(&Tok::Assign, "`=`")?;
         let value = self.expr()?;
         let span = start.to(value.span);

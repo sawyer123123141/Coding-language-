@@ -133,3 +133,13 @@ fn only_heap_payloads_of_places_that_cant_change_are_views() {
     // A `var` root can change while the view reads it, so it's copied.
     assert_eq!(views("main() {\n var names: string? = \"a\"\n let n = names else {\n  return\n }\n print(n)\n}\n"), 0);
 }
+
+#[test]
+fn a_loop_item_of_a_let_list_roots_a_view() {
+    let (t, errs) = run("main() {\n let hs = [Holder(b: Bag()), Holder(b: none)]\n for h in hs {\n  let b = h.b else {\n   continue\n  }\n  print(b.n)\n }\n}\n");
+    assert!(errs.is_empty(), "{errs:?}");
+    assert_eq!(t.unwrap().let_else_views.len(), 1);
+    // The view reads the list's item in place (the message names the list), so it can't move out.
+    let moved = "main() {\n var keep = list[Bag]()\n let hs = [Holder(b: Bag())]\n for h in hs {\n  let b = h.b else {\n   continue\n  }\n  keep.add(b)\n }\n}\n";
+    assert_eq!(errors(moved), vec!["can't move `b`: it's inside `hs`, and it holds an `Arena`, so it can't be copied".to_string()]);
+}

@@ -38,8 +38,9 @@ fn builds_owning(e: &Expr, t: &Tables) -> bool {
     match &e.kind {
         ExprKind::Call { name, .. } if name == "Arena" => false,
         ExprKind::Call { args, .. } | ExprKind::MethodCall { args, .. } => t.is_owning(t.ty(e.id)) || any(args),
-        // A constant is built again at each use, so naming an owning one builds one.
-        ExprKind::Ident(_) => matches!(t.res.get(&e.id), Some(Res::Const(_))) && t.is_owning(t.ty(e.id)),
+        // A constant is built again at each use, so naming an owning one builds one. One that is
+        // just an `Arena` is a fresh `Arena()` each time, like writing it out.
+        ExprKind::Ident(_) => matches!(t.res.get(&e.id), Some(Res::Const(_))) && t.ty(e.id) != Ty::Arena && t.is_owning(t.ty(e.id)),
         ExprKind::TypeCall { args, .. } => any(args),
         ExprKind::Unary { expr, .. } => builds_owning(expr, t),
         ExprKind::Binary { lhs, rhs, .. } => builds_owning(lhs, t) || builds_owning(rhs, t),

@@ -148,8 +148,10 @@ pub(crate) fn is_const_expr(e: &Expr, t: &Tables) -> bool {
         ExprKind::Call { name, args, .. } if name == "Arena" => args.is_empty(),
         // Pure built-ins (`sqrt(2.0)`) are fine; the random ones change state.
         ExprKind::Call { name, args, .. } if Builtin::global(name).is_some_and(Builtin::is_pure) => all(args),
-        // A struct construction (`Color(1, 0, 0)`, `vec2(0, 1)`) is a value like any other.
-        ExprKind::Call { name, args, .. } if t.struct_by_name.contains_key(name) => all(args),
+        // A struct construction (`Color(1, 0, 0)`, `vec2(0, 1)`) is a value like any other. A
+        // capitalised name that isn't a function is one meant to be (an unknown struct, an enum, a
+        // constant): `check_call` says what's wrong with it.
+        ExprKind::Call { name, args, .. } if t.struct_by_name.contains_key(name) || names_no_fn(name, t) => all(args),
         ExprKind::Field { base, .. } => names_enum(base),
         ExprKind::MethodCall { receiver, args, .. } => names_enum(receiver) && all(args),
         ExprKind::Unary { expr, .. } => is_const_expr(expr, t),
@@ -160,4 +162,12 @@ pub(crate) fn is_const_expr(e: &Expr, t: &Tables) -> bool {
         ExprKind::TypeCall { args, .. } => all(args),
         ExprKind::Interp(_) | ExprKind::Index { .. } | ExprKind::Call { .. } | ExprKind::If { .. } | ExprKind::Match { .. } => false,
     }
+}
+
+/// Whether calling `name` can't be a function call: it's capitalised, an enum or a constant, and
+/// no function has that name.
+fn names_no_fn(name: &str, t: &Tables) -> bool {
+    let capitalised = name.starts_with(|c: char| c.is_ascii_uppercase());
+    let other = t.enum_by_name.contains_key(name) || t.consts.iter().any(|c| c.name == name);
+    (capitalised || other) && !t.fn_by_name.contains_key(name)
 }

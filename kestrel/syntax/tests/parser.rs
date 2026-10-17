@@ -305,3 +305,22 @@ fn native_errors() {
     assert_eq!(errs("native h() -> int {\n    1\n}\nmain() {}"), vec!["native functions have no body; remove the `{ }`"]);
     assert_eq!(errs("native\nmain() {}"), vec!["expected a function name, found end of line"]);
 }
+
+/// The message and help of each parse error.
+fn errs_help(src: &str) -> Vec<(String, Option<String>)> {
+    parse(src).1.into_iter().map(|d| (d.message, d.help)).collect()
+}
+
+#[test]
+fn a_value_in_the_type_place_says_where_it_goes() {
+    let msg = "a type goes after `:`, and the value after `=`".to_string();
+    let with = |help: &str| vec![(msg.clone(), Some(help.to_string()))];
+    assert_eq!(errs_help("main() {\n    let velocity: vec3()\n}\n"), with("write `let velocity: vec3 = vec3()`"));
+    assert_eq!(errs_help("main() {\n    var xs: list[int]()\n}\n"), with("write `var xs: list[int] = list[int]()`"));
+    assert_eq!(errs_help("struct Ball {\n    velocity: vec3()\n}\nmain() {}\n"), with("write `velocity: vec3 = vec3()`"));
+    assert_eq!(errs_help("let ORIGIN: vec3()\nmain() {}\n"), with("write `let ORIGIN: vec3 = vec3()`"));
+    // A built-in scalar type has no such value, and a type that isn't a name can't be called.
+    for src in ["main() {\n    let x: int(5)\n}\n", "main() {\n    let s: string()\n}\n", "let N: float(1)\nmain() {}\n", "main() {\n    let a: [int](3)\n}\n"] {
+        assert_eq!(errs_help(src), vec![(msg.clone(), None)], "{src}");
+    }
+}

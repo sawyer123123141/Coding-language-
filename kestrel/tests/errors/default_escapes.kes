@@ -1,0 +1,32 @@
+// A default that holds heap memory is built in the arena where its struct is built, so a struct
+// built inside `arena { }` can't be stored somewhere that lives longer, whether the memory is in
+// a struct-valued or an enum-valued default.
+struct Inventory {
+    items: list[int] = [1, 2]
+}
+
+enum Kit {
+    Empty
+    Bag { ids: list[int] }
+}
+
+struct Player {
+    inv: Inventory = Inventory()
+}
+
+struct Loadout {
+    kit: Kit = Kit.Bag([3, 4])
+}
+
+main() {
+    var p = Player()
+    var l = Loadout()
+    arena {
+        p = Player()
+        l = Loadout()
+    }
+    print(p, l)
+}
+
+// error 25: this memory is freed at the end of the `arena { }` block, but `p` lives longer
+// error 26: this memory is freed at the end of the `arena { }` block, but `l` lives longer

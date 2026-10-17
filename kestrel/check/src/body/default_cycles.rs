@@ -2,7 +2,7 @@
 //! never finish (`kids: list[Node] = [Node()]`, or through a constant). This finds such loops
 //! before KIR, whose constant ordering and construction would otherwise recurse forever.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use kestrel_syntax::ast::{Expr, ExprKind, Item, Program};
 use kestrel_syntax::{Diagnostic, Span};
@@ -52,6 +52,9 @@ impl<'a> Walk<'a> {
         self.stack.push(n);
         let mut next = Vec::new();
         self.builds(e, &mut next);
+        // Building the same thing twice (`[Node(), Node()]`) is one loop, not two.
+        let mut seen = HashSet::new();
+        next.retain(|m| seen.insert(*m));
         for m in next {
             match self.marks.get(&m) {
                 None => self.visit(m, diags),

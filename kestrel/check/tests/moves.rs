@@ -164,3 +164,30 @@ fn a_loop_that_goes_around_after_a_move_is_an_error() {
         vec![IN_LOOP.to_string()]
     );
 }
+
+#[test]
+fn break_and_continue_in_a_match_arm_follow_the_loop() {
+    let kinds = "enum Kind {\n A\n B\n}\n";
+    // Leaving the loop from an arm right after a move is fine.
+    let broke = format!("{kinds}go(var keep: list[Bag], k: Kind) {{\n let t = Bag()\n for i from 0 to 3 {{\n  match k {{\n   A {{\n    keep.add(t)\n    break\n   }}\n   else {{ }}\n  }}\n }}\n}}\n");
+    assert_eq!(errors(&broke), none());
+    // Going around from an arm after a move is the loop error.
+    let went_on = format!("{kinds}go(var keep: list[Bag], k: Kind) {{\n let t = Bag()\n for i from 0 to 3 {{\n  match k {{\n   A {{\n    keep.add(t)\n    continue\n   }}\n   else {{ }}\n  }}\n }}\n}}\n");
+    assert_eq!(errors(&went_on), vec![IN_LOOP.to_string()]);
+}
+
+#[test]
+fn the_right_side_of_or_moves_only_sometimes() {
+    assert_eq!(errors("go(c: bool) {\n let t = Bag()\n let ok = c or Pair(b: t).b.n > 0\n print(t.n)\n}\n"), vec![MAYBE.to_string()]);
+}
+
+#[test]
+fn a_new_value_on_one_branch_only_leaves_it_maybe_moved() {
+    let after = "go(var keep: list[Bag], c: bool) {\n var t = Bag()\n keep.add(t)\n if c {\n  t = Bag()\n }\n print(t.n)\n}\n";
+    assert_eq!(errors(after), vec![MAYBE.to_string()]);
+    let looped = "go(var keep: list[Bag], c: bool) {\n var t = Bag()\n for i from 0 to 3 {\n  keep.add(t)\n  if c {\n   t = Bag()\n  }\n }\n}\n";
+    assert_eq!(errors(looped), vec![IN_LOOP.to_string()]);
+    // Both branches giving it a value is enough.
+    let both = "go(var keep: list[Bag], c: bool) {\n var t = Bag()\n keep.add(t)\n if c {\n  t = Bag()\n } else {\n  t = Bag(n: 1)\n }\n print(t.n)\n}\n";
+    assert_eq!(errors(both), none());
+}

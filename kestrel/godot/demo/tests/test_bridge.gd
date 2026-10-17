@@ -6,6 +6,14 @@ extends SceneTree
 var failures := 0
 
 
+## Keeps the text of each error Godot reports, so a check can read what the add-on printed.
+class ErrorLog extends Logger:
+	var lines: Array[String] = []
+
+	func _log_error(_function: String, _file: String, _line: int, code: String, rationale: String, _editor_notify: bool, _error_type: int, _script_backtraces: Array[ScriptBacktrace]) -> void:
+		lines.append(code + " " + rationale)
+
+
 func check(what: String, got: Variant, want: Variant) -> void:
 	if typeof(got) == typeof(want) and got == want:
 		print("ok   ", what)
@@ -29,7 +37,12 @@ func _init() -> void:
 	check("vec3", k.run("up", [Vector3(1, 1, 1)]), Vector3(1, 2, 1))
 	check("[u8] out", k.run("ramp", [4]), PackedByteArray([0, 1, 2, 3]))
 	check("print goes to output and the result comes back", k.run("talk", [41]), 42)
+	var log := ErrorLog.new()
+	OS.add_logger(log)
 	check("a runtime panic returns null", k.run("crash", [5]), null)
+	OS.remove_logger(log)
+	var named := log.lines.any(func(l: String) -> bool: return "of bridge_test.kes" in l)
+	check("a runtime error names its file", named, true)
 	check("the next call works", k.run("add", [1, 1.0]), 2.0)
 	check("unknown function returns null", k.run("nope", []), null)
 	check("wrong argument type returns null", k.run("add", ["x", 1.0]), null)

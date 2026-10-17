@@ -1,0 +1,27 @@
+// expect: 16 3
+// expect: 16 7
+// A constant that is a fresh `Arena()` is built again at each use, so it can be a field default:
+// each `Chunk` gets its own arena.
+let A = Arena()
+
+struct Chunk {
+    x: int
+    mem: Arena = A
+    heights: [int] = []
+
+    fill(var self) {
+        in self.mem {
+            self.heights = array[int](16)
+        }
+        for i from 0 to 16 { self.heights[i] = self.x }
+    }
+}
+
+main() {
+    var a = Chunk(x: 3)
+    var b = Chunk(x: 7)
+    a.fill()
+    b.fill()
+    print(a.heights.len, a.heights[15])
+    print(b.heights.len, b.heights[0])
+}

@@ -6,5 +6,8 @@ main() {
     var speed: vec3()
 }
 
+let ORIGIN: vec3()
+
 // error 2: a type goes after `:`, and the value after `=`
 // error 6: a type goes after `:`, and the value after `=`
+// error 9: a type goes after `:`, and the value after `=`

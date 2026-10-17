@@ -121,7 +121,9 @@ impl Parser {
     /// goes. `decl` is what comes before the `:` (`var velocity`, or a field's name).
     fn value_in_type_place<T>(&mut self, decl: &str, ty: &TypeExpr) -> PResult<T> {
         let mut d = Diagnostic::error(self.span(), "a type goes after `:`, and the value after `=`");
-        if let TypeKind::Named { .. } = ty.kind {
+        // A built-in scalar has no `int()`-style value to suggest.
+        const SCALARS: &[&str] = &["int", "i64", "u8", "float", "f64", "bool", "string", "GpuHandle"];
+        if matches!(&ty.kind, TypeKind::Named { name, .. } if !SCALARS.contains(&name.as_str())) {
             let t = type_text(ty);
             d = d.with_help(format!("write `{decl}: {t} = {t}()`"));
         }
