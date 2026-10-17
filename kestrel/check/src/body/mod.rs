@@ -82,10 +82,12 @@ pub(crate) fn check_fn(program: &Program, fn_id: FnId, t: &mut Tables, diags: &m
     let is_native = info.is_native;
     let mut bc = BodyChecker::new(t, diags, Some(fn_id), ret, is_pure);
     bc.scopes.push(HashMap::new());
+    // A native has no body; its parameters are declared so calls and codegen see them, but
+    // they are only labels, so their names aren't checked (see `link`).
+    let declare = if is_native { BodyChecker::add_local } else { BodyChecker::declare };
     for (p, sig) in decl.params.iter().zip(&params) {
-        bc.declare(&p.bind, sig.ty, p.is_var, true, p.is_var);
+        declare(&mut bc, &p.bind, sig.ty, p.is_var, true, p.is_var);
     }
-    // A native has no body; its parameters are declared so calls and codegen see them.
     if is_native {
         return;
     }
@@ -149,23 +151,27 @@ impl<'a> BodyChecker<'a> {
         self.scopes.iter().rev().find_map(|s| s.get(name).copied())
     }
 
+    /// A new local, which can't take a built-in or reserved name or hide another local. (A
+    /// clash with one of its module's items or imports is `link`'s to report: here every
+    /// module's items are global, and another module's names don't clash.)
     fn declare(&mut self, bind: &Binding, ty: Ty, mutable: bool, is_param: bool, is_var_param: bool) -> LocalId {
         let name = &bind.name;
         if let Some(msg) = crate::collect::reserved_name_error(name, name) {
             self.error(bind.span, msg);
         }
-        let taken = self.lookup_local(name).is_some()
-            || self.t.const_by_name.contains_key(name)
-            || self.t.fn_by_name.contains_key(name)
-            || self.t.struct_by_name.contains_key(name)
-            || self.t.enum_by_name.contains_key(name);
-        if taken {
+        if self.lookup_local(name).is_some() {
             self.error_help(
                 bind.span,
                 format!("`{name}` is already defined; Kestrel doesn't allow shadowing"),
                 "pick a different name",
             );
         }
+        self.add_local(bind, ty, mutable, is_param, is_var_param)
+    }
+
+    /// `declare` without the checks on the name.
+    fn add_local(&mut self, bind: &Binding, ty: Ty, mutable: bool, is_param: bool, is_var_param: bool) -> LocalId {
+        let name = &bind.name;
         let owner = self.fn_id.expect("locals only exist inside functions");
         let id = LocalId(self.t.locals.len() as u32);
         self.t.locals.push(LocalInfo {

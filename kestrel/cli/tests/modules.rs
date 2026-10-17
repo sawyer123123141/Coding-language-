@@ -267,3 +267,52 @@ fn constants_that_use_each_other_across_modules_are_a_named_error() {
     let err = String::from_utf8_lossy(&out.stderr).replace("\r\n", "\n");
     assert_eq!(err, "2:13: error: constants can't use each other in a loop: a.X -> b.Y -> a.X; give one of them a value that doesn't use the others\n");
 }
+
+#[test]
+fn a_module_may_reuse_the_names_of_the_programs_globals_for_its_locals() {
+    // The module's own names are its items and its imports: the entry file's `r` and `k` are
+    // not among them, so a parameter `r` and a local `k` hide nothing.
+    let util = "pub pure helper(r: int) -> int {\n    let k = r + 1\n    k\n}\n";
+    let main = "use { helper from util }\npure r(x: int) -> int { x }\nlet k = 5\nmain() {\n    print(helper(2), r(1), k)\n}\n";
+    let dir = project("modules_local_names", &[("main.kes", main), ("util.kes", util)]);
+    let out = kestrel(&["run"], &dir.join("main.kes"));
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "3 1 5\n");
+}
+
+#[test]
+fn a_local_named_like_an_item_of_its_own_file_is_still_refused() {
+    let util = "pub pure helper(x: int) -> int {\n    let helper2 = x\n    helper2\n}\n\npub pure helper2() -> int { 1 }\n";
+    let main = "use { helper from util }\npure r(x: int) -> int { x }\nmain() {\n    let r = 2\n    print(helper(r))\n}\n";
+    let dir = project("modules_local_clash", &[("main.kes", main), ("util.kes", util)]);
+    let out = kestrel(&["check", "--diagnostics=short"], &dir.join("main.kes"));
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr).replace("\r\n", "\n");
+    let want = [
+        "4:9: error: `r` is already defined in this file; Kestrel doesn't allow shadowing\n",
+        "2:9: error: `helper2` is already defined in this file; Kestrel doesn't allow shadowing\n",
+    ];
+    for w in want {
+        assert!(err.contains(w), "missing {w:?} in:\n{err}");
+    }
+    assert_eq!(err.lines().count(), 2, "{err}");
+}
+
+#[test]
+fn a_module_cant_see_the_programs_own_names() {
+    // `bump` and `secret` are the entry file's, not imported by `util`: they don't exist there.
+    let util = "pub pure helper() -> int {\n    bump(secret)\n}\n";
+    let main = "use { helper from util }\nlet secret = 41\npure bump(x: int) -> int { x + 1 }\nmain() {\n    print(helper())\n}\n";
+    let dir = project("modules_entry_private", &[("main.kes", main), ("util.kes", util)]);
+    let out = kestrel(&["check", "--diagnostics=short"], &dir.join("main.kes"));
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr).replace("\r\n", "\n");
+    let want = [
+        "2:5: error: unknown function `bump`: it's in main.kes, which `util` can't see\n",
+        "2:10: error: unknown name `secret`: it's in main.kes, which `util` can't see\n",
+    ];
+    for w in want {
+        assert!(err.contains(w), "missing {w:?} in:\n{err}");
+    }
+    assert_eq!(err.lines().count(), 2, "{err}");
+}

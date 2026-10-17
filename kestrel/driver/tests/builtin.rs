@@ -165,11 +165,17 @@ fn a_native_parameter_may_share_its_functions_name_but_a_local_may_not() {
     let (_, text) = build(&dir, "use draw\nmain() {\n    draw.text(text: \"x\", pos: vec2(0, 0), size: 1, color: draw.RED)\n}\n");
     assert_eq!(text, "");
 
-    // A function with a body keeps the rule: `text` would hide the imported function.
+    // A function with a body keeps the rule: `text` would hide the function of its own file.
     let dir = project("local_names", &[("geom.kes", "pub text(text: string) -> string {\n    text\n}\n")]);
     let (compiled, text) = build(&dir, "use geom\nmain() {}\n");
     assert!(compiled.is_none());
-    assert_eq!(text, "1:10: error: `text` is already defined: it's imported; pick another name\n");
+    assert_eq!(text, "1:10: error: `text` is already defined in this file; Kestrel doesn't allow shadowing\n");
+
+    // And a local can't take the name of an import.
+    let dir = project("local_import_names", &[("geom.kes", "pub text(s: string) -> string {\n    s\n}\n")]);
+    let (compiled, text) = build(&dir, "use { text from geom }\nmain() {\n    let text = 1\n}\n");
+    assert!(compiled.is_none());
+    assert_eq!(text, "3:9: error: `text` is already defined: it's imported; pick another name\n");
 }
 
 extern "C" fn never_called() {}
@@ -194,4 +200,15 @@ fn a_program_using_built_in_modules_prints_their_structs_and_enums() {
     main();
     let out = String::from_utf8(kestrel_runtime::print::take_output()).unwrap();
     assert_eq!(out, "Color(r: 1, g: 0, b: 0, a: 1) Color(r: 0.2, g: 0.2, b: 0.2, a: 1)\nKey.Space vec2(x: 0, y: 1)\n");
+}
+
+#[test]
+fn a_program_may_reuse_the_names_of_built_in_parameters_and_locals() {
+    // `draw` has natives with parameters `pos` and `color`, and `draw.fill` has a parameter `r`;
+    // `window` has a native `width`. They belong to the module, so the program may use the names.
+    let dir = project("builtin_param_names", &[]);
+    let src = "use draw\nuse window\npure pos(x: int) -> int { x }\nlet color = 3\npure r(v: int) -> int { v }\npure width() -> int { 3 }\nmain() {\n    print(pos(1), color, r(2), width())\n}\n";
+    let (compiled, text) = build(&dir, src);
+    assert_eq!(text, "");
+    assert!(compiled.is_some());
 }

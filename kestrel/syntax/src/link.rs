@@ -3,6 +3,12 @@
 //! references are rewritten to what they mean there: its own items, names
 //! it imported with `use { a from m }`, and `m.a` for a module it imported
 //! whole with `use m`.
+//!
+//! Each module sees only those names, so this is also where a local is checked against them:
+//! a local can't take the name of one of its module's items or imports. (The checker sees the
+//! linked program, where another module's items, the entry file's included, are all global.)
+
+mod walk;
 
 use std::collections::HashMap;
 
@@ -21,8 +27,13 @@ struct Export {
     is_pub: bool,
 }
 
+/// What a name means inside one module.
 enum Scoped {
+    /// One of the module's own items, by its qualified name.
+    Own(String),
+    /// An item imported with `use { a from m }`, by its qualified name.
     Item(String),
+    /// A module imported whole with `use m`.
     Module(usize),
 }
 
@@ -56,9 +67,9 @@ pub fn link(modules: Vec<Module>) -> (Program, Vec<Diagnostic>) {
     for (i, m) in modules.into_iter().enumerate() {
         expr_count = expr_count.max(m.program.expr_count);
         bind_count = bind_count.max(m.program.bind_count);
-        let mut rw = Rewriter { scope: HashMap::new(), exports: &exports, names: &names, diags: Vec::new() };
+        let mut rw = Rewriter { scope: HashMap::new(), exports: &exports, names: &names, module: i, locals: Vec::new(), diags: Vec::new() };
         for (name, e) in &exports[i] {
-            rw.scope.insert(name.clone(), Scoped::Item(e.qualified.clone()));
+            rw.scope.insert(name.clone(), Scoped::Own(e.qualified.clone()));
         }
         for item in &m.program.items {
             if let Item::Use(u) = item {
@@ -80,6 +91,10 @@ struct Rewriter<'a> {
     scope: HashMap<String, Scoped>,
     exports: &'a [HashMap<String, Export>],
     names: &'a [String],
+    /// The module being rewritten, an index into `names`; 0 is the entry file.
+    module: usize,
+    /// The locals and parameters in scope at this point of the module's code.
+    locals: Vec<String>,
     diags: Vec<Diagnostic>,
 }
 
@@ -134,7 +149,7 @@ impl Rewriter<'_> {
 
     fn qualified(&self, name: &str) -> Option<String> {
         match self.scope.get(name) {
-            Some(Scoped::Item(q)) => Some(q.clone()),
+            Some(Scoped::Own(q) | Scoped::Item(q)) => Some(q.clone()),
             _ => None,
         }
     }
@@ -148,214 +163,32 @@ impl Rewriter<'_> {
         }
     }
 
-    fn item(&mut self, item: &mut Item) {
-        match item {
-            Item::Fn(f) => {
-                f.name = self.qualified(&f.name).unwrap_or_else(|| f.name.clone());
-                self.func(f);
-            }
-            Item::Struct(s) => {
-                s.name = self.qualified(&s.name).unwrap_or_else(|| s.name.clone());
-                for f in &mut s.fields {
-                    self.ty(&mut f.ty);
-                    if let Some(d) = &mut f.default {
-                        self.expr(d);
-                    }
-                }
-                s.methods.iter_mut().for_each(|m| self.func(m));
-            }
-            Item::Enum(e) => {
-                e.name = self.qualified(&e.name).unwrap_or_else(|| e.name.clone());
-                for v in &mut e.variants {
-                    v.fields.iter_mut().for_each(|f| self.ty(&mut f.ty));
-                }
-                e.methods.iter_mut().for_each(|m| self.func(m));
-            }
-            Item::Const(c) => {
-                c.bind.name = self.qualified(&c.bind.name).unwrap_or_else(|| c.bind.name.clone());
-                if let Some(t) = &mut c.ty {
-                    self.ty(t);
-                }
-                self.expr(&mut c.value);
-            }
-            Item::Use(_) => {}
-        }
-    }
-
-    fn func(&mut self, f: &mut FnDecl) {
-        for p in &mut f.params {
-            // A native has no body, so its parameter names are only labels and hide nothing:
-            // `draw.text(text: string, ...)` may name its parameter `text`.
-            if !p.is_self && !f.is_native {
-                self.binding(&p.bind);
-            }
-            self.ty(&mut p.ty);
-        }
-        if let Some(r) = &mut f.ret {
-            self.ty(r);
-        }
-        self.block(&mut f.body);
-    }
-
-    fn ty(&mut self, t: &mut TypeExpr) {
-        match &mut t.kind {
-            TypeKind::Named { name, args } => {
-                if let Some(q) = self.qualified(name) {
-                    *name = q;
-                }
-                args.iter_mut().for_each(|a| self.ty(a));
-            }
-            TypeKind::Array(inner) | TypeKind::Optional(inner) => self.ty(inner),
-        }
-    }
-
-    /// A local can't take the name of an import (the checker only sees the
-    /// qualified names, so it couldn't tell).
+    /// A local or parameter comes into scope. It can't take the name of one of the module's
+    /// items or imports (the checker only sees the qualified names, so it couldn't tell).
     fn binding(&mut self, b: &Binding) {
-        let clash = match self.scope.get(&b.name) {
-            Some(Scoped::Module(_)) => true,
-            Some(Scoped::Item(q)) => *q != b.name,
-            None => false,
-        };
-        if clash {
-            self.error(b.span, format!("`{}` is already defined: it's imported; pick another name", b.name));
+        match self.scope.get(&b.name) {
+            Some(Scoped::Module(_) | Scoped::Item(_)) => {
+                self.error(b.span, format!("`{}` is already defined: it's imported; pick another name", b.name));
+            }
+            Some(Scoped::Own(_)) => {
+                let msg = format!("`{}` is already defined in this file; Kestrel doesn't allow shadowing", b.name);
+                self.diags.push(Diagnostic::error(b.span, msg).with_help("pick a different name"));
+            }
+            None => {}
         }
+        self.locals.push(b.name.clone());
     }
 
-    fn block(&mut self, b: &mut Block) {
-        b.stmts.iter_mut().for_each(|s| self.stmt(s));
-    }
-
-    fn stmt(&mut self, s: &mut Stmt) {
-        match s {
-            Stmt::Let { bind, ty, value, else_block, .. } => {
-                self.expr(value);
-                if let Some(t) = ty {
-                    self.ty(t);
-                }
-                if let Some(b) = else_block {
-                    self.block(b);
-                }
-                self.binding(bind);
-            }
-            Stmt::Assign { target, value, .. } => {
-                self.expr(target);
-                self.expr(value);
-            }
-            Stmt::While { cond, body, .. } => {
-                self.expr(cond);
-                self.block(body);
-            }
-            Stmt::ForRange { var, start, end, body, .. } => {
-                self.binding(var);
-                self.expr(start);
-                self.expr(end);
-                self.block(body);
-            }
-            Stmt::ForIn { index, var, iter, body, .. } => {
-                if let Some(i) = index {
-                    self.binding(i);
-                }
-                self.binding(var);
-                self.expr(iter);
-                self.block(body);
-            }
-            Stmt::Arena { body, .. } => self.block(body),
-            Stmt::In { arena, body, .. } => {
-                self.expr(arena);
-                self.block(body);
-            }
-            Stmt::Return { value: Some(v), .. } | Stmt::Expr(v) => self.expr(v),
-            Stmt::Return { value: None, .. } | Stmt::Break(_) | Stmt::Continue(_) | Stmt::Remove { .. } => {}
-        }
-    }
-
-    fn args(&mut self, args: &mut [Arg]) {
-        args.iter_mut().for_each(|a| self.expr(&mut a.value));
-    }
-
-    fn expr(&mut self, e: &mut Expr) {
-        match &mut e.kind {
-            ExprKind::Ident(name) => match self.scope.get(name.as_str()) {
-                Some(Scoped::Item(q)) => *name = q.clone(),
-                Some(Scoped::Module(_)) => {
-                    let msg = format!("`{name}` is a module; use one of its items, like `{name}.something`");
-                    self.error(e.span, msg);
-                }
-                None => {}
-            },
-            ExprKind::Call { name, args, .. } => {
-                if let Some(q) = self.qualified(name) {
-                    *name = q;
-                }
-                self.args(args);
-            }
-            ExprKind::MethodCall { receiver, name, name_span, args } => match self.module(receiver) {
-                // `m.f(...)` calls `f` from module `m`.
-                Some(m) => {
-                    let (name, name_span, mut args) = (name.clone(), *name_span, std::mem::take(args));
-                    self.args(&mut args);
-                    let name = self.exported(m, &name, name_span).unwrap_or(name);
-                    e.kind = ExprKind::Call { name, name_span, args };
-                }
-                None => {
-                    self.expr(receiver);
-                    self.args(args);
-                }
-            },
-            ExprKind::Field { base, name, name_span } => match self.module(base) {
-                // `m.LIMIT`, or `m.Shape` in `m.Shape.Circle(...)`.
-                Some(m) => {
-                    let (name, name_span) = (name.clone(), *name_span);
-                    let name = self.exported(m, &name, name_span).unwrap_or(name);
-                    e.kind = ExprKind::Ident(name);
-                }
-                None => self.expr(base),
-            },
-            ExprKind::Unary { expr, .. } => self.expr(expr),
-            ExprKind::Binary { lhs, rhs, .. } => {
-                self.expr(lhs);
-                self.expr(rhs);
-            }
-            ExprKind::If { cond, then_block, else_block } => {
-                self.expr(cond);
-                self.block(then_block);
-                if let Some(b) = else_block {
-                    self.block(b);
-                }
-            }
-            ExprKind::Match { scrutinee, arms } => {
-                self.expr(scrutinee);
-                for a in arms {
-                    if let Pattern::Variant { binding: Some(b), .. } = &a.pattern {
-                        self.binding(b);
-                    }
-                    self.block(&mut a.body);
-                }
-            }
-            ExprKind::Index { base, index } => {
-                self.expr(base);
-                self.expr(index);
-            }
-            ExprKind::ArrayLit(items) => items.iter_mut().for_each(|i| self.expr(i)),
-            ExprKind::MapLit(entries) => {
-                for (k, v) in entries {
-                    self.expr(k);
-                    self.expr(v);
-                }
-            }
-            ExprKind::TypeCall { type_args, args, .. } => {
-                type_args.iter_mut().for_each(|t| self.ty(t));
-                self.args(args);
-            }
-            ExprKind::Interp(parts) => {
-                for p in parts {
-                    if let InterpPart::Expr(x) = p {
-                        self.expr(x);
-                    }
-                }
-            }
-            ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::None | ExprKind::Str(_) => {}
+    /// A bare name that means nothing in this module. The entry file's items keep their own
+    /// names when linked, so without this another module could reach one it never imported.
+    /// `local` is whether a local of that name would be what it means (not for a call or a type).
+    fn unseen(&mut self, name: &str, span: Span, what: &str, local: bool) {
+        let hidden = self.module != 0 && self.exports[0].contains_key(name);
+        if hidden && !(local && self.locals.iter().any(|l| l == name)) {
+            let (entry, here) = (&self.names[0], &self.names[self.module]);
+            let msg = format!("unknown {what} `{name}`: it's in {entry}.kes, which `{here}` can't see");
+            let help = "a module sees only its own items and the ones it imports with `use`";
+            self.diags.push(Diagnostic::error(span, msg).with_help(help));
         }
     }
 }

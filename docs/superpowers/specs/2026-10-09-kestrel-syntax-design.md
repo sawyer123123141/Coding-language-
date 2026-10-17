@@ -194,7 +194,10 @@ prefix: `Block.Air`, `Block.Stone(hardness: 3)`.
 - **Block scoped:** visible from declaration to the end of the
   enclosing `{ }`.
 - **No shadowing:** declaring a name already visible in an enclosing
-  scope is an error.
+  scope is an error. Visible means in the same file: the file's own items,
+  its imports and the enclosing locals. Another file's items aren't
+  visible, so a local may share their names ("`r` is already defined in
+  this file; Kestrel doesn't allow shadowing" is only for a clash in one file).
 - Top-level `let` is a module constant. Top-level `var` is a global;
   touching it is an effect, so `pure` functions can't.
 
@@ -211,6 +214,7 @@ use {
 
 - **Modules.** A module is one file, named after it, found next to the file that uses it. A file is loaded once; files may use each other.
 - **`pub`** marks a function, struct, enum or constant as importable. Anything else stays private to its file.
+- **A module sees only its own items and its imports.** The program's own file is no exception: a module that uses `bump` from it without importing it gets "unknown function `bump`: it's in main.kes, which `util` can't see".
 - **Names must be unique.** An imported name can't collide with the file's own items, another import, or a local variable.
 - **Printing** shows a type's own name (`Point`), not `geom.Point`.
 - **Types from another module** must be imported by name; `geom.Point` doesn't work in a type position yet.
