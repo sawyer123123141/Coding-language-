@@ -118,6 +118,23 @@ impl<'a> BodyChecker<'a> {
         }
     }
 
+    /// A call of a function that doesn't exist. `remove(b)`, with `b` a loop's item, is a slip
+    /// for the statement `remove b`.
+    pub(crate) fn unknown_function(&mut self, span: Span, name: &str, args: &[Arg]) {
+        let msg = format!("unknown function `{name}`");
+        let item = match args {
+            [a] if name == "remove" => match &a.value.kind {
+                ExprKind::Ident(b) => self.lookup_local(b).filter(|l| self.removing.loops.iter().any(|lp| lp.item == *l)).map(|_| b),
+                _ => None,
+            },
+            _ => None,
+        };
+        match item {
+            Some(b) => self.error_help(span, msg, format!("to remove the loop's item, write `remove {b}` without parentheses")),
+            None => self.error(span, msg),
+        }
+    }
+
     /// `remove name`.
     pub(crate) fn check_remove(&mut self, name: &str, name_span: Span, span: Span) {
         let found = self.lookup_local(name).and_then(|l| self.removing.loops.iter().rposition(|lp| lp.item == l));

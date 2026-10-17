@@ -103,3 +103,25 @@ fn an_inner_loop_over_a_part_of_the_item_may_remove_it_and_break() {
     let (_, errs) = run("struct Brick {\n hits: list[int]\n}\nmain() {\n var bs: list[Brick] = []\n for b in bs {\n  for h in b.hits {\n   if h > 3 { remove b }\n   print(h)\n   break\n  }\n }\n}\n");
     assert_eq!(errs, vec!["`h` reads from `b`, which may have been removed earlier, so it can't be used here".to_string()]);
 }
+
+/// The message and help of each error in `src`.
+fn errors_with_help(src: &str) -> Vec<(String, Option<String>)> {
+    let (p, d) = parse(src);
+    assert!(d.is_empty(), "parse errors: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
+    check(&p).1.into_iter().map(|d| (d.message, d.help)).collect()
+}
+
+#[test]
+fn slips_for_remove_get_a_help_line() {
+    let src = "main() {\n var xs: list[int] = [1, 2]\n for b in xs {\n  xs.remove(b)\n  xs.erase(b)\n  remove(b)\n }\n remove(xs)\n}\n";
+    let help = "use `xs.remove_at(i)`, or `remove b` inside `for b in xs`".to_string();
+    assert_eq!(
+        errors_with_help(src),
+        [
+            ("`list[int]` has no method `remove`".to_string(), Some(help.clone())),
+            ("`list[int]` has no method `erase`".to_string(), Some(help)),
+            ("unknown function `remove`".to_string(), Some("to remove the loop's item, write `remove b` without parentheses".to_string())),
+            ("unknown function `remove`".to_string(), None),
+        ]
+    );
+}

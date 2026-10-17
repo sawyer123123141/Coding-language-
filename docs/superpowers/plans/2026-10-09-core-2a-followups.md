@@ -237,7 +237,7 @@ From `docs/superpowers/specs/2026-10-12-language-pass-1-design.md` (its "As buil
 From `docs/superpowers/specs/2026-10-17-lists-strings-design.md` (its "As built" section) and the task reports. None blocks anything. Not fixed:
 
 **Follow-ups to build:**
-- **String views as an optimisation.** `s[i]`, `slice`, `trim`, `split` pieces and the characters of `for c in s` are copies in the current arena (spec ruling 2). Views into `s` would avoid the allocation (`for c in s` allocates two small strings per character), but need a stricter region rule: the design review found six ways a view outlives its bytes (returns from owning roots, `arena { }` blocks, loops whose string the body frees, later `var` arguments).
+- **String views as an optimisation.** `s[i]`, `slice`, `trim`, `split` pieces and the characters of `for c in s` are copies in the current arena (spec ruling 2). Views into `s` would avoid the allocation (`for c in s` allocates one small string per character), but need a stricter region rule: the design review found six ways a view outlives its bytes (returns from owning roots, `arena { }` blocks, loops whose string the body frees, later `var` arguments).
 - **`remove` inside a `par for` over a chunk's own list** would be safe but is refused (any `par for` around the statement is).
 - **`for x in xs { f(var xs) }` where `f` shrinks `xs`** is accepted by the checker. The runtime index panic is the safety net.
 

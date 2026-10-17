@@ -1,4 +1,5 @@
-//! Removing and inserting list items (`Stmt::List`) and setting a list's length (`Stmt::SetLen`).
+//! Removing, inserting and clearing list items, and compacting a list after a loop that removes
+//! some (`Stmt::List`); and setting a list's length (`Stmt::SetLen`).
 //! The runtime moves the items; the list's header is `{ptr, len, cap, arena}` (see `collections`).
 
 use cranelift_codegen::ir::{types, InstBuilder};

@@ -64,7 +64,7 @@ impl<'a> BodyChecker<'a> {
                     format!("declare it at the top level of a file (`struct {name} {{ ... }}`), or bring it in from a module with `use {{ {name} from m }}`"),
                 );
             } else {
-                self.error(*name_span, format!("unknown function `{name}`"));
+                self.unknown_function(*name_span, name, args);
             }
             for a in args {
                 self.check_expr(&a.value, None);

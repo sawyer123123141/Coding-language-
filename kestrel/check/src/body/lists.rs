@@ -128,8 +128,17 @@ impl<'a> BodyChecker<'a> {
             "join" => Which::Other(ListMethod::Join),
             _ => {
                 let help = match recv_ty {
-                    Ty::List(_) => "lists have `add`, `remove_at`, `pop`, `insert`, `clear`, `has`, `find`, `join` and `.len`",
-                    _ => "arrays have `has`, `find`, `join` and `.len`",
+                    // A slip for `remove_at`, or for the statement `remove b` in a loop.
+                    Ty::List(_) if matches!(name.as_str(), "remove" | "erase") => {
+                        let item = match args.first().map(|a| &a.value.kind) {
+                            Some(ExprKind::Ident(b)) => b.clone(),
+                            _ => "b".to_string(),
+                        };
+                        let xs = written(receiver);
+                        format!("use `{xs}.remove_at(i)`, or `remove {item}` inside `for {item} in {xs}`")
+                    }
+                    Ty::List(_) => "lists have `add`, `remove_at`, `pop`, `insert`, `clear`, `has`, `find`, `join` and `.len`".to_string(),
+                    _ => "arrays have `has`, `find`, `join` and `.len`".to_string(),
                 };
                 let msg = format!("`{}` has no method `{name}`", self.tn(recv_ty));
                 self.error_help(*name_span, msg, help);

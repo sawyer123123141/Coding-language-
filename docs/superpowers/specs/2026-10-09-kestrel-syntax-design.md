@@ -392,7 +392,7 @@ for b in bricks {
 }
 ```
 
-- `remove` is not a keyword: `remove` followed by a name, on a line of its own, is this statement.
+- `remove` is not a keyword: `remove` followed by a name, as a statement of its own (`if hit { remove b; continue }` too), is this statement.
 - `b` is gone after `remove b`, so using it later is an error. The rest of the body still runs, so follow it with `continue` to skip that.
 - While a loop that uses `remove` runs, its body can't use the list except through `b` (not `xs`, `xs.len` or `xs[j]`), because the items are moving. Other fields of the same variable are fine.
 - Not allowed in `par for`, in a loop over an array, map, string or a temporary, or on a list declared with `let`.
