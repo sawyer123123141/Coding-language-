@@ -114,10 +114,12 @@ impl<'a> BodyChecker<'a> {
                 continue;
             }
             let name = self.t.local(l).name.clone();
+            // A `par for` body can't `return`; an ordinary loop inside it can still `break`.
+            let leave = if self.par.is_empty() { "(`break` or `return`)" } else { "with `break`" };
             self.error_help(
                 span,
                 format!("`{name}` is moved inside a loop, so the next time around it would already be gone"),
-                "declare it inside the loop, give it a new value before the loop goes around, or leave the loop (`break` or `return`) right after moving it",
+                format!("declare it inside the loop, give it a new value before the loop goes around, or leave the loop {leave} right after moving it"),
             );
         }
     }
@@ -181,6 +183,14 @@ impl<'a> BodyChecker<'a> {
                 } else if let Some(g) = self.let_guards.iter().find(|g| g.root == l).cloned() {
                     let view = self.t.local(g.view).name.clone();
                     self.error_help(v.span, format!("can't move `{name}` here: `{view}` reads from it"), format!("move it after the block that declares `{view}`"));
+                } else if self.par.last().is_some_and(|p| self.local_ctx.get(&l).is_some_and(|&(_, loops)| loops < p.depth)) {
+                    // Every iteration would move it, at the same time. Refused here rather than at
+                    // the back edge, which a body that never finishes doesn't reach.
+                    self.error_help(
+                        v.span,
+                        format!("`{name}` is declared outside this `par for`, whose iterations run at the same time, so they can't each move it"),
+                        "declare it inside the loop, so each iteration has its own",
+                    );
                 } else {
                     self.moved.insert(l, MoveAt { span: v.span, every });
                     self.t.moves.insert(v.id);

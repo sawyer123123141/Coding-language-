@@ -107,6 +107,43 @@ fn a_use_after_a_move_on_every_path_is_an_error() {
     );
 }
 
+const IN_PAR: &str = "`t` is declared outside this `par for`, whose iterations run at the same time, so they can't each move it";
+
+/// The messages and help texts of each error.
+fn errors_with_help(body: &str) -> Vec<(String, Option<String>)> {
+    let src = format!("{BAG}{body}main() {{}}\n");
+    let (p, d) = parse(&src);
+    assert!(d.is_empty(), "parse errors: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
+    check(&p).1.into_iter().map(|d| (d.message, d.help)).collect()
+}
+
+#[test]
+fn a_par_for_body_cant_move_an_outer_local() {
+    let plain = "go() {\n let t = Bag()\n var outs = array[int](4)\n par for i, o in outs {\n  let m = t\n  o = m.n\n }\n}\n";
+    let help = Some("declare it inside the loop, so each iteration has its own".to_string());
+    assert_eq!(errors_with_help(plain), vec![(IN_PAR.to_string(), help)]);
+    // A body that never finishes never goes around, but every iteration still moves `t`.
+    let forever = "go() {\n let t = Bag()\n var outs = array[int](4)\n par for i, o in outs {\n  let m = t\n  while true {\n   o = m.n\n  }\n }\n}\n";
+    assert_eq!(errors(forever), vec![IN_PAR.to_string()]);
+    // A local of an outer `par for` body is shared by the inner one's iterations.
+    let nested = "go() {\n var grid = array[[int]](2)\n par for i, row in grid {\n  let t = Bag()\n  par for j, c in row {\n   let m = t\n   c = m.n\n  }\n }\n}\n";
+    assert_eq!(errors(nested), vec![IN_PAR.to_string()]);
+}
+
+#[test]
+fn a_par_for_bodys_own_locals_follow_the_usual_rules() {
+    let own = "go() {\n var outs = array[int](4)\n par for i, o in outs {\n  let t = Bag()\n  let m = t\n  o = m.n\n }\n}\n";
+    assert_eq!(errors(own), none());
+    let inner = "go() {\n var outs = array[int](4)\n par for i, o in outs {\n  for j from 0 to 2 {\n   let t = Bag()\n   let m = t\n   o = m.n\n  }\n }\n}\n";
+    assert_eq!(errors(inner), none());
+    // An ordinary loop inside the body still can't go around after moving the body's local.
+    let around = "go() {\n var outs = array[int](4)\n par for i, o in outs {\n  let t = Bag()\n  for j from 0 to 2 {\n   let m = t\n   o = m.n\n  }\n }\n}\n";
+    let help = "declare it inside the loop, give it a new value before the loop goes around, or leave the loop with `break` right after moving it";
+    assert_eq!(errors_with_help(around), vec![(IN_LOOP.to_string(), Some(help.to_string()))]);
+    let left = "go() {\n var outs = array[int](4)\n par for i, o in outs {\n  let t = Bag()\n  for j from 0 to 2 {\n   let m = t\n   o = m.n\n   break\n  }\n }\n}\n";
+    assert_eq!(errors(left), none());
+}
+
 #[test]
 fn a_loop_that_goes_around_after_a_move_is_an_error() {
     assert_eq!(errors("go(var keep: list[Bag]) {\n let t = Bag()\n for i from 0 to 3 {\n  keep.add(t)\n }\n}\n"), vec![IN_LOOP.to_string()]);
