@@ -103,3 +103,128 @@ fn exclusivity_reaches_through_elements() {
     let ok = "g(var x: [int], n: int) {}\nmain() {\n var a = [1, 2]\n g(var a, a[0])\n}\n";
     assert_eq!(run(ok).1, Vec::<String>::new());
 }
+
+#[test]
+fn list_methods_have_their_types() {
+    let src = "main() {
+    var xs: list[int] = [1, 2, 3]
+    xs.remove_at(0)
+    xs.insert(1, 5)
+    let last = xs.pop()
+    let at = xs.find(5)
+    let has = xs.has(5)
+    xs.clear()
+    let arr = [1.5, 2.5]
+    let in_arr = arr.has(2.5)
+    let words = [\"a\"]
+    let word_at = words.find(\"a\")
+}
+";
+    let (t, errs) = run(src);
+    assert!(errs.is_empty(), "{errs:?}");
+    let t = t.unwrap();
+    assert_eq!(t.ty_name(local(&t, "last").ty), "int?");
+    assert_eq!(t.ty_name(local(&t, "at").ty), "int?");
+    assert_eq!(local(&t, "has").ty, Ty::Bool);
+    assert_eq!(local(&t, "in_arr").ty, Ty::Bool);
+    assert_eq!(t.ty_name(local(&t, "word_at").ty), "int?");
+}
+
+#[test]
+fn list_method_errors() {
+    let cases: &[(&str, &str)] = &[
+        ("main() {\n let l: list[int] = []\n l.remove_at(0)\n}\n", "can't call `remove_at` on `l`: it changes `l`, which was declared with `let`"),
+        ("main() {\n var a = [1]\n a.pop()\n}\n", "arrays have a fixed length; use a `list[int]` if items come and go"),
+        ("main() {\n var a = [1]\n a.clear()\n}\n", "arrays have a fixed length; use a `list[int]` if items come and go"),
+        ("main() {\n let l: list[vec2] = []\n let b = l.find(vec2(1, 2))\n}\n", "`find` needs items that `==` can compare (numbers, bools and strings); `list[vec2]` holds `vec2`"),
+        ("main() {\n var l: list[int] = []\n l.find(1)\n}\n", "this only reads the list, so the line does nothing"),
+        ("main() {\n var l: list[int] = []\n l.has(1)\n}\n", "this only reads the list, so the line does nothing"),
+        ("main() {\n var l: list[int] = []\n l.insert(1.5, 2)\n}\n", "an index must be an integer, found float"),
+        ("main() {\n var l: list[int] = []\n l.remove_at()\n}\n", "`remove_at` takes one index"),
+        ("main() {\n var l: list[int] = []\n l.insert(0)\n}\n", "`insert` takes an index and a value"),
+        ("main() {\n var l: list[int] = []\n l.pop(1)\n}\n", "`pop` takes no arguments"),
+        ("main() {\n var l: list[int] = []\n l.insert(0, true)\n}\n", "expected int, found bool"),
+        ("main() {\n var l: list[int] = []\n let b = l.has(true)\n}\n", "expected int, found bool"),
+        ("main() {\n var l: list[int] = []\n l.sort()\n}\n", "`list[int]` has no method `sort`"),
+        ("main() {\n var a = [1]\n a.remove_at(0)\n}\n", "arrays have a fixed length; use a `list[int]` if items come and go"),
+    ];
+    for (src, expected) in cases {
+        let errs = run(src).1;
+        assert_eq!(errs, vec![expected.to_string()], "source:\n{src}");
+    }
+}
+
+#[test]
+fn a_list_cant_change_length_inside_a_loop_over_it() {
+    let refused = |name: &str, setup: &str, looped: &str, changed: &str| {
+        let src = format!(
+            "struct W {{\n items: list[int]\n}}\nmain() {{\n var xs: list[int] = [1]\n var w = W([1])\n var grid: list[list[int]] = [[1]]\n{setup}\n for {looped} {{\n  {changed}\n }}\n}}\n"
+        );
+        let errs = run(&src).1;
+        assert_eq!(errs.len(), 1, "{src}\n{errs:?}");
+        assert!(errs[0].starts_with(&format!("can't change how many items `{name}` has while looping over it; use `remove ")), "{errs:?}");
+    };
+    refused("xs", "", "x in xs", "xs.remove_at(0)");
+    refused("xs", "", "x in xs", "xs.insert(0, x)");
+    refused("xs", "", "x in xs", "xs.pop()");
+    refused("xs", "", "x in xs", "xs.clear()");
+    refused("w.items", "", "x in w.items", "w.items.clear()");
+    refused("grid", "", "row in grid", "for x in grid[0] {\n   row.clear()\n  }");
+    // Through an index, any list in `grid` might be the looped one.
+    refused("grid", "", "x in grid[0]", "grid[1].clear()");
+    refused("grid", "", "x in grid[0]", "grid.pop()");
+
+    // These don't change the list the loop reads.
+    let ok = "struct W {
+ items: list[int]
+ other: list[int]
+}
+main() {
+ var xs: list[int] = [1]
+ var ys: list[int] = [1]
+ var w = W([1], [2])
+ var grid: list[list[int]] = [[1]]
+ for x in xs { xs.add(x) }
+ for x in xs { ys.clear() }
+ for x in w.items { w.other.clear() }
+ for row in grid { row.clear() }
+ for row in grid { row.add(1) }
+ for x in xs { }
+ xs.clear()
+ for x in grid[0] { ys.pop() }
+}
+";
+    assert_eq!(run(ok).1, Vec::<String>::new());
+}
+
+#[test]
+fn a_popped_value_lives_as_long_as_its_list() {
+    let src = "main() {
+ var keep: string? = none
+ var n = 1
+ var outer: list[string] = []
+ outer.add(\"{n}\")
+ keep = outer.pop()
+ arena {
+  var inner: list[string] = []
+  inner.add(\"{n}\")
+  let own = inner.pop()
+  keep = outer.pop()
+ }
+}
+";
+    assert_eq!(run(src).1, Vec::<String>::new());
+    let escape = "main() {
+ var keep: string? = none
+ var n = 1
+ arena {
+  var inner: list[string] = []
+  inner.add(\"{n}\")
+  keep = inner.pop()
+ }
+}
+";
+    let errs = run(escape).1;
+    assert_eq!(errs.len(), 1, "{errs:?}");
+    assert!(errs[0].starts_with("this memory is freed at the end of the `arena { }` block, but `keep` lives longer"), "{errs:?}");
+}

@@ -4,6 +4,7 @@
 
 use std::alloc::Layout;
 use std::cell::RefCell;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use crate::blocks;
 
@@ -131,10 +132,27 @@ pub(crate) fn program_bytes() -> usize {
     unsafe { (*program_arena()).bytes() }
 }
 
+/// The arenas made by `kestrel_rt_arena_new` and not freed yet: `Arena()` values and `arena { }`
+/// blocks. `KESTREL_ARENA_COUNT=1` reports it at exit, so tests can tell that every arena a
+/// program made was dropped exactly once.
+static ALIVE: AtomicI64 = AtomicI64::new(0);
+
+/// How many counted arenas are alive now (see `ALIVE`).
+pub(crate) fn arenas_alive() -> i64 {
+    ALIVE.load(Ordering::Relaxed)
+}
+
+/// A new, empty arena that nothing counts: for arenas the runtime makes for itself and then
+/// keeps (see `Arena::adopt`).
+pub(crate) fn new_uncounted() -> *mut Arena {
+    Box::into_raw(Box::default())
+}
+
 /// A new, empty arena (`Arena()`). It allocates nothing until first used.
 #[no_mangle]
 pub extern "C" fn kestrel_rt_arena_new() -> *mut Arena {
-    Box::into_raw(Box::default())
+    ALIVE.fetch_add(1, Ordering::Relaxed);
+    new_uncounted()
 }
 
 /// Frees an arena and everything allocated in it. Null does nothing.
@@ -149,6 +167,7 @@ pub unsafe extern "C" fn kestrel_rt_arena_free(a: *mut Arena) {
     if STACK.with_borrow(|s| s.pushed.contains(&a)) {
         crate::panic::fail("an arena was freed while allocating into it (its owner was replaced inside `in`)");
     }
+    ALIVE.fetch_sub(1, Ordering::Relaxed);
     // SAFETY: the caller guarantees `a` is a live arena from `kestrel_rt_arena_new`.
     drop(unsafe { Box::from_raw(a) });
 }
@@ -235,6 +254,10 @@ pub unsafe extern "C" fn kestrel_rt_list_grow(list: *mut List, elem_size: i64, a
 mod tests {
     use super::*;
 
+    /// Tests that make or free counted arenas hold this, so each can read the count without the
+    /// others changing it.
+    static COUNTED: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn allocations_are_aligned_zeroed_and_distinct() {
         let mut a = Arena::new();
@@ -296,6 +319,7 @@ mod tests {
 
     #[test]
     fn list_grow_keeps_elements() {
+        let _counted = COUNTED.lock().unwrap_or_else(|e| e.into_inner());
         let mut l = List { ptr: std::ptr::null_mut(), len: 0, cap: 0, arena: std::ptr::null_mut() };
         // SAFETY: `l` is a valid list of i32s throughout.
         unsafe {
@@ -319,6 +343,7 @@ mod tests {
 
     #[test]
     fn pushed_arenas_take_allocations_until_popped() {
+        let _counted = COUNTED.lock().unwrap_or_else(|e| e.into_inner());
         let program = kestrel_rt_current_arena();
         let a = kestrel_rt_arena_new();
         kestrel_rt_arena_push(a);
@@ -343,5 +368,29 @@ mod tests {
         assert_ne!(p as *const u8, src.as_ptr());
         // SAFETY: `p` was just filled with 5 bytes.
         assert_eq!(unsafe { std::slice::from_raw_parts(p, 5) }, &src);
+    }
+
+    #[test]
+    fn the_live_arena_count_goes_up_on_new_and_down_on_free() {
+        let _counted = COUNTED.lock().unwrap_or_else(|e| e.into_inner());
+        let before = arenas_alive();
+        let (a, b) = (kestrel_rt_arena_new(), kestrel_rt_arena_new());
+        assert_eq!(arenas_alive(), before + 2);
+        // SAFETY: both came from `kestrel_rt_arena_new` and aren't pushed.
+        unsafe {
+            kestrel_rt_arena_free(a);
+            assert_eq!(arenas_alive(), before + 1);
+            // Freeing null frees nothing, so it counts nothing.
+            kestrel_rt_arena_free(std::ptr::null_mut());
+            assert_eq!(arenas_alive(), before + 1);
+            kestrel_rt_arena_free(b);
+        }
+        assert_eq!(arenas_alive(), before);
+        // The runtime's own arenas (a `par for` thread's) aren't counted.
+        let own = new_uncounted();
+        assert_eq!(arenas_alive(), before);
+        // SAFETY: `own` is a live arena nothing else holds.
+        drop(unsafe { Box::from_raw(own) });
+        assert_eq!(arenas_alive(), before);
     }
 }

@@ -1,0 +1,42 @@
+// expect: [1, 3]
+// expect: 3 [1]
+// expect: none
+// expect: [0, 1, 2]
+// expect: [0, 1, 2, 9]
+// expect: []
+// expect: true false
+// expect: 1 none
+// expect: true 0
+// expect: ["b", "c"] 2
+// expect: [3, 1, 2, 3]
+// expect: [1, 2, 3, 1, 2, 3]
+main() {
+    var xs: list[int] = [1, 2, 3]
+    xs.remove_at(1)
+    print(xs)
+    let p = xs.pop()
+    print(p, xs)
+    var e: list[int] = []
+    print(e.pop())
+    var ys: list[int] = [0, 2]
+    ys.insert(1, 1)
+    print(ys)
+    ys.insert(3, 9)
+    print(ys)
+    ys.clear()
+    print(ys)
+    let names = ["ana", "bo"]
+    print(names.has("bo"), names.has("cy"))
+    print(names.find("bo"), names.find("cy"))
+    let arr = [4, 5]
+    print(arr.has(4), arr.find(4))
+    var ss: list[string] = ["a", "b", "c"]
+    ss.remove_at(0)
+    print(ss, ss.len)
+    var zs: list[int] = [1, 2, 3]
+    zs.insert(0, zs[2])
+    print(zs)
+    var grow: list[int] = [1, 2, 3]
+    for g in grow { grow.add(g) }
+    print(grow)
+}

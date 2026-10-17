@@ -38,3 +38,14 @@ pub enum MapOp {
     /// `[]`: starts a loop over the map; the old lock count (i64), for `MapUnlock`.
     Lock,
 }
+
+/// What `Stmt::List` does with the list at its place.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ListOp {
+    /// `[index]`: removes that item, moving the later ones down and zeroing the vacated slot. An
+    /// owning item is dropped first; the runtime panics when the index is out of range.
+    RemoveAt,
+    /// `[index, value]`: opens a slot at `index` (`index == len` adds at the end), moving the
+    /// later ones up, and stores `value` in it. `value` is evaluated before anything moves.
+    Insert,
+}

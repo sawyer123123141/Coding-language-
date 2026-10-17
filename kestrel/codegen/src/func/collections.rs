@@ -10,12 +10,12 @@ use kestrel_kir::{self as kir, KTy, Place};
 use super::FuncLowerer;
 
 const PTR: i32 = 0;
-const LEN: i32 = 8;
+pub(super) const LEN: i32 = 8;
 const CAP: i32 = 16;
 const ARENA: i32 = 24;
 
 impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
-    fn elem_size_align(&self, ty: KTy) -> (i64, i64) {
+    pub(super) fn elem_size_align(&self, ty: KTy) -> (i64, i64) {
         // A string's elements are its bytes.
         if ty == KTy::Str {
             return (1, 1);
@@ -26,7 +26,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         (size as i64, align as i64)
     }
 
-    fn store(&mut self, v: Value, addr: Value, offset: i32) {
+    pub(super) fn store(&mut self, v: Value, addr: Value, offset: i32) {
         self.b.ins().store(MemFlags::trusted(), v, addr, offset);
     }
 

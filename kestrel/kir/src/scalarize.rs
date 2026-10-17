@@ -61,6 +61,8 @@ fn pinned(body: &[Stmt]) -> HashSet<LocalIdx> {
         Node::Stmt(
             Stmt::Bind(_, p)
             | Stmt::ListAdd(p, _)
+            | Stmt::SetLen(p, _)
+            | Stmt::List(_, p, _)
             | Stmt::Dup(p)
             | Stmt::FreeArena(p)
             | Stmt::DropGpu(p)

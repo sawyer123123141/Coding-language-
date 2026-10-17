@@ -6,6 +6,7 @@ mod default_cycles;
 mod enums;
 mod expr;
 mod let_else;
+mod lists;
 mod maps;
 mod matching;
 mod moves;
@@ -64,6 +65,8 @@ pub(crate) struct BodyChecker<'a> {
     let_guards: Vec<let_else::LetGuard>,
     /// Enclosing `par for` bodies, outermost first.
     par: Vec<par::ParBody>,
+    /// Enclosing `for ... in` loops over lists and arrays that are places, outermost first.
+    for_in_lists: Vec<lists::LoopList>,
 }
 
 pub(crate) fn check_fn(program: &Program, fn_id: FnId, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
@@ -99,7 +102,7 @@ impl<'a> BodyChecker<'a> {
         let (local_ctx, views, moved) = (HashMap::new(), HashSet::new(), HashMap::new());
         let (scopes, loop_breaks, match_guards) = (Vec::new(), Vec::new(), Vec::new());
         let (loop_moves, loop_move_errors) = (Vec::new(), HashSet::new());
-        let (par, let_guards) = (Vec::new(), Vec::new());
+        let (par, let_guards, for_in_lists) = (Vec::new(), Vec::new(), Vec::new());
         BodyChecker {
             t,
             diags,
@@ -117,6 +120,7 @@ impl<'a> BodyChecker<'a> {
             match_guards,
             let_guards,
             par,
+            for_in_lists,
         }
     }
 

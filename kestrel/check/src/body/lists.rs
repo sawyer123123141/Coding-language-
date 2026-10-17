@@ -1,0 +1,228 @@
+//! List methods (`add`, `remove_at`, `pop`, `insert`, `clear`, `has` and `find`), and the loop
+//! check that keeps a list from changing length while a `for ... in` loop runs over it.
+
+use kestrel_syntax::ast::{Arg, Expr, ExprId, ExprKind};
+
+use super::BodyChecker;
+use crate::tables::{ListMethod, LocalId, Res};
+use crate::ty::Ty;
+
+/// A step into a place: a field's name, or `None` for an index (which may be any index).
+type Step = Option<String>;
+
+/// A `for ... in` loop over a list or an array that is being checked.
+pub(crate) struct LoopList {
+    /// The loop's item, which stands for one element of the list.
+    pub(crate) item: LocalId,
+    /// The expression the loop iterates over.
+    #[allow(dead_code)] // read by `remove`, which needs the loop's list by expression
+    pub(crate) iter: ExprId,
+    /// The variable the list belongs to, aliases followed.
+    pub(crate) root: LocalId,
+    /// The list's place inside `root`.
+    pub(crate) path: Vec<Step>,
+}
+
+/// Whether the list at `changed` is the list at `looped`, or holds it: `changed` is `looped` or
+/// a start of it, an index standing for any index. A list inside an element of the looped
+/// list (`row` while looping over `grid`) is a different list, and is free to change.
+fn covers(changed: &[Step], looped: &[Step]) -> bool {
+    changed.len() <= looped.len() && changed.iter().zip(looped).all(|(a, b)| a.is_none() || b.is_none() || a == b)
+}
+
+/// How a list method is written, to tell `add` from the rest.
+#[derive(Clone, Copy)]
+enum Which {
+    Add,
+    Other(ListMethod),
+}
+
+impl<'a> BodyChecker<'a> {
+    /// The root variable and steps of a place, with a loop's item standing for an element of its
+    /// list. Call after the expression has been checked.
+    fn list_place(&self, e: &Expr) -> Option<(LocalId, Vec<Step>)> {
+        match &e.kind {
+            ExprKind::Ident(_) => {
+                let Some(&Res::Local(l)) = self.t.res.get(&e.id) else { return None };
+                if let Some(x) = self.for_in_lists.iter().rev().find(|x| x.item == l) {
+                    let mut path = x.path.clone();
+                    path.push(None);
+                    return Some((x.root, path));
+                }
+                // A `match` binding or `let ... else` view stands for a part of its root that we
+                // don't track, so it counts as the whole root.
+                Some((self.t.local(l).alias.unwrap_or(l), Vec::new()))
+            }
+            ExprKind::Field { .. } if self.t.swizzles.contains_key(&e.id) => None,
+            ExprKind::Field { base, .. } if matches!(self.t.ty(base.id), Ty::Array(_) | Ty::List(_) | Ty::Map(..)) => None,
+            ExprKind::Field { base, name, .. } => {
+                let (root, mut path) = self.list_place(base)?;
+                path.push(Some(name.clone()));
+                Some((root, path))
+            }
+            ExprKind::Index { base, .. } => {
+                let (root, mut path) = self.list_place(base)?;
+                path.push(None);
+                Some((root, path))
+            }
+            _ => None,
+        }
+    }
+
+    /// The innermost enclosing `for ... in` loop (an index into `for_in_lists`) whose list is
+    /// the one at `place`, or holds it: changing the length of `place` there would shorten,
+    /// move or drop the items the loop is reading.
+    pub(crate) fn overlapping_loop(&self, place: &Expr) -> Option<usize> {
+        let (root, path) = self.list_place(place)?;
+        self.for_in_lists.iter().rposition(|x| x.root == root && covers(&path, &x.path))
+    }
+
+    /// Pushes the loop over `iter`, whose item is `item`, if `iter` is a place.
+    pub(crate) fn enter_list_loop(&mut self, item: LocalId, iter: &Expr) {
+        if let Some((root, path)) = self.list_place(iter) {
+            self.for_in_lists.push(LoopList { item, iter: iter.id, root, path });
+        }
+    }
+
+    /// Pops the loop `enter_list_loop` pushed, if it did.
+    pub(crate) fn leave_list_loop(&mut self, item: LocalId) {
+        if self.for_in_lists.last().is_some_and(|x| x.item == item) {
+            self.for_in_lists.pop();
+        }
+    }
+
+    /// The list a loop reads, as the loop's error names it: its variable and fields, up to the
+    /// first index.
+    fn loop_list_name(&self, i: usize) -> String {
+        let x = &self.for_in_lists[i];
+        let mut name = self.t.local(x.root).name.clone();
+        for step in x.path.iter().map_while(Option::as_ref) {
+            name.push_str(&format!(".{step}"));
+        }
+        name
+    }
+
+    /// An index argument: any integer type.
+    pub(crate) fn check_int_index(&mut self, index: &Expr) {
+        let ty = self.check_expr(index, None);
+        let ty = self.reject_never(index, ty);
+        if !ty.is_int() && ty != Ty::Error {
+            let msg = format!("an index must be an integer, found {}", self.tn(ty));
+            self.error(index.span, msg);
+        }
+    }
+
+    /// `xs.add(v)`, `xs.remove_at(i)`, `xs.pop()`, `xs.insert(i, v)`, `xs.clear()`, `xs.has(v)`
+    /// and `xs.find(v)`. Arrays only take the last two. The ones that change `xs` need it to be
+    /// changeable.
+    pub(crate) fn list_method(&mut self, e: &Expr, receiver: &Expr, recv_ty: Ty, args: &[Arg]) -> Ty {
+        let ExprKind::MethodCall { name, name_span, .. } = &e.kind else { unreachable!("not a method call") };
+        let elem = self.elem_of(recv_ty).expect("a collection type");
+        let which = match name.as_str() {
+            "add" => Which::Add,
+            "remove_at" => Which::Other(ListMethod::RemoveAt),
+            "pop" => Which::Other(ListMethod::Pop),
+            "insert" => Which::Other(ListMethod::Insert),
+            "clear" => Which::Other(ListMethod::Clear),
+            "has" => Which::Other(ListMethod::Has),
+            "find" => Which::Other(ListMethod::Find),
+            _ => {
+                let help = match recv_ty {
+                    Ty::List(_) => "lists have `add`, `remove_at`, `pop`, `insert`, `clear`, `has`, `find` and `.len`",
+                    _ => "arrays have `has`, `find` and `.len`",
+                };
+                let msg = format!("`{}` has no method `{name}`", self.tn(recv_ty));
+                self.error_help(*name_span, msg, help);
+                self.check_loose_args(args);
+                return Ty::Error;
+            }
+        };
+        let changes = match which {
+            Which::Add => true,
+            Which::Other(m) => m.changes_receiver(),
+        };
+        if changes && matches!(recv_ty, Ty::Array(_)) {
+            let msg = match which {
+                Which::Add => format!("arrays have a fixed length; use a `list[{}]` to add items", self.tn(elem)),
+                Which::Other(_) => format!("arrays have a fixed length; use a `list[{}]` if items come and go", self.tn(elem)),
+            };
+            self.error(*name_span, msg);
+            self.check_loose_args(args);
+            return Ty::Error;
+        }
+        let Which::Other(method) = which else { return self.list_add(e, receiver, args, elem) };
+        if matches!(method, ListMethod::Has | ListMethod::Find) && !(elem.is_numeric() || matches!(elem, Ty::Bool | Ty::Str | Ty::Error)) {
+            let msg = format!(
+                "`{name}` needs items that `==` can compare (numbers, bools and strings); `{}` holds `{}`",
+                self.tn(recv_ty),
+                self.tn(elem)
+            );
+            self.error(*name_span, msg);
+            self.check_loose_args(args);
+            return Ty::Error;
+        }
+        let usage = match method {
+            ListMethod::RemoveAt => ("`remove_at` takes one index", 1),
+            ListMethod::Pop => ("`pop` takes no arguments", 0),
+            ListMethod::Insert => ("`insert` takes an index and a value", 2),
+            ListMethod::Clear => ("`clear` takes no arguments", 0),
+            ListMethod::Has => ("`has` takes one value", 1),
+            ListMethod::Find => ("`find` takes one value", 1),
+        };
+        if args.len() != usage.1 || args.iter().any(|a| a.label.is_some() || a.is_var) {
+            self.error(e.span, usage.0);
+            self.check_loose_args(args);
+            return Ty::Error;
+        }
+        self.t.res.insert(e.id, Res::List(method));
+        if method.changes_receiver() && self.receiver_root(receiver, name).is_some() {
+            if let Some(i) = self.overlapping_loop(receiver) {
+                let (list, item) = (self.loop_list_name(i), self.t.local(self.for_in_lists[i].item).name.clone());
+                let msg = format!(
+                    "can't change how many items `{list}` has while looping over it; use `remove {item}` to remove the loop's item, or change `{list}` after the loop"
+                );
+                self.error(e.span, msg);
+            }
+        }
+        match method {
+            ListMethod::RemoveAt => self.check_int_index(&args[0].value),
+            ListMethod::Insert => {
+                self.check_int_index(&args[0].value);
+                self.check_element(&args[1].value, Some(elem));
+                self.check_store(receiver, &args[1].value);
+            }
+            ListMethod::Has | ListMethod::Find => {
+                self.check_value(&args[0].value, Some(elem));
+            }
+            ListMethod::Pop | ListMethod::Clear => {}
+        }
+        match method {
+            ListMethod::Pop => Ty::Optional(self.t.intern_elem(elem)),
+            ListMethod::Find => Ty::Optional(self.t.intern_elem(Ty::Int)),
+            // Lowering searches with `find`, whose `int?` needs its element type interned.
+            ListMethod::Has => {
+                self.t.intern_elem(Ty::Int);
+                Ty::Bool
+            }
+            ListMethod::RemoveAt | ListMethod::Insert | ListMethod::Clear => Ty::Unit,
+        }
+    }
+
+    /// `xs.add(v)`: `xs` must be changeable. Adding while looping over `xs` is fine: the loop
+    /// reads the length once.
+    fn list_add(&mut self, e: &Expr, receiver: &Expr, args: &[Arg], elem: Ty) -> Ty {
+        self.t.res.insert(e.id, Res::ListAdd);
+        self.receiver_root(receiver, "add");
+        match args {
+            [a] if a.label.is_none() && !a.is_var => {
+                self.check_element(&a.value, Some(elem));
+                self.check_store(receiver, &a.value);
+            }
+            _ => {
+                self.error(e.span, "`add` takes one value");
+                self.check_loose_args(args);
+            }
+        }
+        Ty::Unit
+    }
+}

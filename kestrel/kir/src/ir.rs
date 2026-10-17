@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use crate::layout::{EnumLayout, StructLayout};
-pub use crate::ops::{MapOp, MathOp};
+pub use crate::ops::{ListOp, MapOp, MathOp};
 
 /// Bits of a KIR line (`Expr::line`, `Stmt::SetLine`) that hold the line within its file; the
 /// bits above hold the file's index in `Module::files`. Bit 31 stays clear.
@@ -239,6 +239,11 @@ pub enum Stmt {
     RandSeed(Expr),
     /// Appends a value to the list at a place, growing it if it's full.
     ListAdd(Place, Expr),
+    /// Removes or inserts an item of the list at a place; see `ListOp` for the arguments.
+    List(ListOp, Place, Vec<Expr>),
+    /// Sets the length (i64) of the list at a place to a value no greater than the old length;
+    /// the items past it are not dropped, whoever shortens a list has moved or dropped them.
+    SetLen(Place, Expr),
     /// Points a reference local at a place (a `for ... in` element, found
     /// once per iteration).
     Bind(LocalIdx, Place),

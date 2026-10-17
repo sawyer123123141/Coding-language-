@@ -1,0 +1,88 @@
+// expect: ccc ["a", "bb"]
+// expect: [2, 3] [[1]]
+// expect: true 0
+// expect: [1.5, 9, 2.5]
+// expect: false true []
+// expect: 1 [2, 3]
+// expect: 99 0 100
+// expect: 0
+// expect: [vec2(x: 1, y: 2), vec2(x: 5, y: 6), vec2(x: 3, y: 4)] 3
+// expect: vec2(x: 3, y: 4) 2
+// expect: ["c", "a", "b"]
+// expect: 7 [1, 2]
+// expect: 3 0
+// expect: 3 none
+// expect: []
+// expect: 3
+struct Bag {
+    items: list[int]
+
+    take(var self) -> int? {
+        self.items.pop()
+    }
+
+    put(var self, at: int, x: int) {
+        self.items.insert(at, x)
+    }
+}
+
+drain(var xs: list[int]) -> int {
+    var total = 0
+    while xs.len > 0 {
+        let x = xs.pop() else { return total }
+        total += x
+    }
+    total
+}
+
+main() {
+    var words: list[string] = ["a", "bb", "ccc"]
+    let w = words.pop() else { return }
+    print(w, words)
+    var rows: list[list[int]] = [[1], [2, 3]]
+    let r = rows.pop()
+    print(r, rows)
+    var fs: list[float] = [1.5, 2.5]
+    print(fs.has(2.5), fs.find(1.5))
+    fs.insert(1, 9.0)
+    print(fs)
+    var bs: list[bool] = [true]
+    let had = bs.has(false)
+    let popped = bs.pop()
+    print(had, popped, bs)
+    var us: list[u8] = [1, 2, 3]
+    us.remove_at(0)
+    print(us.find(3), us)
+    var big: list[int] = []
+    for i from 0 to 100 { big.insert(0, i) }
+    print(big[0], big[99], big.len)
+    while big.len > 0 { big.pop() }
+    print(big.len)
+    var vs: list[vec2] = [vec2(1, 2), vec2(3, 4)]
+    vs.insert(1, vec2(5, 6))
+    print(vs, vs.len)
+    let last = vs.pop() else { return }
+    print(last, vs.len)
+    var ss: list[string] = ["a", "b", "c"]
+    ss.insert(0, ss[2])
+    ss.remove_at(3)
+    print(ss)
+    var bag = Bag([1, 2])
+    bag.put(2, 7)
+    let t = bag.take() else { return }
+    print(t, bag.items)
+    let sum = drain(var bag.items)
+    print(sum, bag.items.len)
+    var ns: list[int] = [1, 2]
+    let d = drain(var ns)
+    print(d, ns.pop())
+    var e: list[int] = []
+    e.clear()
+    print(e)
+    var cs: list[int] = [1, 2, 3]
+    cs.clear()
+    cs.add(1)
+    cs.add(2)
+    cs.add(3)
+    print(cs.len)
+}

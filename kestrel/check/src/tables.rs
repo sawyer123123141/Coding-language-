@@ -30,6 +30,24 @@ pub struct EnumId(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ElemId(pub u32);
 
+/// The list methods besides `add` (which is `Res::ListAdd`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ListMethod {
+    RemoveAt,
+    Pop,
+    Insert,
+    Clear,
+    Has,
+    Find,
+}
+
+impl ListMethod {
+    /// Whether the method changes its receiver; `has` and `find` only read it.
+    pub fn changes_receiver(self) -> bool {
+        !matches!(self, ListMethod::Has | ListMethod::Find)
+    }
+}
+
 /// What a name or call expression refers to.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Res {
@@ -44,6 +62,8 @@ pub enum Res {
     Variant(EnumId, u32),
     /// `xs.add(v)` on a list.
     ListAdd,
+    /// `xs.remove_at(i)` and the other list methods besides `add` (see `ListMethod`).
+    List(ListMethod),
     /// `m.remove(k)`: changes the map.
     MapRemove,
     /// `m.get(k, d)` / `m.has(k)`: reads the map.

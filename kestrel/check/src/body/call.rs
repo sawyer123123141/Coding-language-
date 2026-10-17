@@ -91,6 +91,9 @@ impl<'a> BodyChecker<'a> {
             Some(Res::MapRead) => {
                 self.error(e.span, "this only reads the map, so the line does nothing");
             }
+            Some(Res::List(m)) if !m.changes_receiver() => {
+                self.error(e.span, "this only reads the list, so the line does nothing");
+            }
             Some(Res::Convert(_) | Res::Construct(_) | Res::Variant(..) | Res::NewArena) => {
                 self.error(e.span, "this line has no effect; did you mean to continue the line above?");
             }

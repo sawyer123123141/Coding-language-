@@ -8,7 +8,6 @@ use kestrel_syntax::Span;
 
 use super::BodyChecker;
 use crate::collect::resolve_type;
-use crate::tables::Res;
 use crate::ty::Ty;
 
 impl<'a> BodyChecker<'a> {
@@ -61,12 +60,7 @@ impl<'a> BodyChecker<'a> {
         if let Some(kv) = self.map_of(base_ty) {
             return self.check_map_index(index, kv.0, kv.1);
         }
-        let index_ty = self.check_expr(index, None);
-        let index_ty = self.reject_never(index, index_ty);
-        if !index_ty.is_int() && index_ty != Ty::Error {
-            let msg = format!("an index must be an integer, found {}", self.tn(index_ty));
-            self.error(index.span, msg);
-        }
+        self.check_int_index(index);
         match self.elem_of(base_ty) {
             Some(elem) => elem,
             None if base_ty == Ty::Error => Ty::Error,
@@ -137,37 +131,6 @@ impl<'a> BodyChecker<'a> {
         Ty::Error
     }
 
-    /// `xs.add(v)`: lists only, and `xs` must be changeable.
-    pub(crate) fn collection_method(&mut self, e: &Expr, receiver: &Expr, recv_ty: Ty, args: &[Arg]) -> Ty {
-        let ExprKind::MethodCall { name, name_span, .. } = &e.kind else { unreachable!("not a method call") };
-        let elem = self.elem_of(recv_ty).expect("a collection type");
-        let problem = match (recv_ty, name.as_str()) {
-            (Ty::List(_), "add") => None,
-            (Ty::Array(_), "add") => {
-                Some(format!("arrays have a fixed length; use a `list[{}]` to add items", self.tn(elem)))
-            }
-            _ => Some(format!("`{}` has no method `{name}`", self.tn(recv_ty))),
-        };
-        if let Some(msg) = problem {
-            self.error(*name_span, msg);
-            self.check_loose_args(args);
-            return Ty::Error;
-        }
-        self.t.res.insert(e.id, Res::ListAdd);
-        self.receiver_root(receiver, name);
-        match args {
-            [a] if a.label.is_none() && !a.is_var => {
-                self.check_element(&a.value, Some(elem));
-                self.check_store(receiver, &a.value);
-            }
-            _ => {
-                self.error(e.span, "`add` takes one value");
-                self.check_loose_args(args);
-            }
-        }
-        Ty::Unit
-    }
-
     /// `for v in xs` / `for i, v in xs`. `v` aliases `xs[i]`, so it can
     /// change the collection when the collection can change.
     pub(crate) fn check_for_in(&mut self, par: bool, index: Option<&Binding>, var: &Binding, iter: &Expr, body: &Block) {
@@ -205,8 +168,10 @@ impl<'a> BodyChecker<'a> {
             let collection = self.path_key(iter);
             self.par.push(super::par::ParBody::new(v, collection, root, first_local, self.loop_breaks.len() + 1));
         }
+        self.enter_list_loop(v, iter);
         let entry = self.moved.clone();
         self.loop_body(entry.clone(), Some(entry), body);
+        self.leave_list_loop(v);
         if par {
             self.end_par();
         }

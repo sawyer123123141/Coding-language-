@@ -31,8 +31,14 @@ fn stmt<'a>(s: &'a Stmt, f: &mut impl FnMut(Node<'a>)) {
     f(Node::Stmt(s));
     match s {
         Stmt::Let(_, e) | Stmt::Return(Some(e)) | Stmt::RandSeed(e) => walk_expr(e, f),
-        Stmt::Assign(p, e) | Stmt::ListAdd(p, e) => {
+        Stmt::Assign(p, e) | Stmt::ListAdd(p, e) | Stmt::SetLen(p, e) => {
             walk_expr(e, f);
+            place(p, true, f);
+        }
+        Stmt::List(_, p, xs) => {
+            for x in xs {
+                walk_expr(x, f);
+            }
             place(p, true, f);
         }
         Stmt::Bind(_, p) => place(p, false, f),

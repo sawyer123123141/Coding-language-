@@ -9,6 +9,17 @@ fn run_entry(entry: extern "C" fn()) {
     if let Some(report) = arena_report(std::env::var("KESTREL_ARENA_REPORT").ok().as_deref(), crate::arena::program_bytes) {
         eprintln!("{report}");
     }
+    if let Some(report) = arena_count_report(std::env::var("KESTREL_ARENA_COUNT").ok().as_deref(), crate::arena::arenas_alive) {
+        eprintln!("{report}");
+    }
+}
+
+/// The line `KESTREL_ARENA_COUNT=1` asks for once `main` has returned: how many arenas made by
+/// `Arena()` or `arena { }` are still alive. A program that drops everything it made says 0, so
+/// tests use it to tell that an owning value was dropped exactly once. `alive` counts them, and
+/// runs only when the report is on.
+fn arena_count_report(setting: Option<&str>, alive: impl FnOnce() -> i64) -> Option<String> {
+    (setting == Some("1")).then(|| format!("arenas alive at exit: {}", alive()))
 }
 
 /// The line `KESTREL_ARENA_REPORT=1` asks for once `main` has returned. Tests use it to
@@ -41,7 +52,7 @@ pub extern "C" fn kestrel_rt_start(entry: extern "C" fn()) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{arena_report, kestrel_rt_start};
+    use super::{arena_count_report, arena_report, kestrel_rt_start};
     use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]
@@ -56,6 +67,15 @@ mod tests {
     fn the_arena_is_not_measured_unless_the_report_is_on() {
         for setting in [None, Some("0"), Some("true")] {
             assert_eq!(arena_report(setting, || panic!("measured with {setting:?}")), None);
+        }
+    }
+
+    #[test]
+    fn the_arena_count_is_on_only_for_one() {
+        assert_eq!(arena_count_report(Some("1"), || 0).as_deref(), Some("arenas alive at exit: 0"));
+        assert_eq!(arena_count_report(Some("1"), || 3).as_deref(), Some("arenas alive at exit: 3"));
+        for setting in [None, Some("0"), Some("true")] {
+            assert_eq!(arena_count_report(setting, || panic!("counted with {setting:?}")), None);
         }
     }
 

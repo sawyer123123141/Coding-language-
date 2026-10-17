@@ -114,9 +114,15 @@ impl Inliner<'_> {
     fn stmt(&mut self, s: &mut Stmt, depth: u32) {
         match s {
             Stmt::Let(_, e) | Stmt::Return(Some(e)) | Stmt::RandSeed(e) => self.expr(e, depth),
-            Stmt::Assign(p, e) | Stmt::ListAdd(p, e) => {
+            Stmt::Assign(p, e) | Stmt::ListAdd(p, e) | Stmt::SetLen(p, e) => {
                 self.place(p, depth);
                 self.expr(e, depth);
+            }
+            Stmt::List(_, p, xs) => {
+                self.place(p, depth);
+                for x in xs {
+                    self.expr(x, depth);
+                }
             }
             Stmt::If { cond, then_body, else_body } => {
                 self.expr(cond, depth);

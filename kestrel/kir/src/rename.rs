@@ -39,9 +39,15 @@ pub(crate) fn rename_stmts(stmts: &mut [Stmt], subst: &[Subst]) {
                 rename_expr(e, subst);
             }
             Stmt::Return(Some(e)) | Stmt::RandSeed(e) => rename_expr(e, subst),
-            Stmt::Assign(p, e) | Stmt::ListAdd(p, e) => {
+            Stmt::Assign(p, e) | Stmt::ListAdd(p, e) | Stmt::SetLen(p, e) => {
                 rename_place(p, subst);
                 rename_expr(e, subst);
+            }
+            Stmt::List(_, p, xs) => {
+                rename_place(p, subst);
+                for x in xs {
+                    rename_expr(x, subst);
+                }
             }
             Stmt::If { cond, then_body, else_body } => {
                 rename_expr(cond, subst);

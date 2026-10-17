@@ -1,0 +1,26 @@
+// env: KESTREL_ARENA_COUNT=1
+// expect: 5
+// expect: 2
+// expect: 0
+// expect: 8
+// expect-stderr: arenas alive at exit: 0
+struct Pool {
+    mem: Arena = Arena()
+    n: int
+}
+
+main() {
+    var ps: list[Pool] = []
+    for i from 1 to 6 { ps.add(Pool(n: i)) }
+    ps.remove_at(0)
+    let last = ps.pop() else { return }
+    print(last.n)
+    ps.pop()
+    let maybe = ps.pop()
+    for p in ps { print(p.n) }
+    ps.clear()
+    print(ps.len)
+    ps.add(Pool(n: 7))
+    ps.insert(0, Pool(n: 8))
+    print(ps[0].n)
+}

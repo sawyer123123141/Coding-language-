@@ -6,6 +6,8 @@ mod expr;
 mod helpers;
 mod layout;
 mod lines;
+mod list_helpers;
+mod lists;
 mod map_helpers;
 mod maps;
 mod matching;
@@ -78,8 +80,8 @@ pub(crate) struct FnLowerer<'a> {
     origins: HashMap<LocalIdx, Place>,
     /// Enclosing blocks, innermost last, with what leaving each must do.
     scopes: Vec<scopes::Scope>,
-    /// Temporaries holding the owning result of a native called in a scratch arena, which is
-    /// handed on as a new value (see `scratch_call_value` and `temps`).
+    /// Temporaries holding an owning result that is handed on as a new value: a native called in
+    /// a scratch arena (see `scratch_call_value`), or a `pop` (see `temps`).
     scratch_results: HashSet<LocalIdx>,
     /// The reference local of each heap constant this function uses (see `consts`).
     const_locals: HashMap<ConstId, LocalIdx>,
@@ -276,6 +278,7 @@ impl<'a> FnLowerer<'a> {
                 let tmp = self.temp(KTy::Bool);
                 out.push(Stmt::Let(tmp, Expr { kind, ty: KTy::Bool, line }));
             }
+            Res::List(method) => self.list_stmt(method, e, receiver.expect("a list method is a method"), args, out),
             Res::ListAdd => {
                 let v = self.value(&args[0].value);
                 let list = self.place(receiver.expect("`add` is a method")).expect("checker requires a place for `add`");

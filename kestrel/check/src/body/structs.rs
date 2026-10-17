@@ -151,7 +151,7 @@ impl<'a> BodyChecker<'a> {
         }
         let receiver_ty = self.check_expr(receiver, None);
         if matches!(receiver_ty, Ty::Array(_) | Ty::List(_)) {
-            return self.collection_method(e, receiver, receiver_ty, args);
+            return self.list_method(e, receiver, receiver_ty, args);
         }
         if let Ty::Map(..) = receiver_ty {
             return self.map_method(e, receiver, receiver_ty, args);

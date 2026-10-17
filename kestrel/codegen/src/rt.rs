@@ -17,6 +17,8 @@ pub(crate) struct RtFuncs {
     pub alloc: FuncId,
     pub dup: FuncId,
     pub list_grow: FuncId,
+    pub list_remove: FuncId,
+    pub list_insert: FuncId,
     pub current_arena: FuncId,
     pub panic_index: FuncId,
     pub arena_new: FuncId,
@@ -77,6 +79,8 @@ impl RtFuncs {
             alloc: decl("kestrel_rt_alloc", &[I64, I64, I64, I32, ptr], Some(ptr))?,
             dup: decl("kestrel_rt_dup", &[ptr, I64, I64], Some(ptr))?,
             list_grow: decl("kestrel_rt_list_grow", &[ptr, I64, I64], None)?,
+            list_remove: decl("kestrel_rt_list_remove", &[ptr, I64, I64, I32, ptr], None)?,
+            list_insert: decl("kestrel_rt_list_insert", &[ptr, I64, I64, I64, I32, ptr], Some(ptr))?,
             current_arena: decl("kestrel_rt_current_arena", &[], Some(ptr))?,
             panic_index: decl("kestrel_rt_panic_index", &[I64, I64, I32, ptr], None)?,
             arena_new: decl("kestrel_rt_arena_new", &[], Some(ptr))?,
@@ -118,7 +122,7 @@ pub(crate) const MATH: [(MathOp, &str, usize); 10] = [
 
 /// Addresses of every runtime export, for registering with the JIT.
 pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
-    use kestrel_runtime::{arena, gpu, map, math, panic, par, print, start};
+    use kestrel_runtime::{arena, gpu, list, map, math, panic, par, print, start};
     vec![
         ("kestrel_rt_print_i64", print::kestrel_rt_print_i64 as *const u8),
         ("kestrel_rt_print_f32", print::kestrel_rt_print_f32 as *const u8),
@@ -134,6 +138,8 @@ pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
         ("kestrel_rt_alloc", arena::kestrel_rt_alloc as *const u8),
         ("kestrel_rt_dup", arena::kestrel_rt_dup as *const u8),
         ("kestrel_rt_list_grow", arena::kestrel_rt_list_grow as *const u8),
+        ("kestrel_rt_list_remove", list::kestrel_rt_list_remove as *const u8),
+        ("kestrel_rt_list_insert", list::kestrel_rt_list_insert as *const u8),
         ("kestrel_rt_current_arena", arena::kestrel_rt_current_arena as *const u8),
         ("kestrel_rt_panic_index", panic::kestrel_rt_panic_index as *const u8),
         ("kestrel_rt_arena_new", arena::kestrel_rt_arena_new as *const u8),

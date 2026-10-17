@@ -56,7 +56,7 @@ fn has_value(place: &Place) -> Expr {
     expr(ExprKind::Binary(BinOp::Ne, Box::new(tag), Box::new(zero)), KTy::Bool)
 }
 
-fn elem_of(ty: KTy, t: &Tables) -> KTy {
+pub(super) fn elem_of(ty: KTy, t: &Tables) -> KTy {
     match ty {
         KTy::Array(e) | KTy::List(e) => kty(t.elems[e.0 as usize]),
         other => unreachable!("{other:?} has no elements"),
@@ -87,6 +87,8 @@ pub(crate) struct Helpers {
     pub(super) copy: HashMap<KTy, FuncIdx>,
     drop: HashMap<KTy, FuncIdx>,
     pub(crate) print: HashMap<KTy, FuncIdx>,
+    /// The search behind `has` and `find`, per list or array type.
+    pub(super) find: HashMap<KTy, FuncIdx>,
     pub(crate) par_bodies: Vec<FuncIdx>,
     /// The heap constants the functions use, and their globals.
     pub(super) consts: ConstGlobals,
@@ -95,7 +97,8 @@ pub(crate) struct Helpers {
 impl Helpers {
     pub(crate) fn new(base: u32) -> Self {
         let (copy, drop, print) = (HashMap::new(), HashMap::new(), HashMap::new());
-        Helpers { base, funcs: Vec::new(), copy, drop, print, par_bodies: Vec::new(), consts: ConstGlobals::default() }
+        let find = HashMap::new();
+        Helpers { base, funcs: Vec::new(), copy, drop, print, find, par_bodies: Vec::new(), consts: ConstGlobals::default() }
     }
 
     /// Adds an outlined `par for` body, named for its index.

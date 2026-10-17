@@ -136,7 +136,7 @@ fn serve(rx: Arc<Mutex<Receiver<Arc<Job>>>>) {
 /// Works on `job` until its iterations run out (or one failed).
 fn participate(job: &Arc<Job>, pool_thread: bool) {
     CURRENT.with_borrow_mut(|c| *c = Some((Arc::clone(job), pool_thread)));
-    let a = arena::kestrel_rt_arena_new();
+    let a = arena::new_uncounted();
     let mut done = Done { job, arena: None };
     arena::kestrel_rt_arena_push(a);
     while !job.failed.load(Ordering::Acquire) {
@@ -201,7 +201,7 @@ pub(crate) fn run_job(count: i64, body: Body, env: *const u8, threads: usize) ->
     }
     let current = arena::kestrel_rt_current_arena();
     for a in arenas {
-        // SAFETY: each came from `kestrel_rt_arena_new`, is no longer pushed
+        // SAFETY: each came from `new_uncounted`, is no longer pushed
         // anywhere, and is handed over exactly once; `current` is live.
         let child = unsafe { Box::from_raw(a as *mut Arena) };
         // SAFETY: `current` is the live current arena.

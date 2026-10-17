@@ -1,0 +1,32 @@
+// expect: 11 [10, 1] 2
+// expect: 21 [] 20
+// expect: [Enemy(hp: 11, targets: []), Enemy(hp: 21, targets: [])]
+// expect: [[9, 1], [9]]
+// expect: 5
+// expect: 6
+struct Enemy {
+    hp: int
+    targets: list[int]
+}
+
+main() {
+    var es: list[Enemy] = [Enemy(10, [1, 2]), Enemy(20, [])]
+    for e in es {
+        e.targets.insert(0, e.hp)
+        e.hp += 1
+        let t = e.targets.pop()
+        print(e.hp, e.targets, t)
+    }
+    for e in es { e.targets.clear() }
+    print(es)
+    var grid: list[list[int]] = [[1, 2], [3]]
+    for row in grid {
+        row.insert(0, 9)
+        row.remove_at(row.len - 1)
+    }
+    print(grid)
+    var xs: list[int] = [5, 6, 7]
+    for x in xs {
+        if xs.has(x + 1) { print(x) }
+    }
+}

@@ -4,7 +4,7 @@
 use kestrel_syntax::ast::{Block, Expr, ExprKind, Stmt};
 
 use super::{BodyChecker, Expect};
-use crate::tables::{LocalId, Res};
+use crate::tables::{ListMethod, LocalId, Res};
 use crate::ty::Ty;
 
 /// Where new memory goes at a point in the code.
@@ -171,6 +171,17 @@ impl<'a> BodyChecker<'a> {
                 };
                 let start = if defaults { self.current() } else { 0 };
                 args.iter().fold(start, |r, a| r | self.region(&a.value, moving))
+            }
+            // `pop` moves the last item out of the list's memory: it lives as long as the list,
+            // not in the current arena. (A list that is a loop's item may be either, like a view.)
+            ExprKind::MethodCall { receiver, .. } if matches!(self.t.res.get(&e.id), Some(Res::List(ListMethod::Pop))) => {
+                let ctx = self.place_root(receiver).and_then(|root| self.local_ctx.get(&root)).map(|&(c, _)| bit(c));
+                let view = self.path_key(receiver).is_some_and(|p| self.views.contains(&p.root));
+                match ctx {
+                    Some(r) if view => r | self.current(),
+                    Some(r) => r,
+                    None => self.current(),
+                }
             }
             ExprKind::If { then_block, else_block, .. } => {
                 let blocks = std::iter::once(then_block).chain(else_block.as_ref());

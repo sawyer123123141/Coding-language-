@@ -103,3 +103,122 @@ fn list_add_and_len() {
     let Stmt::Print(args) = &main.body[2] else { panic!() };
     assert!(matches!(&args[0], PrintArg::Value(Expr { kind: ExprKind::Cast(_), ty: KTy::I32, .. })));
 }
+
+const POOLS: &str = "struct Pool {
+ mem: Arena = Arena()
+ n: int
+}
+";
+
+/// The statements of `main` (nested ones included), outermost first.
+fn all_stmts(f: &Func) -> Vec<&Stmt> {
+    let mut out = Vec::new();
+    kestrel_kir::visit::walk(&f.body, &mut |n| {
+        if let kestrel_kir::visit::Node::Stmt(s) = n {
+            out.push(s);
+        }
+    });
+    out
+}
+
+#[test]
+fn remove_at_drops_an_owning_item_once_before_the_runtime_removes_it() {
+    let m = lower_src(&format!("{POOLS}main() {{\n var ps: list[Pool] = []\n ps.add(Pool(n: 1))\n ps.remove_at(0)\n}}\n"));
+    let main = func(&m, "main");
+    let at = main.body.iter().position(|s| matches!(s, Stmt::List(ListOp::RemoveAt, ..))).expect("a remove");
+    // The item's arena is freed (once) just before, through a checked index into the list.
+    let Stmt::FreeArena(arena) = &main.body[at - 1] else { panic!("{:#?}", main.body) };
+    assert!(matches!(arena.path[..], [Proj::Index { checked: true, .. }, Proj::Field(0)]), "{arena:?}");
+    let frees = all_stmts(main).into_iter().filter(|s| matches!(s, Stmt::FreeArena(_))).count();
+    // One for the removed item; the list's own drop at the end of `main` is a call to the drop helper.
+    assert_eq!(frees, 1, "{:#?}", main.body);
+}
+
+#[test]
+fn remove_at_of_a_plain_item_just_removes() {
+    let m = lower_src("main() {\n var xs: list[int] = [1, 2]\n xs.remove_at(0)\n}\n");
+    let main = func(&m, "main");
+    assert!(matches!(main.body[1], Stmt::List(ListOp::RemoveAt, ..)), "{:#?}", main.body);
+    assert_eq!(main.body.len(), 2);
+}
+
+#[test]
+fn pop_moves_the_item_out_and_drops_nothing_inside_the_list_op() {
+    let m = lower_src(&format!("{POOLS}main() {{\n var ps: list[Pool] = []\n ps.add(Pool(n: 1))\n let p = ps.pop()\n}}\n"));
+    let main = func(&m, "main");
+    let stmts = all_stmts(main);
+    let moves: Vec<_> = stmts
+        .iter()
+        .filter_map(|s| match s {
+            Stmt::Assign(_, Expr { kind: ExprKind::Some(inner), .. }) => Some(inner),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(moves.len(), 1, "{:#?}", main.body);
+    assert!(matches!(&moves[0].kind, ExprKind::Move(p) if matches!(p.path[..], [Proj::Index { checked: true, .. }])), "{moves:?}");
+    // Then the length goes down. The move is all that happens to the item: nothing is freed or removed
+    // by the runtime there (the `let` drops what it holds at the end of `main`).
+    let Some(Stmt::If { then_body, .. }) = stmts.iter().find(|s| matches!(s, Stmt::If { then_body, .. } if then_body.iter().any(|s| matches!(s, Stmt::SetLen(..))))) else {
+        panic!("{:#?}", main.body)
+    };
+    assert!(matches!(&then_body[..], [Stmt::Assign(..), Stmt::SetLen(..)]), "{then_body:#?}");
+    assert!(!stmts.iter().any(|s| matches!(s, Stmt::List(..))), "{:#?}", main.body);
+}
+
+#[test]
+fn clear_drops_the_items_then_sets_the_length() {
+    let m = lower_src(&format!("{POOLS}main() {{\n var ps: list[Pool] = []\n ps.add(Pool(n: 1))\n ps.clear()\n}}\n"));
+    let main = func(&m, "main");
+    let at = main.body.iter().position(|s| matches!(s, Stmt::SetLen(..))).expect("a set-length");
+    let Stmt::SetLen(_, zero) = &main.body[at] else { unreachable!() };
+    assert!(matches!(zero.kind, ExprKind::Int(0)));
+    assert!(matches!(&main.body[at - 1], Stmt::Call(f, _) if m.funcs[f.0 as usize].name.starts_with("__kestrel_drop_")), "{:#?}", main.body);
+}
+
+#[test]
+fn insert_evaluates_its_value_before_the_items_move() {
+    let m = lower_src("main() {\n var xs: list[int] = [1, 2, 3]\n xs.insert(0, xs[2])\n}\n");
+    let main = func(&m, "main");
+    let at = main.body.iter().position(|s| matches!(s, Stmt::List(ListOp::Insert, ..))).expect("an insert");
+    let Stmt::List(_, _, args) = &main.body[at] else { unreachable!() };
+    // Both arguments are loads of temporaries set before the insert.
+    assert!(args.iter().all(|a| matches!(&a.kind, ExprKind::Load(p) if p.path.is_empty())), "{args:?}");
+    assert!(matches!(&main.body[at - 1], Stmt::Let(_, Expr { kind: ExprKind::Load(p), .. }) if !p.path.is_empty()), "{:#?}", main.body);
+}
+
+#[test]
+fn has_and_find_call_one_search_per_list_type() {
+    let m = lower_src("main() {\n let a = [1, 2]\n let b = [3]\n print(a.has(1), a.find(2), b.find(3))\n}\n");
+    assert_eq!(helpers(&m, "__kestrel_find_").len(), 1);
+    let search = helpers(&m, "__kestrel_find_")[0];
+    assert_eq!(search.params.len(), 2);
+    assert!(matches!(search.ret, Some(KTy::Optional(_))));
+}
+
+#[test]
+fn every_list_change_is_reported_as_a_write_of_the_list() {
+    // `for ... in` finds out from these reports that the list may move its items.
+    for change in ["xs.remove_at(0)", "xs.insert(0, 1)", "xs.clear()", "xs.pop()", "xs.add(1)"] {
+        let m = lower_src(&format!("main() {{\n var xs: list[int] = [1, 2, 3]\n {change}\n}}\n"));
+        let main = func(&m, "main");
+        let mut writes = 0;
+        kestrel_kir::visit::places(&main.body, &mut |p, written| {
+            writes += usize::from(written && p.path.is_empty() && p.root == LocalIdx(0));
+        });
+        assert!(writes > 0, "{change}: {:#?}", main.body);
+    }
+    // And a read-only search isn't one.
+    let m = lower_src("main() {\n var xs: list[int] = [1, 2, 3]\n print(xs.has(2), xs.find(3))\n}\n");
+    let mut writes = 0;
+    kestrel_kir::visit::places(&func(&m, "main").body, &mut |p, written| writes += usize::from(written && p.root == LocalIdx(0)));
+    assert_eq!(writes, 0);
+}
+
+#[test]
+fn a_discarded_pop_of_an_owning_item_is_held_and_dropped() {
+    let m = lower_src(&format!("{POOLS}main() {{\n var ps: list[Pool] = []\n ps.add(Pool(n: 1))\n ps.pop()\n}}\n"));
+    let main = func(&m, "main");
+    // The popped optional goes in a hidden local, and the end of `main` frees the arena in its payload.
+    let frees: Vec<_> = all_stmts(main).into_iter().filter(|s| matches!(s, Stmt::FreeArena(p) if p.path.first() == Some(&Proj::Payload))).collect();
+    assert_eq!(frees.len(), 1, "{:#?}", main.body);
+}

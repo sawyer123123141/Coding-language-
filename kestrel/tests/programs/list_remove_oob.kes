@@ -1,0 +1,9 @@
+// expect: [1, 2]
+// expect-exit: 101
+// expect-stderr: index 5 out of bounds for length 2 on line 8
+main() {
+    var xs: list[int] = [1, 2]
+    print(xs)
+    var i = 5
+    xs.remove_at(i)
+}

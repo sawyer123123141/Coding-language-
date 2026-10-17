@@ -29,8 +29,14 @@ pub trait VisitMut {
 pub fn walk_stmt<V: VisitMut + ?Sized>(v: &mut V, s: &mut Stmt) {
     match s {
         Stmt::Let(_, e) | Stmt::Return(Some(e)) | Stmt::RandSeed(e) => v.visit_expr(e),
-        Stmt::Assign(p, e) | Stmt::ListAdd(p, e) => {
+        Stmt::Assign(p, e) | Stmt::ListAdd(p, e) | Stmt::SetLen(p, e) => {
             v.visit_expr(e);
+            v.visit_place(p);
+        }
+        Stmt::List(_, p, xs) => {
+            for x in xs {
+                v.visit_expr(x);
+            }
             v.visit_place(p);
         }
         Stmt::If { cond, then_body, else_body } => {

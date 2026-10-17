@@ -22,7 +22,7 @@ impl<'a> FnLowerer<'a> {
     fn builds_new(&self, v: &Expr) -> bool {
         match &v.kind {
             ExprKind::Load(_) | ExprKind::FieldOf(..) => false,
-            // The result of a native called in a scratch arena (see `scratch_call_value`).
+            // The result of a native called in a scratch arena (see `scratch_call_value`), or of `pop`.
             ExprKind::Move(p) => self.scratch_results.contains(&p.root),
             ExprKind::Seq(_, inner) | ExprKind::Some(inner) => self.builds_new(inner),
             ExprKind::If { then_val, else_val, .. } => [then_val, else_val].into_iter().flatten().all(|v| self.builds_new(v)),
@@ -31,7 +31,7 @@ impl<'a> FnLowerer<'a> {
     }
 
     /// Binds the new owning value `v` to a hidden `let` of the current block and returns it.
-    fn keep(&mut self, v: Expr, pre: &mut Vec<Stmt>) -> LocalIdx {
+    pub(crate) fn keep(&mut self, v: Expr, pre: &mut Vec<Stmt>) -> LocalIdx {
         let tmp = self.temp(v.ty);
         pre.push(Stmt::Let(tmp, v));
         self.declared(tmp);

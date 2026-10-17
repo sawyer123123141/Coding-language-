@@ -1,0 +1,48 @@
+// error 17: can't call `remove_at` on `fixed`: it changes `fixed`, which was declared with `let`
+// error 19: arrays have a fixed length; use a `list[int]` if items come and go
+// error 21: `has` needs items that `==` can compare (numbers, bools and strings); `list[vec2]` holds `vec2`
+// error 23: this only reads the list, so the line does nothing
+// error 25: can't change how many items `xs` has while looping over it; use `remove x` to remove the loop's item, or change `xs` after the loop
+// error 29: can't change how many items `w.items` has while looping over it; use `remove x` to remove the loop's item, or change `w.items` after the loop
+// error 32: can't change how many items `w.items` has while looping over it; use `remove x` to remove the loop's item, or change `w.items` after the loop
+// error 37: can't change how many items `grid` has while looping over it; use `remove x` to remove the loop's item, or change `grid` after the loop
+// error 40: an index must be an integer, found float
+// error 46: this memory is freed at the end of the `arena { }` block, but `keep` lives longer
+struct Wrap {
+    items: list[int]
+}
+
+main() {
+    let fixed: list[int] = [1, 2]
+    fixed.remove_at(0)
+    var arr = [1, 2]
+    arr.pop()
+    let vs: list[vec2] = []
+    let ok = vs.has(vec2(1, 2))
+    var xs: list[int] = [1, 2]
+    xs.find(1)
+    for x in xs {
+        xs.remove_at(0)
+    }
+    var w = Wrap(items: [1, 2])
+    for x in w.items {
+        w.items.clear()
+    }
+    for x in w.items {
+        w.items.pop()
+    }
+    var grid: list[list[int]] = [[1], [2]]
+    for row in grid {
+        for x in grid[0] {
+            row.clear()
+        }
+    }
+    xs.insert(1.5, 2)
+    var keep: string? = none
+    var n = 3
+    arena {
+        var ys: list[string] = []
+        ys.add("{n}")
+        keep = ys.pop()
+    }
+}

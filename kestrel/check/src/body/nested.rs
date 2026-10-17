@@ -16,6 +16,7 @@ impl<'a> BodyChecker<'a> {
                 let changes_receiver = match self.t.res.get(&e.id) {
                     Some(Res::Fn(f)) => self.t.func(*f).params.first().is_some_and(|p| p.is_var),
                     Some(Res::ListAdd | Res::MapRemove) => true,
+                    Some(Res::List(m)) => m.changes_receiver(),
                     _ => false,
                 };
                 if changes_receiver {
