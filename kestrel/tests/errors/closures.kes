@@ -3,8 +3,8 @@
 // error 36: `count` is captured by this closure, so it can't change here; return a value instead, or use a `for` loop
 // error 37: `xs` is captured by this closure, so it can't change here; return a value instead, or use a `for` loop
 // error 39: `hold` is captured by this closure, so it can't change here; return a value instead, or use a `for` loop
-// error 39: a closure can't capture `hold`: it owns an Arena; pass it as a parameter instead
-// error 41: a closure can't capture `p`: it owns an Arena; pass it as a parameter instead
+// error 39: a closure can't capture `hold`: it owns an `Arena`; pass it as a parameter instead
+// error 41: a closure can't capture `p`: it owns an `Arena`; pass it as a parameter instead
 // error 26: this closure would copy all of `self`, including its function fields; copy what it needs into a local first
 // error 54: this reads `w.chunks`, whose items other iterations are changing; use the loop's item (`c`)
 // error 63: this memory is freed at the end of the `arena { }` block, but `f` lives longer

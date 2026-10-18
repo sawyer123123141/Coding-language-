@@ -13,10 +13,11 @@
 //! body as well: they are copied out of it when the inner closure is made.
 //!
 //! **The rules.** A capture can't change (`Immutable::Captured`) and can't be moved. It can't be
-//! owning, so a closure is never owning. A closure that copies its captures (every one with a
-//! heap environment; not a literal passed straight to a call, `Tables::stack_closures`) can't
+//! owning, so a closure is never owning. A closure that may be stored (every one but a literal
+//! passed straight to `filter`, `map`, `any`, `all` or `sort_by`, whose loops never keep it) can't
 //! capture a whole struct or enum value that holds a function value: storing such a closure where
-//! the value is would copy the old closure into the new one, without bound.
+//! the value is would copy the old closure into the new one, without bound. That includes a
+//! literal with a stack environment passed to a user function, which may store its parameter.
 
 use std::collections::HashMap;
 
@@ -167,9 +168,11 @@ impl<'a> BodyChecker<'a> {
             let rest = r.path[list[firsts[k]].path.len()..].to_vec();
             self.t.capture_reads.insert(e, (id, k as u32, rest));
         }
-        // A literal with a stack environment copies nothing, so it may capture a whole value that
-        // holds a function value; the closure around it, if it copies, checks that instead.
-        let copies = !self.t.stack_closures.contains(&id);
+        // A literal passed to `filter`, `map`, `any`, `all` or `sort_by` is never stored, so it may
+        // capture a whole value that holds a function value; the closure around it, if it copies,
+        // checks that instead. Any other literal may be stored, even one with a stack environment:
+        // a user function can store its parameter, which copies it.
+        let copies = !self.unstored.contains(&id);
         let mut captures = Vec::with_capacity(firsts.len());
         for &c in &firsts {
             let r = &list[c];
@@ -195,11 +198,12 @@ impl<'a> BodyChecker<'a> {
     /// array, map or optional of them, is fine: storing the closure into one of those is a
     /// growth the program asks for, not an accident of capturing `self`. `direct`: the body reads
     /// it itself, rather than through a closure inside it (which reported the owning error).
-    /// `copied`: the closure copies it, and no closure inside has checked the second rule.
+    /// `copied`: the closure may be stored, which copies it, and no closure inside has checked the
+    /// second rule.
     fn check_capture(&mut self, ty: Ty, written: &str, span: Span, direct: bool, copied: bool) {
         if self.t.is_owning(ty) {
             if direct {
-                let what = if self.t.holds_arena(ty) { "an Arena" } else { "a GPU object" };
+                let what = self.t.owns_what(ty);
                 self.error(span, format!("a closure can't capture `{written}`: it owns {what}; pass it as a parameter instead"));
             }
         } else if copied && matches!(ty, Ty::Struct(_) | Ty::Enum(_) | Ty::Variant(..)) && self.t.holds_fn(ty) {

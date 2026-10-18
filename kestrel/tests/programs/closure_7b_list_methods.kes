@@ -1,0 +1,31 @@
+// expect: true
+// expect: [4, 5]
+// expect: [5, 4]
+// expect: 3 fired
+// A literal passed to `filter`, `map`, `any`, `all` or `sort_by` is never stored, so it may read
+// all of a value that holds a function field (`g`, which holds `g.timer.cb`).
+struct Timer {
+    left: int = 0
+    cb: () = () { }
+}
+
+struct Game {
+    timer: Timer = Timer()
+    hp: int = 3
+
+    fire(self) { print(self.hp, "fired") }
+    near(self, n: int) -> bool { n - self.hp < 3 }
+}
+
+main() {
+    var g = Game()
+    g.timer = Timer(left: 1, cb: () { print("tick") })
+    var xs: list[int] = [4, 5, 9]
+    print(xs.any((n) { g.near(n) }))
+    print(xs.filter((n) { g.near(n) }))
+    let ys = xs.filter((n) { g.near(n) and xs.all((m) { g.near(m) or m > 5 }) })
+    var zs = ys.map((n) { n + g.hp - 3 })
+    zs.sort_by((n) { g.hp - n })
+    print(zs)
+    g.fire()
+}

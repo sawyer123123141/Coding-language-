@@ -1,0 +1,35 @@
+// error 26: this closure would copy all of `g`, including its function fields; copy what it needs into a local first
+// error 27: this closure would copy all of `g`, including its function fields; copy what it needs into a local first
+// error 29: this closure would copy all of `g`, including its function fields; copy what it needs into a local first
+// A user function, a user method or a function value may store the closure it is given, which
+// copies it, and with it all of `g` and the closure `g` already holds: re-arming the timer in a
+// loop would copy without bound. Only `filter`, `map`, `any`, `all` and `sort_by` can't store it.
+struct Timer {
+    left: int = 0
+    cb: () = () { }
+}
+
+make_timer(n: int, cb: ()) -> Timer {
+    Timer(left: n, cb: cb)
+}
+
+struct Game {
+    timer: Timer = Timer()
+    hp: int = 3
+
+    fire(self) { }
+    rearm(self, n: int, cb: ()) -> Timer { Timer(left: n, cb: cb) }
+}
+
+main() {
+    var g = Game()
+    g.timer = make_timer(3, () { g.fire() })
+    g.timer = g.rearm(3, () { g.fire() })
+    let make = make_timer
+    g.timer = make(3, () { g.fire() })
+    let hp = g.hp
+    g.timer = make_timer(3, () { print(hp) })
+    if [1, 2].any((n) { n == g.hp }) {
+        g.fire()
+    }
+}

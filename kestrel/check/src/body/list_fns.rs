@@ -64,6 +64,9 @@ impl<'a> BodyChecker<'a> {
         let sorting = method == ListMethod::SortBy;
         let want = Ty::Fn(self.t.intern_sig(Sig { params: vec![item], ret: result, is_pure: sorting }));
         self.note_stack_closure(&args[0]);
+        if literal {
+            self.unstored.insert(f.id);
+        }
         let found = if open {
             self.infer_result = literal;
             if literal && sorting {

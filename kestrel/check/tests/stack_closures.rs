@@ -70,8 +70,10 @@ fn only_a_literal_that_is_directly_a_call_argument_gets_a_stack_environment() {
 }
 
 #[test]
-fn a_literal_passed_straight_to_a_call_may_capture_a_whole_value_holding_a_function() {
-    let src = "struct B {
+fn only_a_list_method_literal_may_capture_a_whole_value_holding_a_function() {
+    const COPY: &str = "this closure would copy all of `self`, including its function fields; copy what it needs into a local first";
+    // A user function may store the literal it is given, which copies it, so rule 7b applies.
+    let passed = "struct B {
     name: string
     cb: () -> string = () { \"\" }
 
@@ -82,20 +84,31 @@ fn a_literal_passed_straight_to_a_call_may_capture_a_whole_value_holding_a_funct
 run(f: () -> string) -> string { f() }
 main() { }
 ";
-    ok(src);
-    // A stored closure around it copies the value, so it is refused there, once.
+    assert_eq!(errors(passed), vec![COPY]);
+    // `filter`, `map`, `any`, `all` and `sort_by` never store it.
+    let listed = "struct B {
+    name: string
+    cb: () -> string = () { \"\" }
+
+    go(self) -> bool { self.name == \"b\" }
+
+    show(self, xs: list[int]) -> bool { xs.any((n) { self.go() }) }
+}
+main() { }
+";
+    ok(listed);
+    // A stored closure around such a literal copies the value, so it is refused there, once.
     let stored = "struct B {
     name: string
     cb: () -> string = () { \"\" }
 
-    go(self) -> string { self.name }
+    go(self) -> bool { self.name == \"b\" }
 
-    keep(self) -> () -> string { () { run(() { self.go() }) } }
+    keep(self, xs: list[int]) -> () -> bool { () { xs.any((n) { self.go() }) } }
 }
-run(f: () -> string) -> string { f() }
 main() { }
 ";
-    assert_eq!(errors(stored), vec!["this closure would copy all of `self`, including its function fields; copy what it needs into a local first"]);
+    assert_eq!(errors(stored), vec![COPY]);
 }
 
 const CHANGED: &str = "is changed by this call, so the closure passed to it can't read it";

@@ -96,6 +96,9 @@ pub(crate) struct BodyChecker<'a> {
     arg_name: Option<String>,
     /// Set while a closure literal passed to `map` is checked: its result type comes from its body.
     infer_result: bool,
+    /// The closure literals passed straight to `filter`, `map`, `any`, `all` or `sort_by`, whose
+    /// loops can't store them, so rule 7b doesn't apply to them (see `captures`).
+    unstored: HashSet<ExprId>,
 }
 
 pub(crate) fn check_fn(program: &Program, fn_id: FnId, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
@@ -158,6 +161,7 @@ impl<'a> BodyChecker<'a> {
             frames: Vec::new(),
             arg_name: None,
             infer_result: false,
+            unstored: HashSet::new(),
         }
     }
 

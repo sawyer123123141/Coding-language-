@@ -151,7 +151,7 @@ fn captures_cannot_change() {
 #[test]
 fn owning_values_cannot_be_captured_but_their_plain_fields_can() {
     let src = "struct H {\n    mem: Arena = Arena()\n    size: int = 0\n\n    total(self) -> int { self.size }\n}\nmain() {\n    let h = H()\n    let f = () { h.size }\n    let g = () { h.total() }\n}\n";
-    assert_eq!(errors(src), vec!["a closure can't capture `h`: it owns an Arena; pass it as a parameter instead"]);
+    assert_eq!(errors(src), vec!["a closure can't capture `h`: it owns an `Arena`; pass it as a parameter instead"]);
 }
 
 #[test]
