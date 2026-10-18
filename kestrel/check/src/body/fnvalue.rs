@@ -5,6 +5,7 @@ use kestrel_syntax::ast::{Arg, Expr, ExprKind};
 use kestrel_syntax::Span;
 
 use super::args::param_ref;
+use super::closure::Impure;
 use super::lists::written;
 use super::BodyChecker;
 use crate::builtins::Builtin;
@@ -142,6 +143,9 @@ impl<'a> BodyChecker<'a> {
     /// A non-pure function value can't be called in a `pure` function or a `par for` body.
     pub(crate) fn check_value_purity(&mut self, sig: SigId, span: Span, shown: &str) {
         if self.t.sig(sig).is_pure {
+            return;
+        }
+        if self.closure_impure(span, Impure::Value(&quote(shown))) {
             return;
         }
         let pure_type = format!("pure {}", self.t.sig_name(sig));

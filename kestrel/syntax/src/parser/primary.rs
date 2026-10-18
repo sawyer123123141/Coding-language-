@@ -23,11 +23,16 @@ impl Parser {
         toks.push(Token { tok: Tok::RBrace, span: close });
         toks.push(eof);
         let saved = (std::mem::replace(&mut self.toks, toks), std::mem::replace(&mut self.pos, 0));
-        let result = self.nested(|p| {
-            let e = p.expr()?;
-            p.expect(&Tok::RBrace, "`}` after the expression")?;
-            Ok(e)
+        // The string's tokens are numbered from 0 again: the matches found in the file's don't apply.
+        let closes = std::mem::take(&mut self.closes);
+        let result = self.inside_brackets(|p| {
+            p.nested(|p| {
+                let e = p.expr()?;
+                p.expect(&Tok::RBrace, "`}` after the expression")?;
+                Ok(e)
+            })
         });
+        self.closes = closes;
         (self.toks, self.pos) = saved;
         if self.stopped() {
             // Too deep inside the string: the rest of the file is skipped too.
@@ -67,9 +72,12 @@ impl Parser {
                 return Ok(self.expr_node(ExprKind::Ident(name), span));
             }
             Tok::LParen => {
+                if self.starts_closure() {
+                    return self.closure();
+                }
                 return self.nested(|p| {
                     p.bump();
-                    let mut inner = p.expr()?;
+                    let mut inner = p.inside_brackets(Self::expr)?;
                     let end = p.expect(&Tok::RParen, "`)`")?;
                     inner.span = span.to(end);
                     Ok(inner)
@@ -84,7 +92,7 @@ impl Parser {
                     p.bump();
                     let mut items = Vec::new();
                     while !p.at(&Tok::RBracket) {
-                        items.push(p.expr()?);
+                        items.push(p.inside_brackets(Self::expr)?);
                         if !p.eat(&Tok::Comma) {
                             break;
                         }
@@ -121,9 +129,9 @@ impl Parser {
         self.skip_newlines();
         let mut entries = Vec::new();
         while !self.at(&Tok::RBrace) {
-            let key = self.expr()?;
+            let key = self.inside_brackets(Self::expr)?;
             self.expect(&Tok::Colon, "`:`")?;
-            let value = self.expr()?;
+            let value = self.inside_brackets(Self::expr)?;
             entries.push((key, value));
             self.skip_newlines();
             if !self.eat(&Tok::Comma) {
@@ -183,7 +191,7 @@ impl Parser {
             }
         }
         let is_var = self.eat(&Tok::Var);
-        let value = self.expr()?;
+        let value = self.inside_brackets(Self::expr)?;
         Ok(Arg { label, is_var, span: start.to(value.span), value })
     }
 }

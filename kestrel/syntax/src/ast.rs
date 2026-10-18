@@ -211,6 +211,24 @@ pub enum ExprKind {
     /// `callee(args)` where the callee is neither a bare name (`Call`) nor a method:
     /// `handlers[i](3)`, `make_adder(2)(5)`, `(f)(x)`.
     CallValue { callee: Box<Expr>, args: Vec<Arg> },
+    /// `(x: int) -> int { x + 1 }`: a function with no name.
+    Closure(Box<ClosureLit>),
+}
+
+/// A closure literal: `(params) [-> Type] { body }`. A parameter may leave out its type when
+/// the context gives it.
+#[derive(Clone, Debug)]
+pub struct ClosureLit {
+    pub params: Vec<ClosureParam>,
+    pub ret: Option<TypeExpr>,
+    pub body: Block,
+}
+
+#[derive(Clone, Debug)]
+pub struct ClosureParam {
+    pub bind: Binding,
+    pub is_var: bool,
+    pub ty: Option<TypeExpr>,
 }
 
 #[derive(Clone, Debug)]

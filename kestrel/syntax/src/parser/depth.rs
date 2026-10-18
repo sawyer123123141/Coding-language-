@@ -96,6 +96,8 @@ impl Parser {
             ExprKind::Index { base, index } => self.height(base).max(self.height(index)) + 1,
             ExprKind::ArrayLit(items) => self.tallest(items.iter()),
             ExprKind::MapLit(entries) => self.tallest(entries.iter().flat_map(|(k, v)| [k, v])),
+            // The body is a block of its own: its height comes in as `inner`.
+            ExprKind::Closure(_) => 0,
         };
         let h = parts.max(inner);
         self.heights.push(h);

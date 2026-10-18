@@ -12,7 +12,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use kestrel_check::{ConstId, FnId, Res, Tables, Ty};
+use kestrel_check::{ConstId, Res, Tables, Ty};
 use kestrel_syntax::ast::{self, Program};
 use kestrel_syntax::LineIndex;
 
@@ -128,8 +128,7 @@ pub(super) fn lower_init(program: &Program, t: &Tables, lines: &LineIndex, helpe
         return None;
     }
     let order = build_order(program, t, &helpers.consts.used);
-    // `fn_id` is only read by `lower`, which this isn't.
-    let mut cx = FnLowerer::new(program, t, lines, FnId(0), helpers);
+    let mut cx = FnLowerer::new(program, t, lines, None, helpers);
     let built = cx.ref_local("built", KTy::Bool);
     let arena = cx.ref_local("arena", KTy::Arena);
     let locals: Vec<LocalIdx> = order.iter().map(|&c| cx.const_local(c)).collect();

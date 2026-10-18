@@ -111,6 +111,21 @@ impl Expr {
                 format!("(make {name}[{}]{})", tys.join(", "), args_sexpr(args))
             }
             ExprKind::CallValue { callee, args } => format!("(callv {}{})", callee.to_sexpr(), args_sexpr(args)),
+            ExprKind::Closure(c) => {
+                let params: Vec<String> = c
+                    .params
+                    .iter()
+                    .map(|p| {
+                        let var = if p.is_var { "var " } else { "" };
+                        match &p.ty {
+                            Some(t) => format!("{var}{}: {}", p.bind.name, t.to_sexpr()),
+                            None => format!("{var}{}", p.bind.name),
+                        }
+                    })
+                    .collect();
+                let ret = c.ret.as_ref().map_or(String::new(), |r| format!(" -> {}", r.to_sexpr()));
+                format!("(closure ({}){ret} {})", params.join(", "), c.body.to_sexpr())
+            }
             ExprKind::If { cond, then_block, else_block } => match else_block {
                 Some(e) => format!("(if {} {} else {})", cond.to_sexpr(), then_block.to_sexpr(), e.to_sexpr()),
                 None => format!("(if {} {})", cond.to_sexpr(), then_block.to_sexpr()),

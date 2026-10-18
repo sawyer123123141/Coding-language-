@@ -57,6 +57,7 @@ impl<'a> BodyChecker<'a> {
             ExprKind::Binary { op, lhs, rhs } => self.binary(e, *op, lhs, rhs, want),
             ExprKind::Call { .. } => self.check_call(e, want),
             ExprKind::CallValue { .. } => self.check_call_value(e),
+            ExprKind::Closure(lit) => self.check_closure(e, lit, want),
             ExprKind::If { .. } => self.check_if(e, Expect::Value(want)),
             ExprKind::Field { .. } => self.check_field(e),
             ExprKind::MethodCall { .. } => self.check_method_call(e),
@@ -93,6 +94,7 @@ impl<'a> BodyChecker<'a> {
     /// A use of `local`: it must not have been moved or removed on the way here, and a view
     /// into a loop item can't be used once the item is removed.
     pub(crate) fn check_local_use(&mut self, local: LocalId, name: &str, span: Span) {
+        self.refuse_capture(local, name, span);
         match self.moved.get(&local).copied() {
             Some(at) if at.removed && at.every => self.error(span, format!("`{name}` was removed earlier, so it can't be used here")),
             Some(at) if at.removed => self.error_help(

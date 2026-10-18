@@ -4,6 +4,7 @@ use kestrel_syntax::ast::{BindId, ExprId, FnDecl, Item, Program};
 use kestrel_syntax::Span;
 
 use crate::builtins::Builtin;
+use crate::closure::ClosureInfo;
 use crate::sig::{Sig, SigId};
 use crate::ty::Ty;
 
@@ -95,7 +96,12 @@ pub struct LocalInfo {
     pub is_var_param: bool,
     /// Passed as a `var` argument somewhere, so it needs a memory slot.
     pub addressed: bool,
-    pub owner: FnId,
+    /// The function the local is written in; `None` in a field default or a constant, where
+    /// only a closure's own locals exist.
+    pub owner: Option<FnId>,
+    /// The closure literal the local belongs to (a parameter or a variable of its body), if any.
+    /// A closure's locals are listed in its `ClosureInfo`, not in its function's `FnInfo::locals`.
+    pub closure: Option<ExprId>,
     pub span: Span,
     /// A `match` or `for ... in` binding aliases the variable it reads
     /// from: changes go to it.
@@ -201,6 +207,8 @@ pub struct Tables {
     /// For a call by a constant's name (`RULE(3)` with `let RULE = square`, `Res::CallValue`): the
     /// constant that holds the function.
     pub call_const: HashMap<ExprId, ConstId>,
+    /// Closure literals, by the literal's id.
+    pub closures: HashMap<ExprId, ClosureInfo>,
     pub locals: Vec<LocalInfo>,
     pub fns: Vec<FnInfo>,
     pub consts: Vec<ConstInfo>,

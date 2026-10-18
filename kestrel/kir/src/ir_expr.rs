@@ -67,6 +67,10 @@ pub enum ExprKind {
     /// The function value of a named function: the address of its thunk (the function this
     /// index names; see `Helpers::thunk_for`) and no environment.
     FnRef(FuncIdx),
+    /// The function value of a closure literal: the address of its code (the function this index
+    /// names; see `Helpers::closure_code`) and the environment `env` builds. The code takes the
+    /// environment word first, then the parameters.
+    MakeFn { code: FuncIdx, env: EnvKind },
     /// The environment word (an `i64`) of the function value at a place.
     FnEnv(Place),
     /// A call through the function value at `callee`: its code gets the environment, then
@@ -132,4 +136,11 @@ impl BinOp {
     pub fn is_comparison(self) -> bool {
         matches!(self, BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge)
     }
+}
+
+/// What a closure literal's function value holds besides its code.
+#[derive(Clone, Debug, PartialEq)]
+pub enum EnvKind {
+    /// Nothing: the closure captures nothing, and the environment word is 0.
+    None,
 }

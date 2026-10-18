@@ -15,7 +15,7 @@ impl Parser {
     /// A `match`, and the height of its tallest arm.
     fn match_parts(&mut self) -> PResult<(ExprKind, Span, u32)> {
         let start = self.expect(&Tok::Match, "`match`")?;
-        let scrutinee = self.expr()?;
+        let scrutinee = self.in_head(Self::expr)?;
         self.expect(&Tok::LBrace, "`{`")?;
         let mut arms = Vec::new();
         let mut inner = 0;
@@ -64,7 +64,7 @@ impl Parser {
     /// An `if`, and the height of its tallest block.
     fn if_parts(&mut self) -> PResult<(ExprKind, Span, u32)> {
         let start = self.expect(&Tok::If, "`if`")?;
-        let cond = self.expr()?;
+        let cond = self.in_head(Self::expr)?;
         let (then_block, mut inner) = self.block_with_height()?;
         let else_block = if self.eat(&Tok::Else) {
             if self.at(&Tok::If) {

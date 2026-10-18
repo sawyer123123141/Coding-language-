@@ -1,6 +1,8 @@
 mod args;
 mod builtins;
 mod call;
+mod closure;
+mod closure_result;
 mod collections;
 mod consts;
 mod default_cycles;
@@ -80,6 +82,10 @@ pub(crate) struct BodyChecker<'a> {
     removing: remove::Removing,
     /// The call statement being checked, whose result is thrown away.
     discarded: Option<ExprId>,
+    /// The closure literals being checked, outermost first (see `closure`).
+    frames: Vec<closure::ClosureFrame>,
+    /// The name of the parameter a closure literal is being passed for, for its messages.
+    arg_name: Option<String>,
 }
 
 pub(crate) fn check_fn(program: &Program, fn_id: FnId, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
@@ -138,6 +144,8 @@ impl<'a> BodyChecker<'a> {
             for_in_lists,
             removing: remove::Removing::default(),
             discarded: None,
+            frames: Vec::new(),
+            arg_name: None,
         }
     }
 
@@ -179,8 +187,10 @@ impl<'a> BodyChecker<'a> {
     /// `declare` without the checks on the name.
     fn add_local(&mut self, bind: &Binding, ty: Ty, mutable: bool, is_param: bool, is_var_param: bool) -> LocalId {
         let name = &bind.name;
-        let owner = self.fn_id.expect("locals only exist inside functions");
         let id = LocalId(self.t.locals.len() as u32);
+        // A local belongs to the innermost closure around it, or else to its function. (A field
+        // default or a constant has no function: only closures' locals exist there.)
+        let closure = self.frames.last().map(|f| f.id);
         self.t.locals.push(LocalInfo {
             name: name.clone(),
             ty,
@@ -188,11 +198,18 @@ impl<'a> BodyChecker<'a> {
             is_param,
             is_var_param,
             addressed: false,
-            owner,
+            owner: self.fn_id,
+            closure,
             span: bind.span,
             alias: None,
         });
-        self.t.fns[owner.0 as usize].locals.push(id);
+        match self.frames.last_mut() {
+            Some(frame) => frame.locals.push(id),
+            None => {
+                let owner = self.fn_id.expect("locals only exist inside functions and closures");
+                self.t.fns[owner.0 as usize].locals.push(id);
+            }
+        }
         self.t.bind_local.insert(bind.id, id);
         self.local_ctx.insert(id, (self.ctxs.len() - 1, self.loop_breaks.len()));
         self.scopes.last_mut().expect("a scope is open").insert(name.clone(), id);

@@ -1,0 +1,97 @@
+// expect: hey!
+// expect: Pt(x: 2, y: 2)
+// expect: Pt(x: 2.5, y: 5)
+// expect: 9
+// expect: 3
+// expect: 3
+// expect: 6
+// expect: 5
+// expect: shout 9
+// expect: 10
+// expect: 7
+// expect: 42
+// expect: 31
+// expect: big
+// expect: small
+// expect: 3
+// expect: 6
+// expect: [2, 4, 6]
+// expect: 7
+// expect: link 2
+// expect: link 1
+struct Pt {
+    x: float
+    y: float
+}
+
+struct Counter {
+    step: (int) -> int = (n) { n + 1 }
+}
+
+let DOUBLE = (x: int) -> int { x * 2 }
+let TWICE = (f: (int) -> int, x: int) -> int { f(f(x)) }
+let LATER = (x: int) -> int { BASE + x }
+let BASE = 40
+let OUTER = (x: int) -> int { INNER(x) + 1 }
+let INNER = (x: int) -> int { x * 2 }
+
+struct Chain {
+    link: (int) = (n) { if n > 0 { print("link", n); let c = Chain(); c.link(n - 1) } }
+}
+
+shout(n: int) { print("shout", n) }
+
+pure total(xs: list[int]) -> int {
+    let add = (a: int, b: int) { a + b }
+    var t = 0
+    for v in xs { t = add(t, v) }
+    t
+}
+
+main() {
+    let up = (s: string) -> string { s + "!" }
+    print(up("hey"))
+    let mid = (p: Pt) -> Pt { Pt(x: p.x + 1.0, y: p.y) }
+    print(mid(Pt(x: 1.0, y: 2.0)))
+    let bump = (var p: Pt, by: float) { p.x += by }
+    var q = Pt(x: 0.0, y: 5.0)
+    bump(var q, 2.5)
+    print(q)
+    let area: (float, float) -> float = (w, h) { w * h }
+    print(area(2.0, 4.5))
+    // An `int` tail where `float` is expected converts.
+    let as_float: (int) -> float = (n) { n }
+    print(as_float(3))
+    var f: (int) -> int = (x) { x }
+    print(f(3))
+    f = (x) { x * 2 }
+    print(f(3))
+    print(Counter().step(4))
+    let calls = (n: int) { shout(n) }
+    calls(9)
+    print(total([1, 2, 3, 4]))
+    print(TWICE((n) { n + 3 }, 1))
+    print(LATER(2))
+    let fs: list[(int) -> int] = [(x) { x + 1 }, DOUBLE]
+    print(fs[0](10) + fs[1](10))
+    let noisy = (n: int) { if n > 1 { print("big") } else { print("small") } }
+    noisy(5)
+    noisy(0)
+    let sorted_pair = (a: int, b: int) -> int {
+        if a < b { return a }
+        b
+    }
+    print(sorted_pair(7, 3))
+    let words = (text: string) -> int {
+        var n = 0
+        for part in text.split(" ") { n += part.len }
+        n
+    }
+    print(words("ab cde f"))
+    var scores: list[int] = [1, 2, 3]
+    par for s in scores { s = DOUBLE(s) }
+    print(scores)
+    print(OUTER(3))
+    let chain = Chain()
+    chain.link(2)
+}

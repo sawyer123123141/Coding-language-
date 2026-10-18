@@ -17,7 +17,7 @@ impl Parser {
     /// A function's body: the outermost block, so not a level of its own. Also gives its height.
     pub(crate) fn fn_body(&mut self) -> PResult<(Block, u32)> {
         self.open_block();
-        let block = self.block_contents();
+        let block = self.inside_brackets(Self::block_contents);
         let h = self.close_block();
         Ok((block?, h))
     }
@@ -52,7 +52,7 @@ impl Parser {
             Tok::For => self.for_stmt(false),
             Tok::While => {
                 self.bump();
-                let cond = self.expr()?;
+                let cond = self.in_head(Self::expr)?;
                 let body = self.block()?;
                 Ok(Stmt::While { span: start.to(body.span), cond, body })
             }
@@ -71,7 +71,7 @@ impl Parser {
             }
             Tok::In => {
                 self.bump();
-                let arena = self.expr()?;
+                let arena = self.in_head(Self::expr)?;
                 let body = self.block()?;
                 Ok(Stmt::In { span: start.to(body.span), arena, body })
             }
@@ -138,16 +138,16 @@ impl Parser {
         }
         let var = first;
         self.expect(&Tok::From, "`from`")?;
-        let lo = self.expr()?;
+        let lo = self.in_head(Self::expr)?;
         self.expect(&Tok::To, "`to`")?;
-        let hi = self.expr()?;
+        let hi = self.in_head(Self::expr)?;
         let body = self.block()?;
         Ok(Stmt::ForRange { var, start: lo, end: hi, span: start.to(body.span), body })
     }
 
     fn for_in(&mut self, par: bool, start: Span, index: Option<Binding>, var: Binding) -> PResult<Stmt> {
         self.expect(&Tok::In, "`in`")?;
-        let iter = self.expr()?;
+        let iter = self.in_head(Self::expr)?;
         let body = self.block()?;
         Ok(Stmt::ForIn { par, index, var, iter, span: start.to(body.span), body })
     }

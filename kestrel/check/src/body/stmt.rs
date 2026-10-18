@@ -102,13 +102,17 @@ impl<'a> BodyChecker<'a> {
             Stmt::In { arena, body, .. } => self.check_in(arena, body),
             Stmt::Break(span) | Stmt::Continue(span) => {
                 let is_break = matches!(s, Stmt::Break(_));
+                let word = if is_break { "break" } else { "continue" };
+                if let Some(msg) = self.closure_jump_error(word) {
+                    self.error(*span, msg);
+                    return Ty::Never;
+                }
                 if is_break && self.par.last().is_some_and(|p| p.depth == self.loop_breaks.len()) {
                     self.error(*span, "`break` can't stop a `par for`: iterations run at the same time");
                 }
                 match self.loop_breaks.last_mut() {
                     Some(broke) => *broke |= is_break,
                     None => {
-                        let word = if is_break { "break" } else { "continue" };
                         self.error(*span, format!("`{word}` outside a loop"));
                     }
                 }
@@ -120,13 +124,18 @@ impl<'a> BodyChecker<'a> {
                 Ty::Never
             }
             Stmt::Return { value, span } => {
-                if !self.par.is_empty() {
+                if self.par_inside_frame() {
                     self.error(*span, "`return` can't leave a `par for` body");
+                }
+                let what = if self.in_closure() { "closure" } else { "function" };
+                if self.infers_result() {
+                    self.infer_return(value.as_ref(), *span);
+                    return Ty::Never;
                 }
                 match (value, self.ret) {
                     (Some(v), Ty::Unit) => {
                         self.check_expr(v, None);
-                        self.error(v.span, "this function doesn't return a value");
+                        self.error(v.span, format!("this {what} doesn't return a value"));
                     }
                     (Some(v), r) => {
                         self.check_value(v, Some(r));
@@ -135,7 +144,7 @@ impl<'a> BodyChecker<'a> {
                     }
                     (None, Ty::Unit | Ty::Error) => {}
                     (None, r) => {
-                        let msg = format!("this function must return {}", self.tn(r));
+                        let msg = format!("this {what} must return {}", self.tn(r));
                         self.error(*span, msg);
                     }
                 }

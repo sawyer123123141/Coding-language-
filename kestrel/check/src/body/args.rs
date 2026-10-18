@@ -65,6 +65,10 @@ impl<'a> BodyChecker<'a> {
                 if native && matches!(p.ty, Ty::Array(_)) {
                     self.check_native_array_arg(&a.value, p.ty);
                 } else {
+                    // A closure literal names the parameter in what it says about purity.
+                    if matches!(a.value.kind, ExprKind::Closure(_)) {
+                        self.arg_name = Some(p.name.clone());
+                    }
                     self.check_value(&a.value, Some(p.ty));
                 }
             }

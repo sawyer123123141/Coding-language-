@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 
 use kestrel_check::Tables;
+use kestrel_syntax::ast::ExprId;
 
 use super::consts::ConstGlobals;
 use super::kty;
@@ -55,6 +56,8 @@ pub(crate) struct Helpers {
     pub(super) find: HashMap<KTy, FuncIdx>,
     /// The thunk of each function used as a value (see `thunk_for`).
     pub(super) thunks: HashMap<FuncIdx, FuncIdx>,
+    /// The code of each closure literal (see `closure_code`).
+    pub(super) closures: HashMap<ExprId, FuncIdx>,
     pub(crate) par_bodies: Vec<FuncIdx>,
     /// The heap constants the functions use, and their globals.
     pub(super) consts: ConstGlobals,
@@ -63,8 +66,8 @@ pub(crate) struct Helpers {
 impl Helpers {
     pub(crate) fn new(base: u32) -> Self {
         let (copy, drop, print) = (HashMap::new(), HashMap::new(), HashMap::new());
-        let (find, thunks) = (HashMap::new(), HashMap::new());
-        Helpers { base, funcs: Vec::new(), copy, drop, print, find, thunks, par_bodies: Vec::new(), consts: ConstGlobals::default() }
+        let (find, thunks, closures) = (HashMap::new(), HashMap::new(), HashMap::new());
+        Helpers { base, funcs: Vec::new(), copy, drop, print, find, thunks, closures, par_bodies: Vec::new(), consts: ConstGlobals::default() }
     }
 
     /// Adds an outlined `par for` body, named for its index.

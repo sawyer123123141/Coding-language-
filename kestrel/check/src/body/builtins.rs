@@ -4,6 +4,7 @@
 use kestrel_syntax::ast::{Arg, Expr};
 use kestrel_syntax::Span;
 
+use super::closure::Impure;
 use super::BodyChecker;
 use crate::builtins::Builtin;
 use crate::tables::Res;
@@ -78,6 +79,10 @@ impl<'a> BodyChecker<'a> {
     /// and no `par for` body may use them. Like `print`, they make the
     /// enclosing function do I/O.
     fn check_random_use(&mut self, e: &Expr) {
+        // In a closure this makes the closure impure, not the function around it.
+        if self.closure_impure(e.span, Impure::Random) {
+            return;
+        }
         if self.is_pure {
             self.error(e.span, "pure functions can't use random numbers: each call changes the generator");
         } else if !self.par.is_empty() {

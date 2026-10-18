@@ -21,7 +21,7 @@ impl FnLowerer<'_> {
         let callee = t.func(f);
         !callee.is_pure
             && t.in_builtin(callee.decl(program).name_span)
-            && !t.in_builtin(t.func(self.fn_id).decl(program).name_span)
+            && !self.in_builtin
     }
 
     /// Whether running `arg` can store a line of its own: it holds a `SetLine`, or calls a

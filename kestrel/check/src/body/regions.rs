@@ -111,7 +111,8 @@ impl<'a> BodyChecker<'a> {
     }
 
     fn is_main(&self) -> bool {
-        self.fn_id.is_some() && self.fn_id == self.t.main
+        // A closure body runs in the arena current where it is called, even one written in `main`.
+        self.frames.is_empty() && self.fn_id.is_some() && self.fn_id == self.t.main
     }
 
     /// The contexts whose memory the value of `e` points into. A copy of a
@@ -131,6 +132,8 @@ impl<'a> BodyChecker<'a> {
             // constant is a literal, built again at each use.
             ExprKind::Str(_) => 0,
             ExprKind::Ident(_) if ty == Ty::Str && matches!(self.t.res.get(&e.id), Some(Res::Const(_))) => 0,
+            // A closure that captures nothing has no environment, like a named function.
+            ExprKind::Closure(_) => 0,
             // A named function has no environment, so it points into no arena.
             ExprKind::Ident(_) if matches!(self.t.res.get(&e.id), Some(Res::FnValue(_))) => 0,
             // An empty list still remembers the current arena, to grow in.

@@ -1,6 +1,7 @@
 use kestrel_syntax::ast::{Arg, Expr, ExprKind};
 use kestrel_syntax::Span;
 
+use super::closure::Impure;
 use super::BodyChecker;
 use crate::builtins::Builtin;
 use crate::tables::{FnId, Res};
@@ -116,13 +117,16 @@ impl<'a> BodyChecker<'a> {
 
     fn check_print(&mut self, e: &Expr, args: &[Arg]) -> Ty {
         self.t.res.insert(e.id, Res::Print);
-        if self.is_pure {
-            self.error(e.span, "pure functions can't call `print`");
-        } else if !self.par.is_empty() {
-            self.error(e.span, "`par for` bodies can't print: iterations run at the same time");
-        }
-        if let Some(f) = self.fn_id {
-            self.t.fns[f.0 as usize].io = true;
+        // In a closure this makes the closure impure, not the function around it.
+        if !self.closure_impure(e.span, Impure::Print) {
+            if self.is_pure {
+                self.error(e.span, "pure functions can't call `print`");
+            } else if !self.par.is_empty() {
+                self.error(e.span, "`par for` bodies can't print: iterations run at the same time");
+            }
+            if let Some(f) = self.fn_id {
+                self.t.fns[f.0 as usize].io = true;
+            }
         }
         for a in args {
             if a.label.is_some() || a.is_var {
@@ -160,6 +164,13 @@ impl<'a> BodyChecker<'a> {
     }
 
     pub(crate) fn check_callee_purity(&mut self, span: Span, callee: FnId) {
+        let info = &self.t.fns[callee.0 as usize];
+        if !info.is_pure {
+            let name = info.name.clone();
+            if self.closure_impure(span, Impure::Call(&name)) {
+                return;
+            }
+        }
         let info = &self.t.fns[callee.0 as usize];
         if self.is_pure && !info.is_pure {
             let name = info.name.clone();

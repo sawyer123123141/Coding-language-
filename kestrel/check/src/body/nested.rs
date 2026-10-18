@@ -67,6 +67,8 @@ impl<'a> BodyChecker<'a> {
                     self.changed_in_block(&a.body, out);
                 }
             }
+            // Building a closure runs none of its body, and it can capture nothing yet.
+            ExprKind::Closure(_) => {}
             ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::None | ExprKind::Str(_) | ExprKind::Ident(_) => {}
         }
     }

@@ -1,10 +1,13 @@
 mod branch;
+mod closure;
 mod depth;
 mod expr;
 mod item;
 mod members;
 mod primary;
 mod stmt;
+
+use std::collections::HashMap;
 
 use crate::ast::{BindId, Binding, Expr, ExprId, ExprKind, Program, TypeExpr, TypeKind};
 use crate::diag::Diagnostic;
@@ -29,6 +32,13 @@ pub struct Parser {
     block_heights: Vec<u32>,
     /// Set when code nested too deep: how many diagnostics to keep (the rest came after it).
     too_deep_at: Option<usize>,
+    /// Set while parsing the head of an `if`, `while`, `for`, `match` or `in`, outside any bracket
+    /// of its own: `(cond) {` is then a parenthesised expression and its block, not a closure
+    /// (see `closure`).
+    no_closure_head: bool,
+    /// For each open bracket token (by index), the index of its closing one; found by scanning
+    /// for a closure and kept (see `closure`).
+    closes: HashMap<usize, usize>,
 }
 
 impl Parser {
@@ -52,6 +62,8 @@ impl Parser {
             first_expr: next_expr,
             block_heights: Vec::new(),
             too_deep_at: None,
+            no_closure_head: false,
+            closes: HashMap::new(),
         }
     }
 

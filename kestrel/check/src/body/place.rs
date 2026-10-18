@@ -47,10 +47,17 @@ impl<'a> BodyChecker<'a> {
     /// makes the function change its caller's value; a local needs memory.
     pub(crate) fn mark_changed(&mut self, root: LocalId) {
         if self.t.local(root).is_var_param {
-            let f = self.fn_id.expect("inside a function");
-            self.t.fns[f.0 as usize].mutates_params = true;
+            self.note_param_changed(root);
         } else {
             self.t.locals[root.0 as usize].addressed = true;
+        }
+    }
+
+    /// The function (or closure) that `root`, one of its `var` parameters, belongs to changes it.
+    fn note_param_changed(&mut self, root: LocalId) {
+        if !self.closure_mutates(root) {
+            let f = self.fn_id.expect("a function's own parameter is changed inside the function");
+            self.t.fns[f.0 as usize].mutates_params = true;
         }
     }
 
@@ -111,10 +118,7 @@ impl<'a> BodyChecker<'a> {
                 "declare the method with `var self`",
             ),
             // Plain assignment keeps a local in a register; only a `var` parameter matters.
-            None if self.t.local(root).is_var_param => {
-                let f = self.fn_id.expect("inside a function");
-                self.t.fns[f.0 as usize].mutates_params = true;
-            }
+            None if self.t.local(root).is_var_param => self.note_param_changed(root),
             None => {}
         }
         self.check_par_write(target);

@@ -1,6 +1,6 @@
 use cranelift_codegen::ir::{types, InstBuilder, MemFlags, TrapCode, Value};
 use cranelift_module::Module;
-use kestrel_kir::{self as kir, ExprKind, KTy};
+use kestrel_kir::{self as kir, EnvKind, ExprKind, KTy};
 
 use super::FuncLowerer;
 
@@ -69,6 +69,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 self.call_indirect(callee, args, sig, Some(dest))?;
             }
             ExprKind::FnRef(thunk) => self.fn_ref_into(*thunk, dest),
+            // A closure with nothing to capture: its code and a zero environment, like a named function.
+            ExprKind::MakeFn { code, env: EnvKind::None } => self.fn_ref_into(*code, dest),
             ExprKind::Seq(stmts, value) => {
                 self.stmts(stmts)?;
                 self.lower_into(value, dest)?;

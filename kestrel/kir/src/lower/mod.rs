@@ -1,5 +1,6 @@
 mod builtins;
 mod call;
+mod closure;
 mod collections;
 mod consts;
 mod expr;
@@ -37,7 +38,7 @@ pub fn lower(program: &Program, t: &Tables, lines: &LineIndex) -> Module {
     let (structs, enums) = layout::layouts(t);
     let mut helpers = Helpers::new(t.fns.len() as u32);
     let mut funcs: Vec<Func> =
-        (0..t.fns.len()).map(|i| FnLowerer::new(program, t, lines, FnId(i as u32), &mut helpers).lower()).collect();
+        (0..t.fns.len()).map(|i| FnLowerer::new(program, t, lines, Some(FnId(i as u32)), &mut helpers).lower()).collect();
     let init = consts::lower_init(program, t, lines, &mut helpers);
     funcs.append(&mut helpers.funcs);
     let elems = t.elems.iter().map(|&e| kty(e)).collect();
@@ -75,7 +76,11 @@ pub(crate) struct FnLowerer<'a> {
     program: &'a Program,
     t: &'a Tables,
     lines: &'a LineIndex,
-    fn_id: FnId,
+    /// The function being lowered; `None` for the initializer of the constants and for a closure
+    /// written in a field default or a constant.
+    fn_id: Option<FnId>,
+    /// The code being lowered is a built-in module's (see `lines`).
+    in_builtin: bool,
     local_map: HashMap<LocalId, LocalIdx>,
     /// Grows during lowering as temporaries are added.
     locals: Vec<Local>,
@@ -98,7 +103,8 @@ pub(crate) struct FnLowerer<'a> {
 }
 
 impl<'a> FnLowerer<'a> {
-    fn new(program: &'a Program, t: &'a Tables, lines: &'a LineIndex, fn_id: FnId, helpers: &'a mut Helpers) -> Self {
+    fn new(program: &'a Program, t: &'a Tables, lines: &'a LineIndex, fn_id: Option<FnId>, helpers: &'a mut Helpers) -> Self {
+        let in_builtin = fn_id.is_some_and(|f| t.in_builtin(t.func(f).decl(program).name_span));
         let (local_map, locals, bindings, elems) = (HashMap::new(), Vec::new(), HashMap::new(), HashMap::new());
         let (origins, scopes) = (HashMap::new(), Vec::new());
         let (scratch_results, const_locals) = (HashSet::new(), HashMap::new());
@@ -108,6 +114,7 @@ impl<'a> FnLowerer<'a> {
             t,
             lines,
             fn_id,
+            in_builtin,
             local_map,
             locals,
             bindings,
@@ -124,9 +131,31 @@ impl<'a> FnLowerer<'a> {
     fn lower(mut self) -> Func {
         // Copy the shared references out so borrows of them don't hold `self`.
         let (t, program) = (self.t, self.program);
-        let info = t.func(self.fn_id);
+        let info = t.func(self.fn_id.expect("a function is lowered with its id"));
         let decl = info.decl(program);
-        for &lid in &info.locals {
+        self.declare_locals(&info.locals);
+        let params = (0..info.params.len()).map(|i| LocalIdx(i as u32)).collect();
+        let ret = if info.ret == Ty::Unit { None } else { Some(kty(info.ret)) };
+        let body = if info.is_native { Vec::new() } else { self.lower_body(&decl.body, ret) };
+        Func {
+            name: info.name.clone(),
+            params,
+            ret,
+            locals: self.locals,
+            body,
+            is_pure: info.is_pure,
+            io: info.io,
+            mutates_params: info.mutates_params,
+            // Items of other modules are named `module.name`.
+            exported: decl.is_pub && info.method.is_none() && !info.name.contains('.') && !info.is_native,
+            native: info.is_native.then(|| native_symbol(&info.name)),
+        }
+    }
+
+    /// Gives each of the checker's locals `ids` (parameters first) a KIR local.
+    pub(crate) fn declare_locals(&mut self, ids: &[LocalId]) {
+        let t = self.t;
+        for &lid in ids {
             let l = t.local(lid);
             // `match` bindings aren't storage; they name fields of the matched place.
             if let Ty::Variant(..) = l.ty {
@@ -143,34 +172,23 @@ impl<'a> FnLowerer<'a> {
             self.local_map.insert(lid, LocalIdx(self.locals.len() as u32));
             self.locals.push(Local { name: l.name.clone(), ty, kind });
         }
-        let params = (0..info.params.len()).map(|i| LocalIdx(i as u32)).collect();
-        let ret = if info.ret == Ty::Unit { None } else { Some(kty(info.ret)) };
-        let mut body = if info.is_native {
-            Vec::new()
-        } else if ret.is_some() {
-            let (mut stmts, tail) = self.block_value(&decl.body);
+    }
+
+    /// The statements of a function's or closure's body, which gives a value of type `ret`
+    /// (if any) and starts by binding the heap constants it uses.
+    pub(crate) fn lower_body(&mut self, block: &ast::Block, ret: Option<KTy>) -> Vec<Stmt> {
+        let mut body = if ret.is_some() {
+            let (mut stmts, tail) = self.block_value(block);
             if let Some(v) = tail {
                 let v = self.owned(v, true);
                 stmts.push(Stmt::Return(Some(v)));
             }
             stmts
         } else {
-            self.block_stmts(&decl.body)
+            self.block_stmts(block)
         };
         body.splice(0..0, self.const_binds());
-        Func {
-            name: info.name.clone(),
-            params,
-            ret,
-            locals: self.locals,
-            body,
-            is_pure: info.is_pure,
-            io: info.io,
-            mutates_params: info.mutates_params,
-            // Items of other modules are named `module.name`.
-            exported: decl.is_pub && info.method.is_none() && !info.name.contains('.') && !info.is_native,
-            native: info.is_native.then(|| native_symbol(&info.name)),
-        }
+        body
     }
 
     /// A fresh local holding an intermediate value.

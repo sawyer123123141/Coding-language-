@@ -177,6 +177,20 @@ impl Rewriter<'_> {
                 self.expr(callee);
                 self.args(args);
             }
+            ExprKind::Closure(c) => {
+                let mark = self.locals.len();
+                for p in &mut c.params {
+                    self.binding(&p.bind);
+                    if let Some(t) = &mut p.ty {
+                        self.ty(t);
+                    }
+                }
+                if let Some(r) = &mut c.ret {
+                    self.ty(r);
+                }
+                self.block(&mut c.body);
+                self.locals.truncate(mark);
+            }
             ExprKind::Unary { expr, .. } => self.expr(expr),
             ExprKind::Binary { lhs, rhs, .. } => {
                 self.expr(lhs);

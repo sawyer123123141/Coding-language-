@@ -50,6 +50,13 @@ pub(crate) struct Removing {
     pub(crate) views: HashMap<LocalId, (LocalId, Vec<Step>)>,
 }
 
+impl Removing {
+    /// How many `for ... in` loops are open.
+    pub(crate) fn loops_len(&self) -> usize {
+        self.loops.len()
+    }
+}
+
 impl<'a> BodyChecker<'a> {
     /// Starts the body of a `for ... in` loop over `iter` whose item is `item`. A loop over a list
     /// whose body says `remove <item>` anywhere is a removing loop (`remove` in a loop over anything
@@ -142,7 +149,11 @@ impl<'a> BodyChecker<'a> {
             let msg = format!("`remove` takes the item of a `for ... in` loop over a list; `{name}` isn't one");
             return self.error(name_span, msg);
         };
-        if !self.par.is_empty() {
+        // The item of a loop outside the closure this is in: the closure is a function of its own.
+        if i < self.removing_floor() {
+            return self.error(span, "`remove` can't leave this closure; it is a function of its own");
+        }
+        if self.par_inside_frame() {
             return self.error(span, "`remove` can't be used in a `par for`: its iterations run at the same time");
         }
         let lp = &self.removing.loops[i];
@@ -275,6 +286,8 @@ fn expr_removes(x: &Expr, name: &str) -> bool {
         ExprKind::ArrayLit(items) => items.iter().any(e),
         ExprKind::MapLit(entries) => entries.iter().any(|(k, v)| e(k) || e(v)),
         ExprKind::Interp(parts) => parts.iter().any(|p| matches!(p, InterpPart::Expr(x) if e(x))),
+        // A closure's `remove` is its own: it can't remove an outer loop's item (see `check_remove`).
+        ExprKind::Closure(_) => false,
         ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::None | ExprKind::Str(_) | ExprKind::Ident(_) => false,
     }
 }

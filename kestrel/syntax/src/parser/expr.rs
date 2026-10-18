@@ -133,7 +133,7 @@ impl Parser {
             if self.at(&Tok::LBracket) {
                 let (index, end) = self.nested(|p| {
                     p.bump();
-                    let index = p.expr()?;
+                    let index = p.inside_brackets(Self::expr)?;
                     Ok((index, p.expect(&Tok::RBracket, "`]`")?))
                 })?;
                 let span = e.span.to(end);

@@ -1,0 +1,129 @@
+// expect: ouch 3
+// expect: 12
+// expect: 4
+// expect: n 7
+// expect: default click 2
+// expect: 101
+// expect: 2
+// expect: 0
+// expect: 5
+// expect: 11
+// expect: [1, 2, 9]
+// expect: go
+// expect: n is 0
+// expect: coin 3
+// expect: 6
+// expect: in the arena
+// expect: 10
+// expect: 4
+// expect: 8
+// expect: 10
+// expect: 2
+// expect: 21
+// Closures that name nothing from outside themselves.
+struct Button {
+    label: string
+    on_click: (int) = (n) { print("default click", n) }
+}
+
+struct Holder {
+    mem: Arena = Arena()
+}
+
+enum Kind {
+    Plain
+    Coin { value: int }
+}
+
+let DOUBLE = (x: int) -> int { x * 2 }
+let TABLE = [(x: int) -> int { x + 1 }, (x: int) -> int { x * 2 }]
+
+apply(f: (int) -> int, x: int) -> int { f(x) }
+
+adder() -> (int) -> int {
+    return (x) { x + 100 }
+}
+
+make() -> (int) -> int {
+    arena {
+        return (x) { x + 1 }
+    }
+}
+
+make_nested() -> (int) -> int {
+    let outer = () -> (int) -> int { (x: int) -> int { x + 1 } }
+    outer()
+}
+
+main() {
+    let hurt = (amount: int) { print("ouch", amount) }
+    hurt(3)
+
+    // Parameter types come from the context.
+    let f: (int) -> int = (x) { x * 3 }
+    print(f(4))
+    print(apply((x) { x - 1 }, 5))
+    var b = Button(label: "a", on_click: (n) { })
+    b.on_click(1)
+    b.on_click = (n) { print("n", n) }
+    b.on_click(7)
+    let d = Button(label: "d")
+    d.on_click(2)
+    print(adder()(1))
+
+    // A `var` parameter.
+    let inc: (var int) = (var p) { p += 1 }
+    var v = 1
+    inc(var v)
+    print(v)
+
+    // `return` leaves the closure.
+    let early = (x: int) -> int {
+        if x < 0 { return 0 }
+        x
+    }
+    print(early(-5))
+    print(early(5))
+    print(make()(10))
+
+    var xs: list[int] = [1, 2, 3]
+    par for x in xs {
+        let sq = (n: int) -> int {
+            if n > 2 { return n * n }
+            n
+        }
+        x = sq(x)
+    }
+    print(xs)
+
+    // Parentheses in the head of a statement still group.
+    let ready = true
+    if (ready) { print("go") }
+    var n = 2
+    while (n > 0) { n -= 1 }
+    print("n is", n)
+    let k = Kind.Coin(value: 3)
+    match (k) {
+        Coin c { print("coin", c.value) }
+        else { print("plain") }
+    }
+    var total = 0
+    for item in (xs) { total += item }
+    print(total - 6)
+    var h = Holder()
+    in (h.mem) { print("in the arena") }
+
+    // A body of several lines inside a call's parentheses.
+    let r = apply((x) {
+        let y = x + 1
+        y * 2
+    }, 4)
+    print(r)
+
+    // A closure followed by `(3)` on the same line is called.
+    print((x: int) -> int { x + 1 }(3))
+    print(DOUBLE(4))
+    print(TABLE[1](5))
+    print(make_nested()(1))
+    print(apply(DOUBLE, 10) + 1)
+}

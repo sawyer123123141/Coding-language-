@@ -1,6 +1,7 @@
 mod body;
 mod builtins;
 mod collect;
+mod closure;
 mod collect_ty;
 mod natives;
 mod sig;
@@ -19,6 +20,7 @@ pub use tables::{
     ConstId, ConstInfo, EnumId, EnumInfo, FieldInfo, FnId, FnInfo, ListMethod, LocalId, LocalInfo, ParamSig, Res, StrMethod, StructId,
     StructInfo, Tables, VariantInfo, BUILTIN_STRUCTS, VEC2, VEC3,
 };
+pub use closure::{Capture, ClosureInfo};
 pub use sig::{sig_accepts, Sig, SigId, SigParam};
 pub use ty::Ty;
 

@@ -1,0 +1,87 @@
+// error 23: this closure calls `print`, which a `pure` function can't do
+// error 28: give `x` a type: `(x: int) { ... }`; Kestrel can only leave it out where a function type is expected
+// error 33: `break` can't leave this closure; it is a function of its own
+// error 34: `continue` can't leave this closure; it is a function of its own
+// error 38: `remove` can't leave this closure; it is a function of its own
+// error 44: this closure calls `print`, which a `par for` body can't do
+// error 46: this closure isn't pure (it calls `print`), but `f` needs a pure one
+// error 53: this closure takes 2 parameters, but `(int) -> int` takes 1 parameter
+// error 54: expected int, found string
+// error 57: expected int, found string
+// error 59: this line has no effect; did you mean to continue the line above?
+// error 63: closures can't capture `y` yet
+// error 68: unknown name `missing`
+// error 71: this closure must return int, but its body can finish without a value
+// error 72: this closure must return int
+// error 73: this closure doesn't return a value
+// error 74: give `x` a type: `(x: int) { ... }`; Kestrel can only leave it out where a function type is expected
+// error 77: this closure must return int
+// error 83: this closure calls `noisy`, which isn't `pure`; a `par for` body can only call `pure` functions
+run(f: pure (int) -> int) -> int { f(1) }
+
+pure shout() -> int {
+    let g = () { print("hi") }
+    1
+}
+
+untyped() {
+    let g = (x) { x }
+}
+
+leaving() {
+    for i from 0 to 3 {
+        let a = () { break }
+        let b = () { continue }
+    }
+    var items: list[int] = [1, 2]
+    for it in items {
+        let c = () { remove it }
+    }
+}
+
+printing(xs: list[int]) {
+    par for x in xs {
+        let g = () { print("hi") }
+    }
+    run((x) {
+        print(x)
+        x
+    })
+}
+
+shapes() {
+    let two: (int) -> int = (a, b) { a }
+    let wrong: (int) -> int = (x) { "s" }
+    let mixed = (x: int) {
+        if x > 0 { return 1 }
+        "a"
+    }
+    (x: int) { x }
+}
+
+capturing(y: int) {
+    let g = (x: int) { x + y }
+}
+
+main() { }
+
+let BAD = (x: int) -> int { missing + x }
+
+result_errors() {
+    let a = (x: int) -> int { }
+    let b = (x: int) -> int { return }
+    let c: (int) = (n) { return 5 }
+    let d: int = (x) { x }
+    let e = (x: int) {
+        if x > 0 { return x }
+        return
+    }
+}
+
+par_calls(xs: list[int]) {
+    par for x in xs {
+        let g = () { noisy(1) }
+    }
+}
+
+noisy(n: int) { print(n) }

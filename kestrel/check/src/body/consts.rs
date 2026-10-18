@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use kestrel_syntax::ast::{Arg, ConstDecl, Expr, ExprKind, Item, Program};
+use kestrel_syntax::ast::{Arg, Block, ConstDecl, Expr, ExprKind, InterpPart, Item, Program, Stmt};
 use kestrel_syntax::{Diagnostic, Span};
 
 use super::BodyChecker;
@@ -97,28 +97,104 @@ impl Order<'_> {
 }
 
 /// The names `e` mentions, each once with where it first appears: the
-/// constants it uses, when `e` is a constant expression (see `is_const_expr`).
+/// constants it uses, when `e` is a constant expression (see `is_const_expr`). A closure's body
+/// is walked whole: it runs later, but the constants it names must be checked first.
 fn names_used(e: &Expr, out: &mut Vec<(String, Span)>) {
+    let args = |args: &[Arg], out: &mut Vec<(String, Span)>| args.iter().for_each(|a| names_used(&a.value, out));
     match &e.kind {
         ExprKind::Ident(name) => {
             if !out.iter().any(|(n, _)| n == name) {
                 out.push((name.clone(), e.span));
             }
         }
-        ExprKind::Call { args, .. } | ExprKind::TypeCall { args, .. } | ExprKind::MethodCall { args, .. } => {
-            args.iter().for_each(|a| names_used(&a.value, out))
+        // A constant of function type is called by its name.
+        ExprKind::Call { name, args: a, .. } => {
+            if !out.iter().any(|(n, _)| n == name) {
+                out.push((name.clone(), e.span));
+            }
+            args(a, out);
+        }
+        ExprKind::TypeCall { args: a, .. } => args(a, out),
+        ExprKind::MethodCall { receiver, args: a, .. } => {
+            names_used(receiver, out);
+            args(a, out);
+        }
+        ExprKind::CallValue { callee, args: a } => {
+            names_used(callee, out);
+            args(a, out);
         }
         ExprKind::Unary { expr, .. } => names_used(expr, out),
         ExprKind::Binary { lhs, rhs, .. } => {
             names_used(lhs, out);
             names_used(rhs, out);
         }
+        ExprKind::Field { base, .. } => names_used(base, out),
+        ExprKind::Index { base, index } => {
+            names_used(base, out);
+            names_used(index, out);
+        }
         ExprKind::ArrayLit(items) => items.iter().for_each(|i| names_used(i, out)),
         ExprKind::MapLit(entries) => entries.iter().for_each(|(k, v)| {
             names_used(k, out);
             names_used(v, out);
         }),
-        _ => {}
+        ExprKind::Interp(parts) => {
+            for p in parts {
+                if let InterpPart::Expr(x) = p {
+                    names_used(x, out);
+                }
+            }
+        }
+        ExprKind::If { cond, then_block, else_block } => {
+            names_used(cond, out);
+            names_in_block(then_block, out);
+            if let Some(b) = else_block {
+                names_in_block(b, out);
+            }
+        }
+        ExprKind::Match { scrutinee, arms } => {
+            names_used(scrutinee, out);
+            arms.iter().for_each(|a| names_in_block(&a.body, out));
+        }
+        ExprKind::Closure(c) => names_in_block(&c.body, out),
+        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::None | ExprKind::Str(_) => {}
+    }
+}
+
+fn names_in_block(b: &Block, out: &mut Vec<(String, Span)>) {
+    for s in &b.stmts {
+        match s {
+            Stmt::Let { value, else_block, .. } => {
+                names_used(value, out);
+                if let Some(b) = else_block {
+                    names_in_block(b, out);
+                }
+            }
+            Stmt::Assign { target, value, .. } => {
+                names_used(target, out);
+                names_used(value, out);
+            }
+            Stmt::While { cond, body, .. } => {
+                names_used(cond, out);
+                names_in_block(body, out);
+            }
+            Stmt::ForRange { start, end, body, .. } => {
+                names_used(start, out);
+                names_used(end, out);
+                names_in_block(body, out);
+            }
+            Stmt::ForIn { iter, body, .. } => {
+                names_used(iter, out);
+                names_in_block(body, out);
+            }
+            Stmt::Arena { body, .. } => names_in_block(body, out),
+            Stmt::In { arena, body, .. } => {
+                names_used(arena, out);
+                names_in_block(body, out);
+            }
+            Stmt::Return { value: Some(v), .. } | Stmt::Expr(v) => names_used(v, out),
+            Stmt::Return { value: None, .. } | Stmt::Break(_) | Stmt::Continue(_) | Stmt::Remove { .. } => {}
+        }
     }
 }
 
@@ -160,6 +236,8 @@ pub(crate) fn is_const_expr(e: &Expr, t: &Tables) -> bool {
         ExprKind::ArrayLit(items) => items.iter().all(|i| is_const_expr(i, t)),
         ExprKind::MapLit(entries) => entries.iter().all(|(k, v)| is_const_expr(k, t) && is_const_expr(v, t)),
         ExprKind::TypeCall { args, .. } => all(args),
+        // A closure is a value; its body runs only when it is called.
+        ExprKind::Closure(_) => true,
         ExprKind::Interp(_)
         | ExprKind::Index { .. }
         | ExprKind::Call { .. }

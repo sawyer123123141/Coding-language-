@@ -180,6 +180,8 @@ fn default_allocates(default: &Expr, ty: Ty, t: &Tables) -> bool {
     };
     match &default.kind {
         ExprKind::None | ExprKind::Str(_) => false,
+        // A closure that captures nothing has no environment, like a named function.
+        ExprKind::Closure(_) => false,
         ExprKind::Ident(name) if inner == Ty::Str => !t.consts.iter().any(|c| &c.name == name),
         // A named function has no environment: it holds no memory.
         ExprKind::Ident(name) if matches!(inner, Ty::Fn(_)) && t.fn_by_name.contains_key(name) => false,
