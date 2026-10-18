@@ -53,18 +53,27 @@ pub enum ListMethod {
     Any,
     /// `xs.all(f)`: whether `f` is true for every item.
     All,
+    /// `xs.sort()`: sorts a list or array of numbers, strings or bools in place.
+    Sort,
+    /// `xs.sort_by(key)`: sorts in place by a pure key function's number, string or bool.
+    SortBy,
 }
 
 impl ListMethod {
     /// Whether the method changes its receiver; `has`, `find`, `join` and the four that take a
-    /// function only read it.
+    /// function and give a result only read it.
     pub fn changes_receiver(self) -> bool {
-        !matches!(self, ListMethod::Has | ListMethod::Find | ListMethod::Join) && !self.takes_fn()
+        !matches!(self, ListMethod::Has | ListMethod::Find | ListMethod::Join | ListMethod::Filter | ListMethod::Map | ListMethod::Any | ListMethod::All)
     }
 
     /// Whether the method takes a function and calls it for the items.
     pub fn takes_fn(self) -> bool {
-        matches!(self, ListMethod::Filter | ListMethod::Map | ListMethod::Any | ListMethod::All)
+        matches!(self, ListMethod::Filter | ListMethod::Map | ListMethod::Any | ListMethod::All | ListMethod::SortBy)
+    }
+
+    /// Whether the method changes a list's order but not its length, so it works on an array.
+    pub fn reorders(self) -> bool {
+        matches!(self, ListMethod::Sort | ListMethod::SortBy)
     }
 }
 

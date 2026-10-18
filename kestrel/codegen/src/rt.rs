@@ -40,6 +40,7 @@ pub(crate) struct RtFuncs {
     pub str_find: FuncId,
     pub str_starts: FuncId,
     pub str_ends: FuncId,
+    pub str_cmp: FuncId,
     pub str_slice: FuncId,
     pub str_trim: FuncId,
     pub str_case: FuncId,
@@ -48,6 +49,7 @@ pub(crate) struct RtFuncs {
     pub str_to_int: FuncId,
     pub str_to_float: FuncId,
     pub par_for: FuncId,
+    pub sort: FuncId,
     /// The function for each float operation the runtime does (see `MATH`).
     pub math: Vec<(MathOp, FuncId)>,
     pub rand_float: FuncId,
@@ -119,6 +121,7 @@ impl RtFuncs {
             str_find: decl("kestrel_rt_str_find", &[ptr, I64, ptr, I64], Some(I64))?,
             str_starts: decl("kestrel_rt_str_starts", &[ptr, I64, ptr, I64], Some(I8))?,
             str_ends: decl("kestrel_rt_str_ends", &[ptr, I64, ptr, I64], Some(I8))?,
+            str_cmp: decl("kestrel_rt_str_cmp", &[ptr, I64, ptr, I64], Some(I8))?,
             str_slice: decl("kestrel_rt_str_slice", &[ptr, I64, I64, I64, I32, ptr, ptr], None)?,
             str_trim: decl("kestrel_rt_str_trim", &[ptr, I64, ptr], None)?,
             str_case: decl("kestrel_rt_str_case", &[ptr, I64, I8, ptr], None)?,
@@ -127,6 +130,7 @@ impl RtFuncs {
             str_to_int: decl("kestrel_rt_str_to_int", &[ptr, I64, ptr], Some(I8))?,
             str_to_float: decl("kestrel_rt_str_to_float", &[ptr, I64, ptr], Some(I8))?,
             par_for: decl("kestrel_rt_par_for", &[I64, ptr, ptr], None)?,
+            sort: decl("kestrel_rt_sort", &[ptr, I64, I64, ptr, ptr], None)?,
             math: MATH.iter().map(|&(op, name, args)| Ok((op, decl(name, &[F64, F64][..args], Some(F64))?))).collect::<Result<_, String>>()?,
             rand_float: decl("kestrel_rt_rand_float", &[], Some(F64))?,
             rand_int: decl("kestrel_rt_rand_int", &[I64, I64], Some(I64))?,
@@ -156,7 +160,7 @@ pub(crate) const MATH: [(MathOp, &str, usize); 10] = [
 
 /// Addresses of every runtime export, for registering with the JIT.
 pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
-    use kestrel_runtime::{arena, gpu, list, map, math, panic, par, print, start, string, string_find, string_make, string_parse};
+    use kestrel_runtime::{arena, gpu, list, map, math, panic, par, print, sort, start, string, string_find, string_make, string_parse};
     vec![
         ("kestrel_rt_print_i64", print::kestrel_rt_print_i64 as *const u8),
         ("kestrel_rt_print_f32", print::kestrel_rt_print_f32 as *const u8),
@@ -195,6 +199,7 @@ pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
         ("kestrel_rt_str_find", string_find::kestrel_rt_str_find as *const u8),
         ("kestrel_rt_str_starts", string_find::kestrel_rt_str_starts as *const u8),
         ("kestrel_rt_str_ends", string_find::kestrel_rt_str_ends as *const u8),
+        ("kestrel_rt_str_cmp", sort::kestrel_rt_str_cmp as *const u8),
         ("kestrel_rt_str_slice", string_find::kestrel_rt_str_slice as *const u8),
         ("kestrel_rt_str_trim", string_make::kestrel_rt_str_trim as *const u8),
         ("kestrel_rt_str_case", string_make::kestrel_rt_str_case as *const u8),
@@ -203,6 +208,7 @@ pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
         ("kestrel_rt_str_to_int", string_parse::kestrel_rt_str_to_int as *const u8),
         ("kestrel_rt_str_to_float", string_parse::kestrel_rt_str_to_float as *const u8),
         ("kestrel_rt_par_for", par::kestrel_rt_par_for as *const u8),
+        ("kestrel_rt_sort", sort::kestrel_rt_sort as *const u8),
         ("kestrel_rt_sin", math::kestrel_rt_sin as *const u8),
         ("kestrel_rt_cos", math::kestrel_rt_cos as *const u8),
         ("kestrel_rt_tan", math::kestrel_rt_tan as *const u8),

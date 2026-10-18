@@ -131,6 +131,8 @@ impl<'a> BodyChecker<'a> {
             "map" => Which::Other(ListMethod::Map),
             "any" => Which::Other(ListMethod::Any),
             "all" => Which::Other(ListMethod::All),
+            "sort" => Which::Other(ListMethod::Sort),
+            "sort_by" => Which::Other(ListMethod::SortBy),
             _ => {
                 let help = match recv_ty {
                     // A slip for `remove_at`, or for the statement `remove b` in a loop.
@@ -142,8 +144,8 @@ impl<'a> BodyChecker<'a> {
                         let xs = written(receiver);
                         format!("use `{xs}.remove_at(i)`, or `remove {item}` inside `for {item} in {xs}`")
                     }
-                    Ty::List(_) => "lists have `add`, `remove_at`, `pop`, `insert`, `clear`, `has`, `find`, `join`, `filter`, `map`, `any`, `all` and `.len`".to_string(),
-                    _ => "arrays have `has`, `find`, `join`, `filter`, `map`, `any`, `all` and `.len`".to_string(),
+                    Ty::List(_) => "lists have `add`, `remove_at`, `pop`, `insert`, `clear`, `has`, `find`, `join`, `filter`, `map`, `any`, `all`, `sort`, `sort_by` and `.len`".to_string(),
+                    _ => "arrays have `has`, `find`, `join`, `filter`, `map`, `any`, `all`, `sort`, `sort_by` and `.len`".to_string(),
                 };
                 let msg = format!("`{}` has no method `{name}`", self.tn(recv_ty));
                 self.error_help(*name_span, msg, help);
@@ -153,7 +155,8 @@ impl<'a> BodyChecker<'a> {
         };
         let changes = match which {
             Which::Add => true,
-            Which::Other(m) => m.changes_receiver(),
+            // (Sorting changes the order of an array's items, not its length.)
+            Which::Other(m) => m.changes_receiver() && !m.reorders(),
         };
         if changes && matches!(recv_ty, Ty::Array(_)) {
             let msg = match which {
@@ -193,6 +196,8 @@ impl<'a> BodyChecker<'a> {
             ListMethod::Map => ("`map` takes one function", 1),
             ListMethod::Any => ("`any` takes one function", 1),
             ListMethod::All => ("`all` takes one function", 1),
+            ListMethod::Sort => ("`sort` takes no arguments", 0),
+            ListMethod::SortBy => ("`sort_by` takes one function", 1),
         };
         if args.len() != usage.1 || args.iter().any(|a| a.label.is_some() || a.is_var) {
             self.error(e.span, usage.0);
@@ -200,6 +205,9 @@ impl<'a> BodyChecker<'a> {
             return Ty::Error;
         }
         self.t.res.insert(e.id, Res::List(method));
+        if method.reorders() {
+            return self.list_sort(e, receiver, recv_ty, method, *name_span, args);
+        }
         if method.takes_fn() {
             return self.list_fn(e, receiver, recv_ty, method, *name_span, args);
         }
@@ -227,7 +235,9 @@ impl<'a> BodyChecker<'a> {
             }
             ListMethod::Pop => self.check_pop_owner(e, receiver, elem),
             ListMethod::Clear => {}
-            ListMethod::Filter | ListMethod::Map | ListMethod::Any | ListMethod::All => unreachable!("handled by `list_fn`"),
+            ListMethod::Filter | ListMethod::Map | ListMethod::Any | ListMethod::All | ListMethod::Sort | ListMethod::SortBy => {
+                unreachable!("handled by `list_fn` and `list_sort`")
+            }
         }
         match method {
             ListMethod::Pop => Ty::Optional(self.t.intern_elem(elem)),
@@ -239,7 +249,9 @@ impl<'a> BodyChecker<'a> {
             }
             ListMethod::Join => Ty::Str,
             ListMethod::RemoveAt | ListMethod::Insert | ListMethod::Clear => Ty::Unit,
-            ListMethod::Filter | ListMethod::Map | ListMethod::Any | ListMethod::All => unreachable!("handled by `list_fn`"),
+            ListMethod::Filter | ListMethod::Map | ListMethod::Any | ListMethod::All | ListMethod::Sort | ListMethod::SortBy => {
+                unreachable!("handled by `list_fn` and `list_sort`")
+            }
         }
     }
 

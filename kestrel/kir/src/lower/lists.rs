@@ -2,7 +2,7 @@
 //! The runtime moves items for `remove_at` and `insert` and empties the list for `clear`
 //! (`Stmt::List`, after drops); `pop` is built from `SetLen` and a move, copy or drop of the last
 //! item; `has` and `find` call a generated search (see `list_helpers`); `filter`, `map`, `any` and
-//! `all` call a generated loop (see `list_fns`).
+//! `all` call a generated loop (see `list_fns`); `sort` and `sort_by` are `ListOp::Sort` (see `sort`).
 
 use kestrel_check::{ListMethod, Ty};
 use kestrel_syntax::ast;
@@ -71,6 +71,7 @@ impl<'a> FnLowerer<'a> {
                 let not_empty = binary(BinOp::Ne, load(n, KTy::I64, line), int(0, KTy::I64, line), KTy::Bool, line);
                 out.push(Stmt::If { cond: not_empty, then_body, else_body: Vec::new() });
             }
+            ListMethod::Sort | ListMethod::SortBy => self.sort_stmt(method, receiver, args, out),
             ListMethod::Has | ListMethod::Find | ListMethod::Join | ListMethod::Filter | ListMethod::Map | ListMethod::Any | ListMethod::All => {
                 unreachable!("the checker refuses a discarded `{method:?}`")
             }

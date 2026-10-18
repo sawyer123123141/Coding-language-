@@ -56,6 +56,12 @@ pub enum ListOp {
     /// zeroed, and the length becomes `kept` plus their count. When `next` is past the length (the
     /// list shrank meanwhile) the length becomes at most `kept`.
     Compact,
+    /// `[compare]` or `[compare, key]`: sorts the items stably, smallest first. `compare` is a
+    /// `FnRef` to a generated function `(env, a, b) -> u8` that says how the item at the pointer
+    /// `a` stands to the one at `b`: 0 for before, 1 for equal, 2 for after (a total order). Its
+    /// environment word is the address of a copy of `key`, a function value, when there is one, else
+    /// 0. The items move as bytes.
+    Sort,
 }
 
 /// What `ExprKind::Str` does with its string operand (`args[0]`, a string value; for `Join` a list
@@ -76,6 +82,9 @@ pub enum StrOp {
     Find,
     /// `[s, sub]`: whether `s` starts with `sub` (bool).
     Starts,
+    /// `[a, b]`: how `a` stands to `b` by code point (the order of their UTF-8 bytes): a u8, 0 for
+    /// before, 1 for equal, 2 for after.
+    Cmp,
     /// `[s, sub]`: whether `s` ends with `sub` (bool).
     Ends,
     /// `[s, from, to]`: a new string of the characters `from..to` (any integers); the runtime

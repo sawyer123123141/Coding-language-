@@ -10,6 +10,7 @@ pub mod math;
 pub mod panic;
 pub mod par;
 pub mod print;
+pub mod sort;
 pub mod start;
 pub mod string;
 pub mod string_find;

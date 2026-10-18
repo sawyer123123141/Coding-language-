@@ -57,6 +57,12 @@ pub(crate) struct Helpers {
     pub(super) find: HashMap<KTy, FuncIdx>,
     /// The loop behind each `filter`, `map`, `any` and `all` (see `list_fn`).
     pub(super) list_fns: HashMap<(ListMethod, KTy, Callee), FuncIdx>,
+    /// The compare function behind each `sort` (no callee) and `sort_by`, per item type (see `sort`).
+    pub(super) sort_less: HashMap<(KTy, Option<Callee>), FuncIdx>,
+    /// The function a `sort_by` call site calls, per list type and key.
+    pub(super) sort_calls: HashMap<(KTy, Callee), FuncIdx>,
+    /// Each `sort_by` compare function with the code of the literal key it calls.
+    pub(super) sort_idle: Vec<(FuncIdx, FuncIdx)>,
     /// The thunk of each function used as a value (see `thunk_for`).
     pub(super) thunks: HashMap<FuncIdx, FuncIdx>,
     /// The code of each closure literal (see `closure_code`).
@@ -76,7 +82,25 @@ impl Helpers {
         let (find, thunks, closures, env_copies) = (HashMap::new(), HashMap::new(), HashMap::new(), HashMap::new());
         let (funcs, par_bodies, consts) = (Vec::new(), Vec::new(), ConstGlobals::default());
         let (env_layouts, list_fns) = (HashMap::new(), HashMap::new());
-        Helpers { base, funcs, copy, drop, print, find, list_fns, thunks, closures, env_copies, env_layouts, par_bodies, consts }
+        let (sort_less, sort_calls, sort_idle) = (HashMap::new(), HashMap::new(), Vec::new());
+        Helpers {
+            base,
+            funcs,
+            copy,
+            drop,
+            print,
+            find,
+            list_fns,
+            sort_less,
+            sort_calls,
+            sort_idle,
+            thunks,
+            closures,
+            env_copies,
+            env_layouts,
+            par_bodies,
+            consts,
+        }
     }
 
     /// Adds an outlined `par for` body, named for its index.

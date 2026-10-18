@@ -1,0 +1,70 @@
+// error 47: can't sort `xs` while looping over it; sort it after the loop
+// error 50: can't sort `world.items` while looping over it; sort it after the loop
+// error 52: `sort` needs numbers, strings or bools; `list[vec2]` holds `vec2`; use `sort_by` with a key
+// error 53: `sort_by` needs a key that is a number, string or bool; this one gives `vec2`
+// error 54: this closure isn't pure (it calls `print`), but `sort_by` needs a pure one
+// error 55: `xs` is changed by this call, so the closure passed to it can't read it
+// error 56: can't call `sort` on `ys`: it changes `ys`, which was declared with `let`
+// error 57: `sort` changes its receiver, so it needs a variable, not a temporary
+// error 58: `sort` takes no arguments
+// error 59: `sort_by` takes one function
+// error 60: `sort_by` needs a key that is a number, string or bool; this one gives nothing
+// error 61: `sort_by` needs a function that takes `int`, found `pure (float) -> float`
+// error 62: `noisy` isn't `pure`, but `sort_by` needs a pure function
+// error 63: `g` isn't a pure function type, but `sort_by` needs a pure one
+// error 64: `sort_by` needs a key that is a number, string or bool; this one gives `[int]`
+// error 65: can't call `hs[0].key` while this call changes `hs`, which may hold its memory
+// error 69: can't call `sort_by` on parameter `zs`: it changes `zs`, which isn't `var`
+// Errors specific to `sort` and `sort_by`.
+struct World {
+    items: list[int]
+}
+
+struct Handler {
+    key: pure (Handler) -> int
+}
+
+noisy(n: int) -> int {
+    print(n)
+    n
+}
+
+make() -> list[int] {
+    [3, 1, 2]
+}
+
+main() {
+    var xs: list[int] = [3, 1, 2]
+    var world = World(items: [2, 1])
+    var vs: list[vec2] = []
+    var hs: list[Handler] = []
+    let ys: list[int] = [2, 1]
+    let g = (k: int) -> int {
+        print(k)
+        k
+    }
+    for x in xs {
+        xs.sort()
+    }
+    for w in world.items {
+        world.items.sort_by((e) { e })
+    }
+    vs.sort()
+    vs.sort_by((e) { e })
+    xs.sort_by((e) { print(e) })
+    xs.sort_by((e) { xs.len + e })
+    ys.sort()
+    make().sort()
+    xs.sort(1)
+    xs.sort_by()
+    xs.sort_by((e) { })
+    xs.sort_by((e: float) { e })
+    xs.sort_by(noisy)
+    xs.sort_by(g)
+    xs.sort_by((e) { [e] })
+    hs.sort_by(hs[0].key)
+}
+
+sort_param(zs: list[int]) {
+    zs.sort_by((e) { e })
+}

@@ -1,0 +1,167 @@
+// env: KESTREL_ARENA_COUNT=1
+// expect: [-2, 1, 3, 3, 5, 9]
+// expect: [5, 130, 200]
+// expect: [-5, 7, 3000000000]
+// expect: [-1, 0.5, 2.5, 10, NaN, NaN]
+// expect: ["", "B", "a", "ab", "abc", "z", "é"]
+// expect: [false, false, true, true]
+// expect: ["b", "d", "f", "a", "c", "e"]
+// expect: ["b", "e", "a", "c", "f", "d"]
+// expect: ["d", "a", "c", "f", "b", "e"]
+// expect: ["d", "a", "c", "f", "b", "e"]
+// expect: ["b", "d", "f", "a", "c", "e"]
+// expect: ["a", "c", "d", "f", "b", "e"]
+// expect: ["c", "f", "b", "e", "d", "a"]
+// expect: ["a", "c", "f", "b", "e", "d"]
+// expect: ["alpha", "bravo", "Charlie", "Delta"]
+// expect: ["alpha", "bravo", "Charlie", "Delta"]
+// expect: ["Charlie", "Delta", "alpha", "bravo"]
+// expect: ["c", "f", "b", "e", "d", "a"]
+// expect: [] 0 [7]
+// expect: [0, 1, 2, 3, 4]
+// expect: [4, 3, 2, 1, 0]
+// expect: [[1, 2, 3], [8, 9]]
+// expect: [1, 2, 3]
+// expect-stderr: arenas alive at exit: 0
+// Sorting lists and arrays in place: `sort` for numbers, strings and bools, `sort_by` with a key.
+struct Enemy {
+    name: string
+    hp: int
+    tier: int
+    pos: vec2
+}
+
+struct Pool {
+    mem: Arena = Arena()
+    id: int
+}
+
+struct Scene {
+    items: list[Enemy]
+    center: vec2
+
+    arrange(var self) {
+        self.items.sort_by((e) { e.pos.distance_to(self.center) })
+    }
+}
+
+pure by_hp(e: Enemy) -> int { e.hp }
+
+pure by_name(e: Enemy) -> string { e.name.lower() }
+
+order(var xs: list[Enemy], key: pure (Enemy) -> int) {
+    xs.sort_by(key)
+}
+
+enemy(name: string, hp: int, tier: int, x: float) -> Enemy {
+    Enemy(name: name, hp: hp, tier: tier, pos: vec2(x, 0))
+}
+
+// The same six enemies, in the same order, each time.
+fresh() -> list[Enemy] {
+    [enemy("a", 5, 2, 9.0), enemy("b", 9, 1, 3.0), enemy("c", 5, 2, 1.0), enemy("d", 2, 1, 7.0), enemy("e", 9, 3, 5.0), enemy("f", 5, 1, 2.0)]
+}
+
+names(xs: list[Enemy]) -> list[string] {
+    xs.map((e) { e.name })
+}
+
+main() {
+    // Numbers, strings and bools.
+    var ints: list[int] = [5, 3, 9, 1, 3, -2]
+    ints.sort()
+    print(ints)
+    var bytes: list[u8] = [u8(200), u8(5), u8(130)]
+    bytes.sort()
+    print(bytes)
+    var wide: list[i64] = [i64(3000000000), i64(-5), i64(7)]
+    wide.sort()
+    print(wide)
+    var z = 0.0
+    var floats: list[float] = [2.5, z / z, -1.0, 0.5, z / z, 10.0]
+    floats.sort()
+    print(floats)
+    var words: list[string] = ["z", "é", "a", "B", "ab", "", "abc"]
+    words.sort()
+    print(words)
+    var flags: list[bool] = [true, false, true, false]
+    flags.sort()
+    print(flags)
+
+    // Equal keys keep their order.
+    var foes = fresh()
+    foes.sort_by((e) { e.tier })
+    print(names(foes))
+    // Largest first: negate the key.
+    foes = fresh()
+    foes.sort_by((e) { -e.hp })
+    print(names(foes))
+    // A named function, then a function value passed on.
+    foes = fresh()
+    foes.sort_by(by_hp)
+    print(names(foes))
+    foes = fresh()
+    order(var foes, by_hp)
+    print(names(foes))
+    foes = fresh()
+    order(var foes, (e) { e.tier })
+    print(names(foes))
+    // Bool, float and captured keys.
+    foes = fresh()
+    foes.sort_by((e) { e.hp > 5 })
+    print(names(foes))
+    foes = fresh()
+    foes.sort_by((e) { e.pos.x })
+    print(names(foes))
+    let target = 6
+    foes = fresh()
+    foes.sort_by((e) { (e.hp - target) * (e.hp - target) })
+    print(names(foes))
+    // String keys build strings, which are freed.
+    var crew: list[Enemy] = [enemy("Delta", 1, 1, 0.0), enemy("alpha", 2, 1, 0.0), enemy("Charlie", 3, 1, 0.0), enemy("bravo", 4, 1, 0.0)]
+    crew.sort_by((e) { e.name.lower() })
+    print(names(crew))
+    crew.sort_by(by_name)
+    print(names(crew))
+    crew.sort_by((e) { e.name })
+    print(names(crew))
+    // A method that sorts its own list by a key that reads another field.
+    var scene = Scene(items: fresh(), center: vec2(0, 0))
+    scene.arrange()
+    print(names(scene.items))
+
+    // Nothing to sort, and one item.
+    var empty: list[int] = []
+    empty.sort()
+    var nobody: list[Enemy] = []
+    nobody.sort_by((e) { e.hp })
+    var one: list[int] = [7]
+    one.sort()
+    print(empty, nobody.len, one)
+
+    // Arrays sort in place.
+    var arr = array[int](5)
+    for i from 0 to 5 {
+        arr[i] = (i * 3) % 5
+    }
+    arr.sort()
+    print(arr)
+    arr.sort_by((n) { -n })
+    print(arr)
+
+    // Lists inside lists.
+    var rows: list[list[int]] = [[3, 1, 2], [9, 8]]
+    rows[1].sort()
+    for row in rows {
+        row.sort()
+    }
+    print(rows)
+
+    // Items that own an Arena are moved, never copied: each is freed once.
+    var pools: list[Pool] = []
+    pools.add(Pool(id: 3))
+    pools.add(Pool(id: 1))
+    pools.add(Pool(id: 2))
+    pools.sort_by((p) { p.id })
+    print(pools.map((p) { p.id }))
+}

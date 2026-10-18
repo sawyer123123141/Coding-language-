@@ -145,7 +145,7 @@ fn list_method_errors() {
         ("main() {\n var l: list[int] = []\n l.pop(1)\n}\n", "`pop` takes no arguments"),
         ("main() {\n var l: list[int] = []\n l.insert(0, true)\n}\n", "expected int, found bool"),
         ("main() {\n var l: list[int] = []\n let b = l.has(true)\n}\n", "expected int, found bool"),
-        ("main() {\n var l: list[int] = []\n l.sort()\n}\n", "`list[int]` has no method `sort`"),
+        ("main() {\n var l: list[int] = []\n l.reverse()\n}\n", "`list[int]` has no method `reverse`"),
         ("main() {\n var a = [1]\n a.remove_at(0)\n}\n", "arrays have a fixed length; use a `list[int]` if items come and go"),
     ];
     for (src, expected) in cases {

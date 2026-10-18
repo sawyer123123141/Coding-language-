@@ -20,6 +20,7 @@ mod matching;
 mod par;
 mod remove;
 mod scopes;
+mod sort;
 mod stmt;
 mod strings;
 mod temps;
@@ -43,6 +44,7 @@ pub fn lower(program: &Program, t: &Tables, lines: &LineIndex) -> Module {
         (0..t.fns.len()).map(|i| FnLowerer::new(program, t, lines, Some(FnId(i as u32)), &mut helpers).lower()).collect();
     let init = consts::lower_init(program, t, lines, &mut helpers);
     funcs.append(&mut helpers.funcs);
+    sort::strip_idle_scratch(&mut funcs, &helpers.sort_idle);
     let elems = t.elems.iter().map(|&e| kty(e)).collect();
     let main = t.main.map(|m| FuncIdx(m.0));
     if let (Some(init), Some(main)) = (init, main) {

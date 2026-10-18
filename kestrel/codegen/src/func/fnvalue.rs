@@ -32,7 +32,7 @@ pub(crate) fn fn_value_sig(sig: &KSig, cc: CallConv, ptr: Type) -> Signature {
 
 impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// The address of function `f`.
-    fn func_address(&mut self, f: FuncIdx) -> Value {
+    pub(crate) fn func_address(&mut self, f: FuncIdx) -> Value {
         let fref = self.module.declare_func_in_func(self.shared.funcs[f.0 as usize], self.b.func);
         self.b.ins().func_addr(self.ptr, fref)
     }

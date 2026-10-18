@@ -29,11 +29,12 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let rt = self.shared.rt;
         let (ptr, len) = self.str_parts(&args[0])?;
         Ok(match op {
-            StrOp::Find | StrOp::Starts | StrOp::Ends => {
+            StrOp::Find | StrOp::Starts | StrOp::Ends | StrOp::Cmp => {
                 let (sub, sub_len) = self.str_parts(&args[1])?;
                 let f = match op {
                     StrOp::Find => rt.str_find,
                     StrOp::Starts => rt.str_starts,
+                    StrOp::Cmp => rt.str_cmp,
                     _ => rt.str_ends,
                 };
                 self.call_id(f, &[ptr, len, sub, sub_len])
@@ -103,7 +104,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 let at = self.shared.kir.payload_offset(el) as i32;
                 self.b.ins().store(MemFlags::trusted(), value, dest, at);
             }
-            StrOp::Chars | StrOp::CharLen | StrOp::Find | StrOp::Starts | StrOp::Ends => unreachable!("{op:?} is a number"),
+            StrOp::Chars | StrOp::CharLen | StrOp::Find | StrOp::Starts | StrOp::Ends | StrOp::Cmp => unreachable!("{op:?} is a number"),
         }
         Ok(())
     }

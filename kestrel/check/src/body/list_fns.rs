@@ -1,17 +1,21 @@
-//! `xs.filter(f)`, `xs.map(f)`, `xs.any(f)` and `xs.all(f)`: the list methods that call a function
-//! for the items. None of them changes `xs`.
+//! `xs.filter(f)`, `xs.map(f)`, `xs.any(f)`, `xs.all(f)`, `xs.sort()` and `xs.sort_by(key)`: the
+//! list methods that call a function for the items, and the sort. The first four don't change `xs`;
+//! the sorts change its order, so they need a variable to sort (as `add` does) and refuse to run
+//! inside a loop over the list.
 //!
 //! `f` is any function value of type `(T) -> bool` (`(T) -> R` for `map`, where `R` is taken from
-//! the function): a literal, a named function, a stored closure or a parameter. A literal
+//! the function, and `pure (T) -> K` for `sort_by`, whose key is a number, string or bool): a
+//! literal, a named function, a stored closure or a parameter. A literal
 //! that is directly the argument gets a stack environment, like one passed to a user function
 //! (`Tables::stack_closures`), so the call exclusivity rule applies to it. In a `pure` function
 //! or a `par for` body the function must be pure: a literal is checked by its frame, and any
-//! other function value must have a `pure` type.
+//! other function value must have a `pure` type. A sort key must be pure wherever it is.
 
 use kestrel_syntax::ast::{Arg, Expr, ExprKind};
 use kestrel_syntax::Span;
 
 use super::closure::Impure;
+use super::exclusive::CalleePlace;
 use super::fnvalue::shown_callee;
 use super::lists::written;
 use super::BodyChecker;
@@ -26,6 +30,7 @@ fn word(method: ListMethod) -> &'static str {
         ListMethod::Map => "map",
         ListMethod::Any => "any",
         ListMethod::All => "all",
+        ListMethod::SortBy => "sort_by",
         other => unreachable!("`{other:?}` takes no function"),
     }
 }
@@ -52,11 +57,17 @@ impl<'a> BodyChecker<'a> {
         let literal = matches!(f.kind, ExprKind::Closure(_));
         // The function takes an item, read-only. `map` leaves the result open: it is the closure's.
         let item = SigParam { ty: elem, is_var: false };
-        let result = if method == ListMethod::Map { Ty::Error } else { Ty::Bool };
-        let want = Ty::Fn(self.t.intern_sig(Sig { params: vec![item], ret: result, is_pure: false }));
+        // `map` and `sort_by` take the result type from the function.
+        let open = matches!(method, ListMethod::Map | ListMethod::SortBy);
+        let result = if open { Ty::Error } else { Ty::Bool };
+        let sorting = method == ListMethod::SortBy;
+        let want = Ty::Fn(self.t.intern_sig(Sig { params: vec![item], ret: result, is_pure: sorting }));
         self.note_stack_closure(&args[0]);
-        let found = if method == ListMethod::Map {
+        let found = if open {
             self.infer_result = literal;
+            if literal && sorting {
+                self.arg_name = Some(name.to_string());
+            }
             let found = self.check_expr(f, Some(want));
             self.reject_never(f, found)
         } else {
@@ -64,7 +75,7 @@ impl<'a> BodyChecker<'a> {
             self.t.ty(f.id)
         };
         let given = match method {
-            ListMethod::Map => match self.map_result(f, found, item, elem, literal) {
+            ListMethod::Map | ListMethod::SortBy => match self.fn_result(name, f, found, item, elem, literal) {
                 Some(r) => Some(r),
                 None => return Ty::Error,
             },
@@ -72,6 +83,8 @@ impl<'a> BodyChecker<'a> {
         };
         // What the function does must suit the code around.
         match found {
+            // (A key that isn't pure was refused with the literal, or is refused below.)
+            Ty::Fn(_) if sorting => {}
             Ty::Fn(_) if literal => {
                 if !self.t.closures.get(&f.id).is_some_and(|c| c.is_pure) {
                     let shown = format!("the closure passed to `{name}`");
@@ -83,12 +96,18 @@ impl<'a> BodyChecker<'a> {
             _ => {}
         }
         // The function runs while `xs` is read, so it can't be given anything the call changes.
-        let changes = self.call_changes(args, Some((receiver, false)));
-        self.check_call_captures(e.span, args, &changes, None);
+        let changes = self.call_changes(args, Some((receiver, sorting)));
+        let mut callee = None;
+        if sorting && !literal {
+            callee = self.key_place(f);
+            self.check_key_purity(f, found);
+        }
+        self.check_call_captures(e.span, args, &changes, callee);
         if refused {
             return Ty::Error;
         }
         match method {
+            ListMethod::SortBy => Ty::Unit,
             ListMethod::Filter => Ty::List(self.t.intern_elem(elem)),
             ListMethod::Map => Ty::List(self.t.intern_elem(given.expect("map has a result"))),
             _ => Ty::Bool,
@@ -113,31 +132,94 @@ impl<'a> BodyChecker<'a> {
         }
     }
 
-    /// The type of the items `map`'s function `f` (of type `found`) gives, or `None` after
-    /// reporting why it can't be used.
-    fn map_result(&mut self, f: &Expr, found: Ty, item: SigParam, elem: Ty, literal: bool) -> Option<Ty> {
+    /// The type of the items `map`'s function `f` (of type `found`) gives, or of the keys
+    /// `sort_by`'s gives, or `None` after reporting why it can't be used.
+    fn fn_result(&mut self, name: &str, f: &Expr, found: Ty, item: SigParam, elem: Ty, literal: bool) -> Option<Ty> {
+        let sorting = name == "sort_by";
+        let gives = if sorting { "a number, string or bool" } else { "a value" };
         let Ty::Fn(id) = found else {
             if found != Ty::Error {
-                let msg = format!("`map` needs a function that takes `{}` and gives a value, found {}", self.tn(elem), self.tn(found));
+                let msg = format!("`{name}` needs a function that takes `{}` and gives {gives}, found {}", self.tn(elem), self.tn(found));
                 self.error(f.span, msg);
             }
             return None;
         };
         let sig = self.t.sig(id).clone();
         if sig.params != [item] {
-            let msg = format!("`map` needs a function that takes `{}`, found `{}`", self.tn(elem), self.t.sig_name(id));
+            let msg = format!("`{name}` needs a function that takes `{}`, found `{}`", self.tn(elem), self.t.sig_name(id));
             self.error(f.span, msg);
             return None;
         }
         match sig.ret {
+            // Said already.
+            Ty::Error => None,
+            Ty::Unit if sorting => {
+                self.error(f.span, "`sort_by` needs a key that is a number, string or bool; this one gives nothing");
+                None
+            }
             Ty::Unit => {
                 let what = if literal { "closure" } else { "function" };
                 self.error(f.span, format!("`map` needs a {what} that gives a value"));
                 None
             }
-            // Said already.
-            Ty::Error => None,
+            ret if sorting && !sortable(ret) => {
+                let msg = format!("`sort_by` needs a key that is a number, string or bool; this one gives `{}`", self.tn(ret));
+                self.error(f.span, msg);
+                None
+            }
             ret => Some(ret),
         }
     }
+
+    /// The place a `sort_by` key that isn't a literal is read from, if it is read from one.
+    fn key_place(&self, f: &Expr) -> Option<CalleePlace> {
+        if matches!(self.t.res.get(&f.id), Some(Res::FnValue(_))) {
+            return None;
+        }
+        Some(CalleePlace { key: self.source_key(f)?, shown: shown_callee(f) })
+    }
+
+    /// A key that isn't a literal must be a pure function: sorting calls it about twice per
+    /// comparison, in no promised order.
+    fn check_key_purity(&mut self, f: &Expr, found: Ty) {
+        let Ty::Fn(sig) = found else { return };
+        if self.t.sig(sig).is_pure {
+            return;
+        }
+        let shown = shown_callee(f);
+        if matches!(self.t.res.get(&f.id), Some(Res::FnValue(_))) {
+            let msg = format!("`{shown}` isn't `pure`, but `sort_by` needs a pure function");
+            self.error_help(f.span, msg, format!("declare it as `pure {shown}(...)`"));
+        } else {
+            let msg = format!("`{shown}` isn't a pure function type, but `sort_by` needs a pure one");
+            self.error_help(f.span, msg, format!("give it the type `pure {}`", self.t.sig_name(sig)));
+        }
+    }
+
+    /// `xs.sort()` and `xs.sort_by(key)`: `xs` changes order, so it needs a variable, and no loop
+    /// over it (or over a list holding it) may be running.
+    pub(super) fn list_sort(&mut self, e: &Expr, receiver: &Expr, recv_ty: Ty, method: ListMethod, name_span: Span, args: &[Arg]) -> Ty {
+        let name = if method == ListMethod::Sort { "sort" } else { "sort_by" };
+        if self.receiver_root(receiver, name).is_some() {
+            if let Some(i) = self.overlapping_loop(receiver) {
+                let list = self.loop_list_name(i);
+                self.error(e.span, format!("can't sort `{list}` while looping over it; sort it after the loop"));
+            }
+        }
+        if method == ListMethod::SortBy {
+            return self.list_fn(e, receiver, recv_ty, method, name_span, args);
+        }
+        let elem = self.elem_of(recv_ty).expect("a collection type");
+        if !(sortable(elem) || elem == Ty::Error) {
+            let msg = format!("`sort` needs numbers, strings or bools; `{}` holds `{}`; use `sort_by` with a key", self.tn(recv_ty), self.tn(elem));
+            self.error(name_span, msg);
+            return Ty::Error;
+        }
+        Ty::Unit
+    }
+}
+
+/// Whether values of type `ty` have a sort order: numbers, strings and bools.
+fn sortable(ty: Ty) -> bool {
+    ty.is_numeric() || matches!(ty, Ty::Bool | Ty::Str)
 }

@@ -88,3 +88,17 @@ fn the_list_methods_allocate_nothing_for_a_literal_and_what_an_arena_block_frees
     let many = arena_bytes(&build("list_fns_100000", &list_fns(100_000)), "6");
     assert_eq!(few, many, "100,000 calls should take no more memory than 10");
 }
+
+/// A program that sorts a list by a key that builds a string (`lower()`) `n` times in `main`.
+fn sorts(n: u32) -> String {
+    format!(
+        "struct Enemy {{\n    name: string\n}}\n\nmain() {{\n    var enemies: list[Enemy] = []\n    for name in [\"Delta\", \"alpha\", \"Charlie\", \"bravo\", \"Echo\", \"foxtrot\", \"Golf\", \"hotel\"] {{\n        enemies.add(Enemy(name: name))\n    }}\n    for i from 0 to {n} {{\n        enemies.sort_by((e) {{ e.name.lower() }})\n    }}\n    print(enemies[0].name, enemies[7].name)\n}}\n"
+    )
+}
+
+#[test]
+fn sorting_by_a_key_that_builds_strings_frees_them_after_each_comparison() {
+    let few = arena_bytes(&build("sorts_10", &sorts(10)), "alpha hotel");
+    let many = arena_bytes(&build("sorts_1000", &sorts(1_000)), "alpha hotel");
+    assert_eq!(few, many, "1,000 sorts should take no more memory than 10");
+}

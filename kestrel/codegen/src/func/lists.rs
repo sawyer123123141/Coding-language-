@@ -1,10 +1,10 @@
-//! Removing, inserting and clearing list items, and compacting a list after a loop that removes
-//! some (`Stmt::List`); and setting a list's length (`Stmt::SetLen`).
+//! Removing, inserting and clearing list items, compacting a list after a loop that removes
+//! some, and sorting (`Stmt::List`); and setting a list's length (`Stmt::SetLen`).
 //! The runtime moves the items; the list's header is `{ptr, len, cap, arena}` (see `collections`).
 
-use cranelift_codegen::ir::{types, InstBuilder};
+use cranelift_codegen::ir::{types, InstBuilder, MemFlags};
 use cranelift_module::Module;
-use kestrel_kir::{self as kir, Place};
+use kestrel_kir::{self as kir, ExprKind, KTy, Place};
 
 use super::collections::LEN;
 use super::FuncLowerer;
@@ -21,6 +21,9 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             let size_v = self.b.ins().iconst(types::I64, size);
             self.call_id(self.shared.rt.list_clear, &[header, size_v]);
             return Ok(());
+        }
+        if op == kir::ListOp::Sort {
+            return self.sort_items(list, args, size);
         }
         if op == kir::ListOp::Compact {
             let kept = self.expr(&args[0])?;
@@ -39,7 +42,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 let header = self.place_addr(list)?;
                 self.call_id(self.shared.rt.list_remove, &[header, at, size_v, l, f]);
             }
-            kir::ListOp::Clear | kir::ListOp::Compact => unreachable!("handled above"),
+            kir::ListOp::Clear | kir::ListOp::Compact | kir::ListOp::Sort => unreachable!("handled above"),
             kir::ListOp::Insert => {
                 let value = &args[1];
                 let v = if value.ty.is_aggregate() {
@@ -59,6 +62,28 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// `Sort`: the runtime sorts the items in place by the generated compare function `args[0]`,
+    /// which gets as its environment word the address of a copy of the function value `args[1]`
+    /// (kept in this function's frame until the sort is done), or 0 without one.
+    fn sort_items(&mut self, list: &Place, args: &[kir::Expr], size: i64) -> Result<(), String> {
+        let ExprKind::FnRef(compare) = &args[0].kind else { unreachable!("the compare function is a `FnRef`") };
+        let compare = self.func_address(*compare);
+        let env = match args.get(1) {
+            Some(key) => {
+                let slot = self.temp_addr(KTy::Fn);
+                self.lower_into(key, slot)?;
+                slot
+            }
+            None => self.b.ins().iconst(self.ptr, 0),
+        };
+        let header = self.place_addr(list)?;
+        let items = self.b.ins().load(self.ptr, MemFlags::trusted(), header, 0);
+        let len = self.b.ins().load(types::I64, MemFlags::trusted(), header, LEN);
+        let size = self.b.ins().iconst(types::I64, size);
+        self.call_id(self.shared.rt.sort, &[items, len, size, compare, env]);
         Ok(())
     }
 
