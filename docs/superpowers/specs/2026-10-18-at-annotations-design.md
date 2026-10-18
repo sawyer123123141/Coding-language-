@@ -54,7 +54,7 @@ Each contract is decided by Kestrel's own KIR analyses after inlining and the ex
 `@assume(cond)` tells the analysis a comparison it can use: `@assume(n <= grid.len)` lets it drop the bounds checks of `grid[i]` for `i` below `n`.
 
 - `cond` is limited to comparisons the analysis uses: `<`, `<=`, `>`, `>=`, `==`, `!=` between integer expressions and `.len`, joined with `and`.
-- **It holds from where it is written until any variable in it changes** (an assignment, a `var` argument, or a change to a list's length, like `grid.pop()`) or its block ends.
+- **It holds from where it is written until any variable in it changes** (an assignment, a `var` argument, or a change to a list's length, like `grid.pop()`) on any path, loop back edges included, or its block ends. So an assumption before a loop whose body pops from `grid` doesn't hold in the loop.
 - With checks on, it is checked where it is written (a failure is a runtime error: "assumption `n <= grid.len` is false on line 12 of f.kes").
 - **Under `--release`** an assumption that only removes arithmetic checks is trusted and not checked. **An assumption never removes a bounds check unchecked:** if the analysis uses it for a bounds check, the assumption stays one check where it is written, even under `--release` (one check instead of one per iteration). So `@assume` can't make a program read outside a list.
 - A warning when it removes nothing: "`@assume(n <= grid.len)` removes no check; delete it".
