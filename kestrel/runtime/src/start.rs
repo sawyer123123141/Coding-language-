@@ -29,10 +29,24 @@ fn arena_report(setting: Option<&str>, bytes: impl FnOnce() -> usize) -> Option<
     (setting == Some("1")).then(|| format!("kestrel: program arena {} bytes", bytes()))
 }
 
+/// Whether `KESTREL_POISON` asks for poisoning: only "1" does. Freed arena blocks are then filled
+/// with 0xDB and never reused, so the test suite shows a use of freed memory as garbage.
+fn poison_setting(setting: Option<&str>) -> bool {
+    setting == Some("1")
+}
+
 /// Runs a compiled Kestrel `main` on a large stack, then flushes output.
-/// Returns the exit code.
+/// Returns the exit code. `KESTREL_POISON` is read here, once, before `entry` runs.
 #[no_mangle]
 pub extern "C" fn kestrel_rt_start(entry: extern "C" fn()) -> i32 {
+    start_with(entry, poison_setting(std::env::var("KESTREL_POISON").ok().as_deref()))
+}
+
+/// `kestrel_rt_start` with the poison setting given, not read from the environment (the process
+/// environment is shared by every thread of a test process; this isn't). The setting is
+/// process-wide: arenas made from now on follow it.
+pub fn start_with(entry: extern "C" fn(), poison: bool) -> i32 {
+    crate::blocks::set_poison(poison);
     match std::thread::Builder::new().stack_size(STACK_SIZE).spawn(move || run_entry(entry)) {
         Ok(thread) => {
             // A panic in the runtime itself (not a Kestrel panic, which exits directly).
@@ -52,7 +66,7 @@ pub extern "C" fn kestrel_rt_start(entry: extern "C" fn()) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{arena_count_report, arena_report, kestrel_rt_start};
+    use super::{arena_count_report, arena_report, kestrel_rt_start, poison_setting};
     use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]
@@ -76,6 +90,14 @@ mod tests {
         assert_eq!(arena_count_report(Some("1"), || 3).as_deref(), Some("arenas alive at exit: 3"));
         for setting in [None, Some("0"), Some("true")] {
             assert_eq!(arena_count_report(setting, || panic!("counted with {setting:?}")), None);
+        }
+    }
+
+    #[test]
+    fn poisoning_is_on_only_for_one() {
+        assert!(poison_setting(Some("1")));
+        for setting in [None, Some("0"), Some("true"), Some("")] {
+            assert!(!poison_setting(setting), "{setting:?}");
         }
     }
 

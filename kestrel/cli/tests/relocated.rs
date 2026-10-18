@@ -71,7 +71,7 @@ fn copied_binary_uses_the_window_library_next_to_it() {
     let out = build_window_program(&kestrel, &dir);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let exe = dir.join(format!("builtin_modules{}", std::env::consts::EXE_SUFFIX));
-    let run = Command::new(exe).output().unwrap();
+    let run = Command::new(exe).env("KESTREL_POISON", "1").output().unwrap();
     assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
 }
 

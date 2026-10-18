@@ -17,3 +17,6 @@ kestrel-window.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 find-msvc-tools.workspace = true
+
+[dev-dependencies]
+kestrel-runtime.workspace = true

@@ -5,6 +5,7 @@
 
 use std::alloc::{alloc, dealloc, handle_alloc_error, Layout};
 use std::cell::RefCell;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// At most this many bytes of spare blocks are kept per thread.
 const KEEP: usize = 256 * 1024 * 1024;
@@ -25,6 +26,20 @@ impl Drop for Spares {
 
 thread_local! {
     static SPARES: RefCell<Spares> = const { RefCell::new(Spares { blocks: Vec::new(), bytes: 0 }) };
+}
+
+/// The byte poisoned memory is filled with.
+pub(crate) const POISON_BYTE: u8 = 0xDB;
+
+/// Whether arenas made now poison what they free: set once at start from `KESTREL_POISON`.
+static POISON: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn set_poison(on: bool) {
+    POISON.store(on, Ordering::Relaxed);
+}
+
+pub(crate) fn poison_enabled() -> bool {
+    POISON.load(Ordering::Relaxed)
 }
 
 /// A block of at least `size` bytes aligned to `align`, and its real
@@ -71,4 +86,12 @@ pub(crate) fn give(p: *mut u8, layout: Layout) {
         // SAFETY: `p` was allocated with `layout` (by `take`).
         unsafe { dealloc(p, layout) };
     }
+}
+
+/// Retires a block an arena freed while poisoning is on: fills it with `POISON_BYTE` and leaves it
+/// allocated for good. It isn't reused, and it isn't returned to the allocator either, so a read
+/// of it through a dangling pointer sees poison instead of crashing or seeing a new owner's data.
+pub(crate) fn poison(p: *mut u8, layout: Layout) {
+    // SAFETY: `p` was allocated by `take` with room for `layout.size()` bytes, and nothing owns it now.
+    unsafe { std::ptr::write_bytes(p, POISON_BYTE, layout.size()) };
 }

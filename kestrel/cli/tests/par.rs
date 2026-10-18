@@ -5,7 +5,7 @@ use std::process::Command;
 fn run(file: &str, threads: Option<&str>) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/programs").join(file);
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_kestrel"));
-    cmd.arg("run").arg(&path);
+    cmd.arg("run").arg(&path).env("KESTREL_POISON", "1");
     match threads {
         Some(t) => cmd.env("KESTREL_THREADS", t),
         None => cmd.env_remove("KESTREL_THREADS"),

@@ -117,7 +117,7 @@ fn runtime_errors_report_the_line_and_their_own_file() {
     let exe = dir.join("main_runtime.exe");
     let built = kestrel(&["build", "-o", exe.to_str().unwrap()], &dir.join("main.kes"));
     assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
-    let run = std::process::Command::new(&exe).output().expect("run the built program");
+    let run = std::process::Command::new(&exe).env("KESTREL_POISON", "1").output().expect("run the built program");
     assert_eq!(run.status.code(), Some(101));
     let err = String::from_utf8_lossy(&run.stderr);
     assert!(err.contains(want), "{err}");

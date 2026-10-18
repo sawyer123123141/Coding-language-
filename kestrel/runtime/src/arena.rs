@@ -19,6 +19,8 @@ pub struct Arena {
     /// lists and maps point at them, so they must never move.
     #[allow(clippy::vec_box)]
     children: Vec<Box<Arena>>,
+    /// Whether dropping this arena poisons its blocks (see `blocks::poison`) instead of recycling them.
+    poison: bool,
 }
 
 impl Default for Arena {
@@ -28,8 +30,14 @@ impl Default for Arena {
 }
 
 impl Arena {
+    /// A new arena that poisons its freed blocks if `KESTREL_POISON=1` was set at start.
     pub fn new() -> Self {
-        Arena { blocks: Vec::new(), next: 0, end: 0, children: Vec::new() }
+        Self::with_poison(blocks::poison_enabled())
+    }
+
+    /// A new arena that poisons its freed blocks (or recycles them), whatever the setting.
+    pub fn with_poison(poison: bool) -> Self {
+        Arena { blocks: Vec::new(), next: 0, end: 0, children: Vec::new(), poison }
     }
 
     /// `size` zeroed bytes aligned to `align` (a power of two).
@@ -90,7 +98,11 @@ impl Arena {
 impl Drop for Arena {
     fn drop(&mut self) {
         for (p, layout) in self.blocks.drain(..) {
-            blocks::give(p, layout);
+            if self.poison {
+                blocks::poison(p, layout);
+            } else {
+                blocks::give(p, layout);
+            }
         }
     }
 }
@@ -287,17 +299,53 @@ mod tests {
     #[test]
     fn freed_blocks_are_reused_and_still_come_back_zeroed() {
         let first = {
-            let mut a = Arena::new();
+            let mut a = Arena::with_poison(false);
             let p = a.alloc(BLOCK, 16);
             // SAFETY: `p` holds `BLOCK` bytes.
             unsafe { std::ptr::write_bytes(p, 0xAB, BLOCK) };
             p
         };
-        let mut b = Arena::new();
+        let mut b = Arena::with_poison(false);
         let q = b.alloc(BLOCK, 16);
         assert_eq!(q, first, "the freed block is reused");
         // SAFETY: `q` holds `BLOCK` bytes.
         assert!(unsafe { std::slice::from_raw_parts(q, BLOCK) }.iter().all(|&x| x == 0));
+    }
+
+    #[test]
+    fn a_poisoned_arena_fills_its_freed_blocks_with_db_and_keeps_them() {
+        let (p, big) = {
+            let mut a = Arena::with_poison(true);
+            let p = a.alloc(100, 1);
+            // SAFETY: `p` holds 100 bytes.
+            unsafe { std::ptr::write_bytes(p, 1, 100) };
+            let big = a.alloc(BLOCK * 2, 16);
+            // SAFETY: `big` holds `BLOCK * 2` bytes.
+            unsafe { std::ptr::write_bytes(big, 1, BLOCK * 2) };
+            (p, big)
+        };
+        // SAFETY: a poisoned arena leaves its blocks allocated, so they can still be read.
+        unsafe {
+            assert!(std::slice::from_raw_parts(p, 100).iter().all(|&x| x == 0xDB), "the small block is poisoned");
+            assert!(std::slice::from_raw_parts(big, BLOCK * 2).iter().all(|&x| x == 0xDB), "and the big one");
+        }
+        // And neither goes to the next arena, poisoned or not.
+        for poison in [true, false] {
+            let mut b = Arena::with_poison(poison);
+            let (q, r) = (b.alloc(100, 1), b.alloc(BLOCK * 2, 16));
+            assert_ne!(q, p);
+            assert_ne!(r, big);
+        }
+    }
+
+    #[test]
+    fn a_poisoned_arena_counts_its_bytes_like_any_other() {
+        let (mut poisoned, mut plain) = (Arena::with_poison(true), Arena::with_poison(false));
+        for a in [&mut poisoned, &mut plain] {
+            a.alloc(10, 1);
+            a.alloc(BLOCK * 2, 16);
+        }
+        assert_eq!(poisoned.bytes(), plain.bytes());
     }
 
     #[test]
