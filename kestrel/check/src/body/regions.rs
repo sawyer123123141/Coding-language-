@@ -2,9 +2,8 @@
 //! such a value may be stored. Moves are in `moves`.
 
 use kestrel_syntax::ast::{Block, Expr, ExprKind, Stmt};
-use kestrel_syntax::Span;
 
-use super::{BodyChecker, Expect};
+use super::BodyChecker;
 use crate::tables::{ListMethod, LocalId, Res};
 use crate::ty::Ty;
 
@@ -29,7 +28,7 @@ pub(crate) enum Ctx {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct PathKey {
     pub(crate) root: LocalId,
-    steps: Vec<Option<String>>,
+    pub(super) steps: Vec<Option<String>>,
 }
 
 impl PathKey {
@@ -273,94 +272,6 @@ impl<'a> BodyChecker<'a> {
                 return self.error_help(value.span, msg, help);
             }
         }
-    }
-
-    /// `in x.mem { }`: allocations inside belong to `x`.
-    pub(crate) fn check_in(&mut self, arena: &Expr, body: &Block) -> Ty {
-        let ty = self.check_expr(arena, None);
-        let owner = match &arena.kind {
-            ExprKind::Field { base, .. } => self.path_key(base),
-            _ => self.path_key(arena),
-        };
-        let ctx = match (ty, owner) {
-            (Ty::Arena, Some(p)) => {
-                self.check_changeable_arena(arena);
-                self.check_par_write(arena);
-                Some(Ctx::Owned(p))
-            }
-            (Ty::Arena, None) => {
-                self.error(arena.span, "`in` needs an arena stored in a variable or field");
-                None
-            }
-            (Ty::Error, _) => None,
-            (other, _) => {
-                let msg = format!("`in` needs an `Arena`, like `in self.mem {{ }}`; found {}", self.tn(other));
-                self.error(arena.span, msg);
-                None
-            }
-        };
-        let pushed = ctx.is_some();
-        self.ctxs.extend(ctx);
-        let ty = self.check_block(body, Expect::Discard);
-        if pushed {
-            self.ctxs.pop();
-        }
-        if ty == Ty::Never {
-            Ty::Never
-        } else {
-            Ty::Unit
-        }
-    }
-
-    /// Allocating into an arena changes it, so its owner must be changeable.
-    fn check_changeable_arena(&mut self, arena: &Expr) {
-        let Some(root) = self.place_root(arena) else { return };
-        let name = self.t.local(root).name.clone();
-        let help = match self.immutable(root) {
-            None => return self.mark_changed(root),
-            Some(super::place::Immutable::Let) => format!("declare `{name}` with `var`"),
-            Some(_) => format!("take `{name}` as a `var` parameter"),
-        };
-        self.error_help(arena.span, format!("`in` allocates into this arena, so `{name}` must be changeable"), help);
-    }
-
-    /// While a `match` arm's binding reads from a place, nothing may change
-    /// that place (or anything holding it) except through the binding:
-    /// the binding would then read a different variant's fields.
-    pub(crate) fn check_not_matched(&mut self, target: &Expr) {
-        let Some(root) = self.place_root(target) else { return };
-        let Some(path) = self.path_key(target) else { return };
-        if let Some(binding) = self.matched_by(root, &path) {
-            let name = self.t.local(root).name.clone();
-            self.matched_error(target.span, &name, binding);
-        }
-    }
-
-    /// The binding of a `match` arm that is reading from the place `path` (whose variable, aliases
-    /// followed, is `root`), or from a place that holds it.
-    pub(crate) fn matched_by(&self, root: LocalId, path: &PathKey) -> Option<LocalId> {
-        let g = self.match_guards.iter().find(|g| {
-            path.root != g.binding
-                && root == g.root
-                && match &g.path {
-                    Some(s) if s.root == path.root => {
-                        path.steps.len() <= s.steps.len()
-                            && path.steps.iter().zip(&s.steps).all(|(a, b)| a.is_none() || b.is_none() || a == b)
-                    }
-                    _ => true,
-                }
-        })?;
-        Some(g.binding)
-    }
-
-    /// Changing `name` at `span` would change what `binding`, a `match` arm's binding, reads.
-    pub(crate) fn matched_error(&mut self, span: Span, name: &str, binding: LocalId) {
-        let binding = self.t.local(binding).name.clone();
-        self.error_help(
-            span,
-            format!("can't change `{name}` here: this `match` arm's `{binding}` reads from it"),
-            format!("change it after the `match`, or copy what you need out of `{binding}` first"),
-        );
     }
 
     /// A returned value can only point into the caller's memory.

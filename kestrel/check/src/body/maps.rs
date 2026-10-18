@@ -7,7 +7,7 @@ use kestrel_syntax::ast::{Arg, AssignOp, Binding, Block, Expr, ExprKind, TypeExp
 use kestrel_syntax::Span;
 
 use super::BodyChecker;
-use crate::collect::{map_ty, resolve_type};
+use crate::collect_ty::{map_ty, resolve_type};
 use crate::tables::Res;
 use crate::ty::Ty;
 

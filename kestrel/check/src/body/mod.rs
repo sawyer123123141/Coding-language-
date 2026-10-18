@@ -1,3 +1,4 @@
+mod args;
 mod builtins;
 mod call;
 mod collections;
@@ -6,15 +7,20 @@ mod default_cycles;
 mod enums;
 mod expr;
 mod let_else;
+mod in_block;
 mod lists;
 mod maps;
+mod match_guard;
 mod matching;
 mod moves;
 mod nested;
 mod par;
+mod ops;
 mod place;
+mod pop_owner;
 mod regions;
 mod remove;
+mod stmt;
 mod strings;
 mod structs;
 
@@ -24,10 +30,9 @@ pub(crate) use structs::check_field_defaults;
 
 use std::collections::{HashMap, HashSet};
 
-use kestrel_syntax::ast::{Binding, Block, Expr, ExprId, ExprKind, Program, Stmt};
+use kestrel_syntax::ast::{Binding, Expr, ExprId, Program, Stmt};
 use kestrel_syntax::{Diagnostic, Span};
 
-use crate::collect::resolve_type;
 use crate::tables::{FnId, LocalId, LocalInfo, Tables};
 use crate::ty::Ty;
 
@@ -253,146 +258,6 @@ impl<'a> BodyChecker<'a> {
             self.error_help(e.span, msg, format!("convert it explicitly: `{}(...)`", to.name()));
         } else {
             self.error(e.span, msg);
-        }
-    }
-
-    pub(crate) fn check_block(&mut self, block: &Block, expect: Expect) -> Ty {
-        self.scopes.push(HashMap::new());
-        let mut ty = Ty::Unit;
-        let last = block.stmts.len().saturating_sub(1);
-        for (i, stmt) in block.stmts.iter().enumerate() {
-            ty = match (stmt, expect) {
-                (Stmt::Expr(e), Expect::Value(want)) if i == last => self.check_tail(e, want),
-                _ => self.check_stmt(stmt),
-            };
-        }
-        self.scopes.pop();
-        // The block's `let ... else` views end with it.
-        let depth = self.scopes.len();
-        self.let_guards.retain(|g| g.depth <= depth);
-        ty
-    }
-
-    /// Checks a statement; returns `Never` when control can't continue past it.
-    fn check_stmt(&mut self, s: &Stmt) -> Ty {
-        match s {
-            Stmt::Let { is_var, bind, ty, value, else_block: Some(otherwise), .. } => {
-                self.check_let_else(*is_var, bind, ty.as_ref(), value, otherwise);
-                Ty::Unit
-            }
-            Stmt::Let { is_var, bind, ty, value, .. } => {
-                let ann = ty.as_ref().map(|t| resolve_type(t, self.t, self.diags));
-                let mut local_ty = self.check_value(value, ann);
-                if matches!(local_ty, Ty::Unit | Ty::Never) {
-                    self.error(value.span, "this expression has no value to store");
-                    local_ty = Ty::Error;
-                }
-                self.consume(value);
-                self.declare(bind, local_ty, *is_var, false, false);
-                Ty::Unit
-            }
-            Stmt::Assign { target, op, value, .. } => {
-                self.check_assign(target, *op, value);
-                Ty::Unit
-            }
-            Stmt::While { cond, body, .. } => {
-                // The condition runs each time around, so the loop starts before it.
-                let entry = self.moved.clone();
-                self.check_value(cond, Some(Ty::Bool));
-                let forever = matches!(cond.kind, ExprKind::Bool(true));
-                // The loop ends when the condition is false, after it has run (and moved what it moves).
-                let after_cond = if forever { None } else { Some(self.moved.clone()) };
-                let broke = self.loop_body(entry, after_cond, body);
-                // `while true` with no `break` can only be left by `return`.
-                if forever && !broke {
-                    Ty::Never
-                } else {
-                    Ty::Unit
-                }
-            }
-            Stmt::ForRange { var, start, end, body, .. } => {
-                let st = self.check_expr(start, None);
-                let st = self.reject_never(start, st);
-                let et = self.check_expr(end, if st.is_int() { Some(st) } else { None });
-                let et = self.reject_never(end, et);
-                let var_ty = match Ty::common(st, et) {
-                    _ if st == Ty::Error || et == Ty::Error => Ty::Error,
-                    Some(t) if t.is_int() => {
-                        self.coerce(start, st, t);
-                        self.coerce(end, et, t);
-                        t
-                    }
-                    _ => {
-                        let msg = format!("`for ... from ... to` needs integers, found {} and {}", self.tn(st), self.tn(et));
-                        self.error(start.span.to(end.span), msg);
-                        Ty::Error
-                    }
-                };
-                self.scopes.push(HashMap::new());
-                self.declare(var, var_ty, false, false, false);
-                let entry = self.moved.clone();
-                self.loop_body(entry.clone(), Some(entry), body);
-                self.scopes.pop();
-                Ty::Unit
-            }
-            Stmt::ForIn { par, index, var, iter, body, .. } => {
-                self.check_for_in(*par, index.as_ref(), var, iter, body);
-                Ty::Unit
-            }
-            // A block that always leaves (say, ends in `return`) never finishes.
-            Stmt::Arena { body, .. } => {
-                self.ctxs.push(regions::Ctx::Scoped);
-                let ty = self.check_block(body, Expect::Discard);
-                self.ctxs.pop();
-                if ty == Ty::Never { Ty::Never } else { Ty::Unit }
-            }
-            Stmt::In { arena, body, .. } => self.check_in(arena, body),
-            Stmt::Break(span) | Stmt::Continue(span) => {
-                let is_break = matches!(s, Stmt::Break(_));
-                if is_break && self.par.last().is_some_and(|p| p.depth == self.loop_breaks.len()) {
-                    self.error(*span, "`break` can't stop a `par for`: iterations run at the same time");
-                }
-                match self.loop_breaks.last_mut() {
-                    Some(broke) => *broke |= is_break,
-                    None => {
-                        let word = if is_break { "break" } else { "continue" };
-                        self.error(*span, format!("`{word}` outside a loop"));
-                    }
-                }
-                if is_break {
-                    self.note_break();
-                } else {
-                    self.back_edge();
-                }
-                Ty::Never
-            }
-            Stmt::Return { value, span } => {
-                if !self.par.is_empty() {
-                    self.error(*span, "`return` can't leave a `par for` body");
-                }
-                match (value, self.ret) {
-                    (Some(v), Ty::Unit) => {
-                        self.check_expr(v, None);
-                        self.error(v.span, "this function doesn't return a value");
-                    }
-                    (Some(v), r) => {
-                        self.check_value(v, Some(r));
-                        self.consume(v);
-                        self.check_return_region(v);
-                    }
-                    (None, Ty::Unit | Ty::Error) => {}
-                    (None, r) => {
-                        let msg = format!("this function must return {}", self.tn(r));
-                        self.error(*span, msg);
-                    }
-                }
-                Ty::Never
-            }
-            Stmt::Remove { name, name_span, span } => {
-                self.check_remove(name, *name_span, *span);
-                Ty::Unit
-            }
-            Stmt::Expr(e) => self.check_discarded(e),
         }
     }
 }

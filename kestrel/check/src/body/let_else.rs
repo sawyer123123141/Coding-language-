@@ -4,7 +4,7 @@
 use kestrel_syntax::ast::{Binding, Block, Expr, ExprKind, TypeExpr};
 
 use super::{BodyChecker, Expect};
-use crate::collect::resolve_type;
+use crate::collect_ty::resolve_type;
 use crate::tables::{LocalId, Res};
 use crate::ty::Ty;
 

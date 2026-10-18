@@ -12,11 +12,11 @@ mod math;
 mod par;
 mod place;
 mod print;
+mod stmt;
 mod strings;
 
 use std::collections::HashMap;
 
-use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::{
     types, AbiParam, Block, Function, InstBuilder, Signature, StackSlot, StackSlotData, StackSlotKind, TrapCode,
     Type, Value,
@@ -24,7 +24,7 @@ use cranelift_codegen::ir::{
 use cranelift_codegen::isa::CallConv;
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_module::{DataId, FuncId, Module};
-use kestrel_kir::{self as kir, KTy, LocalIdx, LocalKind, Place};
+use kestrel_kir::{self as kir, KTy, LocalIdx, LocalKind};
 
 use crate::rt::RtFuncs;
 use crate::Options;
@@ -189,158 +189,5 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     pub(crate) fn temp_addr(&mut self, ty: KTy) -> Value {
         let ss = stack_slot(&mut self.b, self.shared.kir, ty);
         self.b.ins().stack_addr(self.ptr, ss, 0)
-    }
-
-    /// Lowers statements; returns whether control can reach the end.
-    fn stmts(&mut self, list: &[kir::Stmt]) -> Result<bool, String> {
-        for s in list {
-            if !self.stmt(s)? {
-                return Ok(false);
-            }
-        }
-        Ok(true)
-    }
-
-    fn stmt(&mut self, s: &kir::Stmt) -> Result<bool, String> {
-        match s {
-            kir::Stmt::Let(l, e) => {
-                if e.ty.is_aggregate() {
-                    let dest = self.place_addr(&Place::local(*l))?;
-                    self.lower_into(e, dest)?;
-                } else {
-                    let v = self.expr(e)?;
-                    self.store_place(&Place::local(*l), v)?;
-                }
-            }
-            kir::Stmt::Assign(p, e) => self.assign(p, e)?,
-            kir::Stmt::If { cond, then_body, else_body } => return self.if_stmt(cond, then_body, else_body),
-            kir::Stmt::While { cond, body } => self.while_loop(cond, body)?,
-            kir::Stmt::ForRange { var, start, end, body } => self.for_range(*var, start, end, body)?,
-            kir::Stmt::Break => {
-                let (_, brk) = *self.loops.last().expect("break inside a loop");
-                self.b.ins().jump(brk, &[]);
-                return Ok(false);
-            }
-            kir::Stmt::Continue => {
-                let (cont, _) = *self.loops.last().expect("continue inside a loop");
-                self.b.ins().jump(cont, &[]);
-                return Ok(false);
-            }
-            kir::Stmt::Return(value) => {
-                match value {
-                    Some(e) if e.ty.is_aggregate() => {
-                        let dest = self.sret.expect("struct-returning function has a result pointer");
-                        self.lower_into(e, dest)?;
-                        self.b.ins().return_(&[]);
-                    }
-                    Some(e) => {
-                        let v = self.expr(e)?;
-                        self.b.ins().return_(&[v]);
-                    }
-                    None => {
-                        self.b.ins().return_(&[]);
-                    }
-                }
-                return Ok(false);
-            }
-            kir::Stmt::Call(fi, args) => {
-                self.call(*fi, args, None)?;
-            }
-            kir::Stmt::Print(args) => self.print(args, true)?,
-            kir::Stmt::Write(args) => self.print(args, false)?,
-            kir::Stmt::RandSeed(n) => self.rand_seed(n)?,
-            kir::Stmt::ListAdd(list, value) => self.list_add(list, value)?,
-            kir::Stmt::List(op, list, args) => self.list_op(*op, list, args)?,
-            kir::Stmt::SetLen(list, len) => self.set_len(list, len)?,
-            kir::Stmt::Dup(p) => self.dup(p)?,
-            kir::Stmt::MapSet(map, key, value, copy_key) => self.map_set(map, key, value, *copy_key, key.line)?,
-            kir::Stmt::MapUnlock(map, saved) => self.map_unlock(map, saved)?,
-            kir::Stmt::ParFor { func, args, count } => self.par_for(*func, args, count)?,
-            kir::Stmt::PushArena(_) | kir::Stmt::PopArena { .. } | kir::Stmt::FreeArena(_) | kir::Stmt::DropGpu(_) => {
-                self.arena_stmt(s)?
-            }
-            kir::Stmt::Bind(l, p) => {
-                let addr = self.place_addr(p)?;
-                let Slot::Ptr(v) = self.slots[l.0 as usize] else { unreachable!("binds a reference local") };
-                self.b.def_var(v, addr);
-            }
-            kir::Stmt::BindGlobal(l, g) => self.bind_global(*l, *g),
-            kir::Stmt::SetLine(line) => self.set_line(*line),
-        }
-        Ok(true)
-    }
-
-    fn if_stmt(&mut self, cond: &kir::Expr, then_body: &[kir::Stmt], else_body: &[kir::Stmt]) -> Result<bool, String> {
-        let c = self.expr(cond)?;
-        let (then_b, else_b, merge) = (self.b.create_block(), self.b.create_block(), self.b.create_block());
-        self.b.ins().brif(c, then_b, &[], else_b, &[]);
-        self.b.switch_to_block(then_b);
-        let then_falls = self.stmts(then_body)?;
-        if then_falls {
-            self.b.ins().jump(merge, &[]);
-        }
-        self.b.switch_to_block(else_b);
-        let else_falls = self.stmts(else_body)?;
-        if else_falls {
-            self.b.ins().jump(merge, &[]);
-        }
-        self.b.switch_to_block(merge);
-        if !then_falls && !else_falls {
-            self.b.ins().trap(TrapCode::unwrap_user(1));
-            return Ok(false);
-        }
-        Ok(true)
-    }
-
-    fn while_loop(&mut self, cond: &kir::Expr, body: &[kir::Stmt]) -> Result<(), String> {
-        let (header, body_b, exit) = (self.b.create_block(), self.b.create_block(), self.b.create_block());
-        self.b.ins().jump(header, &[]);
-        self.b.switch_to_block(header);
-        let c = self.expr(cond)?;
-        self.b.ins().brif(c, body_b, &[], exit, &[]);
-        self.b.switch_to_block(body_b);
-        self.loops.push((header, exit));
-        let falls = self.stmts(body)?;
-        self.loops.pop();
-        if falls {
-            self.b.ins().jump(header, &[]);
-        }
-        self.b.switch_to_block(exit);
-        Ok(())
-    }
-
-    fn for_range(&mut self, var: LocalIdx, start: &kir::Expr, end: &kir::Expr, body: &[kir::Stmt]) -> Result<(), String> {
-        let start_v = self.expr(start)?;
-        let end_v = self.expr(end)?;
-        let place = Place::local(var);
-        self.store_place(&place, start_v)?;
-        let ty = self.local_ty(var);
-        let (header, body_b, step, exit) =
-            (self.b.create_block(), self.b.create_block(), self.b.create_block(), self.b.create_block());
-        self.b.ins().jump(header, &[]);
-
-        self.b.switch_to_block(header);
-        let i = self.load_place(&place)?;
-        let cc = if ty.is_signed() { IntCC::SignedLessThan } else { IntCC::UnsignedLessThan };
-        let more = self.b.ins().icmp(cc, i, end_v);
-        self.b.ins().brif(more, body_b, &[], exit, &[]);
-
-        self.b.switch_to_block(body_b);
-        self.loops.push((step, exit));
-        let falls = self.stmts(body)?;
-        self.loops.pop();
-        if falls {
-            self.b.ins().jump(step, &[]);
-        }
-
-        // `i < end` held, so `i + 1` can't overflow.
-        self.b.switch_to_block(step);
-        let i = self.load_place(&place)?;
-        let next = self.b.ins().iadd_imm(i, 1);
-        self.store_place(&place, next)?;
-        self.b.ins().jump(header, &[]);
-
-        self.b.switch_to_block(exit);
-        Ok(())
     }
 }

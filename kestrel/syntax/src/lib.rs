@@ -1,4 +1,5 @@
 pub mod ast;
+mod ast_ops;
 pub mod diag;
 pub mod lexer;
 pub mod link;

@@ -2,6 +2,8 @@ mod branch;
 mod depth;
 mod expr;
 mod item;
+mod members;
+mod primary;
 mod stmt;
 
 use crate::ast::{BindId, Binding, Expr, ExprId, ExprKind, Program, TypeExpr, TypeKind};

@@ -1,5 +1,7 @@
 pub mod inline;
 pub mod ir;
+mod ir_expr;
+mod ir_stmt;
 mod layout;
 mod leaves;
 mod lower;

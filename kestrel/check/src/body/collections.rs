@@ -8,7 +8,7 @@ use kestrel_syntax::Span;
 
 use super::remove::Over;
 use super::BodyChecker;
-use crate::collect::resolve_type;
+use crate::collect_ty::resolve_type;
 use crate::ty::Ty;
 
 impl<'a> BodyChecker<'a> {

@@ -9,7 +9,7 @@ use kestrel_syntax::{Diagnostic, Span};
 
 use super::BodyChecker;
 use crate::builtins::Builtin;
-use crate::collect::resolve_type;
+use crate::collect_ty::resolve_type;
 use crate::tables::{ConstId, Tables};
 use crate::ty::Ty;
 
