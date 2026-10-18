@@ -60,6 +60,8 @@ pub(crate) struct Helpers {
     pub(super) closures: HashMap<ExprId, FuncIdx>,
     /// The copy function of each closure literal's environment (see `env_copy_fn`).
     pub(super) env_copies: HashMap<ExprId, FuncIdx>,
+    /// The layout of each closure literal's environment (see `env_layout`).
+    pub(super) env_layouts: HashMap<ExprId, EnvLayout>,
     pub(crate) par_bodies: Vec<FuncIdx>,
     /// The heap constants the functions use, and their globals.
     pub(super) consts: ConstGlobals,
@@ -70,7 +72,8 @@ impl Helpers {
         let (copy, drop, print) = (HashMap::new(), HashMap::new(), HashMap::new());
         let (find, thunks, closures, env_copies) = (HashMap::new(), HashMap::new(), HashMap::new(), HashMap::new());
         let (funcs, par_bodies, consts) = (Vec::new(), Vec::new(), ConstGlobals::default());
-        Helpers { base, funcs, copy, drop, print, find, thunks, closures, env_copies, par_bodies, consts }
+        let env_layouts = HashMap::new();
+        Helpers { base, funcs, copy, drop, print, find, thunks, closures, env_copies, env_layouts, par_bodies, consts }
     }
 
     /// Adds an outlined `par for` body, named for its index.

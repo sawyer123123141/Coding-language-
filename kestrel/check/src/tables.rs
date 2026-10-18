@@ -213,7 +213,8 @@ pub struct Tables {
     /// innermost one around it), the index of the capture in its `ClosureInfo::captures`, and the
     /// fields left to follow from the capture's value (a read of `p.pos.x` under the capture
     /// `p.pos`). The expression is the whole read: a name, a field access, a call by a local's
-    /// name, or a call of a function field (`b.on(1)` reads `b.on`).
+    /// name, or a call of a function field (`b.on(1)` reads `b.on`). Only the code of that
+    /// closure may lower these expressions: KIR binds the captures there (`lower::env`).
     pub capture_reads: HashMap<ExprId, (ExprId, u32, Vec<u32>)>,
     pub locals: Vec<LocalInfo>,
     pub fns: Vec<FnInfo>,

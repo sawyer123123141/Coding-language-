@@ -165,8 +165,7 @@ fn returns_after_freeing(stmts: &[Stmt]) -> bool {
     walk(stmts, &mut |n| match n {
         Node::Stmt(Stmt::Return(_)) => returns = true,
         Node::Stmt(Stmt::PopArena { free: true } | Stmt::FreeArena(_) | Stmt::DropGpu(_)) => frees = true,
-        // Copying a function value's environment, or making one, only allocates.
-        Node::Stmt(Stmt::CopyFnEnv(_)) => {}
+        // (Copying a function value's environment, `CopyFnEnv`, or making one only allocates.)
         Node::Stmt(Stmt::Call(_, a)) | Node::Expr(Expr { kind: ExprKind::Call(_, a), .. }) if by_ref(a) => frees = true,
         Node::Stmt(Stmt::CallIndirect { args: a, .. }) | Node::Expr(Expr { kind: ExprKind::CallIndirect { args: a, .. }, .. }) if by_ref(a) => frees = true,
         _ => {}

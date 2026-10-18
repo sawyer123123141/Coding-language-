@@ -37,9 +37,8 @@ impl FnLowerer<'_> {
             }
             // A function value may be any function that isn't `pure`.
             Node::Expr(Expr { kind: ExprKind::CallIndirect { .. }, .. }) | Node::Stmt(Stmt::CallIndirect { .. }) => found = true,
-            // An environment's copy function (`CopyFnEnv`) only copies memory, and so does making a
-            // heap environment (its values are walked like any others).
-            Node::Stmt(Stmt::CopyFnEnv(_)) => {}
+            // (An environment's copy function, `CopyFnEnv`, only copies memory, and so does making
+            // a heap environment, whose values are walked like any others: neither sets a line.)
             _ => {}
         };
         match arg {

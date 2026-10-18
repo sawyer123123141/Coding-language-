@@ -39,6 +39,9 @@
 // expect: 6
 // expect: opt
 // expect: [6, 7, 8]
+// expect: 11 6 11
+// expect: 511
+// expect: 7 orig 8 changed
 // Closures that name nothing from outside themselves, then closures that capture.
 struct Button {
     label: string
@@ -159,6 +162,13 @@ main() {
     copies()
     views()
     par_capture()
+    function_collections()
+    var hero = Hero(hp: 1, mp: 2)
+    print(hero.pump())
+    var n2 = 1
+    var s2 = "orig"
+    let said = bump_then_capture(var n2, var s2)
+    print(said(), n2, s2)
 }
 
 struct Named {
@@ -294,4 +304,45 @@ par_capture() {
         c = c + bonus()
     }
     print(w.chunks)
+}
+
+// A list, a map and a function value of function values may be captured: only a struct or enum
+// holding one (like `self` with a function field) would nest copies.
+function_collections() {
+    let k = 10
+    var hs: list[(int) -> int] = [(x) { x + k }]
+    let usef = () { hs[0](1) }
+    hs[0] = (x) { x }
+    var ops = map[string, (int) -> int]()
+    ops["inc"] = (x) { x + 1 }
+    let useop = () { ops.get("inc", (x) { x })(5) }
+    ops["inc"] = (x) { x }
+    let h = hs[0]
+    let viaf = () { h(11) }
+    print(usef(), useop(), viaf())
+}
+
+struct Hero {
+    hp: int
+    mp: int
+
+    // The capture is the value when the closure is made, even while `promote` keeps `self.hp`
+    // in a register.
+    pump(var self) -> int {
+        self.hp = 5
+        let f = () { self.hp }
+        self.hp = 9
+        run0(() { self.hp + self.mp }) + f() * 100
+    }
+}
+
+run0(f: () -> int) -> int { f() }
+
+// Captures of `var` parameters copy their values when the closure is made.
+bump_then_capture(var n: int, var s: string) -> () -> string {
+    n = 7
+    let f = () { "{n} {s}" }
+    n = 8
+    s = "changed"
+    f
 }

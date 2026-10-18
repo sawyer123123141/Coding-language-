@@ -158,6 +158,28 @@ fn owning_values_cannot_be_captured_but_their_plain_fields_can() {
 fn a_stored_closure_cannot_capture_a_whole_value_holding_a_function() {
     let src = "struct B {\n    name: string\n    cb: () -> string = () { \"\" }\n\n    go(self) -> string { self.name }\n}\nmain() {\n    var b = B(name: \"a\")\n    b.cb = () { b.go() }\n    b.cb = () { b.name }\n    let f = () { b.cb }\n}\n";
     assert_eq!(errors(src), vec!["this closure would copy all of `b`, including its function fields; copy what it needs into a local first"]);
+    // A struct holding a function inside a list is refused too: `self` would nest copies.
+    let src = "struct H {
+    handlers: list[(int)]
+
+    hook(self) -> int {
+        let f = () { self.handlers.len }
+        let g = () { self }
+        f()
+    }
+}
+main() { }
+";
+    assert_eq!(errors(src), vec!["this closure would copy all of `self`, including its function fields; copy what it needs into a local first"]);
+    // A function value, or a list, array, map or optional of them, may be captured whole.
+    ok("main() {
+    var hs: list[(int) -> int] = [(x) { x }]
+    let a: [(int) -> int] = [(x) { x }]
+    var m = map[string, (int) -> int]()
+    let f = hs[0]
+    let g = () { hs[0](1) + a[0](2) + m.get(\"k\", f)(3) + f(4) }
+}
+");
 }
 
 #[test]

@@ -27,7 +27,7 @@ pub(crate) struct Captured {
 }
 
 /// Where the captures of closure literal `id` go in its environment.
-pub(crate) fn env_layout(t: &Tables, id: ExprId) -> EnvLayout {
+fn layout_of(t: &Tables, id: ExprId) -> EnvLayout {
     let mut offsets = Vec::new();
     let mut end = ENV_HEADER;
     for c in &t.closures[&id].captures {
@@ -51,6 +51,11 @@ fn bind_captures(env: LocalIdx, locals: &[LocalIdx], layout: &EnvLayout) -> Vec<
 }
 
 impl Helpers {
+    /// Where the captures of closure literal `id` go in its environment, worked out once.
+    pub(crate) fn env_layout(&mut self, t: &Tables, id: ExprId) -> EnvLayout {
+        self.env_layouts.entry(id).or_insert_with(|| layout_of(t, id)).clone()
+    }
+
     /// The copy function of closure literal `id`'s environment, made at the first use:
     /// `(env: i64) -> i64`, which copies the block and then each capture's own memory into the
     /// current arena, and returns the copy. One per literal.
@@ -73,7 +78,7 @@ impl Helpers {
                 LocalIdx(locals.len() as u32 - 1)
             })
             .collect();
-        let layout = env_layout(t, id);
+        let layout = self.env_layout(t, id);
         let dup = expr(ExprKind::EnvDup(Box::new(expr(ExprKind::Load(Place::local(env)), KTy::I64))), KTy::I64);
         let mut body = vec![Stmt::Let(copy, dup)];
         body.extend(bind_captures(copy, &refs, &layout));
@@ -108,7 +113,8 @@ impl FnLowerer<'_> {
             self.locals.push(capture_local(t, c));
         }
         // The environment word is the code's first parameter.
-        let binds = bind_captures(LocalIdx(0), &locals, &env_layout(t, id));
+        let layout = self.helpers.env_layout(t, id);
+        let binds = bind_captures(LocalIdx(0), &locals, &layout);
         self.captured = Some(Captured { id, locals });
         binds
     }
@@ -165,6 +171,7 @@ impl FnLowerer<'_> {
                 self.owned(v, false)
             })
             .collect();
-        EnvKind::Heap(Env { copy, layout: env_layout(t, id), values })
+        let layout = self.helpers.env_layout(t, id);
+        EnvKind::Heap(Env { copy, layout, values })
     }
 }

@@ -14,9 +14,9 @@
 //!
 //! **The rules.** A capture can't change (`Immutable::Captured`) and can't be moved. It can't be
 //! owning, so a closure is never owning. A closure that copies its captures (all of them, for
-//! now: every closure with captures has a heap environment) can't capture a whole value that
-//! holds a function value: storing such a closure where the value is would copy the old closure
-//! into the new one, without bound.
+//! now: every closure with captures has a heap environment) can't capture a whole struct or enum
+//! value that holds a function value: storing such a closure where the value is would copy the
+//! old closure into the new one, without bound.
 
 use std::collections::HashMap;
 
@@ -186,12 +186,15 @@ impl<'a> BodyChecker<'a> {
     }
 
     /// A capture, written `written`, of type `ty`: it can't own an arena or a GPU object, and it
-    /// can't be a whole value that holds a function value.
+    /// can't be a whole struct or enum value that holds a function value anywhere in its fields
+    /// (`self` holding `cb`, or `handlers: list[(int)]`). A function value itself, or a list,
+    /// array, map or optional of them, is fine: storing the closure into one of those is a
+    /// growth the program asks for, not an accident of capturing `self`.
     fn check_capture(&mut self, ty: Ty, written: &str, span: Span) {
         if self.t.is_owning(ty) {
             let what = if self.t.holds_arena(ty) { "an Arena" } else { "a GPU object" };
             self.error(span, format!("a closure can't capture `{written}`: it owns {what}; pass it as a parameter instead"));
-        } else if !matches!(ty, Ty::Fn(_)) && self.t.holds_fn(ty) {
+        } else if matches!(ty, Ty::Struct(_) | Ty::Enum(_) | Ty::Variant(..)) && self.t.holds_fn(ty) {
             let msg = format!("this closure would copy all of `{written}`, including its function fields; copy what it needs into a local first");
             self.error(span, msg);
         }
