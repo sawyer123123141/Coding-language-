@@ -2,6 +2,7 @@
 
 use kestrel_syntax::ast::{Arg, Expr, ExprKind};
 
+use super::exclusive::RecvChange;
 use super::lists::written;
 use super::place::Immutable;
 use super::regions::Ctx;
@@ -39,7 +40,7 @@ impl<'a> BodyChecker<'a> {
         let mut var_roots: Vec<(LocalId, Option<usize>)> = recv.and_then(|r| r.var_root).map(|r| vec![(r, None)]).unwrap_or_default();
         let read_root = recv.and_then(|r| r.read_root);
         let info = &self.t.fns[fid.0 as usize];
-        let receiver_changed = recv.map(|r| (r.expr, info.params[0].is_var));
+        let receiver_changed = recv.map(|r| (r.expr, if info.params[0].is_var { RecvChange::Changed } else { RecvChange::Read }));
         let (params, ret, fname) = (info.params[skip..].to_vec(), info.ret, info.name.clone());
         // Text built for a native's arguments may be freed when the call returns (see `wants_scratch`),
         // so memory made while checking them can't be kept past the call.

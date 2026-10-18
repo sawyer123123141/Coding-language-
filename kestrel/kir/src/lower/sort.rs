@@ -7,11 +7,12 @@
 //! before `true`. Both parameters are by pointer (`RefParam`), whatever the item.
 //! - `sort()` has one per item type; `env` is unused.
 //! - `sort_by(key)` has one per (item type, key), and its `env` is the address of the key's
-//!   function value, so it calls `Call(code, [FnEnv(key), item])` for a literal's code, or calls
-//!   the value indirectly. It computes both keys inside a scratch arena that is freed before it
-//!   returns, since a key may build strings (`e.name.lower()`) and runs about twice per comparison;
-//!   `strip_idle_scratch` takes the arena out again when the literal's code (and what it calls)
-//!   can't build anything.
+//!   function value, so it calls `Call(code, [FnEnv(key), item])` for a literal's code or a named
+//!   function's thunk, or calls the value indirectly. It computes both keys inside a scratch arena
+//!   that is freed before it returns, since a key may build strings (`e.name.lower()`) and runs
+//!   about twice per comparison;
+//!   `strip_idle_scratch` takes the arena out again when the literal's code, or a named function's
+//!   thunk (and what it calls), can't build anything.
 //!
 //! **The call site.** A literal key's `MakeFn` (with a stack environment) must be directly an
 //! argument of a call, so `sort_by` calls a generated function `(xs, key)` that holds the
@@ -204,8 +205,9 @@ impl FnLowerer<'_> {
     }
 }
 
-/// Takes the scratch arena out of each `sort_by` compare function whose literal key can't build
-/// anything: `idle` pairs a compare function with the code of the literal it calls.
+/// Takes the scratch arena out of each `sort_by` compare function whose key, a literal or a named
+/// function, can't build anything: `idle` pairs a compare function with the code it calls (the
+/// literal's code, or the function's thunk).
 pub(super) fn strip_idle_scratch(funcs: &mut [Func], idle: &[(FuncIdx, FuncIdx)]) {
     for &(compare, code) in idle {
         if !builds_memory(funcs, code, &mut HashSet::new()) {
@@ -228,21 +230,99 @@ fn builds_memory(funcs: &[Func], f: FuncIdx, seen: &mut HashSet<u32>) -> bool {
     let mut calls = Vec::new();
     let mut builds = false;
     walk(&func.body, &mut |n| match n {
-        Node::Stmt(Stmt::Dup(_) | Stmt::ListAdd(..) | Stmt::MapSet(..) | Stmt::CopyFnEnv(_) | Stmt::ParFor { .. } | Stmt::CallIndirect { .. }) => builds = true,
-        Node::Stmt(Stmt::List(op, ..)) => builds |= matches!(op, ListOp::Insert),
-        Node::Stmt(Stmt::Call(g, _)) => calls.push(*g),
-        Node::Expr(e) => match &e.kind {
-            ExprKind::Format(_) | ExprKind::ArrayNew(_) | ExprKind::ArrayLit(_) | ExprKind::NewArena | ExprKind::StaticArena | ExprKind::EnvDup(_) | ExprKind::CallIndirect { .. } => {
-                builds = true
-            }
-            ExprKind::MakeFn { env: EnvKind::Heap(_), .. } => builds = true,
-            ExprKind::Str(op, _) => {
-                builds |= matches!(op, StrOp::At | StrOp::Piece | StrOp::Slice | StrOp::Trim | StrOp::Upper | StrOp::Lower | StrOp::Join | StrOp::Split)
-            }
-            ExprKind::Call(g, _) => calls.push(*g),
-            _ => {}
-        },
-        _ => {}
+        Node::Stmt(s) => builds |= stmt_builds(s, &mut calls),
+        Node::Expr(e) => builds |= expr_builds(e, &mut calls),
+        Node::Place(..) => {}
     });
     builds || calls.into_iter().any(|g| builds_memory(funcs, g, seen))
+}
+
+/// Whether the statement itself builds memory in the current arena (the statements and
+/// expressions inside it are walked on their own). A direct call goes into `calls`. Every kind is
+/// named, so a new one has to be sorted here.
+fn stmt_builds(s: &Stmt, calls: &mut Vec<FuncIdx>) -> bool {
+    match s {
+        Stmt::Dup(_) | Stmt::ListAdd(..) | Stmt::MapSet(..) | Stmt::CopyFnEnv(_) | Stmt::ParFor { .. } | Stmt::CallIndirect { .. } => true,
+        Stmt::List(op, ..) => match op {
+            ListOp::Insert => true,
+            ListOp::RemoveAt | ListOp::Clear | ListOp::Compact | ListOp::Sort => false,
+        },
+        Stmt::Call(g, _) => {
+            calls.push(*g);
+            false
+        }
+        Stmt::Let(..)
+        | Stmt::Assign(..)
+        | Stmt::If { .. }
+        | Stmt::While { .. }
+        | Stmt::ForRange { .. }
+        | Stmt::Break
+        | Stmt::Continue
+        | Stmt::Return(_)
+        | Stmt::Print(_)
+        | Stmt::Write(_)
+        | Stmt::RandSeed(_)
+        | Stmt::SetLen(..)
+        | Stmt::Bind(..)
+        | Stmt::BindGlobal(..)
+        | Stmt::BindEnv { .. }
+        | Stmt::PushArena(_)
+        | Stmt::PopArena { .. }
+        | Stmt::FreeArena(_)
+        | Stmt::DropGpu(_)
+        | Stmt::MapUnlock(..)
+        | Stmt::SetLine(_) => false,
+    }
+}
+
+/// Whether the expression itself builds memory in the current arena, as `stmt_builds` does for a
+/// statement.
+fn expr_builds(e: &Expr, calls: &mut Vec<FuncIdx>) -> bool {
+    match &e.kind {
+        ExprKind::Format(_) | ExprKind::ArrayNew(_) | ExprKind::ArrayLit(_) | ExprKind::NewArena | ExprKind::StaticArena | ExprKind::EnvDup(_) | ExprKind::CallIndirect { .. } => {
+            true
+        }
+        ExprKind::MakeFn { env, .. } => match env {
+            EnvKind::Heap(_) => true,
+            EnvKind::None | EnvKind::Stack(_) => false,
+        },
+        ExprKind::Str(op, _) => match op {
+            StrOp::At | StrOp::Piece | StrOp::Slice | StrOp::Trim | StrOp::Upper | StrOp::Lower | StrOp::Join | StrOp::Split => true,
+            StrOp::Chars | StrOp::CharLen | StrOp::Find | StrOp::Starts | StrOp::Cmp | StrOp::Ends | StrOp::ToInt | StrOp::ToFloat => false,
+        },
+        ExprKind::Map(op, ..) => match op {
+            MapOp::Get | MapOp::Has | MapOp::Remove | MapOp::Used | MapOp::Live | MapOp::Lock => false,
+        },
+        ExprKind::Call(g, _) => {
+            calls.push(*g);
+            false
+        }
+        ExprKind::Int(_)
+        | ExprKind::Float(_)
+        | ExprKind::Bool(_)
+        | ExprKind::StrLit(_)
+        | ExprKind::ListNew
+        | ExprKind::MapNew
+        | ExprKind::Len(_)
+        | ExprKind::Some(_)
+        | ExprKind::NoneLit
+        | ExprKind::Move(_)
+        | ExprKind::Load(_)
+        | ExprKind::Unary(..)
+        | ExprKind::Binary(..)
+        | ExprKind::And(..)
+        | ExprKind::Or(..)
+        | ExprKind::Cast(_)
+        | ExprKind::Math(..)
+        | ExprKind::RandFloat
+        | ExprKind::RandInt(..)
+        | ExprKind::FnRef(_)
+        | ExprKind::FnEnv(_)
+        | ExprKind::StructLit(..)
+        | ExprKind::VariantLit(..)
+        | ExprKind::Tag(_)
+        | ExprKind::FieldOf(..)
+        | ExprKind::Seq(..)
+        | ExprKind::If { .. } => false,
+    }
 }

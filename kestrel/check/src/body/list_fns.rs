@@ -15,7 +15,7 @@ use kestrel_syntax::ast::{Arg, Expr, ExprKind};
 use kestrel_syntax::Span;
 
 use super::closure::Impure;
-use super::exclusive::CalleePlace;
+use super::exclusive::{CalleePlace, RecvChange};
 use super::fnvalue::shown_callee;
 use super::lists::{written, Overlap};
 use super::BodyChecker;
@@ -97,7 +97,8 @@ impl<'a> BodyChecker<'a> {
             _ => {}
         }
         // The function runs while `xs` is read, so it can't be given anything the call changes.
-        let changes = self.call_changes(args, Some((receiver, sorting)));
+        let how = if sorting { RecvChange::Reordered } else { RecvChange::Read };
+        let changes = self.call_changes(args, Some((receiver, how)));
         let mut callee = None;
         if sorting && !literal {
             callee = self.key_place(f);

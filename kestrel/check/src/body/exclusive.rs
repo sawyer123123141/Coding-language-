@@ -39,6 +39,17 @@ pub(crate) struct Changes {
     pub(crate) moved_roots: Vec<LocalId>,
 }
 
+/// How a method call changes its receiver, for the exclusivity rule.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum RecvChange {
+    /// Not at all.
+    Read,
+    /// Any way: a `var self` receiver.
+    Changed,
+    /// Only the order of its items: the list a `sort` or `sort_by` sorts.
+    Reordered,
+}
+
 /// The place a call through a function value reads the value from (views expanded), and the
 /// callee as the program writes it, for the message.
 pub(crate) struct CalleePlace {
@@ -89,12 +100,16 @@ impl<'a> BodyChecker<'a> {
     }
 
     /// What a call with these arguments can change. `receiver` is the receiver of a method call,
-    /// with whether the method changes it (`var self`, or the list a `sort` sorts).
-    pub(crate) fn call_changes(&self, args: &[Arg], receiver: Option<(&Expr, bool)>) -> Changes {
+    /// with how the method changes it.
+    pub(crate) fn call_changes(&self, args: &[Arg], receiver: Option<(&Expr, RecvChange)>) -> Changes {
         let mut out = Changes::default();
-        if let Some((r, changed)) = receiver {
-            if changed {
-                self.note_changed(r, &mut out);
+        if let Some((r, how)) = receiver {
+            match how {
+                RecvChange::Changed => self.note_changed(r, &mut out),
+                // Sorting moves the items as bytes and frees nothing, so an owning item doesn't
+                // make every sibling of the list a conflict: only the list's own place is one.
+                RecvChange::Reordered => out.paths.extend(self.source_key(r)),
+                RecvChange::Read => {}
             }
             self.changes_in(r, &mut out);
         }

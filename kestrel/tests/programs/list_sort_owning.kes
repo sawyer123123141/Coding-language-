@@ -1,0 +1,42 @@
+// env: KESTREL_ARENA_COUNT=1
+// expect: [3, 2, 1]
+// expect: [1, 2, 3]
+// expect: [2, 3]
+// expect: 2 two
+// expect-stderr: arenas alive at exit: 0
+// Sorting items that own an `Arena` moves them and frees nothing, so the key may read a sibling
+// of the sorted list (`w.bias`, `self.bias`). Each arena is still dropped exactly once.
+struct Pool {
+    id: int
+    mem: Arena = Arena()
+    name: string = ""
+}
+
+struct World {
+    pools: list[Pool] = []
+    bias: int = 1
+
+    order(var self) {
+        self.pools.sort_by((p) { p.id * self.bias })
+    }
+}
+
+main() {
+    var w = World()
+    for id in [3, 1, 2] {
+        var p = Pool(id: id)
+        in p.mem {
+            p.name = ["one", "two", "three"][id - 1] + ""
+        }
+        w.pools.add(p)
+    }
+    w.bias = -1
+    w.pools.sort_by((p) { p.id * w.bias })
+    print(w.pools.map((p) { p.id }))
+    w.bias = 1
+    w.order()
+    print(w.pools.map((p) { p.id }))
+    w.pools.remove_at(0)
+    print(w.pools.map((p) { p.id }))
+    print(w.pools[0].id, w.pools[0].name)
+}

@@ -128,13 +128,16 @@ fn a_key_that_builds_strings_is_run_in_a_scratch_arena_freed_before_the_answer()
     es.sort_by((e) {{ e.name.lower() }})
     es.sort_by((e) {{ shout(e) }})
     es.sort_by(shout)
+    let by = (e: E) -> int {{ e.hp }}
+    es.sort_by(by)
 }}
 "
     ));
     // The first builds a string itself, the second calls a function that does, the third is a
-    // function value (anything may be inside it).
+    // named function that does, and the fourth is a stored closure (anything may be inside it,
+    // so it keeps the arena even though this one builds nothing).
     let compares = named(&m, "__kestrel_compare_");
-    assert_eq!(compares.len(), 3);
+    assert_eq!(compares.len(), 4);
     for c in compares {
         let a = arenas(c);
         assert_eq!(a.len(), 2, "{c:?}");
