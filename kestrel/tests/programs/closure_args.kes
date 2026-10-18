@@ -14,6 +14,9 @@
 // expect: 30
 // expect: 31
 // expect: in a frame 3
+// expect: 108
+// expect: abc7
+// expect: 3
 // Closure literals passed straight to a call get a stack environment: shallow copies of the
 // captured values in the caller's frame. A callee that stores its parameter copies it, so the
 // stored closure outlives the frame and any arena its captures came from.
@@ -123,6 +126,20 @@ frame(var keep: Keep) {
     }, var keep)
 }
 
+// Returns its parameter, which copies it: the result outlives the stack environment.
+pass(f: (int) -> int) -> (int) -> int { f }
+
+keep_text(f: () -> string) -> () -> string { f }
+
+apply_to(f: (int) -> int, x: int) -> int { f(x) }
+
+// A literal passed to a function that returns it, from a frame that is gone when it is called.
+make(n: int) -> () -> string {
+    let s = "abc{n}"
+    let g = keep_text(() { s })
+    g
+}
+
 main() {
     var keep = Keep()
     var n = 10
@@ -163,4 +180,8 @@ main() {
     var later = Keep()
     frame(var later)
     later.fns[0](3)
+    let made = make(7)
+    print(churn(9))
+    print(made())
+    print(apply_to(pass((x) { x + n }), 2))
 }

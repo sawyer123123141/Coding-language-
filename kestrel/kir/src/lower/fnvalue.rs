@@ -99,13 +99,38 @@ impl FnLowerer<'_> {
                 (None, None) => unreachable!("a call by name through a value names a local or a constant"),
             },
             ast::ExprKind::MethodCall { receiver, .. } => {
+                let field = Proj::Field(t.field_index[&e.id]);
+                if let Some(mut p) = self.place(receiver) {
+                    p.path.push(field);
+                    return p;
+                }
+                // `(if c { w } else { v }).cb(var w)`: the receiver is held as it is, and the
+                // function value is copied out of it (see `own_callee`).
                 let mut p = self.place_or_temp(receiver, pre, false);
-                p.path.push(Proj::Field(t.field_index[&e.id]));
-                p
+                p.path.push(field);
+                let ty = KTy::Fn;
+                let v = Expr { kind: ExprKind::Load(p), ty, line: self.line(e.span) };
+                self.own_callee(v, pre)
             }
-            ast::ExprKind::CallValue { callee, .. } => self.place_or_temp(callee, pre, false),
+            ast::ExprKind::CallValue { callee, .. } => match self.place(callee) {
+                Some(p) => p,
+                None => {
+                    let v = self.expr(callee);
+                    self.own_callee(v, pre)
+                }
+            },
             _ => unreachable!("not a call through a function value"),
         }
+    }
+
+    /// The callee `v`, read from something that isn't a place (an `if` or a `match` that yields
+    /// `w.cb`), as a temporary with its own copy of its environment in the current arena. The
+    /// checker's rule about the place a called value is read from (`exclusive`) only sees
+    /// places, so a shallow temporary could share an environment that the call frees (by
+    /// replacing `w`). A fresh value (a call's result) is the call's own already and isn't copied.
+    fn own_callee(&mut self, v: Expr, pre: &mut Vec<Stmt>) -> Place {
+        let v = self.owned(v, false);
+        self.temp_place(v, pre)
     }
 
     /// A constant of function type, called by name: the global of a hoisted one, or its

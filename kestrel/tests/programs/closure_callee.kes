@@ -1,0 +1,46 @@
+// expect: xhello
+// expect: yhello
+// expect: zhello
+// A function value called from something that isn't a place (an `if`) is copied before the call,
+// environment and all, so the call can't free the memory its environment points into, even
+// when it replaces the variable the value came from.
+struct W {
+    mem: Arena = Arena()
+    cb: (var W) = (var w) { }
+}
+
+enum Pick {
+    First
+    Second
+}
+
+// Gives `w.cb` a closure whose environment lives in `w.mem` and that replaces its argument
+// (dropping the old `w.mem`) before it reads its capture.
+arm(var w: W, tag: string) {
+    let k = "hello"
+    in w.mem {
+        let s = "{tag}{k}"
+        w.cb = (var v) {
+            v = W()
+            print(s)
+        }
+    }
+}
+
+main() {
+    let c = true
+    let h = (var v: W) { }
+    var w = W()
+    arm(var w, "x")
+    (if c { w.cb } else { h })(var w)
+    var w2 = W()
+    arm(var w2, "y")
+    (if c { w2 } else { W() }).cb(var w2)
+    var w3 = W()
+    arm(var w3, "z")
+    let pick = Pick.First
+    (match pick {
+        First { w3.cb }
+        else { h }
+    })(var w3)
+}

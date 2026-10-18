@@ -118,9 +118,18 @@ fn sweep_programs() {
             continue;
         }
         let src = std::fs::read_to_string(&path).unwrap();
-        // Lowering itself checks this in debug builds, so this also runs it in release ones.
         let src = kestrel_driver::without_bom(&src);
-        let (compiled, text) = kestrel_driver::compile_unoptimized(&path.to_string_lossy(), src, kestrel_driver::DiagStyle::Short, true);
+        // Lowering itself checks this in debug builds and panics; the panic is caught here so the
+        // failure names the program. The check below runs it in release builds too.
+        let name = path.to_string_lossy();
+        let compile = || kestrel_driver::compile_unoptimized(&name, src, kestrel_driver::DiagStyle::Short, true);
+        let (compiled, text) = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(compile)) {
+            Ok(out) => out,
+            Err(e) => {
+                let msg = e.downcast_ref::<String>().cloned().or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default();
+                panic!("{}: lowering panicked: {msg}", path.display());
+            }
+        };
         let Some(compiled) = compiled else {
             // A program test may be one that fails to compile on purpose: none are, today.
             panic!("{}: doesn't compile:\n{text}", path.display());

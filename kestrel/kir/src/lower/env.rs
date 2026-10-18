@@ -164,6 +164,20 @@ impl FnLowerer<'_> {
     /// The environment of closure literal `id`, which captures something: a new block in the
     /// current arena holding a deep copy of each captured value, read now.
     pub(crate) fn heap_env(&mut self, id: ExprId, line: u32) -> EnvKind {
+        EnvKind::Heap(self.env_of(id, line, true))
+    }
+
+    /// The environment of closure literal `id`, which captures something and is directly a call's
+    /// argument (`Tables::stack_closures`): a stack slot holding a shallow copy of each captured
+    /// value, read now. The header holds the same copy function as a heap environment's, so a
+    /// callee that stores the value copies it out deep.
+    pub(crate) fn stack_env(&mut self, id: ExprId, line: u32) -> EnvKind {
+        EnvKind::Stack(self.env_of(id, line, false))
+    }
+
+    /// Closure literal `id`'s copy function, layout and captured values, each read now: deep
+    /// copies (`owned`) when `deep`, else plain reads.
+    fn env_of(&mut self, id: ExprId, line: u32, deep: bool) -> Env {
         let t = self.t;
         let copy = self.helpers.env_copy_fn(id, t);
         let values = t.closures[&id]
@@ -171,24 +185,14 @@ impl FnLowerer<'_> {
             .iter()
             .map(|c| {
                 let v = Expr { kind: ExprKind::Load(self.capture_source(c)), ty: kty(c.ty), line };
-                self.owned(v, false)
+                if deep {
+                    self.owned(v, false)
+                } else {
+                    v
+                }
             })
             .collect();
         let layout = self.helpers.env_layout(t, id);
-        EnvKind::Heap(Env { copy, layout, values })
-    }
-}
-
-impl FnLowerer<'_> {
-    /// The environment of closure literal `id`, which captures something and is directly a call's
-    /// argument (`Tables::stack_closures`): a stack slot holding a shallow copy of each captured
-    /// value, read now. The header holds the same copy function as a heap environment's, so a
-    /// callee that stores the value copies it out deep.
-    pub(crate) fn stack_env(&mut self, id: ExprId, line: u32) -> EnvKind {
-        let t = self.t;
-        let copy = self.helpers.env_copy_fn(id, t);
-        let values = t.closures[&id].captures.iter().map(|c| Expr { kind: ExprKind::Load(self.capture_source(c)), ty: kty(c.ty), line }).collect();
-        let layout = self.helpers.env_layout(t, id);
-        EnvKind::Stack(Env { copy, layout, values })
+        Env { copy, layout, values }
     }
 }

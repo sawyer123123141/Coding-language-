@@ -46,35 +46,32 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     }
 
     /// Writes the function value of closure code `code` with a new heap environment at `dest`:
-    /// the block is allocated in the current arena, its header written, and each captured value
-    /// stored at its offset, before the value itself is written (a value may read `dest`).
+    /// the block is allocated in the current arena, then filled (see `fill_env`).
     pub(crate) fn heap_fn_into(&mut self, code: FuncIdx, env: &kir::Env, line: u32, dest: Value) -> Result<(), String> {
         let (one, size) = (self.b.ins().iconst(types::I64, 1), self.b.ins().iconst(types::I64, env.layout.size as i64));
         let align = self.b.ins().iconst(types::I64, 8);
         let (l, f) = self.loc_args(line);
         let block = self.call_id(self.shared.rt.alloc, &[one, size, align, l, f]).expect("returns a pointer");
-        let copy = self.func_address(env.copy);
-        self.b.ins().store(MemFlags::trusted(), copy, block, 0);
-        self.b.ins().store(MemFlags::trusted(), size, block, 8);
-        for (v, &offset) in env.values.iter().zip(&env.layout.offsets) {
-            self.store_at(v, block, offset as i32)?;
-        }
-        let code = self.func_address(code);
-        self.b.ins().store(MemFlags::trusted(), code, dest, 0);
-        self.b.ins().store(MemFlags::trusted(), block, dest, 8);
-        Ok(())
+        self.fill_env(code, env, block, size, dest)
     }
 
     /// Writes the function value of closure code `code` with a stack environment at `dest`: a stack
-    /// slot of this function with the same header as a heap environment (so a callee that stores
-    /// the value copies it out through the copy function) and a shallow copy of each value.
+    /// slot of this function, filled like a heap environment (so a callee that stores the value
+    /// copies it out through the copy function in the header), with shallow copies of the values.
     pub(crate) fn stack_fn_into(&mut self, code: FuncIdx, env: &kir::Env, dest: Value) -> Result<(), String> {
         let data = StackSlotData::new(StackSlotKind::ExplicitSlot, env.layout.size, 3);
         let slot = self.b.create_sized_stack_slot(data);
         let block = self.b.ins().stack_addr(self.ptr, slot, 0);
+        let size = self.b.ins().iconst(types::I64, env.layout.size as i64);
+        self.fill_env(code, env, block, size, dest)
+    }
+
+    /// Fills the environment `block` (of `size` bytes): the header (the copy function's address,
+    /// then the size), then each value at its offset. Then writes `{code, block}` at `dest`, last,
+    /// since a value may read `dest`.
+    fn fill_env(&mut self, code: FuncIdx, env: &kir::Env, block: Value, size: Value, dest: Value) -> Result<(), String> {
         let copy = self.func_address(env.copy);
         self.b.ins().store(MemFlags::trusted(), copy, block, 0);
-        let size = self.b.ins().iconst(types::I64, env.layout.size as i64);
         self.b.ins().store(MemFlags::trusted(), size, block, 8);
         for (v, &offset) in env.values.iter().zip(&env.layout.offsets) {
             self.store_at(v, block, offset as i32)?;

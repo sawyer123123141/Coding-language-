@@ -74,4 +74,13 @@ main() {
     for hd in bus.handlers {
         hd(var bus)
     }
+    var m = M()
+    m.cb(var m.mem)
+}
+
+// error 78: can't call `m.cb` while this call changes `m`, which may hold its memory
+// Changing an arena of the variable the value is read from: it may hold the environment.
+struct M {
+    mem: Arena = Arena()
+    cb: (var Arena) = (var a) { }
 }
