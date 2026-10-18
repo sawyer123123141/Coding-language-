@@ -33,8 +33,12 @@ impl FnLowerer<'_> {
         let mut look = |node: Node| match node {
             Node::Stmt(Stmt::SetLine(_)) => found = true,
             Node::Expr(Expr { kind: ExprKind::Call(callee, _), .. }) | Node::Stmt(Stmt::Call(callee, _)) => {
-                // Past the checked functions are generated helpers, which make no such calls.
-                found |= self.t.fns.get(callee.0 as usize).is_some_and(|info| !info.is_pure);
+                // Past the checked functions are generated helpers: most make no such calls, but
+                // a list method's loop calls the function it is given (see `list_fns`).
+                found |= match self.t.fns.get(callee.0 as usize) {
+                    Some(info) => !info.is_pure,
+                    None => self.helpers.runs_user_code(*callee),
+                };
             }
             // A function value may be any function that isn't `pure`.
             Node::Expr(Expr { kind: ExprKind::CallIndirect { .. }, .. }) | Node::Stmt(Stmt::CallIndirect { .. }) => found = true,

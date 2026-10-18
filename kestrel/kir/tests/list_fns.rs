@@ -129,3 +129,83 @@ fn a_function_value_that_is_not_a_literal_is_called_indirectly() {
         assert_eq!(calls(&m, h).1, 1, "{}: {:#?}", h.name, h.body);
     }
 }
+
+#[derive(Debug, PartialEq)]
+enum Step {
+    Line(u32),
+    Call(String),
+}
+
+/// The line stores and calls in `main`, in the order they are met.
+fn steps(src: &str) -> Vec<Step> {
+    let (mut p, d) = parse(src);
+    assert!(d.is_empty(), "parse: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
+    p.builtin_ranges = std::iter::once(src.find("// built-in").expect("a built-in part") as u32..src.len() as u32).collect();
+    let (t, d) = kestrel_check::check(&p);
+    assert!(d.is_empty(), "check: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
+    let m = lower(&p, &t.unwrap(), &LineIndex::new(src));
+    let mut steps = Vec::new();
+    visit::walk(&func(&m, "main").body, &mut |node| match node {
+        visit::Node::Stmt(Stmt::SetLine(n)) => steps.push(Step::Line(*n)),
+        visit::Node::Expr(Expr { kind: ExprKind::Call(f, _), .. }) | visit::Node::Stmt(Stmt::Call(f, _)) => {
+            steps.push(Step::Call(m.funcs[f.0 as usize].name.clone()))
+        }
+        _ => {}
+    });
+    steps
+}
+
+fn is_line(s: &Step, line: u32) -> bool {
+    matches!(s, Step::Line(n) if *n == line || (*n & 0xFFFF) == line)
+}
+
+#[test]
+fn a_list_method_in_the_arguments_does_not_take_over_the_line() {
+    // The loop calls a closure that calls `paint`, which stores the closure's line. So the
+    // method is evaluated first, and the outer call's line is stored right before `paint`.
+    let impure = "main() {
+    let xs = [1, 2]
+    paint(1, xs.map((e) {
+        paint(e, e)
+        e
+    }).len)
+}
+// built-in
+native paint(a: int, b: int)
+";
+    let s = steps(impure);
+    let at = |name: &str| s.iter().position(|x| matches!(x, Step::Call(n) if n.starts_with(name))).unwrap_or_else(|| panic!("{s:?}"));
+    let outer = s.iter().rposition(|x| is_line(x, 3)).unwrap_or_else(|| panic!("no line 3 in {s:?}"));
+    assert!(at("__kestrel_list_fn_") < outer, "{s:?}");
+    assert_eq!(s[outer + 1], Step::Call("paint".into()), "{s:?}");
+    // The same for a function value that isn't of a `pure` type.
+    let value = "main() {
+    let xs = [1, 2]
+    let f = (e: int) -> int {
+        paint(e, e)
+        e
+    }
+    paint(1, xs.map(f).len)
+}
+// built-in
+native paint(a: int, b: int)
+";
+    let s = steps(value);
+    let outer = s.iter().rposition(|x| is_line(x, 7)).unwrap_or_else(|| panic!("no line 7 in {s:?}"));
+    assert!(s.iter().position(|x| matches!(x, Step::Call(n) if n.starts_with("__kestrel_list_fn_"))).unwrap() < outer, "{s:?}");
+}
+
+#[test]
+fn a_pure_literal_leaves_the_arguments_in_place() {
+    let src = "main() {
+    let xs = [1, 2]
+    paint(1, xs.map((e) { e }).len)
+}
+// built-in
+native paint(a: int, b: int)
+";
+    let s = steps(src);
+    let line = s.iter().position(|x| is_line(x, 3)).unwrap_or_else(|| panic!("{s:?}"));
+    let call = s.iter().position(|x| matches!(x, Step::Call(n) if n.starts_with("__kestrel_list_fn_"))).unwrap();
+    assert!(line < call, "a closure that can't call a built-in function needs no care: {s:?}");
+}

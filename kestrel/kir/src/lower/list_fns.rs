@@ -46,6 +46,9 @@ impl Helpers {
         let idx = self.reserve();
         self.list_fns.insert(key, idx);
         let elem = elem_of(list_ty, t);
+        // (The expressions here carry no source line: nothing in the loop can fail by line. The
+        // index is unchecked, and the function it calls reports its own lines. A checked
+        // operation added here needs a line.)
         // Local 0 is the list and local 1 the function value (both passed by pointer), local 2
         // the index, and local 3 the new list when there is one.
         let (xs, f, i, out) = (Place::local(LocalIdx(0)), Place::local(LocalIdx(1)), LocalIdx(2), LocalIdx(3));
@@ -151,5 +154,14 @@ impl FnLowerer<'_> {
         let helper = self.helpers.list_fn(method, list_ty, callee, ty, self.t);
         let args = vec![Arg::Value(Expr { kind: ExprKind::Load(list), ty: list_ty, line }), Arg::Value(value)];
         Self::with_pre(pre, ExprKind::Call(helper, args), ty, line)
+    }
+}
+
+impl Helpers {
+    /// Whether `f`, a generated function, is a list method's loop that calls a function that
+    /// isn't `pure`: running it may call into a built-in module, and so store a line of its own
+    /// (see `lines`).
+    pub(crate) fn runs_user_code(&self, f: FuncIdx) -> bool {
+        f.0 >= self.base && self.list_fns.values().any(|&g| g == f) && !self.funcs[(f.0 - self.base) as usize].is_pure
     }
 }

@@ -1,17 +1,18 @@
-// error 39: `filter` would copy the items of `pools`, which own an Arena; use a `for` loop with `remove`
-// error 40: `map` needs a closure that gives a value
-// error 41: `map` needs a function that gives a value
-// error 42: `map` needs a function that takes `int`, found `pure (float) -> float`
-// error 43: this only reads the list, so the line does nothing
+// error 40: `filter` would copy the items of `pools`, which own an Arena; use a `for` loop with `remove`
+// error 41: `map` needs a closure that gives a value
+// error 42: `map` needs a function that gives a value
+// error 43: `map` needs a function that takes `int`, found `pure (float) -> float`
 // error 44: this only reads the list, so the line does nothing
-// error 45: expected bool, found int
-// error 46: this closure takes 2 parameters, but `(int) -> bool` takes 1 parameter
-// error 47: `n` is changed by this call, so the closure passed to it can't read it
-// error 52: this closure calls `print`, which a `pure` function can't do
-// error 58: `f` isn't a pure function type, so a `pure` function can't call it
-// error 62: `noisy` isn't a pure function type, so a `pure` function can't call it
-// error 67: `par for` bodies can only call `pure` functions; `f` isn't a pure function type
-// error 74: this closure calls `print`, which a `par for` body can't do
+// error 45: this only reads the list, so the line does nothing
+// error 46: expected bool, found int
+// error 47: this closure takes 2 parameters, but `(int) -> bool` takes 1 parameter
+// error 48: `n` is changed by this call, so the closure passed to it can't read it
+// error 53: this closure calls `print`, which a `pure` function can't do
+// error 59: `f` isn't a pure function type, so a `pure` function can't call it
+// error 63: `noisy` isn't `pure`, so a `pure` function can't call it
+// error 68: `par for` bodies can only call `pure` functions; `f` isn't a pure function type
+// error 75: this closure calls `print`, which a `par for` body can't do
+// error 82: `filter` would copy the items of this list, which own an Arena; use a `for` loop with `remove`
 // Errors specific to `filter`, `map`, `any` and `all`.
 struct Pool {
     mem: Arena = Arena()
@@ -75,4 +76,8 @@ par_literal(zs: list[int]) {
             true
         })
     }
+}
+
+temporary() {
+    let kept = [1].map((i) { Pool() }).filter((p) { true })
 }

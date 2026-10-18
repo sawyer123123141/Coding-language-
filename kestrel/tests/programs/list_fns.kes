@@ -25,6 +25,8 @@
 // expect: ["orc", "imp"]
 // expect: orc zed
 // expect: [1, 2] [9, 2]
+// expect: ["ab", "ef"]
+// expect: 1 15
 // expect: 3 2 true
 // expect-stderr: arenas alive at exit: 0
 // The list methods that take a function: `filter`, `map`, `any` and `all`, with a literal, a
@@ -38,6 +40,11 @@ struct Enemy {
 
 struct Bag {
     items: list[int]
+}
+
+struct Keeper {
+    mem: Arena = Arena()
+    words: list[string] = []
 }
 
 struct Pool {
@@ -131,6 +138,20 @@ main() {
     let kept = bags.filter((b) { true })
     bags[0].items[0] = 9
     print(kept[0].items, bags[0].items)
+
+    // The kept items outlive the arena the originals were in, and function values keep their
+    // environments.
+    var keeper = Keeper()
+    in keeper.mem {
+        keeper.words = ["ab", "cd", "ef"]
+    }
+    let some = keeper.words.filter((w) { w != "cd" })
+    keeper = Keeper()
+    print(some)
+    let base = 3
+    let ops: list[(int) -> int] = [(y) { y + base }, (y) { y * base }]
+    let strong = ops.filter((a) { a(10) > 20 })
+    print(strong.len, strong[0](5))
 
     // `map` moves the new items in, owning ones too: each pool is freed once.
     let pools = [1, 2, 3].map((m) { Pool(id: m) })

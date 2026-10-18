@@ -179,7 +179,7 @@ pure a(xs: list[int], f: (int) -> bool, g: pure (int) -> bool) -> int {
         errs,
         vec![
             "`f` isn't a pure function type, so a `pure` function can't call it; declare the parameter as `pure (int) -> bool`",
-            "`noisy` isn't a pure function type, so a `pure` function can't call it; declare the parameter as `pure (int) -> bool`"
+            "`noisy` isn't `pure`, so a `pure` function can't call it"
         ]
     );
 }

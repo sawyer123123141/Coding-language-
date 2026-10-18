@@ -15,8 +15,8 @@ use super::closure::Impure;
 use super::fnvalue::shown_callee;
 use super::lists::written;
 use super::BodyChecker;
-use crate::sig::{Sig, SigParam};
-use crate::tables::ListMethod;
+use crate::sig::{Sig, SigId, SigParam};
+use crate::tables::{ListMethod, Res};
 use crate::ty::Ty;
 
 /// The method as it is written.
@@ -41,7 +41,12 @@ impl<'a> BodyChecker<'a> {
         let refused = method == ListMethod::Filter && self.t.is_owning(elem);
         if refused {
             let what = self.t.owns_what(elem).replace('`', "");
-            let msg = format!("`filter` would copy the items of `{}`, which own {what}; use a `for` loop with `remove`", written(receiver));
+            // (A receiver that isn't a place, like `xs.map(...)`, has no name to give.)
+            let list = match receiver.kind {
+                ExprKind::Ident(_) | ExprKind::Field { .. } | ExprKind::Index { .. } => format!("`{}`", written(receiver)),
+                _ => "this list".to_string(),
+            };
+            let msg = format!("`filter` would copy the items of {list}, which own {what}; use a `for` loop with `remove`");
             self.error(name_span, msg);
         }
         let literal = matches!(f.kind, ExprKind::Closure(_));
@@ -73,6 +78,7 @@ impl<'a> BodyChecker<'a> {
                     self.closure_impure(f.span, Impure::Value(&shown));
                 }
             }
+            Ty::Fn(sig) if matches!(self.t.res.get(&f.id), Some(Res::FnValue(_))) => self.check_named_purity(sig, f),
             Ty::Fn(sig) => self.check_value_purity(sig, f.span, &shown_callee(f)),
             _ => {}
         }
@@ -86,6 +92,24 @@ impl<'a> BodyChecker<'a> {
             ListMethod::Filter => Ty::List(self.t.intern_elem(elem)),
             ListMethod::Map => Ty::List(self.t.intern_elem(given.expect("map has a result"))),
             _ => Ty::Bool,
+        }
+    }
+
+    /// A named function given as the function: in a `pure` function or a `par for` body it must
+    /// be declared `pure`.
+    fn check_named_purity(&mut self, sig: SigId, f: &Expr) {
+        if self.t.sig(sig).is_pure {
+            return;
+        }
+        let shown = shown_callee(f);
+        if self.closure_impure(f.span, Impure::Value(&format!("`{shown}`"))) {
+            return;
+        }
+        if self.is_pure {
+            let msg = format!("`{shown}` isn't `pure`, so a `pure` function can't call it");
+            self.error_help(f.span, msg, format!("declare it as `pure {shown}(...)`"));
+        } else if !self.par.is_empty() {
+            self.error(f.span, format!("`par for` bodies can only call `pure` functions; `{shown}` isn't `pure`"));
         }
     }
 
