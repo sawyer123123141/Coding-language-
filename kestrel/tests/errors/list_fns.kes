@@ -1,0 +1,78 @@
+// error 39: `filter` would copy the items of `pools`, which own an Arena; use a `for` loop with `remove`
+// error 40: `map` needs a closure that gives a value
+// error 41: `map` needs a function that gives a value
+// error 42: `map` needs a function that takes `int`, found `pure (float) -> float`
+// error 43: this only reads the list, so the line does nothing
+// error 44: this only reads the list, so the line does nothing
+// error 45: expected bool, found int
+// error 46: this closure takes 2 parameters, but `(int) -> bool` takes 1 parameter
+// error 47: `n` is changed by this call, so the closure passed to it can't read it
+// error 52: this closure calls `print`, which a `pure` function can't do
+// error 58: `f` isn't a pure function type, so a `pure` function can't call it
+// error 62: `noisy` isn't a pure function type, so a `pure` function can't call it
+// error 67: `par for` bodies can only call `pure` functions; `f` isn't a pure function type
+// error 74: this closure calls `print`, which a `par for` body can't do
+// Errors specific to `filter`, `map`, `any` and `all`.
+struct Pool {
+    mem: Arena = Arena()
+}
+
+show(n: int) { print(n) }
+
+noisy(n: int) -> bool {
+    print(n)
+    true
+}
+
+make(var n: int) -> list[int] {
+    n += 1
+    var out: list[int] = []
+    out.add(n)
+    out
+}
+
+main() {
+    var xs: list[int] = [1, 2, 3]
+    var n = 0
+    let pools: list[Pool] = []
+    let f = (k: int) -> bool { k > 1 }
+    let a = pools.filter((p) { true })
+    let b = xs.map((e) { print(e) })
+    let c = xs.map(show)
+    let d = xs.map((e: float) { e })
+    xs.any(f)
+    xs.filter((e) { e > 1 })
+    let g = xs.filter((e) { e })
+    let h = xs.filter((e, i) { e > i })
+    let j = make(var n).filter((e) { e > n })
+}
+
+pure bad(ys: list[int]) -> int {
+    ys.filter((m) {
+        print(m)
+        true
+    }).len
+}
+
+pure bad_value(ys: list[int], f: (int) -> bool) -> int {
+    ys.filter(f).len
+}
+
+pure bad_name(ys: list[int]) -> int {
+    ys.filter(noisy).len
+}
+
+par_value(zs: list[int], f: (int) -> bool) {
+    par for z in zs {
+        let w = zs.filter(f).len
+    }
+}
+
+par_literal(zs: list[int]) {
+    par for z in zs {
+        let w = zs.any((e) {
+            print(e)
+            true
+        })
+    }
+}

@@ -73,3 +73,18 @@ fn passing_a_capturing_closure_literal_to_a_call_allocates_nothing() {
     let many = arena_bytes(&build("passes_100000", &passes(100_000)), "4");
     assert_eq!(few, many, "100,000 calls with a closure literal should take no more memory than 10");
 }
+
+/// A program that calls `any` and `all` with a capturing literal `n` times in the program arena,
+/// and `filter` and `map` in an `arena { }` block that frees their lists each time.
+fn list_fns(n: u32) -> String {
+    format!(
+        "main() {{\n    let xs = [1, 2, 3, 4]\n    let k = 2\n    let s = \"ab\"\n    var last = 0\n    for i from 0 to {n} {{\n        if xs.any((e) {{ e > k + s.len }}) {{ last += 1 }}\n        if xs.all((e) {{ e > k }}) {{ last += 1 }}\n        arena {{\n            last = xs.filter((e) {{ e > k }}).len + xs.map((e) {{ e + k }}).len\n        }}\n    }}\n    print(last)\n}}\n"
+    )
+}
+
+#[test]
+fn the_list_methods_allocate_nothing_for_a_literal_and_what_an_arena_block_frees() {
+    let few = arena_bytes(&build("list_fns_10", &list_fns(10)), "6");
+    let many = arena_bytes(&build("list_fns_100000", &list_fns(100_000)), "6");
+    assert_eq!(few, many, "100,000 calls should take no more memory than 10");
+}

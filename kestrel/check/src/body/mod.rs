@@ -13,6 +13,7 @@ mod expr;
 mod fnvalue;
 mod let_else;
 mod in_block;
+mod list_fns;
 mod lists;
 mod maps;
 mod match_guard;
@@ -91,6 +92,8 @@ pub(crate) struct BodyChecker<'a> {
     frames: Vec<closure::ClosureFrame>,
     /// The name of the parameter a closure literal is being passed for, for its messages.
     arg_name: Option<String>,
+    /// Set while a closure literal passed to `map` is checked: its result type comes from its body.
+    infer_result: bool,
 }
 
 pub(crate) fn check_fn(program: &Program, fn_id: FnId, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
@@ -151,6 +154,7 @@ impl<'a> BodyChecker<'a> {
             discarded: None,
             frames: Vec::new(),
             arg_name: None,
+            infer_result: false,
         }
     }
 

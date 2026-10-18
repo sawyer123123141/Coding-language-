@@ -168,6 +168,7 @@ impl<'a> BodyChecker<'a> {
     /// which gives parameter types and the result type where the literal leaves them out.
     pub(crate) fn check_closure(&mut self, e: &Expr, lit: &ClosureLit, want: Option<Ty>) -> Ty {
         let arg_name = self.arg_name.take();
+        let infer_result = std::mem::take(&mut self.infer_result);
         let want_sig = match want {
             Some(Ty::Fn(s)) => Some(self.t.sig(s).clone()),
             _ => None,
@@ -205,7 +206,8 @@ impl<'a> BodyChecker<'a> {
             tys.push(ty);
         }
         let declared = lit.ret.as_ref().map(|t| resolve_type(t, self.t, self.diags));
-        let known = declared.or(want_sig.as_ref().map(|w| w.ret));
+        // (`map` gives the item type, and takes the result type from the body.)
+        let known = declared.or(want_sig.as_ref().filter(|_| !infer_result).map(|w| w.ret));
 
         self.push_frame(e.id, known.is_none());
         self.ret = known.unwrap_or(Ty::Error);

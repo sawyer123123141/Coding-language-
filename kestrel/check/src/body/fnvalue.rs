@@ -228,7 +228,7 @@ pub(super) fn quote(shown: &str) -> String {
 }
 
 /// How a message names the function value a postfix call calls.
-fn shown_callee(callee: &Expr) -> String {
+pub(super) fn shown_callee(callee: &Expr) -> String {
     match callee.kind {
         ExprKind::Ident(_) | ExprKind::Field { .. } | ExprKind::Index { .. } => written(callee),
         _ => "this function value".to_string(),

@@ -45,12 +45,26 @@ pub enum ListMethod {
     Find,
     /// `xs.join(sep)` on a list or array of strings.
     Join,
+    /// `xs.filter(f)`: a new list of the items `f` is true for.
+    Filter,
+    /// `xs.map(f)`: a new list of `f`'s results.
+    Map,
+    /// `xs.any(f)`: whether `f` is true for some item.
+    Any,
+    /// `xs.all(f)`: whether `f` is true for every item.
+    All,
 }
 
 impl ListMethod {
-    /// Whether the method changes its receiver; `has`, `find` and `join` only read it.
+    /// Whether the method changes its receiver; `has`, `find`, `join` and the four that take a
+    /// function only read it.
     pub fn changes_receiver(self) -> bool {
-        !matches!(self, ListMethod::Has | ListMethod::Find | ListMethod::Join)
+        !matches!(self, ListMethod::Has | ListMethod::Find | ListMethod::Join) && !self.takes_fn()
+    }
+
+    /// Whether the method takes a function and calls it for the items.
+    pub fn takes_fn(self) -> bool {
+        matches!(self, ListMethod::Filter | ListMethod::Map | ListMethod::Any | ListMethod::All)
     }
 }
 

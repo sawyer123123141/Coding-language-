@@ -1,4 +1,5 @@
-//! List methods (`add`, `remove_at`, `pop`, `insert`, `clear`, `has` and `find`), and the loop
+//! List methods (`add`, `remove_at`, `pop`, `insert`, `clear`, `has`, `find`, `join`, and the four that
+//! take a function, see `list_fns`), and the loop
 //! check that keeps a list from changing length while a `for ... in` loop runs over it.
 
 use kestrel_syntax::ast::{Arg, Expr, ExprKind};
@@ -126,6 +127,10 @@ impl<'a> BodyChecker<'a> {
             "has" => Which::Other(ListMethod::Has),
             "find" => Which::Other(ListMethod::Find),
             "join" => Which::Other(ListMethod::Join),
+            "filter" => Which::Other(ListMethod::Filter),
+            "map" => Which::Other(ListMethod::Map),
+            "any" => Which::Other(ListMethod::Any),
+            "all" => Which::Other(ListMethod::All),
             _ => {
                 let help = match recv_ty {
                     // A slip for `remove_at`, or for the statement `remove b` in a loop.
@@ -137,8 +142,8 @@ impl<'a> BodyChecker<'a> {
                         let xs = written(receiver);
                         format!("use `{xs}.remove_at(i)`, or `remove {item}` inside `for {item} in {xs}`")
                     }
-                    Ty::List(_) => "lists have `add`, `remove_at`, `pop`, `insert`, `clear`, `has`, `find`, `join` and `.len`".to_string(),
-                    _ => "arrays have `has`, `find`, `join` and `.len`".to_string(),
+                    Ty::List(_) => "lists have `add`, `remove_at`, `pop`, `insert`, `clear`, `has`, `find`, `join`, `filter`, `map`, `any`, `all` and `.len`".to_string(),
+                    _ => "arrays have `has`, `find`, `join`, `filter`, `map`, `any`, `all` and `.len`".to_string(),
                 };
                 let msg = format!("`{}` has no method `{name}`", self.tn(recv_ty));
                 self.error_help(*name_span, msg, help);
@@ -184,6 +189,10 @@ impl<'a> BodyChecker<'a> {
             ListMethod::Has => ("`has` takes one value", 1),
             ListMethod::Find => ("`find` takes one value", 1),
             ListMethod::Join => ("`join` takes one value", 1),
+            ListMethod::Filter => ("`filter` takes one function", 1),
+            ListMethod::Map => ("`map` takes one function", 1),
+            ListMethod::Any => ("`any` takes one function", 1),
+            ListMethod::All => ("`all` takes one function", 1),
         };
         if args.len() != usage.1 || args.iter().any(|a| a.label.is_some() || a.is_var) {
             self.error(e.span, usage.0);
@@ -191,6 +200,9 @@ impl<'a> BodyChecker<'a> {
             return Ty::Error;
         }
         self.t.res.insert(e.id, Res::List(method));
+        if method.takes_fn() {
+            return self.list_fn(e, receiver, recv_ty, method, *name_span, args);
+        }
         if method.changes_receiver() && self.receiver_root(receiver, name).is_some() {
             if let Some(i) = self.overlapping_loop(receiver) {
                 let (list, item) = (self.loop_list_name(i), self.t.local(self.for_in_lists[i].item).name.clone());
@@ -215,6 +227,7 @@ impl<'a> BodyChecker<'a> {
             }
             ListMethod::Pop => self.check_pop_owner(e, receiver, elem),
             ListMethod::Clear => {}
+            ListMethod::Filter | ListMethod::Map | ListMethod::Any | ListMethod::All => unreachable!("handled by `list_fn`"),
         }
         match method {
             ListMethod::Pop => Ty::Optional(self.t.intern_elem(elem)),
@@ -226,6 +239,7 @@ impl<'a> BodyChecker<'a> {
             }
             ListMethod::Join => Ty::Str,
             ListMethod::RemoveAt | ListMethod::Insert | ListMethod::Clear => Ty::Unit,
+            ListMethod::Filter | ListMethod::Map | ListMethod::Any | ListMethod::All => unreachable!("handled by `list_fn`"),
         }
     }
 

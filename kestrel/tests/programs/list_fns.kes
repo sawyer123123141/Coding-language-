@@ -1,0 +1,138 @@
+// env: KESTREL_ARENA_COUNT=1
+// expect: 2 king
+// expect: [vec2(x: 1, y: 2), vec2(x: 3, y: 4), vec2(x: 5, y: 6)]
+// expect: true false
+// expect: false true
+// expect: 0 0
+// expect: visit orc
+// expect: visit imp
+// expect: visit king
+// expect: 2
+// expect: check orc
+// expect: check imp
+// expect: true
+// expect: all orc
+// expect: all imp
+// expect: false
+// expect: 2 [5, 0, 9] true false
+// expect: 2 true false 2
+// expect: 1 14
+// expect: ["orc", "king"]
+// expect: ["orcx", "impx", "kingx"]
+// expect: [3, 6, 9] [1, 4, 7, 10]
+// expect: true false
+// expect: 2 2 1
+// expect: ["orc", "imp"]
+// expect: orc zed
+// expect: [1, 2] [9, 2]
+// expect: 3 2 true
+// expect-stderr: arenas alive at exit: 0
+// The list methods that take a function: `filter`, `map`, `any` and `all`, with a literal, a
+// named function, a stored closure and a function-typed parameter, on lists and arrays.
+struct Enemy {
+    name: string
+    hp: int
+    pos: vec2
+    boss: bool = false
+}
+
+struct Bag {
+    items: list[int]
+}
+
+struct Pool {
+    mem: Arena = Arena()
+    id: int
+}
+
+pure is_alive(e: Enemy) -> bool { e.hp > 0 }
+
+is_boss(e: Enemy) -> bool { e.boss }
+
+get_hp(e: Enemy) -> int { e.hp }
+
+count_by(xs: list[Enemy], keep: (Enemy) -> bool) -> int { xs.filter(keep).len }
+
+total_by(xs: list[Enemy], f: (Enemy) -> int) -> int {
+    var sum = 0
+    let hps = xs.map(f)
+    for v in hps { sum += v }
+    sum
+}
+
+// A literal inside a `pure` function is pure; a function value passed in must be a `pure` type.
+pure alive_count(xs: list[Enemy]) -> int { xs.filter((e) { e.hp > 0 }).len }
+
+pure live(xs: list[Enemy], f: pure (Enemy) -> bool) -> int { xs.filter(f).len }
+
+main() {
+    var foes: list[Enemy] = []
+    foes.add(Enemy(name: "orc", hp: 5, pos: vec2(1, 2)))
+    foes.add(Enemy(name: "imp", hp: 0, pos: vec2(3, 4)))
+    foes.add(Enemy(name: "king", hp: 9, pos: vec2(5, 6), boss: true))
+    let nobody: list[Enemy] = []
+
+    let alive = foes.filter((e) { e.hp > 0 })
+    print(alive.len, alive[1].name)
+    print(foes.map((e) { e.pos }))
+    print(foes.any((e) { e.boss }), foes.all((e) { e.hp > 0 }))
+    print(nobody.any((e) { e.boss }), nobody.all((e) { e.boss }))
+    print(nobody.filter((e) { e.boss }).len, nobody.map((e) { e.hp }).len)
+
+    // A closure that prints shows the calls in order, and `any` and `all` stop early.
+    let seen = foes.filter((e) {
+        print("visit", e.name)
+        e.hp > 0
+    })
+    print(seen.len)
+    let hit = foes.any((e) {
+        print("check", e.name)
+        e.hp == 0
+    })
+    print(hit)
+    let every = foes.all((e) {
+        print("all", e.name)
+        e.hp > 3
+    })
+    print(every)
+
+    // Function values that are not literals.
+    print(foes.filter(is_alive).len, foes.map(get_hp), foes.any(is_boss), foes.all(is_alive))
+    let big = (e: Enemy) -> bool { e.hp > 4 }
+    let least = 4
+    let over = (e: Enemy) -> bool { e.hp > least }
+    print(foes.filter(big).len, foes.any(big), foes.all(big), foes.filter(over).len)
+    print(count_by(foes, (e) { e.boss }), total_by(foes, get_hp))
+
+    // Captures, and a chain.
+    let cutoff = 3
+    let tag = "x"
+    print(foes.filter((e) { e.hp > cutoff }).map((e) { e.name }))
+    print(foes.map((e) { "{e.name}{tag}" }))
+
+    // Arrays have all four.
+    var nums = array[int](4)
+    for i from 0 to 4 { nums[i] = i * 3 }
+    print(nums.filter((n) { n > 2 }), nums.map((n) { n + 1 }))
+    print(nums.any((n) { n == 6 }), nums.all((n) { n < 9 }))
+
+    print(alive_count(foes), live(foes, is_alive), live(foes, (e) { e.hp > 6 }))
+
+    // A literal inside a literal, reading the outer one's parameter.
+    print(foes.filter((e) { foes.any((q) { q.hp > e.hp }) }).map((r) { r.name }))
+
+    // `filter` copies the items it keeps: the original can change.
+    foes[0].name = "zed"
+    print(alive[0].name, foes[0].name)
+
+    // The kept items own their lists: changing an original item's list leaves the copy alone.
+    var bags: list[Bag] = []
+    bags.add(Bag(items: [1, 2]))
+    let kept = bags.filter((b) { true })
+    bags[0].items[0] = 9
+    print(kept[0].items, bags[0].items)
+
+    // `map` moves the new items in, owning ones too: each pool is freed once.
+    let pools = [1, 2, 3].map((m) { Pool(id: m) })
+    print(pools.len, pools[1].id, pools.any((p) { p.id == 2 }))
+}

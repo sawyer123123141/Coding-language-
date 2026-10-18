@@ -6,10 +6,11 @@
 
 use std::collections::HashMap;
 
-use kestrel_check::Tables;
+use kestrel_check::{ListMethod, Tables};
 use kestrel_syntax::ast::ExprId;
 
 use super::consts::ConstGlobals;
+use super::list_fns::Callee;
 use super::kty;
 pub(crate) use super::heap::{has_heap, owning};
 use crate::ir::*;
@@ -54,6 +55,8 @@ pub(crate) struct Helpers {
     pub(crate) print: HashMap<KTy, FuncIdx>,
     /// The search behind `has` and `find`, per list or array type.
     pub(super) find: HashMap<KTy, FuncIdx>,
+    /// The loop behind each `filter`, `map`, `any` and `all` (see `list_fn`).
+    pub(super) list_fns: HashMap<(ListMethod, KTy, Callee), FuncIdx>,
     /// The thunk of each function used as a value (see `thunk_for`).
     pub(super) thunks: HashMap<FuncIdx, FuncIdx>,
     /// The code of each closure literal (see `closure_code`).
@@ -72,8 +75,8 @@ impl Helpers {
         let (copy, drop, print) = (HashMap::new(), HashMap::new(), HashMap::new());
         let (find, thunks, closures, env_copies) = (HashMap::new(), HashMap::new(), HashMap::new(), HashMap::new());
         let (funcs, par_bodies, consts) = (Vec::new(), Vec::new(), ConstGlobals::default());
-        let env_layouts = HashMap::new();
-        Helpers { base, funcs, copy, drop, print, find, thunks, closures, env_copies, env_layouts, par_bodies, consts }
+        let (env_layouts, list_fns) = (HashMap::new(), HashMap::new());
+        Helpers { base, funcs, copy, drop, print, find, list_fns, thunks, closures, env_copies, env_layouts, par_bodies, consts }
     }
 
     /// Adds an outlined `par for` body, named for its index.

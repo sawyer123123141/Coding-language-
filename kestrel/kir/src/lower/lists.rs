@@ -1,7 +1,8 @@
 //! List methods: `remove_at`, `pop`, `insert`, `clear`, `has` and `find` (`add` is `Stmt::ListAdd`).
 //! The runtime moves items for `remove_at` and `insert` and empties the list for `clear`
 //! (`Stmt::List`, after drops); `pop` is built from `SetLen` and a move, copy or drop of the last
-//! item; `has` and `find` call a generated search (see `list_helpers`).
+//! item; `has` and `find` call a generated search (see `list_helpers`); `filter`, `map`, `any` and
+//! `all` call a generated loop (see `list_fns`).
 
 use kestrel_check::{ListMethod, Ty};
 use kestrel_syntax::ast;
@@ -70,7 +71,9 @@ impl<'a> FnLowerer<'a> {
                 let not_empty = binary(BinOp::Ne, load(n, KTy::I64, line), int(0, KTy::I64, line), KTy::Bool, line);
                 out.push(Stmt::If { cond: not_empty, then_body, else_body: Vec::new() });
             }
-            ListMethod::Has | ListMethod::Find | ListMethod::Join => unreachable!("the checker refuses a discarded `{method:?}`"),
+            ListMethod::Has | ListMethod::Find | ListMethod::Join | ListMethod::Filter | ListMethod::Map | ListMethod::Any | ListMethod::All => {
+                unreachable!("the checker refuses a discarded `{method:?}`")
+            }
         }
     }
 
@@ -80,6 +83,7 @@ impl<'a> FnLowerer<'a> {
             ListMethod::Pop => self.pop(receiver, ty, line),
             ListMethod::Find => self.find(receiver, &args[0].value, ty, line),
             ListMethod::Join => self.str_join(receiver, &args[0].value),
+            ListMethod::Filter | ListMethod::Map | ListMethod::Any | ListMethod::All => self.list_fn_call(method, receiver, &args[0].value, ty, line),
             ListMethod::Has => {
                 // `find`, then whether it found something.
                 let opt = self.int_optional();
