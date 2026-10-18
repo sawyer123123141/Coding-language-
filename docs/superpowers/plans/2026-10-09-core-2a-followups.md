@@ -261,10 +261,14 @@ From `docs/superpowers/specs/2026-10-17-lists-strings-design.md` (its "As built"
 
 From `docs/superpowers/specs/2026-10-18-closures-design.md` (its "As built" section) and the task reviews. None blocks anything. Not fixed:
 
-**Owed before the round is closed:**
-- **The kernels.** `filter` (1M ints, keep the evens), `map` (1M `vec2` to lengths) and `sort_by` (100,000 structs by a float field) against the hand-written Kestrel loop and against Rust (`filter().collect()`, `map`, `sort_by(|a, b| a.x.total_cmp(&b.x))`), in `kestrel/bench/kernels` with `measure.py`'s method, results in `results.md`, losses included. Not built or run, because the machine was in use; until then "runs like a hand-written loop" is a KIR-shape claim (the closure is inlined into the loop), not a timing. The `sort_by` key runs about twice per comparison and in a scratch arena unless the key can't build memory, so an expensive key may lose to Rust's `sort_by_key`; caching number keys is the optimisation if it does.
-- **The full workspace suite, workspace clippy and the Godot clippy** over everything since `dc98b3d`. The `sort` task passed 834 tests; the fix round after it (the map-loop refusal) ran only the check, KIR, runtime and CLI targets that touch it.
-- **The final whole-round review.** Tasks 1 (the file splits), 4b (the inliner fix) and 9 (docs and measurements) had no task review of their own. It should also look at the closure frame's loop floor (a later check that ignores `loop_floor` and `removing_floor` would leak across a closure boundary).
+**Closed since:** the full suite (835), both clippies and the final whole-round review (Opus) ran, its fix wave landed (8650f44..29f802a), and the kernels were measured (3aea21a, `kestrel/bench/kernels/results.md`).
+
+**From the measurements (ns per item, `--release`, one thread):**
+- `map` matches the hand loop (1.39 vs 1.35); both are 1.8x Rust (0.77), which vectorises.
+- `filter` is 1.23x the hand loop (4.82 vs 3.91; Rust 2.67): the IR shows the closure inlined, but the loop reloads the list header from the stack twice per item, loads the kept item twice, and keeps a dead load of the environment word. The bounds-check and list-header item (Performance) is the likely fix.
+- `sort_by` is 6.1x Rust's `sort_by` (139.5 vs 22.8) and 1.43x a hand-written Kestrel merge sort: the key runs on both sides of every comparison through the runtime callback. Caching the keys (number keys first) is the fix.
+
+**Parked by the final review (fix first next round):** inside `for k, v in hs[0].m`, a `var self` method on `hs[0]` that replaces `self.m` inside `in self.mem { }` runs with no error and gives mixed key/value pairs (no freed memory is read; the fix wave's "the path must contain an index" narrowing in `map_loop_inside`, `check/src/body/lists.rs`, lets it through). Fix: refuse `var` places and `var self` receivers at or above the looped map.
 
 **Follow-ups to build:**
 - **Devirtualising.** After inlining, an indirect call of a value known to be a particular function is still `CallIndirect`: a named function passed through a function-typed parameter, or a closure stored in a local and called once. Turning it into a direct call (and inlining that) is the next step. Literals passed straight to the list methods already run as direct calls into inlined code.
