@@ -95,6 +95,15 @@ impl<'a> BodyChecker<'a> {
         }
     }
 
+    /// Whether a call given `place` as `var` could break an enclosing loop over a map: the map is
+    /// held in an item of a list at or inside `place`, and the call may move that list's items,
+    /// which would swap another map in under the loop. Giving the item or the map itself is fine,
+    /// since that can't move the items (replacing the map is caught when the program runs).
+    pub(crate) fn map_loop_inside(&self, place: &Expr) -> bool {
+        let Some((root, path)) = self.list_place(place) else { return false };
+        self.for_in_maps.iter().any(|x| x.root == root && covers(&path, &x.path) && x.path[path.len()..].contains(&None))
+    }
+
     fn map_overlap(&self, i: usize) -> Overlap {
         Overlap { list: Self::name_of(&self.t.local(self.for_in_maps[i].root).name, &self.for_in_maps[i].path), item: None }
     }

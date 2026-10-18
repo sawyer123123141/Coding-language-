@@ -2,6 +2,7 @@
 
 use kestrel_syntax::ast::{Arg, Expr, ExprKind};
 
+use super::lists::written;
 use super::place::Immutable;
 use super::regions::Ctx;
 use super::BodyChecker;
@@ -219,6 +220,10 @@ impl<'a> BodyChecker<'a> {
             None => {
                 self.mark_changed(root);
                 self.check_par_write(&a.value);
+                if self.map_loop_inside(&a.value) {
+                    let msg = format!("can't pass `{}` as `var` while looping over a map inside it; change it after the loop", written(&a.value));
+                    self.error(a.value.span, msg);
+                }
             }
         }
         if ty != p.ty && ty != Ty::Error && p.ty != Ty::Error {

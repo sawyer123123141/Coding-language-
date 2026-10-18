@@ -500,7 +500,7 @@ enemies.sort_by((e) { e.pos.distance_to(player) })
 - `filter`, `map`, `any` and `all` call `f` once per item, first to last. The `sort_by` key runs twice per comparison, so its order is not promised, and it runs in a scratch arena freed after each comparison.
 - Sorting is stable. Strings compare by code point, `false` comes before `true`, and a float NaN sorts last. For largest first, negate a number key.
 - `filter` copies the kept items, so it refuses items that own memory (use a `for` loop with `remove`). `map` results may own memory.
-- `sort` and `sort_by` are refused inside a loop over the same list (or over a map held in it), and a key can't read the list it sorts. `remove_at`, `insert`, `pop` and `clear` are refused inside a loop over a map held in the list as well.
+- `sort` and `sort_by` are refused inside a loop over the same list (or over a map held in it), and a key can't read the list it sorts. `remove_at`, `insert`, `pop` and `clear` are refused inside a loop over a map held in the list as well. So is a call given the list, or what holds it, as `var`.
 - Not built: `reduce`, a comparator sort, `reverse`, `min_by` and `max_by`.
 
 ## Memory

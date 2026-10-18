@@ -2,6 +2,7 @@ use kestrel_syntax::ast::{Arg, Expr, ExprKind, Item, Program};
 use kestrel_syntax::Diagnostic;
 
 use super::args::Receiver;
+use super::lists::written;
 use super::place::Immutable;
 use super::{is_const_expr, BodyChecker};
 use crate::builtins::Builtin;
@@ -203,6 +204,10 @@ impl<'a> BodyChecker<'a> {
         let mut recv = Receiver { expr: receiver, var_root: None, read_root: None };
         if self.t.func(fid).params[0].is_var {
             recv.var_root = self.receiver_root(receiver, name);
+            if recv.var_root.is_some() && self.map_loop_inside(receiver) {
+                let msg = format!("can't call `{name}` on `{}` while looping over a map inside it; call it after the loop", written(receiver));
+                self.error(receiver.span, msg);
+            }
         } else if receiver_ty.is_aggregate() {
             recv.read_root = self.place_root(receiver);
         }

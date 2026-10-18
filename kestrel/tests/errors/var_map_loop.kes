@@ -1,0 +1,46 @@
+// error 34: can't pass `hs` as `var` while looping over a map inside it; change it after the loop
+// error 40: can't pass `w` as `var` while looping over a map inside it; change it after the loop
+// error 41: can't call `reorder` on `w` while looping over a map inside it; call it after the loop
+// error 44: can't change how many items `hs` has while looping over it; change `hs` after the loop
+// A loop over a map that is held in a list's item re-reads the map by its place, so a call that
+// may move the list's items can't be given the list (or what holds it) as `var` while it runs.
+// Giving it the item, the map itself, or another list, is fine: those can't move the items.
+struct Holder {
+    id: int
+    m: map[int, int] = map[int, int]()
+}
+
+struct World {
+    hs: list[Holder] = []
+
+    reorder(var self) {
+        self.hs.sort_by((h) { h.id })
+    }
+}
+
+reorder(var hs: list[Holder]) {
+    hs.sort_by((h) { h.id })
+}
+
+touch(var w: World) { }
+bump(var h: Holder) { h.id += 1 }
+set(var m: map[int, int]) { m[1] = 5 }
+
+main() {
+    var hs: list[Holder] = [Holder(id: 2), Holder(id: 1)]
+    var w = World()
+    var other: list[Holder] = []
+    for k, v in hs[0].m {
+        reorder(var hs)
+        reorder(var other)
+        bump(var hs[0])
+        set(var hs[0].m)
+    }
+    for k in w.hs[0].m {
+        touch(var w)
+        w.reorder()
+    }
+    for k, v in hs[1].m {
+        hs.pop()
+    }
+}
