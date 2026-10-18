@@ -1,0 +1,51 @@
+// expect: 1 7
+// expect: 10 20 3
+// expect: 5 -5
+// expect: 100 700
+// expect: low
+// expect: high
+enum Shape {
+    Circle { r: int }
+    Square { side: int }
+    Dot
+}
+
+// A `return` inside the tail `if` of a function small enough to inline.
+g(x: int) -> int { if x > 0 { return 1 } else { 7 } }
+
+// A `return` in one arm of a tail `match`.
+size(s: Shape) -> int {
+    match s {
+        Circle c { return c.r * 10 }
+        Square q { q.side * 5 }
+        Dot { 3 }
+    }
+}
+
+// A `return` inside a nested tail `if`.
+dir(x: int) -> int {
+    if x != 0 {
+        if x > 0 { return 5 } else { -5 }
+    } else {
+        0
+    }
+}
+
+// A `return` in the tail `if` of a function with no result.
+note(x: int) {
+    if x > 0 {
+        print("high")
+        return
+    } else {
+        print("low")
+    }
+}
+
+main() {
+    print(g(2), g(-1))
+    print(size(Shape.Circle(r: 1)), size(Shape.Square(side: 4)), size(Shape.Dot))
+    print(dir(9), dir(-9))
+    print(g(1) * 100, g(-1) * 100)
+    note(-1)
+    note(1)
+}

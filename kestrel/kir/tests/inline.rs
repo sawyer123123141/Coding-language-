@@ -109,3 +109,13 @@ fn the_constants_init_is_correct_whether_or_not_it_is_inlined_into_main() {
     assert_eq!(returns, 0, "{:#?}", main.body);
     assert_eq!(prints, 2, "{:#?}", main.body);
 }
+
+#[test]
+fn a_return_inside_the_tail_if_keeps_the_function_a_call() {
+    let src = "g(x: int) -> int { if x > 0 { return 1 } else { 7 } }
+f(a: int) -> int { g(a) + g(a - 1) }
+main() {}
+";
+    let m = lower_inlined(src);
+    assert_eq!(calls(&func(&m, "f").body), 2, "{:#?}", func(&m, "f").body);
+}

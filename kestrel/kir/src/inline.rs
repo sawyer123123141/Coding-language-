@@ -40,28 +40,27 @@ fn inlinable(idx: FuncIdx, f: &Func) -> Option<usize> {
     if f.native.is_some() {
         return None;
     }
-    let (init, last) = match f.body.split_last() {
-        Some((Stmt::Return(Some(_)), init)) => (init, true),
-        _ => (&f.body[..], false),
-    };
+    let last = matches!(f.body.last(), Some(Stmt::Return(Some(_))));
     if !last && f.ret.is_some() {
         return None;
     }
     let mut nodes = 0;
     let mut ok = true;
+    let mut returns = 0;
     walk(&f.body, &mut |s| {
         nodes += 1;
         match s {
-            Node::Stmt(Stmt::Return(_)) => {}
+            Node::Stmt(Stmt::Return(_)) => returns += 1,
             Node::Expr(Expr { kind: ExprKind::Call(callee, _), .. }) | Node::Stmt(Stmt::Call(callee, _)) => {
                 ok &= *callee != idx;
             }
             _ => {}
         }
     });
-    let mut early_return = false;
-    walk(init, &mut |s| early_return |= matches!(s, Node::Stmt(Stmt::Return(_))));
-    (ok && !early_return && nodes <= MAX_NODES).then_some(nodes)
+    // Every `return` anywhere in the body counts, including one inside the
+    // final return's own value (a tail `if` or `match` with a `return` in a
+    // branch): only the final statement itself may be one.
+    (ok && returns == usize::from(last) && nodes <= MAX_NODES).then_some(nodes)
 }
 
 struct Inliner<'a> {
