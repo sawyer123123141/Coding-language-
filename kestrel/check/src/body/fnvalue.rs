@@ -6,6 +6,7 @@ use kestrel_syntax::Span;
 
 use super::args::param_ref;
 use super::closure::Impure;
+use super::exclusive::CalleePlace;
 use super::lists::written;
 use super::BodyChecker;
 use crate::builtins::Builtin;
@@ -83,8 +84,8 @@ impl<'a> BodyChecker<'a> {
         let shown = shown_callee(callee);
         match ty {
             Ty::Fn(sig) => {
-                let root = self.place_root(callee);
-                self.call_through(e, &shown, sig, callee.span, args, root)
+                let place = self.source_key(callee).map(|key| CalleePlace { key, shown: shown.clone() });
+                self.call_through(e, &shown, sig, callee.span, args, place)
             }
             other => {
                 if other != Ty::Error {
@@ -104,8 +105,8 @@ impl<'a> BodyChecker<'a> {
         self.note_local_call_capture(e, local, name_span);
         match self.t.local(local).ty {
             Ty::Fn(sig) => {
-                let root = self.t.local(local).alias.unwrap_or(local);
-                self.call_through(e, name, sig, name_span, args, Some(root))
+                let place = CalleePlace { key: self.local_key(local), shown: name.to_string() };
+                self.call_through(e, name, sig, name_span, args, Some(place))
             }
             other => {
                 if other != Ty::Error {
@@ -130,16 +131,19 @@ impl<'a> BodyChecker<'a> {
         self.t.field_index.insert(e.id, field as u32);
         self.note_field_call_capture(e, receiver, field as u32, name, Ty::Fn(sig));
         let shown = format!("{}.{name}", written(receiver));
-        let root = self.place_root(receiver);
-        self.call_through(e, &shown, sig, e.span, args, root)
+        let place = self.source_key(receiver).map(|mut key| {
+            key.steps.push(Some(name.to_string()));
+            CalleePlace { key, shown: shown.clone() }
+        });
+        self.call_through(e, &shown, sig, e.span, args, place)
     }
 
-    /// A call through a function value of signature `sig`, written as `shown`. `read_root` is
-    /// the variable the value is read from, which the call's `var` arguments can't change.
-    fn call_through(&mut self, e: &Expr, shown: &str, sig: SigId, span: Span, args: &[Arg], read_root: Option<LocalId>) -> Ty {
+    /// A call through a function value of signature `sig`, written as `shown`. `callee` is the
+    /// place the value is read from, which the call can't change (see `exclusive`).
+    fn call_through(&mut self, e: &Expr, shown: &str, sig: SigId, span: Span, args: &[Arg], callee: Option<CalleePlace>) -> Ty {
         self.t.res.insert(e.id, Res::CallValue(sig));
         self.check_value_purity(sig, span, shown);
-        self.check_value_args(e, shown, sig, args, read_root)
+        self.check_value_args(e, shown, sig, args, callee)
     }
 
     /// A non-pure function value can't be called in a `pure` function or a `par for` body.
@@ -165,7 +169,7 @@ impl<'a> BodyChecker<'a> {
 
     /// The arguments of a call through a value: positional, one per parameter, `var` where the
     /// signature says so.
-    pub(crate) fn check_value_args(&mut self, e: &Expr, shown: &str, sig: SigId, args: &[Arg], read_root: Option<LocalId>) -> Ty {
+    pub(crate) fn check_value_args(&mut self, e: &Expr, shown: &str, sig: SigId, args: &[Arg], callee: Option<CalleePlace>) -> Ty {
         let sig = self.t.sig(sig).clone();
         let params: Vec<ParamSig> = sig.params.iter().map(|p| ParamSig { name: String::new(), ty: p.ty, is_var: p.is_var }).collect();
         let mut ok = true;
@@ -189,6 +193,7 @@ impl<'a> BodyChecker<'a> {
                     if a.is_var {
                         self.error_help(a.span, format!("{} isn't `var`", param_ref(p, shown)), "remove `var`");
                     }
+                    self.note_stack_closure(a);
                     self.check_value(&a.value, Some(p.ty));
                 }
                 None => {
@@ -196,7 +201,9 @@ impl<'a> BodyChecker<'a> {
                 }
             }
         }
-        self.check_exclusive(args, &var_roots, read_root);
+        self.check_exclusive(args, &var_roots, None);
+        let changes = self.call_changes(args, None);
+        self.check_call_captures(e.span, args, &changes, callee);
         // Arguments run in source order; one passed by pointer earlier must not be changed by a later one.
         for (i, a) in args.iter().enumerate() {
             if a.is_var || self.t.ty(a.value.id).is_aggregate() {

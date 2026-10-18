@@ -72,6 +72,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             // A closure with nothing to capture: its code and a zero environment, like a named function.
             ExprKind::MakeFn { code, env: EnvKind::None } => self.fn_ref_into(*code, dest),
             ExprKind::MakeFn { code, env: EnvKind::Heap(env) } => self.heap_fn_into(*code, env, e.line, dest)?,
+            ExprKind::MakeFn { code, env: EnvKind::Stack(env) } => self.stack_fn_into(*code, env, dest)?,
             ExprKind::Seq(stmts, value) => {
                 self.stmts(stmts)?;
                 self.lower_into(value, dest)?;

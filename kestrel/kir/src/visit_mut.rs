@@ -94,7 +94,7 @@ pub fn walk_expr<V: VisitMut + ?Sized>(v: &mut V, e: &mut Expr) {
         ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) | ExprKind::EnvDup(x) => {
             v.visit_expr(x)
         }
-        ExprKind::MakeFn { env: EnvKind::Heap(env), .. } => {
+        ExprKind::MakeFn { env: EnvKind::Heap(env) | EnvKind::Stack(env), .. } => {
             for x in &mut env.values {
                 v.visit_expr(x);
             }

@@ -12,6 +12,7 @@ use kestrel_syntax::ast;
 
 use super::FnLowerer;
 use crate::ir::*;
+use crate::stack_envs::is_stack_fn;
 use crate::visit::{walk_expr, Node};
 
 impl FnLowerer<'_> {
@@ -62,6 +63,10 @@ impl FnLowerer<'_> {
             for arg in std::mem::take(lowered) {
                 lowered.push(match arg {
                     Arg::Value(v) if matches!(v.kind, ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::StrLit(_)) => Arg::Value(v),
+                    // A stack environment stays an argument of the call (see `check_stack_envs`); it
+                    // only reads places that no argument can change (the exclusivity rule), so it
+                    // may be made after the others.
+                    Arg::Value(v) if is_stack_fn(&v) => Arg::Value(v),
                     Arg::Value(v) => Arg::Value(self.spill(v, pre)),
                     Arg::Ref(mut p) => {
                         self.stabilize(&mut p, pre);

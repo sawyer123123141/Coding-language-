@@ -48,7 +48,14 @@ pub fn lower(program: &Program, t: &Tables, lines: &LineIndex) -> Module {
         funcs[main.0 as usize].body.insert(0, Stmt::Call(init, Vec::new()));
     }
     let globals = helpers.consts.into_globals();
-    Module { funcs, structs, enums, elems, print_fns: helpers.print, par_bodies: helpers.par_bodies, globals, init, main, files: Vec::new() }
+    let m = Module { funcs, structs, enums, elems, print_fns: helpers.print, par_bodies: helpers.par_bodies, globals, init, main, files: Vec::new() };
+    // Stack environments live only as long as the call they are passed to.
+    if cfg!(debug_assertions) {
+        if let Err(e) = crate::check_stack_envs(&m) {
+            panic!("{e}");
+        }
+    }
+    m
 }
 
 pub(crate) fn kty(ty: Ty) -> KTy {

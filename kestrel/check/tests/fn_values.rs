@@ -106,7 +106,7 @@ fn arguments_through_a_value_are_checked_against_the_signature() {
 #[test]
 fn the_value_a_call_reads_cannot_be_changed_by_its_arguments() {
     let src = "struct Holder {\n    f: (var Holder)\n    n: int\n}\nmain() {\n    var h = Holder(f: poke, n: 1)\n    h.f(var h)\n}\npoke(var h: Holder) { h.n += 1 }\n";
-    assert_eq!(errors(src), vec!["`h` is passed as `var` and is also the receiver of this call"]);
+    assert_eq!(errors(src), vec!["can't call `h.f` while this call changes `h`, which may hold its memory"]);
 }
 
 #[test]

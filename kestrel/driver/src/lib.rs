@@ -84,6 +84,16 @@ pub fn compile(path: &str, src: &str, style: DiagStyle) -> (Option<Compiled>, St
 
 /// Like `compile`; with `needs_main` false it compiles a library (no `main`).
 pub fn compile_as(path: &str, src: &str, style: DiagStyle, needs_main: bool) -> (Option<Compiled>, String) {
+    let (compiled, text) = compile_unoptimized(path, src, style, needs_main);
+    let compiled = compiled.map(|mut c| {
+        kestrel_kir::optimize(&mut c.module);
+        c
+    });
+    (compiled, text)
+}
+
+/// Like `compile_as`, with the KIR as lowering left it: before `kestrel_kir::optimize`.
+pub fn compile_unoptimized(path: &str, src: &str, style: DiagStyle, needs_main: bool) -> (Option<Compiled>, String) {
     let Loaded { files, modules, mut diags, builtins } = load(path, src);
     if diags.iter().any(Diagnostic::is_error) {
         return (None, report(&files, &diags, style));
@@ -104,8 +114,7 @@ pub fn compile_as(path: &str, src: &str, style: DiagStyle, needs_main: bool) -> 
     let mut module = kestrel_kir::lower(&program, &tables, &LineIndex::for_files(&parts));
     // Runtime errors name the file by its base name only: a built program mustn't carry the folders.
     module.files = files.iter().map(|f| base_name(&f.path)).collect();
-    kestrel_kir::optimize(&mut module);
-    let files =files.iter().map(|f| SourceFile::new(Path::new(&f.path))).collect();
+    let files = files.iter().map(|f| SourceFile::new(Path::new(&f.path))).collect();
     (Some(Compiled { module, files, builtins }), text)
 }
 

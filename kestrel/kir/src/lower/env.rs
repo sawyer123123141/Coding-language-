@@ -2,7 +2,10 @@
 //! holds a copy of each captured value: a block in the current arena (`EnvKind::Heap`) with a
 //! 16-byte header (the address of the environment's copy function, then the block's size) and
 //! the values after it, at the offsets of its `EnvLayout`. The values are deep copies (`owned`),
-//! so nothing in the block shares memory with the variables it was made from.
+//! so nothing in the block shares memory with the variables it was made from. A literal that is
+//! directly a call's argument gets a stack environment (`EnvKind::Stack`) instead: the same layout
+//! in a stack slot, with shallow copies, which the checker's exclusivity rule keeps valid while
+//! the call runs.
 //!
 //! Inside the closure's code each capture is a reference local bound to its place in the
 //! environment (`Stmt::BindEnv`), like a parameter passed by pointer: reading it into a new home
@@ -173,5 +176,19 @@ impl FnLowerer<'_> {
             .collect();
         let layout = self.helpers.env_layout(t, id);
         EnvKind::Heap(Env { copy, layout, values })
+    }
+}
+
+impl FnLowerer<'_> {
+    /// The environment of closure literal `id`, which captures something and is directly a call's
+    /// argument (`Tables::stack_closures`): a stack slot holding a shallow copy of each captured
+    /// value, read now. The header holds the same copy function as a heap environment's, so a
+    /// callee that stores the value copies it out deep.
+    pub(crate) fn stack_env(&mut self, id: ExprId, line: u32) -> EnvKind {
+        let t = self.t;
+        let copy = self.helpers.env_copy_fn(id, t);
+        let values = t.closures[&id].captures.iter().map(|c| Expr { kind: ExprKind::Load(self.capture_source(c)), ty: kty(c.ty), line }).collect();
+        let layout = self.helpers.env_layout(t, id);
+        EnvKind::Stack(Env { copy, layout, values })
     }
 }

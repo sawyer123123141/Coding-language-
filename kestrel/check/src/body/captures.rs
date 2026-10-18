@@ -13,10 +13,10 @@
 //! body as well: they are copied out of it when the inner closure is made.
 //!
 //! **The rules.** A capture can't change (`Immutable::Captured`) and can't be moved. It can't be
-//! owning, so a closure is never owning. A closure that copies its captures (all of them, for
-//! now: every closure with captures has a heap environment) can't capture a whole struct or enum
-//! value that holds a function value: storing such a closure where the value is would copy the
-//! old closure into the new one, without bound.
+//! owning, so a closure is never owning. A closure that copies its captures (every one with a
+//! heap environment; not a literal passed straight to a call, `Tables::stack_closures`) can't
+//! capture a whole struct or enum value that holds a function value: storing such a closure where
+//! the value is would copy the old closure into the new one, without bound.
 
 use std::collections::HashMap;
 
@@ -40,6 +40,9 @@ struct CaptureRead {
     names: Vec<String>,
     ty: Ty,
     span: Span,
+    /// Rule 7b (no copying a whole value that holds a function value) was checked for it: by the
+    /// closure inside the body that it comes from, which copies its captures.
+    copy_checked: bool,
 }
 
 /// The reads of one closure literal's body, in the order they start.
@@ -118,7 +121,7 @@ impl<'a> BodyChecker<'a> {
         let ty = self.t.local(root).ty;
         let reads = &mut self.frames.last_mut().expect("a closure is being checked").reads;
         reads.at.insert(id, reads.list.len());
-        reads.list.push(CaptureRead { expr: Some(id), root, path: Vec::new(), names: Vec::new(), ty, span });
+        reads.list.push(CaptureRead { expr: Some(id), root, path: Vec::new(), names: Vec::new(), ty, span, copy_checked: false });
     }
 
     /// The read that is `base` goes on into its field `field` (named `name`, of type `ty`): it is
@@ -137,7 +140,7 @@ impl<'a> BodyChecker<'a> {
 
     /// The place a local reads, with a view (a loop item, a `match` binding, a `let ... else`
     /// view) expanded to its source: the variable, and the steps into it.
-    fn view_source(&self, l: LocalId) -> (LocalId, Vec<Step>) {
+    pub(super) fn view_source(&self, l: LocalId) -> (LocalId, Vec<Step>) {
         if let Some(x) = self.for_in_lists.iter().rev().find(|x| x.item == l) {
             let mut path = x.path.clone();
             path.push(None);
@@ -164,13 +167,14 @@ impl<'a> BodyChecker<'a> {
             let rest = r.path[list[firsts[k]].path.len()..].to_vec();
             self.t.capture_reads.insert(e, (id, k as u32, rest));
         }
+        // A literal with a stack environment copies nothing, so it may capture a whole value that
+        // holds a function value; the closure around it, if it copies, checks that instead.
+        let copies = !self.t.stack_closures.contains(&id);
         let mut captures = Vec::with_capacity(firsts.len());
         for &c in &firsts {
             let r = &list[c];
             let written = std::iter::once(self.t.local(r.root).name.clone()).chain(r.names.iter().cloned()).collect::<Vec<_>>().join(".");
-            if r.expr.is_some() {
-                self.check_capture(r.ty, &written, r.span);
-            }
+            self.check_capture(r.ty, &written, r.span, r.expr.is_some(), copies && !r.copy_checked);
             let (source_root, mut source_path) = self.view_source(r.root);
             source_path.extend(r.names.iter().cloned().map(Some));
             captures.push(Capture { root: r.root, path: r.path.clone(), ty: r.ty, source_root, source_path, span: r.span });
@@ -178,7 +182,7 @@ impl<'a> BodyChecker<'a> {
         // The enclosing closure copies these out of its own environment to make this one.
         for (&c, cap) in firsts.iter().zip(&captures) {
             if self.is_capture(cap.root) {
-                let read = CaptureRead { expr: None, ..list[c].clone() };
+                let read = CaptureRead { expr: None, copy_checked: list[c].copy_checked || copies, ..list[c].clone() };
                 self.frames.last_mut().expect("an enclosing closure").reads.list.push(read);
             }
         }
@@ -189,12 +193,16 @@ impl<'a> BodyChecker<'a> {
     /// can't be a whole struct or enum value that holds a function value anywhere in its fields
     /// (`self` holding `cb`, or `handlers: list[(int)]`). A function value itself, or a list,
     /// array, map or optional of them, is fine: storing the closure into one of those is a
-    /// growth the program asks for, not an accident of capturing `self`.
-    fn check_capture(&mut self, ty: Ty, written: &str, span: Span) {
+    /// growth the program asks for, not an accident of capturing `self`. `direct`: the body reads
+    /// it itself, rather than through a closure inside it (which reported the owning error).
+    /// `copied`: the closure copies it, and no closure inside has checked the second rule.
+    fn check_capture(&mut self, ty: Ty, written: &str, span: Span, direct: bool, copied: bool) {
         if self.t.is_owning(ty) {
-            let what = if self.t.holds_arena(ty) { "an Arena" } else { "a GPU object" };
-            self.error(span, format!("a closure can't capture `{written}`: it owns {what}; pass it as a parameter instead"));
-        } else if matches!(ty, Ty::Struct(_) | Ty::Enum(_) | Ty::Variant(..)) && self.t.holds_fn(ty) {
+            if direct {
+                let what = if self.t.holds_arena(ty) { "an Arena" } else { "a GPU object" };
+                self.error(span, format!("a closure can't capture `{written}`: it owns {what}; pass it as a parameter instead"));
+            }
+        } else if copied && matches!(ty, Ty::Struct(_) | Ty::Enum(_) | Ty::Variant(..)) && self.t.holds_fn(ty) {
             let msg = format!("this closure would copy all of `{written}`, including its function fields; copy what it needs into a local first");
             self.error(span, msg);
         }

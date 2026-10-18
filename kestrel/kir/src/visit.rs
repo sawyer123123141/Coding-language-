@@ -140,7 +140,7 @@ pub fn walk_expr<'a>(e: &'a Expr, f: &mut impl FnMut(Node<'a>)) {
         ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) | ExprKind::EnvDup(x) => {
             walk_expr(x, f)
         }
-        ExprKind::MakeFn { env: EnvKind::Heap(env), .. } => {
+        ExprKind::MakeFn { env: EnvKind::Heap(env) | EnvKind::Stack(env), .. } => {
             for v in &env.values {
                 walk_expr(v, f);
             }

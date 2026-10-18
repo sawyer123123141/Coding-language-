@@ -1,6 +1,7 @@
 use kestrel_syntax::ast::{Arg, Expr, ExprKind, Item, Program};
 use kestrel_syntax::Diagnostic;
 
+use super::args::Receiver;
 use super::place::Immutable;
 use super::{is_const_expr, BodyChecker};
 use crate::builtins::Builtin;
@@ -198,17 +199,14 @@ impl<'a> BodyChecker<'a> {
         };
         self.t.res.insert(e.id, Res::Fn(fid));
         self.check_callee_purity(*name_span, fid);
-        let mut var_roots = Vec::new();
         let by_pointer = self.t.func(fid).params[0].is_var || receiver_ty.is_aggregate();
-        let mut read_root = None;
+        let mut recv = Receiver { expr: receiver, var_root: None, read_root: None };
         if self.t.func(fid).params[0].is_var {
-            if let Some(root) = self.receiver_root(receiver, name) {
-                var_roots.push((root, None));
-            }
+            recv.var_root = self.receiver_root(receiver, name);
         } else if receiver_ty.is_aggregate() {
-            read_root = self.place_root(receiver);
+            recv.read_root = self.place_root(receiver);
         }
-        let ret = self.check_args(e, fid, args, 1, var_roots, read_root);
+        let ret = self.check_args(e, fid, args, Some(recv));
         if by_pointer {
             let later: Vec<&Expr> = args.iter().map(|a| &a.value).collect();
             self.check_changed_later(&[receiver], &later);

@@ -326,6 +326,7 @@ name = "kestrel-kir"
 version = "0.1.0"
 dependencies = [
  "kestrel-check",
+ "kestrel-driver",
  "kestrel-syntax",
 ]
 

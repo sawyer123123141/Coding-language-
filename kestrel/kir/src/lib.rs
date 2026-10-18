@@ -11,6 +11,7 @@ pub mod promote;
 mod rename;
 pub mod scalarize;
 mod split;
+mod stack_envs;
 pub mod visit;
 pub mod visit_mut;
 
@@ -18,6 +19,7 @@ pub use ir::*;
 pub use layout::*;
 pub use lower::lower;
 pub use native::native_symbol;
+pub use stack_envs::check_stack_envs;
 
 /// Inlines small functions, then keeps plain structs and the fields of `var` parameters and loop
 /// elements in registers (see `scalarize` and `promote`). The driver runs it on every program.

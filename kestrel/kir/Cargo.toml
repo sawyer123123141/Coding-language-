@@ -6,3 +6,6 @@ edition.workspace = true
 [dependencies]
 kestrel-syntax.workspace = true
 kestrel-check.workspace = true
+
+[dev-dependencies]
+kestrel-driver.workspace = true

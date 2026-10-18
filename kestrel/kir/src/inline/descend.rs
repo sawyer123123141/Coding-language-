@@ -102,7 +102,7 @@ impl Inliner<'_> {
             ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) | ExprKind::EnvDup(x) => {
                 self.expr(x, depth)
             }
-            ExprKind::MakeFn { env: EnvKind::Heap(env), .. } => {
+            ExprKind::MakeFn { env: EnvKind::Heap(env) | EnvKind::Stack(env), .. } => {
                 for x in &mut env.values {
                     self.expr(x, depth);
                 }

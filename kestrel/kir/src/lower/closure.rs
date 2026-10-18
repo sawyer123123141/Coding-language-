@@ -5,7 +5,9 @@
 //!
 //! The literal itself is a `MakeFn`: the code's address and the environment. A closure that
 //! captures nothing has none (`EnvKind::None`), so it allocates nothing; one that captures
-//! something gets a heap environment holding copies of the captured values (see `env`).
+//! something gets an environment holding copies of the captured values (see `env`): a stack
+//! environment of shallow copies when the literal is directly a call's argument, else a heap one
+//! of deep copies.
 
 use kestrel_check::{ClosureInfo, Tables, Ty};
 use kestrel_syntax::ast::{self, ClosureLit, Program};
@@ -37,7 +39,14 @@ impl<'a> FnLowerer<'a> {
     pub(crate) fn make_closure(&mut self, e: &ast::Expr, lit: &ClosureLit) -> ExprKind {
         let (program, t, lines) = (self.program, self.t, self.lines);
         let code = self.helpers.closure_code(e.id, |helpers| lower_closure(program, t, lines, e, lit, helpers));
-        let env = if t.closures[&e.id].captures.is_empty() { EnvKind::None } else { self.heap_env(e.id, self.line(e.span)) };
+        let line = self.line(e.span);
+        let env = if t.closures[&e.id].captures.is_empty() {
+            EnvKind::None
+        } else if t.stack_closures.contains(&e.id) {
+            self.stack_env(e.id, line)
+        } else {
+            self.heap_env(e.id, line)
+        };
         ExprKind::MakeFn { code, env }
     }
 }

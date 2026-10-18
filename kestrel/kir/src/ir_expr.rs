@@ -151,6 +151,13 @@ pub enum EnvKind {
     /// evaluated (in order) after the block is allocated and before the function value is
     /// written; each is a value of its own (a deep copy of the captured place).
     Heap(Env),
+    /// An environment in a stack slot of the function making it, holding shallow copies of the
+    /// captured values (a string's header, not its bytes), read with plain loads when the value
+    /// is made. Only a closure literal that is directly a call's argument gets one
+    /// (`Tables::stack_closures`), so its value appears only as an `Arg::Value` of a `Call` or a
+    /// `CallIndirect` (see `check_stack_envs`). Its header holds the real copy function: a callee
+    /// that stores its parameter copies it into a heap environment.
+    Stack(Env),
 }
 
 /// A closure's environment: a 16-byte header, then the captured values.

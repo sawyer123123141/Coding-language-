@@ -1,9 +1,10 @@
 //! Function values: `{code, env}` in memory, built from a thunk's or a closure's address, and calls
 //! through them. A closure that captures values has a heap environment: a block in the current
 //! arena with a 16-byte header (the address of its copy function, then the block's size) and the
-//! values after it (see KIR's `lower::env`).
+//! values after it (see KIR's `lower::env`). A closure literal passed straight to a call has a stack
+//! environment instead: the same block in a stack slot of the caller, holding shallow copies.
 
-use cranelift_codegen::ir::{types, AbiParam, InstBuilder, MemFlags, Signature, Type, Value};
+use cranelift_codegen::ir::{types, AbiParam, InstBuilder, MemFlags, Signature, StackSlotData, StackSlotKind, Type, Value};
 use cranelift_codegen::isa::CallConv;
 use cranelift_module::Module;
 use kestrel_kir::{self as kir, FuncIdx, KSig, Place};
@@ -54,6 +55,26 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let block = self.call_id(self.shared.rt.alloc, &[one, size, align, l, f]).expect("returns a pointer");
         let copy = self.func_address(env.copy);
         self.b.ins().store(MemFlags::trusted(), copy, block, 0);
+        self.b.ins().store(MemFlags::trusted(), size, block, 8);
+        for (v, &offset) in env.values.iter().zip(&env.layout.offsets) {
+            self.store_at(v, block, offset as i32)?;
+        }
+        let code = self.func_address(code);
+        self.b.ins().store(MemFlags::trusted(), code, dest, 0);
+        self.b.ins().store(MemFlags::trusted(), block, dest, 8);
+        Ok(())
+    }
+
+    /// Writes the function value of closure code `code` with a stack environment at `dest`: a stack
+    /// slot of this function with the same header as a heap environment (so a callee that stores
+    /// the value copies it out through the copy function) and a shallow copy of each value.
+    pub(crate) fn stack_fn_into(&mut self, code: FuncIdx, env: &kir::Env, dest: Value) -> Result<(), String> {
+        let data = StackSlotData::new(StackSlotKind::ExplicitSlot, env.layout.size, 3);
+        let slot = self.b.create_sized_stack_slot(data);
+        let block = self.b.ins().stack_addr(self.ptr, slot, 0);
+        let copy = self.func_address(env.copy);
+        self.b.ins().store(MemFlags::trusted(), copy, block, 0);
+        let size = self.b.ins().iconst(types::I64, env.layout.size as i64);
         self.b.ins().store(MemFlags::trusted(), size, block, 8);
         for (v, &offset) in env.values.iter().zip(&env.layout.offsets) {
             self.store_at(v, block, offset as i32)?;

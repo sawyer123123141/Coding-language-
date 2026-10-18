@@ -216,6 +216,11 @@ pub struct Tables {
     /// name, or a call of a function field (`b.on(1)` reads `b.on`). Only the code of that
     /// closure may lower these expressions: KIR binds the captures there (`lower::env`).
     pub capture_reads: HashMap<ExprId, (ExprId, u32, Vec<u32>)>,
+    /// The closure literals that get a stack environment: each is directly an argument (the
+    /// argument expression itself) of a call of a user function or method (`Res::Fn`) or of a
+    /// call through a function value (`Res::CallValue`). The checker holds them to the call
+    /// exclusivity rule (`body::exclusive`); KIR gives stack environments to exactly these.
+    pub stack_closures: HashSet<ExprId>,
     pub locals: Vec<LocalInfo>,
     pub fns: Vec<FnInfo>,
     pub consts: Vec<ConstInfo>,

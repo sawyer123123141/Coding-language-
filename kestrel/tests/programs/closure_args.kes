@@ -1,0 +1,166 @@
+// expect: 11 100
+// expect: 21
+// expect: 5
+// expect: 12
+// expect: 350
+// expect: abc7
+// expect: 41
+// expect: 5
+// expect: 35
+// expect: 1
+// expect: hold [1, 1]
+// expect: 1
+// expect: 60
+// expect: 30
+// expect: 31
+// expect: in a frame 3
+// Closure literals passed straight to a call get a stack environment: shallow copies of the
+// captured values in the caller's frame. A callee that stores its parameter copies it, so the
+// stored closure outlives the frame and any arena its captures came from.
+struct Keep {
+    mem: Arena = Arena()
+    fns: list[(int) -> int] = []
+    says: list[() -> string] = []
+}
+
+say(f: () -> string, var keep: Keep) {
+    in keep.mem {
+        keep.says.add(f)
+    }
+}
+
+run(f: (int) -> int, var keep: Keep) {
+    in keep.mem {
+        keep.fns.add(f)
+    }
+}
+
+fill(var keep: Keep, n: int) {
+    in keep.mem {
+        keep.fns.add((x) { x + n })
+    }
+}
+
+// The literal's captures live in this frame and in an arena freed before the closure is called.
+stash(var keep: Keep, n: int) {
+    arena {
+        let s = "abc{n}"
+        run((x) { x + s.len + n }, var keep)
+        say(() { s }, var keep)
+    }
+}
+
+// Uses the stack where `stash`'s frame was.
+churn(n: int) -> int {
+    let a = [n, n + 1, n + 2, n + 3, n + 4, n + 5, n + 6, n + 7]
+    if n > 0 {
+        churn(n - 1) + a[7]
+    } else {
+        a[0]
+    }
+}
+
+apply(f: () -> int) -> int { f() }
+
+struct Hero {
+    hp: int = 1
+
+    heal(var self) {
+        self.hp = 5
+        print(apply(() { self.hp }))
+    }
+
+    boost(self, f: (int) -> int) -> int { f(self.hp) }
+}
+
+struct Thing {
+    pos: vec2
+}
+
+struct Scene {
+    items: list[Thing]
+    center: vec2
+
+    arrange(var self) {
+        reorder(var self.items, (e) { e.pos.distance_to(self.center) })
+    }
+}
+
+// Puts the item with the smallest key first.
+reorder(var xs: list[Thing], key: (Thing) -> float) {
+    var best = 0
+    for i from 1 to xs.len {
+        if key(xs[i]) < key(xs[best]) {
+            best = i
+        }
+    }
+    let first = xs[0]
+    xs[0] = xs[best]
+    xs[best] = first
+}
+
+struct Holder {
+    items: list[int]
+    label: string
+}
+
+tag(var xs: list[int], name: () -> string) {
+    xs.add(xs.len)
+    print(name(), xs)
+}
+
+struct Counter {
+    count: int = 0
+    cb: (var int) = (var n) { n += 1 }
+}
+
+// A stack environment made in a frame that is gone by the time the stored copy is called.
+frame(var keep: Keep) {
+    let words = ["in", "a", "frame"]
+    run((x) {
+        print(words[0], words[1], words[2], x)
+        x
+    }, var keep)
+}
+
+main() {
+    var keep = Keep()
+    var n = 10
+    let h = (x: int) -> int { x * 100 }
+    let c = true
+    run(if c { (x: int) -> int { x + n } } else { h }, var keep)
+    run(if not c { (x: int) -> int { x + n } } else { h }, var keep)
+    n = 20
+    print(keep.fns[0](1), keep.fns[1](1))
+    run((x) { x + n }, var keep)
+    n = 30
+    print(keep.fns[2](1))
+    fill(var keep, 4)
+    print(keep.fns[3](1))
+    stash(var keep, 7)
+    print(keep.fns[4](1))
+    print(churn(20))
+    print(keep.says[0]())
+    run(keep: var keep, f: (x) { x + n + 10 })
+    print(keep.fns[5](1))
+    var hero = Hero()
+    hero.heal()
+    print(hero.boost((x) { x + n }))
+    var scene = Scene(items: [Thing(pos: vec2(5.0, 0.0)), Thing(pos: vec2(1.0, 0.0))], center: vec2(0.0, 0.0))
+    scene.arrange()
+    print(scene.items[0].pos.x)
+    var hold = Holder(items: [1], label: "hold")
+    tag(var hold.items, () { hold.label })
+    var b = Counter()
+    b.cb(var b.count)
+    print(b.count)
+    let twice = (g: () -> int) -> int { g() + g() }
+    print(twice(() { n }))
+    let outer = () { apply(() { n }) }
+    n = 1
+    print(outer())
+    print(apply(() { outer() + n }))
+    var later = Keep()
+    frame(var later)
+    later.fns[0](3)
+}

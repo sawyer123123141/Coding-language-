@@ -185,6 +185,6 @@ impl<'a> BodyChecker<'a> {
     }
 
     fn check_user_call(&mut self, e: &Expr, fid: FnId, args: &[Arg]) -> Ty {
-        self.check_args(e, fid, args, 0, Vec::new(), None)
+        self.check_args(e, fid, args, None)
     }
 }

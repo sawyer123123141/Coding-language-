@@ -131,7 +131,7 @@ pub(crate) fn rename_expr(e: &mut Expr, subst: &[Subst]) {
         ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) | ExprKind::EnvDup(x) => {
             rename_expr(x, subst)
         }
-        ExprKind::MakeFn { env: EnvKind::Heap(env), .. } => {
+        ExprKind::MakeFn { env: EnvKind::Heap(env) | EnvKind::Stack(env), .. } => {
             for x in &mut env.values {
                 rename_expr(x, subst);
             }

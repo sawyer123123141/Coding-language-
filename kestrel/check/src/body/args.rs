@@ -18,21 +18,27 @@ pub(super) fn param_ref(p: &ParamSig, fname: &str) -> String {
     }
 }
 
+/// A method call's receiver, for `check_args`.
+#[derive(Clone, Copy)]
+pub(crate) struct Receiver<'e> {
+    pub(crate) expr: &'e Expr,
+    /// The variable a `var self` receiver changes.
+    pub(crate) var_root: Option<LocalId>,
+    /// The variable a receiver that isn't `var` is read from, by pointer.
+    pub(crate) read_root: Option<LocalId>,
+}
+
 impl<'a> BodyChecker<'a> {
-    /// Checks a call's arguments against `fid`'s parameters after the first
-    /// `skip` (1 for a method's `self`). `var_roots` holds variables the call
-    /// already changes (a `var self` receiver); `read_root` is the variable a
-    /// receiver that isn't `var` is passed from, by pointer.
-    pub(crate) fn check_args(
-        &mut self,
-        e: &Expr,
-        fid: FnId,
-        args: &[Arg],
-        skip: usize,
-        mut var_roots: Vec<(LocalId, Option<usize>)>,
-        read_root: Option<LocalId>,
-    ) -> Ty {
+    /// Checks a call's arguments against `fid`'s parameters, after the first one for a method's
+    /// receiver `recv`. Then the exclusivity rules: no argument may see what another changes,
+    /// and a closure literal passed straight to the call may not capture what it changes.
+    pub(crate) fn check_args(&mut self, e: &Expr, fid: FnId, args: &[Arg], recv: Option<Receiver<'_>>) -> Ty {
+        let skip = usize::from(recv.is_some());
+        // A `var self` receiver is changed by the call; one that isn't is passed by pointer.
+        let mut var_roots: Vec<(LocalId, Option<usize>)> = recv.and_then(|r| r.var_root).map(|r| vec![(r, None)]).unwrap_or_default();
+        let read_root = recv.and_then(|r| r.read_root);
         let info = &self.t.fns[fid.0 as usize];
+        let receiver_changed = recv.map(|r| (r.expr, info.params[0].is_var));
         let (params, ret, fname) = (info.params[skip..].to_vec(), info.ret, info.name.clone());
         // Text built for a native's arguments may be freed when the call returns (see `wants_scratch`),
         // so memory made while checking them can't be kept past the call.
@@ -68,6 +74,9 @@ impl<'a> BodyChecker<'a> {
                     // A closure literal names the parameter in what it says about purity.
                     if matches!(a.value.kind, ExprKind::Closure(_)) {
                         self.arg_name = Some(p.name.clone());
+                        if !native {
+                            self.note_stack_closure(a);
+                        }
                     }
                     self.check_value(&a.value, Some(p.ty));
                 }
@@ -82,6 +91,8 @@ impl<'a> BodyChecker<'a> {
             self.ctxs.pop();
         }
         self.check_exclusive(args, &var_roots, read_root);
+        let changes = self.call_changes(args, receiver_changed);
+        self.check_call_captures(e.span, args, &changes, None);
         // Arguments run in source order; one passed by pointer earlier must
         // not be changed by a later one.
         for (i, a) in args.iter().enumerate() {

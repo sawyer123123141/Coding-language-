@@ -1,0 +1,77 @@
+// error 52: `xs` is changed by this call, so the closure passed to it can't read it
+// error 54: `world` is changed by this call, so the closure passed to it can't read it
+// error 56: `n` is changed by this call, so the closure passed to it can't read it
+// error 59: `bricks` is changed by this call, so the closure passed to it can't read it
+// error 65: `h` is changed by this call, so the closure passed to it can't read it
+// error 66: `h` is changed by this call, so the closure passed to it can't read it
+// error 67: `h` is changed by this call, so the closure passed to it can't read it
+// error 68: `h` is changed by this call, so the closure passed to it can't read it
+// error 70: can't call `w.cb` while this call changes `w`, which may hold its memory
+// error 73: can't call `bus.handlers[i]` while this call changes `bus`, which may hold its memory
+// error 75: can't call `hd` while this call changes `bus`, which may hold its memory
+// A closure literal passed straight to a call reads shallow copies of what it captures, so the
+// call can't change those places, or free or move what may hold their memory. Nor can a call
+// through a function value change the place the value is read from.
+struct H {
+    mem: Arena = Arena()
+    name: string = ""
+}
+
+struct W {
+    g: int = 1
+    cb: (var W) = (var w) { }
+
+    step(var self, f: (int) -> int) { self.g = f(self.g) }
+}
+
+struct Brick {
+    x: int
+}
+
+struct Bus {
+    handlers: list[(var Bus)]
+}
+
+grow(var xs: list[int], f: () -> int) { xs.add(f()) }
+
+bump(var n: int) -> int {
+    n += 1
+    n
+}
+
+shuffle(var bs: list[Brick], f: () -> int) { }
+changes(var h: H, g: () -> string) { }
+frees(var a: Arena, g: () -> string) { }
+reads(h: H, g: () -> string) { }
+later(g: () -> string, n: int) { }
+consume(h: H) -> int { 1 }
+two(g: () -> int, n: int) { }
+
+main() {
+    var xs: list[int] = [1]
+    grow(var xs, () { xs.len })
+    var world = W()
+    world.step((e) { world.g })
+    var n = 1
+    two(() { n }, bump(var n))
+    var bricks: list[Brick] = [Brick(x: 1)]
+    for b in bricks {
+        shuffle(var bricks, () { b.x })
+    }
+    var h = H()
+    in h.mem {
+        h.name = "a{n}"
+    }
+    changes(var h, () { h.name })
+    frees(var h.mem, () { h.name })
+    reads(h, () { h.name })
+    later(() { h.name }, consume(h))
+    var w = W()
+    w.cb(var w)
+    var bus = Bus(handlers: [(var b) { }])
+    let i = 0
+    bus.handlers[i](var bus)
+    for hd in bus.handlers {
+        hd(var bus)
+    }
+}

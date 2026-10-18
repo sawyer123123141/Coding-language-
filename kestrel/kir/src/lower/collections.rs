@@ -247,6 +247,12 @@ impl<'a> FnLowerer<'a> {
             },
             // A `T` used as a `T?`: the payload is a stored value like any other.
             ExprKind::Some(inner) => ExprKind::Some(Box::new(self.owned(*inner, moving))),
+            // A stack environment shares memory with the places its values were read from, and
+            // dies with this frame: a stored one is built as a heap environment of deep copies.
+            ExprKind::MakeFn { code, env: EnvKind::Stack(Env { copy, layout, values }) } => {
+                let values = values.into_iter().map(|v| self.owned(v, false)).collect();
+                ExprKind::MakeFn { code, env: EnvKind::Heap(Env { copy, layout, values }) }
+            }
             // Everything else builds a fresh value.
             other => other,
         };

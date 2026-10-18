@@ -4,6 +4,7 @@ use kestrel_check::{EnumId, FnId, Res, StructId};
 use kestrel_syntax::ast;
 
 use super::consts::hoisted;
+use crate::stack_envs::is_stack_fn;
 use super::FnLowerer;
 use crate::ir::*;
 
@@ -98,7 +99,11 @@ impl<'a> FnLowerer<'a> {
                     refs.insert(ai, p);
                 } else {
                     let v = self.expr(&a.value);
-                    temps.insert(ai, self.spill_held(v, &mut pre));
+                    // A function value with a stack environment stays an argument of the call (see
+                    // `check_stack_envs`). Making it after its turn changes nothing: the checker's
+                    // exclusivity rule keeps the call's arguments from changing what it reads.
+                    let v = if is_stack_fn(&v) { v } else { self.spill_held(v, &mut pre) };
+                    temps.insert(ai, v);
                 }
             }
         }
