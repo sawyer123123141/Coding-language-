@@ -17,7 +17,7 @@ use kestrel_syntax::Span;
 use super::closure::Impure;
 use super::exclusive::CalleePlace;
 use super::fnvalue::shown_callee;
-use super::lists::written;
+use super::lists::{written, Overlap};
 use super::BodyChecker;
 use crate::sig::{Sig, SigId, SigParam};
 use crate::tables::{ListMethod, Res};
@@ -31,6 +31,7 @@ fn word(method: ListMethod) -> &'static str {
         ListMethod::Any => "any",
         ListMethod::All => "all",
         ListMethod::SortBy => "sort_by",
+        ListMethod::Sort => "sort",
         other => unreachable!("`{other:?}` takes no function"),
     }
 }
@@ -75,7 +76,7 @@ impl<'a> BodyChecker<'a> {
             self.t.ty(f.id)
         };
         let given = match method {
-            ListMethod::Map | ListMethod::SortBy => match self.fn_result(name, f, found, item, elem, literal) {
+            ListMethod::Map | ListMethod::SortBy => match self.fn_result(method, f, found, item, elem, literal) {
                 Some(r) => Some(r),
                 None => return Ty::Error,
             },
@@ -134,8 +135,8 @@ impl<'a> BodyChecker<'a> {
 
     /// The type of the items `map`'s function `f` (of type `found`) gives, or of the keys
     /// `sort_by`'s gives, or `None` after reporting why it can't be used.
-    fn fn_result(&mut self, name: &str, f: &Expr, found: Ty, item: SigParam, elem: Ty, literal: bool) -> Option<Ty> {
-        let sorting = name == "sort_by";
+    fn fn_result(&mut self, method: ListMethod, f: &Expr, found: Ty, item: SigParam, elem: Ty, literal: bool) -> Option<Ty> {
+        let (name, sorting) = (word(method), method == ListMethod::SortBy);
         let gives = if sorting { "a number, string or bool" } else { "a value" };
         let Ty::Fn(id) = found else {
             if found != Ty::Error {
@@ -199,10 +200,9 @@ impl<'a> BodyChecker<'a> {
     /// `xs.sort()` and `xs.sort_by(key)`: `xs` changes order, so it needs a variable, and no loop
     /// over it (or over a list holding it) may be running.
     pub(super) fn list_sort(&mut self, e: &Expr, receiver: &Expr, recv_ty: Ty, method: ListMethod, name_span: Span, args: &[Arg]) -> Ty {
-        let name = if method == ListMethod::Sort { "sort" } else { "sort_by" };
+        let name = word(method);
         if self.receiver_root(receiver, name).is_some() {
-            if let Some(i) = self.overlapping_loop(receiver) {
-                let list = self.loop_list_name(i);
+            if let Some(Overlap { list, .. }) = self.overlapping_loop(receiver) {
                 self.error(e.span, format!("can't sort `{list}` while looping over it; sort it after the loop"));
             }
         }

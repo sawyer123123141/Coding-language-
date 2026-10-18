@@ -1,0 +1,37 @@
+// error 22: can't sort `hs` while looping over it; sort it after the loop
+// error 25: can't change how many items `hs` has while looping over it; change `hs` after the loop
+// error 26: can't change how many items `hs` has while looping over it; change `hs` after the loop
+// error 27: can't change how many items `hs` has while looping over it; change `hs` after the loop
+// error 31: can't sort `w.hs` while looping over it; sort it after the loop
+// A loop over a map that is held in a list's item re-reads the map by its place, so the items
+// of that list can't move or go while it runs. Adding to the list, and other lists, are fine.
+struct Holder {
+    id: int
+    m: map[int, int] = map[int, int]()
+}
+
+struct World {
+    hs: list[Holder] = []
+}
+
+main() {
+    var hs: list[Holder] = [Holder(id: 2), Holder(id: 1)]
+    var other: list[int] = [3, 2]
+    var local = map[int, int]()
+    for k, v in hs[0].m {
+        hs.sort_by((h) { h.id })
+        other.sort()
+        hs.add(Holder(id: 3))
+        hs.remove_at(0)
+        hs.insert(0, Holder(id: 4))
+        hs.clear()
+    }
+    var w = World()
+    for k in w.hs[0].m {
+        w.hs.sort_by((h) { h.id })
+    }
+    for k in local {
+        other.sort()
+        other.clear()
+    }
+}

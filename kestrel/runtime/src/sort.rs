@@ -27,7 +27,9 @@ pub unsafe extern "C" fn kestrel_rt_sort(items: *mut u8, len: i64, size: i64, co
     }
     let (n, size) = (len as usize, size as usize);
     let Ok(count) = u32::try_from(n) else { crate::panic::fail("can't sort a list of more than 4294967295 items") };
-    let at = |i: u32| items.add(i as usize * size);
+    // SAFETY (all the pointer arithmetic below): the caller guarantees `len * size` bytes at `items`,
+    // and every index is below `len`.
+    let at = |i: u32| unsafe { items.add(i as usize * size) };
     let mut order: Vec<u32> = (0..count).collect();
     // `sort_by` is stable. The items don't move until the order is known.
     order.sort_by(|&i, &j| match compare(env, at(i), at(j)) {
@@ -37,9 +39,11 @@ pub unsafe extern "C" fn kestrel_rt_sort(items: *mut u8, len: i64, size: i64, co
     });
     let mut sorted = vec![0u8; n * size];
     for (k, &i) in order.iter().enumerate() {
-        std::ptr::copy_nonoverlapping(at(i), sorted.as_mut_ptr().add(k * size), size);
+        // SAFETY: as above; `sorted` holds `n * size` bytes and doesn't overlap the items.
+        unsafe { std::ptr::copy_nonoverlapping(at(i), sorted.as_mut_ptr().add(k * size), size) };
     }
-    std::ptr::copy_nonoverlapping(sorted.as_ptr(), items, n * size);
+    // SAFETY: as above.
+    unsafe { std::ptr::copy_nonoverlapping(sorted.as_ptr(), items, n * size) };
 }
 
 /// How the first string stands to the second by code point: 0 for before, 1 for equal, 2 for

@@ -168,3 +168,22 @@ fn wrong_arguments_say_how_the_method_is_used() {
         ["`sort_by` needs a function that takes `int`, found `pure (float) -> float`"]
     );
 }
+
+#[test]
+fn a_loop_over_a_list_inside_an_item_or_a_map_in_an_item_refuses_the_sort() {
+    // The reverse of sorting a list inside the looped one: the looped list is inside the sorted one.
+    let e = errors("main() {\n var rows: list[list[int]] = [[2, 1]]\n for r in rows[0] {\n rows.sort_by((q) { q.len })\n }\n}\n");
+    assert_eq!(e, ["can't sort `rows` while looping over it; sort it after the loop"]);
+    // A loop over a map held in an item re-reads the map by its place; every operation that moves
+    // or removes the items is refused, `add` is not.
+    let holder = "struct H {\n id: int\n m: map[int, int] = map[int, int]()\n}\n";
+    let body = |op: &str| format!("{holder}main() {{\n var hs: list[H] = []\n for k in hs[0].m {{\n {op}\n }}\n}}\n");
+    assert_eq!(errors(&body("hs.sort_by((h) { h.id })")), ["can't sort `hs` while looping over it; sort it after the loop"]);
+    assert_eq!(
+        errors(&body("hs.remove_at(0)")),
+        ["can't change how many items `hs` has while looping over it; change `hs` after the loop"]
+    );
+    ok(&body("hs.add(H(id: 1))"));
+    // A map held in a local, and lists other than the one holding the map, are free.
+    ok("main() {\n var m = map[int, int]()\n var xs: list[int] = [2, 1]\n for k in m {\n xs.sort()\n xs.clear()\n }\n}\n");
+}

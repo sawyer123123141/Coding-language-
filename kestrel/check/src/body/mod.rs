@@ -84,6 +84,8 @@ pub(crate) struct BodyChecker<'a> {
     par: Vec<par::ParBody>,
     /// Enclosing `for ... in` loops over lists and arrays that are places, outermost first.
     for_in_lists: Vec<lists::LoopList>,
+    /// Enclosing `for ... in` loops over maps that are places, outermost first.
+    for_in_maps: Vec<lists::LoopList>,
     /// Enclosing `for ... in` loops, for `remove`.
     removing: remove::Removing,
     /// The call statement being checked, whose result is thrown away.
@@ -131,7 +133,7 @@ impl<'a> BodyChecker<'a> {
         let (local_ctx, views, moved) = (HashMap::new(), HashSet::new(), HashMap::new());
         let (scopes, loop_breaks, match_guards) = (Vec::new(), Vec::new(), Vec::new());
         let (loop_moves, loop_move_errors) = (Vec::new(), HashSet::new());
-        let (par, let_guards, for_in_lists) = (Vec::new(), Vec::new(), Vec::new());
+        let (par, let_guards, for_in_lists, for_in_maps) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         BodyChecker {
             t,
             diags,
@@ -150,6 +152,7 @@ impl<'a> BodyChecker<'a> {
             let_guards,
             par,
             for_in_lists,
+            for_in_maps,
             removing: remove::Removing::default(),
             discarded: None,
             frames: Vec::new(),

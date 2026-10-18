@@ -193,6 +193,8 @@ impl FnLowerer<'_> {
         let Ty::Fn(sig) = self.t.ty(f.id) else { unreachable!("the checker gives a function to `sort_by`") };
         let callee = match (&f.kind, &value.kind) {
             (ast::ExprKind::Closure(_), ExprKind::MakeFn { code, .. }) => Callee::Code { code: *code, pure: true },
+            // A named function's thunk has the shape of a closure's code (it ignores the environment).
+            (_, ExprKind::FnRef(thunk)) => Callee::Code { code: *thunk, pure: true },
             _ => Callee::Value(sig),
         };
         let key = kty(self.t.sig(sig).ret);

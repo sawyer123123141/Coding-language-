@@ -19,6 +19,15 @@ pub(crate) struct LoopList {
     pub(crate) root: LocalId,
     /// The list's place inside `root`.
     pub(crate) path: Vec<Step>,
+    /// How many loops (of lists and of maps) were open outside this one.
+    pub(crate) order: usize,
+}
+
+/// The loop that stops a list from changing: the list as its message names it, and the loop's item
+/// when it is a loop over a list (a `remove` of it is the way out).
+pub(crate) struct Overlap {
+    pub(crate) list: String,
+    pub(crate) item: Option<String>,
 }
 
 /// Whether the list at `changed` is the list at `looped`, or holds it: `changed` is `looped` or
@@ -69,18 +78,56 @@ impl<'a> BodyChecker<'a> {
         }
     }
 
-    /// The innermost enclosing `for ... in` loop (an index into `for_in_lists`) whose list is
-    /// the one at `place`, or holds it: changing the length of `place` there would shorten,
-    /// move or drop the items the loop is reading.
-    pub(crate) fn overlapping_loop(&self, place: &Expr) -> Option<usize> {
+    /// The innermost enclosing `for ... in` loop whose list is the one at `place`, or holds it:
+    /// changing the length or the order of `place` there would shorten, move or drop the items the
+    /// loop is reading. A loop over a map held in a list's item counts too: the loop re-reads the map
+    /// by its place, so moving the items would swap another map in under it.
+    pub(crate) fn overlapping_loop(&self, place: &Expr) -> Option<Overlap> {
         let (root, path) = self.list_place(place)?;
-        self.for_in_lists.iter().rposition(|x| x.root == root && covers(&path, &x.path))
+        let inner = |loops: &[LoopList]| loops.iter().rposition(|x| x.root == root && covers(&path, &x.path));
+        let (list, map) = (inner(&self.for_in_lists), inner(&self.for_in_maps));
+        // (The map loop is the innermost when it was entered after the list loop.)
+        match (list, map) {
+            (Some(i), Some(j)) if self.for_in_maps[j].order > self.for_in_lists[i].order => Some(self.map_overlap(j)),
+            (Some(i), _) => Some(Overlap { list: self.loop_list_name(i), item: Some(self.t.local(self.for_in_lists[i].item).name.clone()) }),
+            (None, Some(j)) => Some(self.map_overlap(j)),
+            (None, None) => None,
+        }
+    }
+
+    fn map_overlap(&self, i: usize) -> Overlap {
+        Overlap { list: Self::name_of(&self.t.local(self.for_in_maps[i].root).name, &self.for_in_maps[i].path), item: None }
+    }
+
+    /// Pushes the loop over the map `iter`, whose item is `item`, if `iter` is a place.
+    pub(crate) fn enter_map_loop(&mut self, item: LocalId, iter: &Expr) {
+        if let Some((root, path)) = self.list_place(iter) {
+            let order = self.for_in_lists.len() + self.for_in_maps.len();
+            self.for_in_maps.push(LoopList { item, root, path, order });
+        }
+    }
+
+    /// Pops the loop `enter_map_loop` pushed, if it did.
+    pub(crate) fn leave_map_loop(&mut self, item: LocalId) {
+        if self.for_in_maps.last().is_some_and(|x| x.item == item) {
+            self.for_in_maps.pop();
+        }
+    }
+
+    /// A place's variable and fields, up to the first index, as a message names it.
+    fn name_of(root: &str, path: &[Step]) -> String {
+        let mut name = root.to_string();
+        for step in path.iter().map_while(Option::as_ref) {
+            name.push_str(&format!(".{step}"));
+        }
+        name
     }
 
     /// Pushes the loop over `iter`, whose item is `item`, if `iter` is a place.
     pub(crate) fn enter_list_loop(&mut self, item: LocalId, iter: &Expr) {
         if let Some((root, path)) = self.list_place(iter) {
-            self.for_in_lists.push(LoopList { item, root, path });
+            let order = self.for_in_lists.len() + self.for_in_maps.len();
+            self.for_in_lists.push(LoopList { item, root, path, order });
         }
     }
 
@@ -95,11 +142,7 @@ impl<'a> BodyChecker<'a> {
     /// first index.
     pub(crate) fn loop_list_name(&self, i: usize) -> String {
         let x = &self.for_in_lists[i];
-        let mut name = self.t.local(x.root).name.clone();
-        for step in x.path.iter().map_while(Option::as_ref) {
-            name.push_str(&format!(".{step}"));
-        }
-        name
+        Self::name_of(&self.t.local(x.root).name, &x.path)
     }
 
     /// An index argument: any integer type.
@@ -212,12 +255,12 @@ impl<'a> BodyChecker<'a> {
             return self.list_fn(e, receiver, recv_ty, method, *name_span, args);
         }
         if method.changes_receiver() && self.receiver_root(receiver, name).is_some() {
-            if let Some(i) = self.overlapping_loop(receiver) {
-                let (list, item) = (self.loop_list_name(i), self.t.local(self.for_in_lists[i].item).name.clone());
-                let msg = format!(
-                    "can't change how many items `{list}` has while looping over it; use `remove {item}` to remove the loop's item, or change `{list}` after the loop"
-                );
-                self.error(e.span, msg);
+            if let Some(Overlap { list, item }) = self.overlapping_loop(receiver) {
+                let way_out = match item {
+                    Some(item) => format!("use `remove {item}` to remove the loop's item, or change `{list}` after the loop"),
+                    None => format!("change `{list}` after the loop"),
+                };
+                self.error(e.span, format!("can't change how many items `{list}` has while looping over it; {way_out}"));
             }
         }
         match method {

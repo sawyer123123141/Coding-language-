@@ -106,11 +106,15 @@ fn a_key_that_cant_build_memory_gets_no_scratch_arena() {
     var es: list[E] = []
     es.sort_by((e) {{ e.hp * 2 }})
     es.sort_by((e) {{ e.name.len }})
+    es.sort_by(hp)
 }}
+
+pure hp(e: E) -> int {{ e.hp }}
 "
     ));
+    // (A named function's thunk is the code, so it is judged like a literal.)
     let compares = named(&m, "__kestrel_compare_");
-    assert_eq!(compares.len(), 2);
+    assert_eq!(compares.len(), 3);
     for c in compares {
         assert!(arenas(c).is_empty(), "{c:?}");
     }

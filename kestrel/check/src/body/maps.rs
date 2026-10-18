@@ -155,8 +155,10 @@ impl<'a> BodyChecker<'a> {
             None => self.declare(var, k, false, false, false),
         };
         self.enter_item_loop(item, super::remove::Over::Map, iter, body);
+        self.enter_map_loop(item, iter);
         let entry = self.moved.clone();
         self.loop_body(entry.clone(), Some(entry), body);
+        self.leave_map_loop(item);
         self.leave_item_loop();
         self.scopes.pop();
     }
