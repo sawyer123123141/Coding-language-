@@ -16,6 +16,7 @@ impl<'a> BodyChecker<'a> {
         for (i, stmt) in block.stmts.iter().enumerate() {
             ty = match (stmt, expect) {
                 (Stmt::Expr(e), Expect::Value(want)) if i == last => self.check_tail(e, want),
+                (Stmt::Expr(e), Expect::Infer) if i == last => self.check_tail_infer(e),
                 _ => self.check_stmt(stmt),
             };
         }
@@ -156,5 +157,18 @@ impl<'a> BodyChecker<'a> {
             }
             Stmt::Expr(e) => self.check_discarded(e),
         }
+    }
+}
+
+impl<'a> BodyChecker<'a> {
+    /// The last expression of a closure body whose result type isn't known (`Expect::Infer`).
+    pub(crate) fn check_tail_infer(&mut self, e: &kestrel_syntax::ast::Expr) -> Ty {
+        let ty = match &e.kind {
+            ExprKind::If { .. } => self.check_if(e, Expect::Infer),
+            ExprKind::Match { .. } => self.check_match(e, Expect::Infer),
+            _ => return self.check_tail(e, None),
+        };
+        self.t.expr_ty[e.id.0 as usize] = ty;
+        ty
     }
 }

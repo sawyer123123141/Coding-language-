@@ -45,6 +45,9 @@ use crate::ty::Ty;
 pub(crate) enum Expect {
     Discard,
     Value(Option<Ty>),
+    /// A closure body's tail whose result type is not known: its type is whatever the tail shows,
+    /// and an `if` or `match` whose branches that finish all give nothing gives nothing.
+    Infer,
 }
 
 pub(crate) struct BodyChecker<'a> {

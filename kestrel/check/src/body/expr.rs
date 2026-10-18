@@ -156,6 +156,8 @@ impl<'a> BodyChecker<'a> {
         let ExprKind::If { cond, then_block, else_block } = &e.kind else { unreachable!("check_if on non-if") };
         self.check_value(cond, Some(Ty::Bool));
         let before = self.moved.clone();
+        // An `if` without an `else` gives nothing, so there is nothing to infer.
+        let expect = if expect == Expect::Infer && else_block.is_none() { Expect::Discard } else { expect };
         match expect {
             Expect::Discard => {
                 let t1 = self.check_block(then_block, Expect::Discard);
@@ -172,23 +174,34 @@ impl<'a> BodyChecker<'a> {
                     Ty::Unit
                 }
             }
-            Expect::Value(want) => {
+            Expect::Value(_) | Expect::Infer => {
+                // `Infer` is a closure's tail whose result isn't known: the branches decide, and
+                // all of them may give nothing.
+                let infer = expect == Expect::Infer;
+                let want = match expect {
+                    Expect::Value(w) => w,
+                    _ => None,
+                };
                 let Some(else_block) = else_block else {
                     // Checked as a value so its last line isn't also flagged "no effect".
                     self.check_block(then_block, Expect::Value(want));
                     self.error(e.span, "this `if` needs an `else` to produce a value");
                     return Ty::Error;
                 };
-                let t1 = self.check_block(then_block, Expect::Value(want));
+                let t1 = self.check_block(then_block, if infer { Expect::Infer } else { Expect::Value(want) });
                 let after_then = std::mem::replace(&mut self.moved, before.clone());
                 let hint = want.or(if is_value_ty(t1) { Some(t1) } else { None });
-                let t2 = self.check_block(else_block, Expect::Value(hint));
+                let else_expect = if infer && hint.is_none() { Expect::Infer } else { Expect::Value(hint) };
+                let t2 = self.check_block(else_block, else_expect);
                 let after_else = std::mem::take(&mut self.moved);
                 self.join(before, vec![(t1, after_then), (t2, after_else)]);
-                // A branch that finishes without a value would bypass the value checks.
+                // A branch that finishes without a value would bypass the value checks. (When
+                // inferring, a branch that leaves doesn't count, and if the rest give nothing,
+                // so does the `if`.)
+                let nothing = infer && [t1, t2].iter().all(|t| matches!(t, Ty::Unit | Ty::Never));
                 let mut missing = false;
                 for (ty, block) in [(t1, then_block), (t2, else_block)] {
-                    if ty == Ty::Unit {
+                    if ty == Ty::Unit && !nothing {
                         self.error(block.span, "this branch has no value");
                         missing = true;
                     }
@@ -198,6 +211,8 @@ impl<'a> BodyChecker<'a> {
                 }
                 if t1 == Ty::Never && t2 == Ty::Never {
                     Ty::Never
+                } else if nothing {
+                    Ty::Unit
                 } else if let Some(w) = want {
                     w
                 } else if t1 == Ty::Never {

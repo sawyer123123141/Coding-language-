@@ -28,7 +28,7 @@ use std::collections::HashMap;
 use kestrel_syntax::ast::{ClosureLit, Expr, ExprId, Stmt};
 use kestrel_syntax::Span;
 
-use super::closure_result::{tail_is_effect, Infer};
+use super::closure_result::Infer;
 use super::moves::Moved;
 use super::regions::Ctx;
 use super::{BodyChecker, Expect};
@@ -289,8 +289,7 @@ impl<'a> BodyChecker<'a> {
         let expect = match known {
             Some(Ty::Unit) => Expect::Discard,
             Some(r) => Expect::Value(Some(r)),
-            None if tail_is_effect(&lit.body) => Expect::Discard,
-            None => Expect::Value(None),
+            None => Expect::Infer,
         };
         let body = self.check_block(&lit.body, expect);
         let tail = match lit.body.stmts.last() {

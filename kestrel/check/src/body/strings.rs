@@ -92,9 +92,10 @@ impl<'a> BodyChecker<'a> {
             self.error_help(e.span, msg, "put a number in a string with `\"{n}\"`");
             return Ty::Error;
         }
-        // A constant or a field default is built again at each use, wherever that is; the
-        // new string would be in whichever arena is current there.
-        if self.fn_id.is_none() {
+        // A constant or a field default is built again at each use, wherever that is; the new
+        // string would be in whichever arena is current there. (A closure written in one runs when
+        // it is called, in the arena current there, so its body is like any function's.)
+        if self.fn_id.is_none() && !self.in_closure() {
             self.error(e.span, "a constant or field default can't join strings with `+`; write the text as one string");
             return Ty::Error;
         }

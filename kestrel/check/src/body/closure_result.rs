@@ -1,6 +1,6 @@
 //! The result type of a closure literal that says none: what its `return`s and its tail agree on.
 
-use kestrel_syntax::ast::{Block, Expr, ExprKind, Stmt};
+use kestrel_syntax::ast::Expr;
 use kestrel_syntax::Span;
 
 use super::BodyChecker;
@@ -66,28 +66,5 @@ impl<'a> BodyChecker<'a> {
         self.set_found(ty);
         self.consume(v);
         self.check_return_region(v);
-    }
-}
-
-/// Whether the last statement of a closure body whose result isn't known gives no value: it is
-/// not an expression, or it is an `if` or `match` whose first branch is such, or an `if` without
-/// an `else`. (The result of a trailing call is whatever the call gives.)
-pub(super) fn tail_is_effect(body: &Block) -> bool {
-    match body.stmts.last() {
-        None => true,
-        Some(Stmt::Expr(e)) => match &e.kind {
-            ExprKind::If { then_block, else_block, .. } => else_block.is_none() || tail_is_effect_branch(then_block),
-            ExprKind::Match { arms, .. } => arms.first().is_none_or(|a| tail_is_effect_branch(&a.body)),
-            _ => false,
-        },
-        Some(_) => true,
-    }
-}
-
-/// `tail_is_effect` for a branch, where a `print` call is an effect too.
-fn tail_is_effect_branch(branch: &Block) -> bool {
-    match branch.stmts.last() {
-        Some(Stmt::Expr(e)) => matches!(&e.kind, ExprKind::Call { name, .. } if name == "print") || tail_is_effect(branch),
-        _ => true,
     }
 }

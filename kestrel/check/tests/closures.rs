@@ -201,3 +201,44 @@ fn a_closure_statement_does_nothing() {
 fn constants_are_checked_after_the_constants_a_closure_body_names() {
     ok("let F = (x: int) -> int { G + x }\nlet G = 5\nmain() { }\n");
 }
+
+#[test]
+fn the_result_comes_from_the_checked_branches_not_from_their_syntax() {
+    // Branches that give nothing, whatever they call.
+    let t = ok("a() { }\nb() { }\nmain() {\n    let f = (c: bool) { if c { a() } else { b() } }\n    let g = (c: bool) { if c { a() } }\n    let h = (c: bool) { if c { return } else { b() } }\n}\n");
+    assert_eq!(local_ty(&t, "f"), "(bool)");
+    assert_eq!(local_ty(&t, "g"), "(bool)");
+    assert_eq!(local_ty(&t, "h"), "(bool)");
+    // A branch that leaves doesn't count; the others decide.
+    let t = ok("main() {\n    let f = (x: int) { if x < 0 { return 0 } else { x } }\n    let g = (x: int) -> int {\n        if x < 0 { return 0 }\n        x\n    }\n    let h = (x: int) { if x < 0 { return 0 }; x }\n    let k = (x: int) { if x < 0 { 1 } else { return 2 } }\n}\n");
+    for name in ["f", "g", "h", "k"] {
+        assert_eq!(local_ty(&t, name), "pure (int) -> int", "{name}");
+    }
+    // A `match` the same way.
+    let t = ok("enum Kind {\n    Plain\n    Coin { value: int }\n}\nmain() {\n    let v = (k: Kind) { match k { Coin c { c.value } else { 0 } } }\n    let s = (k: Kind) { match k { Coin c { print(c.value) } else { print(0) } } }\n    let r = (k: Kind) { match k { Coin c { return c.value } else { 0 } } }\n}\n");
+    assert_eq!(local_ty(&t, "v"), "pure (Kind) -> int");
+    assert_eq!(local_ty(&t, "s"), "(Kind)");
+    assert_eq!(local_ty(&t, "r"), "pure (Kind) -> int");
+    // Branches that disagree are still refused.
+    assert_eq!(
+        errors("a() { }\nmain() {\n    let f = (c: bool) { if c { a() } else { 1 } }\n}\n"),
+        vec!["this branch has no value"]
+    );
+    assert_eq!(
+        errors("main() {\n    let f = (x: int) { if x < 0 { return 0 } else { 2.5 } }\n}\n"),
+        vec!["expected int, found float"]
+    );
+    assert_eq!(
+        errors("main() {\n    let f = (x: int) { if x < 0 { return 1 } }\n}\n"),
+        vec!["this closure must return int, but its body can finish without a value"]
+    );
+}
+
+#[test]
+fn a_closure_in_a_constant_or_field_default_may_join_strings() {
+    ok("let GREET = (s: string) -> string { s + \"!\" }\nstruct B {\n    f: (string) -> string = (s) { s + \"?\" }\n}\nmain() { }\n");
+    assert_eq!(
+        errors("let BAD = \"a\" + \"b\"\nmain() { }\n"),
+        vec!["a constant or field default can't join strings with `+`; write the text as one string"]
+    );
+}

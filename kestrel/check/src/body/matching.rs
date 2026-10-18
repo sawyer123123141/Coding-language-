@@ -38,9 +38,11 @@ impl<'a> BodyChecker<'a> {
         let mut has_else = false;
         let mut matched = Vec::with_capacity(arms.len());
         let mut tys = Vec::with_capacity(arms.len());
+        // When inferring: the arms that gave nothing, an error if another arm gave a value.
+        let mut unit_arms = Vec::new();
         let mut hint = match expect {
             Expect::Value(want) => want,
-            Expect::Discard => None,
+            Expect::Discard | Expect::Infer => None,
         };
         for arm in arms {
             self.moved = before.clone();
@@ -80,6 +82,8 @@ impl<'a> BodyChecker<'a> {
             let arm_expect = match expect {
                 Expect::Discard => Expect::Discard,
                 Expect::Value(_) => Expect::Value(hint),
+                Expect::Infer if hint.is_some() => Expect::Value(hint),
+                Expect::Infer => Expect::Infer,
             };
             let ty = self.check_block(&arm.body, arm_expect);
             if matches!(expect, Expect::Value(_)) {
@@ -88,6 +92,13 @@ impl<'a> BodyChecker<'a> {
                 }
                 if hint.is_none() && is_value_ty(ty) {
                     hint = Some(ty);
+                }
+            } else if expect == Expect::Infer {
+                if hint.is_none() && is_value_ty(ty) {
+                    hint = Some(ty);
+                }
+                if ty == Ty::Unit {
+                    unit_arms.push(arm.body.span);
                 }
             }
             tys.push(ty);
@@ -105,6 +116,12 @@ impl<'a> BodyChecker<'a> {
             self.error_help(e.span, msg, "add arms for them, or an `else` arm");
         }
         self.t.match_arms.insert(e.id, matched);
+        let gives_value = tys.iter().any(|t| is_value_ty(*t));
+        if expect == Expect::Infer && gives_value {
+            for span in unit_arms {
+                self.error(span, "this branch has no value");
+            }
+        }
         let all_never = !tys.is_empty() && tys.iter().all(|t| *t == Ty::Never);
         match expect {
             Expect::Discard if all_never => Ty::Never,
@@ -113,6 +130,9 @@ impl<'a> BodyChecker<'a> {
             Expect::Value(_) if all_never => Ty::Never,
             Expect::Value(Some(want)) => want,
             Expect::Value(None) => tys.iter().copied().find(|t| *t != Ty::Never).unwrap_or(Ty::Error),
+            Expect::Infer if all_never => Ty::Never,
+            Expect::Infer if gives_value && tys.contains(&Ty::Unit) => Ty::Error,
+            Expect::Infer => tys.iter().copied().find(|t| *t != Ty::Never).unwrap_or(Ty::Error),
         }
     }
 }

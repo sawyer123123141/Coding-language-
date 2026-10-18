@@ -19,6 +19,14 @@
 // expect: 7
 // expect: link 2
 // expect: link 1
+// expect: hey!?
+// expect: tick
+// expect: tock
+// expect: 0
+// expect: 4
+// expect: 5
+// expect: plain
+// expect: coin 2
 struct Pt {
     x: float
     y: float
@@ -34,12 +42,20 @@ let LATER = (x: int) -> int { BASE + x }
 let BASE = 40
 let OUTER = (x: int) -> int { INNER(x) + 1 }
 let INNER = (x: int) -> int { x * 2 }
+let GREET = (s: string) -> string { s + "!" }
+
+enum Kind {
+    Plain
+    Coin { value: int }
+}
 
 struct Chain {
     link: (int) = (n) { if n > 0 { print("link", n); let c = Chain(); c.link(n - 1) } }
 }
 
 shout(n: int) { print("shout", n) }
+tick() { print("tick") }
+tock() { print("tock") }
 
 pure total(xs: list[int]) -> int {
     let add = (a: int, b: int) { a + b }
@@ -94,4 +110,18 @@ main() {
     print(OUTER(3))
     let chain = Chain()
     chain.link(2)
+    print(GREET("hey") + "?")
+    // The result is worked out from the body: branches that leave don't count, and when the
+    // branches that finish give nothing, the closure gives nothing.
+    let flip = (c: bool) { if c { tick() } else { tock() } }
+    flip(true)
+    flip(false)
+    let clip = (x: int) { if x < 0 { return 0 } else { x } }
+    print(clip(-3))
+    print(clip(4))
+    let value_of = (k: Kind) { match k { Coin c { c.value } else { 0 } } }
+    print(value_of(Kind.Coin(value: 5)))
+    let show = (k: Kind) { match k { Coin c { print("coin", c.value) } else { print("plain") } } }
+    show(Kind.Plain)
+    show(Kind.Coin(value: 2))
 }
