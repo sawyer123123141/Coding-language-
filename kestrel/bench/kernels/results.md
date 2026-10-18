@@ -7,6 +7,7 @@ These are small loops from the particles demo, timed alone so that a change to t
 - `step_pow.kes`: the step exactly as the demo writes it, with `pow(KEEP, dt)` for every particle.
 - `copy.kes`: the demo's draw copy, every particle's position into a `list[vec2]`.
 - `src/bin/rust.rs`: the same three kernels in Rust (`step`, `pow` and `copy`), one thread, same arithmetic.
+- `filter.kes`, `map.kes`, `sort_by.kes`: the list methods that take a closure (see "The list methods" at the end), each with a hand-written `_loop.kes` version doing the same work, and `filter`, `map` and `sort_by` modes in `src/bin/rust.rs`.
 
 ## How to run it
 
@@ -220,3 +221,43 @@ This matches the kernels: `step_pow.kes` is 1.44 times faster on one thread and 
 ### In short
 
 Faster: the demo's step (3.0x on one thread, 2.5x on 16, to within 15% of Rust), the `pow` version of it (1.4-1.5x), `bench/2a`'s `particles` (1.7-2.2x) and `swarm` (1.1-1.4x), and the particles demo's update at 200,000 (29-31%). The same: `fib`, `loop`, `collatz`, `mandelbrot`, `sieve`, `heightmap`, `voxels3d`, compile time, and (as far as this machine could say) `maps`. Slower at the end of the plan: `copy.kes`, the demo's draw copy, by 0.2-0.3 ns an element (two bounds checks where there was one); the matching loop in the particles demo (`positions[i] = p.pos`) is the same code. Task 6 fixed it (one bounds check again; the copy takes the same time as before scalar replacement within noise, and about 4 times Rust's). Not slower but worth knowing: this machine's results move by 6-30% with where the compiler puts the code, which is why every comparison here is old against new taking turns.
+
+## The list methods (`filter`, `map`, `sort_by`)
+
+Measured on 2026-10-18 with the compiler at commit 29f802a (the end of the closures round), on the same machine as above (Ryzen 7 5800X, Windows 11), one thread, `--release`.
+
+The claim to check is that a closure literal passed to a list method, which is specialised and inlined, "runs like a hand-written loop". Three kernels, each three ways: the list method, a hand-written Kestrel loop doing the same work, and Rust.
+
+- **`filter`** (`filter.kes`, `filter_loop.kes`, Rust `iter().filter().collect()`): 1,000,000 ints from the generator `x = (x * 75 + 74) % 65537` (so the parity is not a pattern the branch predictor can learn), keeping the evens. About half are kept, so each pass makes a list of about 500,000 ints. The method is `xs.filter((e) { e % 2 == 0 })`; the loop is `for e in xs { if e % 2 == 0 { ys.add(e) } }`.
+- **`map`** (`map.kes`, `map_loop.kes`, Rust `iter().map().collect()`): 1,000,000 `vec2` to their lengths: `vs.map((v) { v.length() })` against a loop that `add`s `v.length()`. The Rust version is `(x * x + y * y).sqrt()` on `f32`.
+- **`sort_by`** (`sort_by.kes`, `sort_by_loop.kes`, Rust `sort_by(|a, b| a.x.total_cmp(&b.x))`): 100,000 `struct Item { x: float, id: int }` whose float key is the same generator's value. Every pass copies the items into a fresh list and sorts the copy; the checksum reads the sorted order. Kestrel's `sort_by` takes a key, not a comparator, and both it and Rust's `sort_by` are stable. There is no hand-written loop that *is* a sort, so `sort_by_loop.kes` is a bottom-up merge sort I wrote (stable, two lists, runs of 1, 2, 4, ... items). A better hand-written sort would be a tougher comparison.
+
+All three versions of each kernel give the same checksum (checked at `--n 100000 --iters 3`; the Rust modes print theirs). In the Kestrel kernels each pass's result is made in its own `arena` that is freed at the end of the pass; in Rust each result is a `Vec` that is dropped. The numbers are ns per input item, the median of 9 rounds with the range of the rounds in brackets (`py measure.py --rounds 9 --threads 1`, which runs every kernel one after the other in each round). The whole set was run twice; the table gives both runs. `measure.py` passes `--n 1000000` (`filter`, `map`) or `--n 100000` (`sort_by`) and 10 iterations. The machine was quiet: the ranges are 1-3%. Still, treat differences under 10% between two different programs as noise, because code layout moves timings by 6-30% here.
+
+| Kernel, ns per item | The list method | Hand-written Kestrel loop | Rust |
+|---|---:|---:|---:|
+| `filter`, run 1 | 4.82 (4.79-4.87) | 3.91 (3.89-3.95) | 2.67 (2.61-2.70) |
+| `filter`, run 2 | 4.83 (4.78-4.87) | 3.90 (3.89-3.92) | 2.67 (2.61-2.70) |
+| `map`, run 1 | 1.39 (1.36-1.40) | 1.35 (1.34-1.36) | 0.77 (0.76-0.90) |
+| `map`, run 2 | 1.36 (1.35-1.40) | 1.36 (1.34-1.38) | 0.77 (0.75-0.78) |
+| `sort_by`, run 1 | 139.5 (139.3-140.2) | 97.8 (97.6-101.9) | 22.8 (22.7-23.2) |
+| `sort_by`, run 2 | 139.2 (138.7-139.9) | 97.6 (97.0-98.6) | 22.8 (22.7-22.9) |
+
+| Ratio of the medians (both runs agree) | Method over hand loop | Method over Rust | Hand loop over Rust |
+|---|---:|---:|---:|
+| `filter` | **1.23-1.24** | 1.81 | 1.46 |
+| `map` | 1.00-1.03 | 1.77-1.80 | 1.76-1.77 |
+| `sort_by` | **1.43** | 6.1 | 4.3 |
+
+**What it means.**
+- **`map` runs like a hand-written loop**: 1.00-1.03 times the loop, inside noise. The claim holds for it. Both are about 1.8 times Rust, which can vectorise this loop (0.77 ns an item); Kestrel does one item at a time.
+- **`filter` does not quite: it is 23-24% slower than the hand loop**, the same in both runs, and the ranges of the rounds (4.78-4.87 against 3.89-3.95) do not touch, so it is not noise. It is 1.8 times Rust's `collect()`; the hand loop is 1.46 times.
+- **`sort_by` is 1.43 times a hand-written merge sort and 6.1 times Rust's sort.** That is a loss on both counts. Even the hand-written merge sort is 4.3 times Rust, so most of the gap to Rust is the speed of Kestrel's sort loops in general, not the method. The method's extra 43% over the hand-written sort I did not take apart. From reading `kir/src/lower/sort.rs` and `runtime/src/sort.rs`: the closure is not inlined into a sort loop. The runtime sorts a vector of positions and calls a generated `compare(env, a, b)` through a function pointer; the closure is specialised into that compare function, which computes the key of each side (so twice per comparison). Rust's `sort_by` inlines the comparison into its loop and compares two floats once.
+
+**Why `filter` is slower** (`kernels.exe filter.kes --release --dump bench` against the same for `filter_loop.kes`). The closure is inlined: there is no call in the loop, and the test is the same instructions in both. The differences are in the code around it:
+- In the hand loop the list's header is held in a register and the item loaded for the test is the item that is added. In the method's loop the header is in a stack slot (`rsp+120`) and is loaded twice per item: once for the data pointer of the test, and again in the branch that keeps the item, where the item is loaded a second time (IR values `v57` and `v72` are the same address). Cranelift did not merge the two loads, with a store to the new list's header between them (I did not find out whether it could not tell the two places apart, or just doesn't forward loads across a store).
+- The loop also has a dead load of the closure's environment word (`v51 = load v38+8`, `movq 8(%r14), %r9`, overwritten at once). The literal's environment is still built on the stack, two stores per pass, although the inlined code never reads it.
+
+Together that is a spill reload, two or three more loads per item and a little more register pressure, about 0.9 ns an item. It is not a bug; the code is right and only slower. What would close it is making the inlined literal bind the item once, as the loop does, and dropping the environment an inlined literal does not read. That is not done here; this round only measured it.
+
+**In short.** `map` matches its hand loop; `filter` is about a quarter slower than its hand loop; `sort_by` is 1.4 times a hand merge sort. Against Rust all three lose: 1.8 times, 1.8 times and 6.1 times. For `filter` and `map` the hand-written loops lose to Rust by about the same factors (1.5 and 1.8), so for those two the method is not the main cost; for `sort_by` a plain loop is 4.3 times Rust and the method is 6.1 times.

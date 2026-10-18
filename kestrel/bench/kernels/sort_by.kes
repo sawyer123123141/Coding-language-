@@ -1,0 +1,38 @@
+// `xs.sort_by` on 100,000 structs by a float field, with a closure literal. `bench(n, iters)`
+// copies `n` items and sorts the copy `iters` times, and returns a checksum of the sorted order.
+// (The key is `x`; equal keys keep their order, so the order is the same as the other versions'.)
+struct Item {
+    x: float
+    id: int
+}
+
+pub bench(n: int, iters: int) -> float {
+    var sum = 0.0
+    arena {
+        var src = list[Item]()
+        var r = 1
+        for i from 0 to n {
+            r = (r * 75 + 74) % 65537
+            src.add(Item(x: float(r) / 65537.0, id: i))
+        }
+        for k from 0 to iters {
+            arena {
+                var work = list[Item]()
+                for it in src {
+                    work.add(it)
+                }
+                work.sort_by((e) { e.x })
+                var s = 0
+                for it in work {
+                    s = (s * 31 + it.id) % 1000003
+                }
+                sum += float(s)
+            }
+        }
+    }
+    sum
+}
+
+main() {
+    print(bench(1000, 10))
+}

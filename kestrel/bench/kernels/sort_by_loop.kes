@@ -1,0 +1,88 @@
+// `sort_by.kes` with a hand-written sort: a bottom-up merge sort (stable, like `sort_by`) between
+// two lists, merging runs of 1, 2, 4, ... items.
+struct Item {
+    x: float
+    id: int
+}
+
+// Merges the runs of `width` items of `src` into runs of `2 * width` in `dst`.
+merge_pass(src: list[Item], var dst: list[Item], width: int, n: int) {
+    var lo = 0
+    while lo < n {
+        let mid = min(lo + width, n)
+        let hi = min(lo + 2 * width, n)
+        var i = lo
+        var j = mid
+        var k = lo
+        while i < mid and j < hi {
+            if src[j].x < src[i].x {
+                dst[k] = src[j]
+                j += 1
+            } else {
+                dst[k] = src[i]
+                i += 1
+            }
+            k += 1
+        }
+        while i < mid {
+            dst[k] = src[i]
+            i += 1
+            k += 1
+        }
+        while j < hi {
+            dst[k] = src[j]
+            j += 1
+            k += 1
+        }
+        lo += 2 * width
+    }
+}
+
+pub bench(n: int, iters: int) -> float {
+    var sum = 0.0
+    arena {
+        var src = list[Item]()
+        var r = 1
+        for i from 0 to n {
+            r = (r * 75 + 74) % 65537
+            src.add(Item(x: float(r) / 65537.0, id: i))
+        }
+        for k from 0 to iters {
+            arena {
+                var a = list[Item]()
+                var b = list[Item]()
+                for it in src {
+                    a.add(it)
+                    b.add(it)
+                }
+                var width = 1
+                var in_a = true
+                while width < n {
+                    if in_a {
+                        merge_pass(a, var b, width, n)
+                    } else {
+                        merge_pass(b, var a, width, n)
+                    }
+                    in_a = not in_a
+                    width *= 2
+                }
+                var s = 0
+                if in_a {
+                    for it in a {
+                        s = (s * 31 + it.id) % 1000003
+                    }
+                } else {
+                    for it in b {
+                        s = (s * 31 + it.id) % 1000003
+                    }
+                }
+                sum += float(s)
+            }
+        }
+    }
+    sum
+}
+
+main() {
+    print(bench(1000, 10))
+}

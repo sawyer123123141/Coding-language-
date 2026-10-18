@@ -1,0 +1,27 @@
+// `map.kes` as a hand-written loop: the same vectors, `add` each length to a new list.
+pub bench(n: int, iters: int) -> float {
+    var sum = 0.0
+    arena {
+        var vs = list[vec2]()
+        var x = 1
+        for i from 0 to n {
+            x = (x * 75 + 74) % 65537
+            let a = float(x) / 65537.0
+            vs.add(vec2(a, 1.0 - a * 0.5))
+        }
+        for k from 0 to iters {
+            arena {
+                var ls = list[float]()
+                for v in vs {
+                    ls.add(v.length())
+                }
+                sum += ls[0] + ls[ls.len - 1] + float(ls.len)
+            }
+        }
+    }
+    sum
+}
+
+main() {
+    print(bench(1000, 10))
+}

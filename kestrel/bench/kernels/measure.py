@@ -17,9 +17,18 @@ KERNELS = [
     ("step_scalar.kes (written with float locals)", ["kernels", "step_scalar.kes", "--release"], 30),
     ("step_pow.kes (pow per particle, the demo)", ["kernels", "step_pow.kes", "--release"], 15),
     ("copy.kes (the draw copy)", ["kernels", "copy.kes", "--release"], 100),
+    ("filter.kes (xs.filter, 1M ints)", ["kernels", "filter.kes", "--release", "--n", "1000000"], 10),
+    ("filter_loop.kes (hand loop)", ["kernels", "filter_loop.kes", "--release", "--n", "1000000"], 10),
+    ("map.kes (xs.map, 1M vec2 lengths)", ["kernels", "map.kes", "--release", "--n", "1000000"], 10),
+    ("map_loop.kes (hand loop)", ["kernels", "map_loop.kes", "--release", "--n", "1000000"], 10),
+    ("sort_by.kes (xs.sort_by, 100k structs)", ["kernels", "sort_by.kes", "--release", "--n", "100000"], 10),
+    ("sort_by_loop.kes (hand merge sort)", ["kernels", "sort_by_loop.kes", "--release", "--n", "100000"], 10),
     ("Rust step", ["rust", "step"], 30),
     ("Rust pow", ["rust", "pow"], 15),
     ("Rust copy", ["rust", "copy"], 100),
+    ("Rust filter", ["rust", "filter", "--n", "1000000"], 10),
+    ("Rust map", ["rust", "map", "--n", "1000000"], 10),
+    ("Rust sort_by", ["rust", "sort_by", "--n", "100000"], 10),
 ]
 
 

@@ -1,8 +1,11 @@
 //! The kernels in Rust, for comparison: the particle step of `step.kes` (`step`), the same with
-//! `pow` per particle as `step_pow.kes` (`pow`), and the copy of `copy.kes` (`copy`). One thread,
-//! release build, timed like `kernels` (median ns per item).
+//! `pow` per particle as `step_pow.kes` (`pow`), and the copy of `copy.kes` (`copy`); and the list
+//! kernels `filter.kes` (`filter`: `iter().filter().collect()`), `map.kes` (`map`:
+//! `iter().map().collect()`) and `sort_by.kes` (`sort_by`: a copy sorted with
+//! `sort_by(|a, b| a.x.total_cmp(&b.x))`). One thread, release build, timed like `kernels` (median
+//! ns per item).
 //!
-//!   rust <step|pow|copy> [--n N] [--iters K] [--reps R]
+//!   rust <step|pow|copy|filter|map|sort_by> [--n N] [--iters K] [--reps R]
 
 use std::hint::black_box;
 use std::time::Instant;
@@ -91,11 +94,75 @@ fn spawn(count: usize) -> Vec<Particle> {
         .collect()
 }
 
+/// The ZX81 generator the list kernels use for their data, as the `.kes` files write it.
+fn zx81(count: usize) -> Vec<i32> {
+    let mut x = 1;
+    (0..count).map(|_| { x = (x * 75 + 74) % 65537; x }).collect()
+}
+
+#[derive(Clone, Copy)]
+struct Item {
+    x: f32,
+    id: i32,
+}
+
+#[inline(never)]
+fn run_filter(xs: &[i32]) -> f32 {
+    let ys: Vec<i32> = xs.iter().filter(|e| **e % 2 == 0).copied().collect();
+    ys.len() as f32 + ys[ys.len() - 1] as f32
+}
+
+#[inline(never)]
+fn run_map(vs: &[V2]) -> f32 {
+    let ls: Vec<f32> = vs.iter().map(|v| (v.x * v.x + v.y * v.y).sqrt()).collect();
+    ls[0] + ls[ls.len() - 1] + ls.len() as f32
+}
+
+#[inline(never)]
+fn run_sort_by(src: &[Item]) -> f32 {
+    let mut work = src.to_vec();
+    work.sort_by(|a, b| a.x.total_cmp(&b.x));
+    let mut s = 0;
+    for it in &work {
+        s = (s * 31 + it.id) % 1_000_003;
+    }
+    s as f32
+}
+
+/// The list kernels: the data is made once per repetition, then `iters` passes are timed.
+fn list_kernel(mode: &str, n: usize, iters: usize, reps: usize) {
+    let xs = zx81(n);
+    let vs: Vec<V2> = xs.iter().map(|&x| { let a = x as f32 / 65537.0; V2 { x: a, y: 1.0 - a * 0.5 } }).collect();
+    let items: Vec<Item> = xs.iter().enumerate().map(|(i, &r)| Item { x: r as f32 / 65537.0, id: i as i32 }).collect();
+    let (mut per, mut sum) = (Vec::new(), 0.0f32);
+    for rep in 0..=reps {
+        sum = 0.0;
+        let start = Instant::now();
+        for _ in 0..iters {
+            sum += match mode {
+                "filter" => run_filter(black_box(&xs)),
+                "map" => run_map(black_box(&vs)),
+                _ => run_sort_by(black_box(&items)),
+            };
+        }
+        let t = start.elapsed().as_secs_f64();
+        // The first pass warms up.
+        if rep > 0 {
+            per.push(t / (n * iters) as f64 * 1e9);
+        }
+    }
+    per.sort_by(f64::total_cmp);
+    println!("rust {mode}: {:.2} ns per item (median; {:.2}-{:.2}), n {n}, iters {iters}, reps {reps}, checksum {sum}", per[per.len() / 2], per[0], per[per.len() - 1]);
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mode = args.first().cloned().unwrap_or_else(|| "step".into());
     let number = |name: &str, default: usize| args.iter().position(|a| a == name).map_or(default, |i| args[i + 1].parse().expect("a number"));
     let (n, iters, reps) = (number("--n", 200_000), number("--iters", 30), number("--reps", 9));
+    if matches!(mode.as_str(), "filter" | "map" | "sort_by") {
+        return list_kernel(&mode, n, iters, reps);
+    }
     let dt = black_box(1.0f32 / 60.0);
     let target = black_box(V2 { x: 640.0, y: 360.0 });
     let keep = black_box(KEEP).powf(dt as f64) as f32;
