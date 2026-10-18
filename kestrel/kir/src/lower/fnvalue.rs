@@ -87,6 +87,10 @@ impl FnLowerer<'_> {
     /// name, a field of function type, or any expression). A value that isn't a place is put in
     /// a temporary by the statements added to `pre`.
     fn callee_place(&mut self, e: &ast::Expr, pre: &mut Vec<Stmt>) -> Place {
+        // A captured function value, or a function field of a capture (`b.on(1)` in a closure).
+        if let Some(p) = self.capture_place(e.id) {
+            return p;
+        }
         let t = self.t;
         match &e.kind {
             ast::ExprKind::Call { .. } => match (t.call_local.get(&e.id), t.call_const.get(&e.id)) {

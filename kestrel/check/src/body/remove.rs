@@ -240,6 +240,10 @@ impl<'a> BodyChecker<'a> {
             Some(Immutable::SelfParam) => {
                 ("can't remove from `self`: the method takes `self`, not `var self`".to_string(), "declare the method with `var self`".to_string())
             }
+            Some(Immutable::Captured) => {
+                self.error(span, Self::captured_message(&name));
+                return false;
+            }
         };
         self.error_help(span, msg, help);
         false

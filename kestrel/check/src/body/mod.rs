@@ -1,6 +1,7 @@
 mod args;
 mod builtins;
 mod call;
+mod captures;
 mod closure;
 mod closure_result;
 mod collections;

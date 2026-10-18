@@ -11,6 +11,8 @@ pub(crate) enum Immutable {
     Param,
     /// `self` in a method that takes `self`, not `var self`.
     SelfParam,
+    /// A local from outside the closure literal being checked (see `captures`).
+    Captured,
 }
 
 impl<'a> BodyChecker<'a> {
@@ -34,6 +36,9 @@ impl<'a> BodyChecker<'a> {
     }
 
     pub(crate) fn immutable(&self, root: LocalId) -> Option<Immutable> {
+        if self.is_capture(root) {
+            return Some(Immutable::Captured);
+        }
         let info = self.t.local(root);
         match (info.mutable, info.is_param, info.name == "self") {
             (true, _, _) => None,
@@ -117,6 +122,7 @@ impl<'a> BodyChecker<'a> {
                 "can't change `self`: the method takes `self`, not `var self`",
                 "declare the method with `var self`",
             ),
+            Some(Immutable::Captured) => self.error(target.span, Self::captured_message(&name)),
             // Plain assignment keeps a local in a register; only a `var` parameter matters.
             None if self.t.local(root).is_var_param => self.note_param_changed(root),
             None => {}

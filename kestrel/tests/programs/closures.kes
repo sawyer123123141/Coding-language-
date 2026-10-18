@@ -20,7 +20,26 @@
 // expect: 10
 // expect: 2
 // expect: 21
-// Closures that name nothing from outside themselves.
+// expect: a
+// expect: first later
+// expect: 15
+// expect: 7
+// expect: 1
+// expect: [1, 2, 3, 1] [1, 2, 3, 2]
+// expect: 13
+// expect: 21
+// expect: 20
+// expect: 16
+// expect: hi [1, 2]
+// expect: hi [1, 2]
+// expect: bye [1, 2, 3]
+// expect: built bye
+// expect: ann
+// expect: bob
+// expect: 6
+// expect: opt
+// expect: [6, 7, 8]
+// Closures that name nothing from outside themselves, then closures that capture.
 struct Button {
     label: string
     on_click: (int) = (n) { print("default click", n) }
@@ -126,4 +145,153 @@ main() {
     print(TABLE[1](5))
     print(make_nested()(1))
     print(apply(DOUBLE, 10) + 1)
+
+    // A capture is a path: `s.name` is copied when the closure is made, not `s`.
+    var s = Named(name: "a")
+    s.cb = () { s.name }
+    s.name = "b"
+    print(s.cb())
+    var tg = Tagged(name: "first")
+    tg.set()
+    print(tg.cb(), tg.name)
+
+    captures()
+    copies()
+    views()
+    par_capture()
+}
+
+struct Named {
+    name: string
+    cb: () -> string = () { "" }
+}
+
+struct Tagged {
+    mem: Arena = Arena()
+    name: string
+    cb: () -> string = () { "" }
+
+    set(var self) {
+        in self.mem {
+            self.cb = () { self.name }
+        }
+        self.name = "later"
+    }
+}
+
+struct Shower {
+    show: () -> string = () { "none" }
+}
+
+struct Boxed {
+    mem: Arena = Arena()
+    s: Shower = Shower()
+}
+
+struct World {
+    score: int
+    chunks: list[int]
+}
+
+make_adder(n: int) -> (int) -> int {
+    (x) { x + n }
+}
+
+captures() {
+    let k = 10
+    let add_k = (x: int) { x + k }
+    print(add_k(5))
+    print(make_adder(2)(5))
+    var n = 1
+    let f = () { n }
+    n = 5
+    print(f())
+
+    // Each call hands out its own copy of the captured list.
+    var xs: list[int] = [1, 2, 3]
+    let g = () { xs }
+    var a = g()
+    var b = g()
+    a.add(1)
+    b.add(2)
+    print(a, b)
+
+    // A closure inside a closure captures the outer one's parameter and its capture.
+    let outer = (x: int) {
+        let inner = (y: int) { x + y + k }
+        inner(1)
+    }
+    print(outer(2))
+
+    // A closure that captures a closure, and a copy of it.
+    let twice = (x: int) { add_k(add_k(x)) }
+    print(twice(1))
+    let t2 = twice
+    print(t2(0))
+
+    arena {
+        let add = (x: int) { x + k + n }
+        print(add(1))
+    }
+}
+
+copies() {
+    var word = "hi"
+    var nums: list[int] = [1, 2]
+    var a = Shower(show: () { "{word} {nums}" })
+    var b = a
+    word = "bye"
+    nums.add(3)
+    print(a.show())
+    print(b.show())
+
+    // A copy taken out of an arena that is then freed keeps its own captures.
+    var bx = Boxed()
+    in bx.mem {
+        bx.s = Shower(show: () { "{word} {nums}" })
+    }
+    let kept = bx.s
+    bx = Boxed()
+    print(kept.show())
+
+    // The environment holds its own copy of a captured string whose arena is then freed.
+    var tg = Tagged(name: "")
+    in tg.mem {
+        tg.name = "built {word}"
+    }
+    let said = () { tg.name }
+    tg = Tagged(name: "")
+    print(said())
+}
+
+views() {
+    let names: list[string] = ["ann", "bob"]
+    var fs = list[() -> string]()
+    for nm in names {
+        fs.add(() { nm })
+    }
+    for one in fs {
+        print(one())
+    }
+    let kind = Kind.Coin(value: 3)
+    match kind {
+        Coin c {
+            let cv = () { c.value * 2 }
+            print(cv())
+        }
+        else { }
+    }
+    let maybe: string? = "opt"
+    let got = maybe else { return }
+    let gf = () { got }
+    print(gf())
+}
+
+par_capture() {
+    var w = World(score: 5, chunks: [1, 2, 3])
+    par for c in w.chunks {
+        let bonus = () { w.score }
+        c = c + bonus()
+    }
+    print(w.chunks)
 }

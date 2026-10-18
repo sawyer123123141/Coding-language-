@@ -101,6 +101,7 @@ impl<'a> BodyChecker<'a> {
     pub(crate) fn check_local_call(&mut self, e: &Expr, local: LocalId, name: &str, name_span: Span, args: &[Arg]) -> Ty {
         self.t.call_local.insert(e.id, local);
         self.check_local_use(local, name, name_span);
+        self.note_local_call_capture(e, local, name_span);
         match self.t.local(local).ty {
             Ty::Fn(sig) => {
                 let root = self.t.local(local).alias.unwrap_or(local);
@@ -127,6 +128,7 @@ impl<'a> BodyChecker<'a> {
     /// `b.on_click(args)` where `on_click` is a field of function type.
     pub(crate) fn check_field_call(&mut self, e: &Expr, receiver: &Expr, name: &str, field: usize, sig: SigId, args: &[Arg]) -> Ty {
         self.t.field_index.insert(e.id, field as u32);
+        self.note_field_call_capture(e, receiver, field as u32, name, Ty::Fn(sig));
         let shown = format!("{}.{name}", written(receiver));
         let root = self.place_root(receiver);
         self.call_through(e, &shown, sig, e.span, args, root)

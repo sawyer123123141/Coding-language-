@@ -20,6 +20,11 @@ pub(crate) fn layouts(t: &Tables) -> (Vec<StructLayout>, Vec<EnumLayout>) {
     (structs, enums)
 }
 
+/// The size and alignment of a value of `ty`.
+pub(crate) fn size_align(t: &Tables, ty: KTy) -> (u32, u32) {
+    Layouts { t, structs: vec![None; t.structs.len()], enums: vec![None; t.enums.len()] }.size_align(ty)
+}
+
 struct Layouts<'a> {
     t: &'a Tables,
     structs: Vec<Option<StructLayout>>,

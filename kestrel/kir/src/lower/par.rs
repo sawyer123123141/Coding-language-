@@ -17,7 +17,7 @@ use crate::visit::{walk, Node};
 fn locals_in(stmts: &[Stmt]) -> (BTreeSet<LocalIdx>, BTreeSet<LocalIdx>) {
     let (mut defined, mut used) = (BTreeSet::new(), BTreeSet::new());
     walk(stmts, &mut |n| match n {
-        Node::Stmt(Stmt::Let(l, _) | Stmt::Bind(l, _) | Stmt::ForRange { var: l, .. }) => {
+        Node::Stmt(Stmt::Let(l, _) | Stmt::Bind(l, _) | Stmt::BindEnv { local: l, .. } | Stmt::ForRange { var: l, .. }) => {
             defined.insert(*l);
             used.insert(*l);
         }

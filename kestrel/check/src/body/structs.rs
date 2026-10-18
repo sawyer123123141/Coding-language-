@@ -249,6 +249,7 @@ impl<'a> BodyChecker<'a> {
             Some(Immutable::SelfParam) => {
                 format!("can't call `{method}` on `self`: it changes `self`, but the method takes `self`, not `var self`")
             }
+            Some(Immutable::Captured) => Self::captured_message(&name),
         };
         self.error(receiver.span, msg);
         None

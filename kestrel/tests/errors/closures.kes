@@ -1,0 +1,79 @@
+// error 34: `count` is captured by this closure, so it can't change here; return a value instead, or use a `for` loop
+// error 35: `count` is captured by this closure, so it can't change here; return a value instead, or use a `for` loop
+// error 36: `count` is captured by this closure, so it can't change here; return a value instead, or use a `for` loop
+// error 37: `xs` is captured by this closure, so it can't change here; return a value instead, or use a `for` loop
+// error 39: `hold` is captured by this closure, so it can't change here; return a value instead, or use a `for` loop
+// error 39: a closure can't capture `hold`: it owns an Arena; pass it as a parameter instead
+// error 41: a closure can't capture `p`: it owns an Arena; pass it as a parameter instead
+// error 26: this closure would copy all of `self`, including its function fields; copy what it needs into a local first
+// error 54: this reads `w.chunks`, whose items other iterations are changing; use the loop's item (`c`)
+// error 63: this memory is freed at the end of the `arena { }` block, but `f` lives longer
+// error 72: this memory is in the caller's current arena, which may not live as long as `keep`
+struct Pool {
+    mem: Arena = Arena()
+    size: int = 0
+
+    total(self) -> int { self.size }
+}
+
+struct Btn {
+    name: string
+    cb: () -> string = () { "" }
+
+    go(self) -> string { self.name }
+
+    report(self) {
+        let f = () { self.go() }
+        print(f())
+    }
+}
+
+changes() {
+    var count = 0
+    var xs: list[int] = [1]
+    let a = () { count = 1 }
+    let b = () { count += 1 }
+    let c = () { bump(var count) }
+    let d = () { xs.add(2) }
+    var hold = Pool()
+    let e = () { let other = hold }
+    let p = Pool()
+    let g = () { p.total() }
+}
+
+struct World {
+    score: int = 1
+    chunks: list[int] = [1, 2]
+
+    pure total(self) -> int { self.score }
+}
+
+reads_the_collection() {
+    var w = World()
+    par for c in w.chunks {
+        let f = () { w.total() }
+        c = c + f()
+    }
+}
+
+lives_longer() {
+    let k = 3
+    var f = (x: int) { x }
+    arena {
+        f = (x: int) { x + k }
+    }
+}
+
+struct Keep {
+    f: (int) -> int = (x) { x }
+}
+
+store_into(var keep: Keep, n: int) {
+    keep.f = (x) { x + n }
+}
+
+bump(var x: int) { x += 1 }
+
+take(p: Pool) { }
+
+main() { }

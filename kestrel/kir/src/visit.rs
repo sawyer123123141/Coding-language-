@@ -42,6 +42,9 @@ fn stmt<'a>(s: &'a Stmt, f: &mut impl FnMut(Node<'a>)) {
             place(p, true, f);
         }
         Stmt::Bind(_, p) => place(p, false, f),
+        // A capture's place is in the environment, which no local owns.
+        Stmt::BindEnv { env, .. } => walk_expr(env, f),
+        Stmt::CopyFnEnv(p) => place(p, true, f),
         Stmt::MapSet(p, k, v, _) => {
             walk_expr(k, f);
             walk_expr(v, f);
@@ -134,7 +137,14 @@ pub fn walk_expr<'a>(e: &'a Expr, f: &mut impl FnMut(Node<'a>)) {
         }
         ExprKind::Format(parts) => print_args(parts, f),
         ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::FnEnv(p) => place(p, false, f),
-        ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) => walk_expr(x, f),
+        ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) | ExprKind::EnvDup(x) => {
+            walk_expr(x, f)
+        }
+        ExprKind::MakeFn { env: EnvKind::Heap(env), .. } => {
+            for v in &env.values {
+                walk_expr(v, f);
+            }
+        }
         ExprKind::Binary(_, a, b) | ExprKind::And(a, b) | ExprKind::Or(a, b) | ExprKind::RandInt(a, b) => {
             walk_expr(a, f);
             walk_expr(b, f);

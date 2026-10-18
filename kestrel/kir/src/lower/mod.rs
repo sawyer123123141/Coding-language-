@@ -3,6 +3,7 @@ mod call;
 mod closure;
 mod collections;
 mod consts;
+mod env;
 mod expr;
 mod fnvalue;
 mod heap;
@@ -99,6 +100,8 @@ pub(crate) struct FnLowerer<'a> {
     const_locals: HashMap<ConstId, LocalIdx>,
     /// Enclosing loops that remove their item, innermost last (see `remove`).
     removing: Vec<remove::RemoveLoop>,
+    /// When the code is a closure's: the closure, and the local bound to each of its captures.
+    captured: Option<env::Captured>,
     helpers: &'a mut Helpers,
 }
 
@@ -124,6 +127,7 @@ impl<'a> FnLowerer<'a> {
             scratch_results,
             const_locals,
             removing,
+            captured: None,
             helpers,
         }
     }

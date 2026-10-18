@@ -10,6 +10,10 @@ use crate::ir::*;
 impl<'a> FnLowerer<'a> {
     /// The place an expression names (`x`, `x.f.g`, `xs[i]`), if it is one.
     pub(crate) fn place(&mut self, e: &ast::Expr) -> Option<Place> {
+        // A closure's read of a capture: its place in the environment.
+        if let Some(p) = self.capture_place(e.id) {
+            return Some(p);
+        }
         match &e.kind {
             ast::ExprKind::Ident(_) => match self.t.res.get(&e.id) {
                 Some(Res::Local(l)) => Some(match self.elems.get(l) {

@@ -20,6 +20,7 @@ impl<'a> BodyChecker<'a> {
         if matches!(e.kind, ExprKind::Ident(_) | ExprKind::Field { .. } | ExprKind::Index { .. }) {
             self.note_par_read(e);
             self.note_remove_read(e);
+            self.note_capture(e);
         }
         ty
     }
@@ -94,7 +95,6 @@ impl<'a> BodyChecker<'a> {
     /// A use of `local`: it must not have been moved or removed on the way here, and a view
     /// into a loop item can't be used once the item is removed.
     pub(crate) fn check_local_use(&mut self, local: LocalId, name: &str, span: Span) {
-        self.refuse_capture(local, name, span);
         match self.moved.get(&local).copied() {
             Some(at) if at.removed && at.every => self.error(span, format!("`{name}` was removed earlier, so it can't be used here")),
             Some(at) if at.removed => self.error_help(

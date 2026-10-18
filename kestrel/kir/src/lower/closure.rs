@@ -4,7 +4,8 @@
 //! its own scopes, so `return` leaves the closure and a `break` can't reach a loop outside it.
 //!
 //! The literal itself is a `MakeFn`: the code's address and the environment. A closure that
-//! captures nothing has none (`EnvKind::None`), so it allocates nothing.
+//! captures nothing has none (`EnvKind::None`), so it allocates nothing; one that captures
+//! something gets a heap environment holding copies of the captured values (see `env`).
 
 use kestrel_check::{ClosureInfo, Tables, Ty};
 use kestrel_syntax::ast::{self, ClosureLit, Program};
@@ -36,13 +37,13 @@ impl<'a> FnLowerer<'a> {
     pub(crate) fn make_closure(&mut self, e: &ast::Expr, lit: &ClosureLit) -> ExprKind {
         let (program, t, lines) = (self.program, self.t, self.lines);
         let code = self.helpers.closure_code(e.id, |helpers| lower_closure(program, t, lines, e, lit, helpers));
-        let info = &t.closures[&e.id];
-        assert!(info.captures.is_empty(), "closures with captures aren't lowered yet");
-        ExprKind::MakeFn { code, env: EnvKind::None }
+        let env = if t.closures[&e.id].captures.is_empty() { EnvKind::None } else { self.heap_env(e.id, self.line(e.span)) };
+        ExprKind::MakeFn { code, env }
     }
 }
 
-/// The function of closure literal `e`: the environment word, then the parameters.
+/// The function of closure literal `e`: the environment word, then the parameters. Its body
+/// starts by binding a reference local to each capture's place in the environment.
 fn lower_closure(program: &Program, t: &Tables, lines: &LineIndex, e: &ast::Expr, lit: &ClosureLit, helpers: &mut Helpers) -> Func {
     let info: &ClosureInfo = &t.closures[&e.id];
     let mut cx = FnLowerer::new(program, t, lines, info.encl_fn, helpers);
@@ -52,7 +53,9 @@ fn lower_closure(program: &Program, t: &Tables, lines: &LineIndex, e: &ast::Expr
     let sig = t.sig(info.sig);
     let params = (0..=sig.params.len() as u32).map(LocalIdx).collect();
     let ret = (sig.ret != Ty::Unit).then(|| kty(sig.ret));
-    let body = cx.lower_body(&lit.body, ret);
+    let binds = cx.bind_closure_captures(e.id);
+    let mut body = cx.lower_body(&lit.body, ret);
+    body.splice(0..0, binds);
     Func {
         name: String::new(),
         params,

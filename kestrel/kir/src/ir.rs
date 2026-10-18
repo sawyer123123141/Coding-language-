@@ -228,7 +228,8 @@ pub enum LocalKind {
     Addressed,
     /// Holds a pointer to the caller's value: a `var` parameter, or any
     /// aggregate parameter (read-only ones are passed by pointer too). Also
-    /// a `for ... in` element (`Stmt::Bind`) or a heap constant (`Stmt::BindGlobal`).
+    /// a `for ... in` element (`Stmt::Bind`), a heap constant (`Stmt::BindGlobal`) or a closure's
+    /// capture (`Stmt::BindEnv`).
     RefParam,
     /// Nothing refers to it any more: a struct `scalarize` split into one local per field.
     Unused,

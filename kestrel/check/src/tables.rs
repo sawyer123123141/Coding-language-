@@ -209,6 +209,12 @@ pub struct Tables {
     pub call_const: HashMap<ExprId, ConstId>,
     /// Closure literals, by the literal's id.
     pub closures: HashMap<ExprId, ClosureInfo>,
+    /// The expressions in closure bodies that read a capture: per expression, the closure (the
+    /// innermost one around it), the index of the capture in its `ClosureInfo::captures`, and the
+    /// fields left to follow from the capture's value (a read of `p.pos.x` under the capture
+    /// `p.pos`). The expression is the whole read: a name, a field access, a call by a local's
+    /// name, or a call of a function field (`b.on(1)` reads `b.on`).
+    pub capture_reads: HashMap<ExprId, (ExprId, u32, Vec<u32>)>,
     pub locals: Vec<LocalInfo>,
     pub fns: Vec<FnInfo>,
     pub consts: Vec<ConstInfo>,

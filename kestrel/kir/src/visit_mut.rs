@@ -59,7 +59,10 @@ pub fn walk_stmt<V: VisitMut + ?Sized>(v: &mut V, s: &mut Stmt) {
             walk_args(v, args);
         }
         Stmt::Print(parts) | Stmt::Write(parts) => walk_print(v, parts),
-        Stmt::Bind(_, p) | Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::DropGpu(p) | Stmt::PushArena(Some(p)) => v.visit_place(p),
+        Stmt::Bind(_, p) | Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::DropGpu(p) | Stmt::PushArena(Some(p)) | Stmt::CopyFnEnv(p) => {
+            v.visit_place(p)
+        }
+        Stmt::BindEnv { env, .. } => v.visit_expr(env),
         Stmt::MapSet(p, k, val, _) => {
             v.visit_expr(k);
             v.visit_expr(val);
@@ -88,7 +91,14 @@ pub fn walk_expr<V: VisitMut + ?Sized>(v: &mut V, e: &mut Expr) {
             }
             v.visit_place(p);
         }
-        ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) => v.visit_expr(x),
+        ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) | ExprKind::EnvDup(x) => {
+            v.visit_expr(x)
+        }
+        ExprKind::MakeFn { env: EnvKind::Heap(env), .. } => {
+            for x in &mut env.values {
+                v.visit_expr(x);
+            }
+        }
         ExprKind::Binary(_, a, b) | ExprKind::And(a, b) | ExprKind::Or(a, b) | ExprKind::RandInt(a, b) => {
             v.visit_expr(a);
             v.visit_expr(b);

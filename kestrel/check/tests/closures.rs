@@ -146,18 +146,10 @@ fn parameter_types_must_be_given_where_nothing_expects_a_function() {
 }
 
 #[test]
-fn naming_a_local_from_outside_is_refused_for_now() {
-    assert_eq!(
-        errors("main() {\n    let n = 1\n    let f = () { n + 1 }\n}\n"),
-        vec!["closures can't capture `n` yet"]
-    );
+fn only_outside_locals_are_captures() {
     // A closure's own locals and parameters, and the module's functions and constants, are not captures.
-    ok("let K = 3\nsq(x: int) -> int { x * x }\nmain() {\n    let f = (a: int) -> int {\n        let b = a + K\n        sq(b)\n    }\n}\n");
-    // The refusal reaches into closures inside closures.
-    assert_eq!(
-        errors("main() {\n    let n = 1\n    let f = () { () { n } }\n}\n"),
-        vec!["closures can't capture `n` yet"]
-    );
+    let t = ok("let K = 3\nsq(x: int) -> int { x * x }\nmain() {\n    let f = (a: int) -> int {\n        let b = a + K\n        sq(b)\n    }\n}\n");
+    assert!(closures(&t).iter().all(|c| c.captures.is_empty()));
 }
 
 #[test]

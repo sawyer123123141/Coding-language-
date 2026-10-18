@@ -9,7 +9,7 @@
 // error 54: expected int, found string
 // error 57: expected int, found string
 // error 59: this line has no effect; did you mean to continue the line above?
-// error 63: closures can't capture `y` yet
+// (`capturing` below captures `y`, which closures may do.)
 // error 68: unknown name `missing`
 // error 71: this closure must return int, but its body can finish without a value
 // error 72: this closure must return int

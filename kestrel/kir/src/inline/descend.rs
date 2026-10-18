@@ -37,7 +37,10 @@ impl Inliner<'_> {
                 self.args(args, depth);
             }
             Stmt::Print(parts) | Stmt::Write(parts) => self.print(parts, depth),
-            Stmt::Bind(_, p) | Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::DropGpu(p) | Stmt::PushArena(Some(p)) => self.place(p, depth),
+            Stmt::Bind(_, p) | Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::DropGpu(p) | Stmt::PushArena(Some(p)) | Stmt::CopyFnEnv(p) => {
+                self.place(p, depth)
+            }
+            Stmt::BindEnv { env, .. } => self.expr(env, depth),
             Stmt::MapSet(p, k, v, _) => {
                 self.place(p, depth);
                 self.expr(k, depth);
@@ -96,7 +99,14 @@ impl Inliner<'_> {
                     self.expr(x, depth);
                 }
             }
-            ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) => self.expr(x, depth),
+            ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) | ExprKind::EnvDup(x) => {
+                self.expr(x, depth)
+            }
+            ExprKind::MakeFn { env: EnvKind::Heap(env), .. } => {
+                for x in &mut env.values {
+                    self.expr(x, depth);
+                }
+            }
             ExprKind::Binary(_, a, b) | ExprKind::And(a, b) | ExprKind::Or(a, b) | ExprKind::RandInt(a, b) => {
                 self.expr(a, depth);
                 self.expr(b, depth);

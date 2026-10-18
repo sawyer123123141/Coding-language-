@@ -175,7 +175,9 @@ impl<'a> BodyChecker<'a> {
                 let Some(&Res::Local(l)) = self.t.res.get(&v.id) else { return };
                 let info = self.t.local(l);
                 let name = info.name.clone();
-                if info.is_param {
+                if self.is_capture(l) {
+                    self.error(v.span, Self::captured_message(&name));
+                } else if info.is_param {
                     let what = self.t.owns_what(ty);
                     let msg = format!("can't move parameter `{name}`: it belongs to the caller, and it holds {what}, so it can't be copied");
                     self.error(v.span, msg);

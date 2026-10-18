@@ -74,7 +74,8 @@ fn pinned(body: &[Stmt]) -> HashSet<LocalIdx> {
             | Stmt::DropGpu(p)
             | Stmt::PushArena(Some(p))
             | Stmt::MapSet(p, ..)
-            | Stmt::MapUnlock(p, _),
+            | Stmt::MapUnlock(p, _)
+            | Stmt::CopyFnEnv(p),
         ) => {
             out.insert(p.root);
         }

@@ -73,6 +73,10 @@ pub enum ExprKind {
     MakeFn { code: FuncIdx, env: EnvKind },
     /// The environment word (an `i64`) of the function value at a place.
     FnEnv(Place),
+    /// A copy of the heap environment at the address the operand (an `i64`) gives, in the current
+    /// arena: its size is in its header. The copy's address, an `i64`. Only an environment's copy
+    /// function uses it (see `Helpers::env_copy_fn`), before it copies what the captures hold.
+    EnvDup(Box<Expr>),
     /// A call through the function value at `callee`: its code gets the environment, then
     /// `args`, which follow `sig` as a direct call's follow the callee's parameters.
     CallIndirect { callee: Place, args: Vec<Arg>, sig: KSig },
@@ -143,4 +147,31 @@ impl BinOp {
 pub enum EnvKind {
     /// Nothing: the closure captures nothing, and the environment word is 0.
     None,
+    /// A new environment in the current arena, holding the captured values. The values are
+    /// evaluated (in order) after the block is allocated and before the function value is
+    /// written; each is a value of its own (a deep copy of the captured place).
+    Heap(Env),
 }
+
+/// A closure's environment: a 16-byte header, then the captured values.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Env {
+    /// The function that copies the environment deep: `(env: i64) -> i64`, whose address the
+    /// header holds at offset 0 (see `Helpers::env_copy_fn`).
+    pub copy: FuncIdx,
+    pub layout: EnvLayout,
+    /// The captured values, one per offset.
+    pub values: Vec<Expr>,
+}
+
+/// Where an environment's parts are: the header holds the copy function's address at offset 0
+/// and `size` (an `i64`) at 8; the captured values follow at `offsets`, each at its natural
+/// alignment. `size` counts the header and is a multiple of 8, the block's alignment.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnvLayout {
+    pub offsets: Vec<u32>,
+    pub size: u32,
+}
+
+/// The size of an environment's header: the copy function's address and the size.
+pub const ENV_HEADER: u32 = 16;

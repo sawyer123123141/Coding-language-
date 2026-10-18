@@ -20,14 +20,15 @@
 //! function type (at the end of the literal). They never touch the enclosing function's `io`
 //! or `mutates_params`.
 //!
-//! **Captures.** Not yet: a closure body that names a local or parameter from outside is refused
-//! (`refuse_capture`).
+//! **Captures.** A body's reads of locals and parameters from outside it are collected in the
+//! frame and become the closure's captures when it ends (see `captures`).
 
 use std::collections::HashMap;
 
 use kestrel_syntax::ast::{ClosureLit, Expr, ExprId, Stmt};
 use kestrel_syntax::Span;
 
+use super::captures::Reads;
 use super::closure_result::Infer;
 use super::moves::Moved;
 use super::regions::Ctx;
@@ -57,6 +58,8 @@ pub(crate) struct ClosureFrame {
     /// Why the closure isn't pure, once something makes it so.
     impure: Option<String>,
     mutates_params: bool,
+    /// The places from outside the body that it reads (see `captures`).
+    pub(super) reads: Reads,
     /// The state of the code around, put back when the frame ends.
     saved: Saved,
 }
@@ -155,13 +158,6 @@ impl<'a> BodyChecker<'a> {
         true
     }
 
-    /// A use of `local` from inside a closure that isn't the closure's own: a capture. Not yet.
-    pub(crate) fn refuse_capture(&mut self, local: LocalId, name: &str, span: Span) {
-        if self.frames.last().is_some_and(|f| local.0 < f.first_local) {
-            self.error(span, format!("closures can't capture `{name}` yet"));
-        }
-    }
-
     /// The message for `break` or `continue` that would leave a closure, if it would.
     pub(crate) fn closure_jump_error(&self, word: &str) -> Option<String> {
         let floor = self.loop_floor();
@@ -219,7 +215,8 @@ impl<'a> BodyChecker<'a> {
         }
         let ret = self.check_closure_body(e, lit, known);
         self.scopes.pop();
-        let frame = self.pop_frame();
+        let mut frame = self.pop_frame();
+        let captures = self.finish_captures(e.id, std::mem::take(&mut frame.reads));
 
         let is_pure = frame.impure.is_none();
         let params = lit.params.iter().zip(&tys).map(|(p, &ty)| SigParam { ty, is_var: p.is_var }).collect();
@@ -239,7 +236,7 @@ impl<'a> BodyChecker<'a> {
             e.id,
             ClosureInfo {
                 sig,
-                captures: Vec::new(),
+                captures,
                 is_pure,
                 locals: frame.locals,
                 mutates_params: frame.mutates_params,
@@ -270,6 +267,7 @@ impl<'a> BodyChecker<'a> {
             infer: infer.then_some(Infer { found: None, bare_return: None }),
             impure: None,
             mutates_params: false,
+            reads: Reads::default(),
             saved,
         });
     }

@@ -81,13 +81,20 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             }
             kir::Stmt::Bind(l, p) => {
                 let addr = self.place_addr(p)?;
-                let Slot::Ptr(v) = self.slots[l.0 as usize] else { unreachable!("binds a reference local") };
-                self.b.def_var(v, addr);
+                self.bind_ref(*l, addr);
             }
+            kir::Stmt::BindEnv { local, env, offset } => self.bind_env(*local, env, *offset)?,
+            kir::Stmt::CopyFnEnv(p) => self.copy_fn_env(p)?,
             kir::Stmt::BindGlobal(l, g) => self.bind_global(*l, *g),
             kir::Stmt::SetLine(line) => self.set_line(*line),
         }
         Ok(true)
+    }
+
+    /// Points reference local `l` at `addr`.
+    pub(crate) fn bind_ref(&mut self, l: LocalIdx, addr: cranelift_codegen::ir::Value) {
+        let Slot::Ptr(v) = self.slots[l.0 as usize] else { unreachable!("binds a reference local") };
+        self.b.def_var(v, addr);
     }
 
     fn if_stmt(&mut self, cond: &kir::Expr, then_body: &[kir::Stmt], else_body: &[kir::Stmt]) -> Result<bool, String> {

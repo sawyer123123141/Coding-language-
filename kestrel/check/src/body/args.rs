@@ -200,8 +200,10 @@ impl<'a> BodyChecker<'a> {
                 "can't pass `self` as `var`: the method takes `self`, not `var self`".to_string(),
                 "declare the method with `var self`".to_string(),
             )),
+            Some(Immutable::Captured) => Some((Self::captured_message(&name), String::new())),
         };
         match problem {
+            Some((msg, help)) if help.is_empty() => self.error(a.value.span, msg),
             Some((msg, help)) => self.error_help(a.value.span, msg, help),
             None => {
                 self.mark_changed(root);

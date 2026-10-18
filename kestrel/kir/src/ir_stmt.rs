@@ -35,6 +35,13 @@ pub enum Stmt {
     Bind(LocalIdx, Place),
     /// Points a reference local at a global: a heap constant, built before `main`.
     BindGlobal(LocalIdx, GlobalIdx),
+    /// Points a reference local at `offset` bytes into the environment whose address `env` (an
+    /// `i64`) gives: a capture, in a closure's code or an environment's copy function.
+    BindEnv { local: LocalIdx, env: Expr, offset: u32 },
+    /// Gives the function value at a place its own copy of its environment, in the current arena,
+    /// through the copy function in the environment's header (the captures are copied deep). A
+    /// value with no environment (0) is left alone. `fixup` emits it for a copied function value.
+    CopyFnEnv(Place),
     /// Makes an arena current: a fresh one (`arena { }`), or the one at a
     /// place (`in x { }`, creating it there if it's still null).
     PushArena(Option<Place>),

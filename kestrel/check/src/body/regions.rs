@@ -132,8 +132,15 @@ impl<'a> BodyChecker<'a> {
             // constant is a literal, built again at each use.
             ExprKind::Str(_) => 0,
             ExprKind::Ident(_) if ty == Ty::Str && matches!(self.t.res.get(&e.id), Some(Res::Const(_))) => 0,
-            // A closure that captures nothing has no environment, like a named function.
-            ExprKind::Closure(_) => 0,
+            // A closure that captures nothing has no environment, like a named function; one that
+            // captures is built with its environment in the current arena.
+            ExprKind::Closure(_) => {
+                if self.t.closures.get(&e.id).is_some_and(|c| !c.captures.is_empty()) {
+                    self.current()
+                } else {
+                    0
+                }
+            }
             // A named function has no environment, so it points into no arena.
             ExprKind::Ident(_) if matches!(self.t.res.get(&e.id), Some(Res::FnValue(_))) => 0,
             // An empty list still remembers the current arena, to grow in.
@@ -153,7 +160,10 @@ impl<'a> BodyChecker<'a> {
                 let ctx = |root: LocalId| self.local_ctx.get(&root).map(|&(c, _)| bit(c));
                 let local = match self.place_root(e) {
                     Some(root) if self.t.moves.contains(&e.id) => ctx(root),
-                    Some(root) if moving && !self.t.local(root).is_param && !self.t.is_owning(self.t.local(root).ty) => ctx(root),
+                    // Inside a closure's body, a capture belongs to the caller, like a parameter.
+                    Some(root) if moving && !self.t.local(root).is_param && !self.is_capture(root) && !self.t.is_owning(self.t.local(root).ty) => {
+                        ctx(root)
+                    }
                     _ => None,
                 };
                 // A view (a loop element) may be copied or not; assume either.

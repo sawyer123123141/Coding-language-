@@ -147,6 +147,7 @@ fn exclusive(stmts: &[Stmt], root: LocalIdx, homes: &HashMap<LocalIdx, LocalIdx>
         Node::Stmt(Stmt::Call(_, a) | Stmt::ParFor { args: a, .. }) | Node::Expr(Expr { kind: ExprKind::Call(_, a), .. }) if refs(a) => ok = false,
         Node::Stmt(Stmt::CallIndirect { args: a, .. }) | Node::Expr(Expr { kind: ExprKind::CallIndirect { args: a, .. }, .. }) if refs(a) => ok = false,
         Node::Stmt(Stmt::Bind(_, p)) if p.root == root => ok = false,
+        // (A capture bound by `BindEnv` points into a closure's environment, which no local is.)
         _ => {}
     });
     ok
@@ -164,6 +165,8 @@ fn returns_after_freeing(stmts: &[Stmt]) -> bool {
     walk(stmts, &mut |n| match n {
         Node::Stmt(Stmt::Return(_)) => returns = true,
         Node::Stmt(Stmt::PopArena { free: true } | Stmt::FreeArena(_) | Stmt::DropGpu(_)) => frees = true,
+        // Copying a function value's environment, or making one, only allocates.
+        Node::Stmt(Stmt::CopyFnEnv(_)) => {}
         Node::Stmt(Stmt::Call(_, a)) | Node::Expr(Expr { kind: ExprKind::Call(_, a), .. }) if by_ref(a) => frees = true,
         Node::Stmt(Stmt::CallIndirect { args: a, .. }) | Node::Expr(Expr { kind: ExprKind::CallIndirect { args: a, .. }, .. }) if by_ref(a) => frees = true,
         _ => {}

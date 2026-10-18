@@ -75,6 +75,11 @@ pub(crate) fn rename_stmts(stmts: &mut [Stmt], subst: &[Subst]) {
                 rename_place(p, subst);
             }
             Stmt::BindGlobal(l, _) => rename_local(l, subst),
+            Stmt::BindEnv { local, env, .. } => {
+                rename_local(local, subst);
+                rename_expr(env, subst);
+            }
+            Stmt::CopyFnEnv(p) => rename_place(p, subst),
             Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::DropGpu(p) | Stmt::PushArena(Some(p)) => rename_place(p, subst),
             Stmt::MapSet(p, k, v, _) => {
                 rename_place(p, subst);
@@ -123,7 +128,14 @@ pub(crate) fn rename_expr(e: &mut Expr, subst: &[Subst]) {
                 rename_expr(x, subst);
             }
         }
-        ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) => rename_expr(x, subst),
+        ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) | ExprKind::EnvDup(x) => {
+            rename_expr(x, subst)
+        }
+        ExprKind::MakeFn { env: EnvKind::Heap(env), .. } => {
+            for x in &mut env.values {
+                rename_expr(x, subst);
+            }
+        }
         ExprKind::Binary(_, a, b) | ExprKind::And(a, b) | ExprKind::Or(a, b) | ExprKind::RandInt(a, b) => {
             rename_expr(a, subst);
             rename_expr(b, subst);

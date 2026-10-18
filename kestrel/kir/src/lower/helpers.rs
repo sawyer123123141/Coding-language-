@@ -58,6 +58,8 @@ pub(crate) struct Helpers {
     pub(super) thunks: HashMap<FuncIdx, FuncIdx>,
     /// The code of each closure literal (see `closure_code`).
     pub(super) closures: HashMap<ExprId, FuncIdx>,
+    /// The copy function of each closure literal's environment (see `env_copy_fn`).
+    pub(super) env_copies: HashMap<ExprId, FuncIdx>,
     pub(crate) par_bodies: Vec<FuncIdx>,
     /// The heap constants the functions use, and their globals.
     pub(super) consts: ConstGlobals,
@@ -66,8 +68,9 @@ pub(crate) struct Helpers {
 impl Helpers {
     pub(crate) fn new(base: u32) -> Self {
         let (copy, drop, print) = (HashMap::new(), HashMap::new(), HashMap::new());
-        let (find, thunks, closures) = (HashMap::new(), HashMap::new(), HashMap::new());
-        Helpers { base, funcs: Vec::new(), copy, drop, print, find, thunks, closures, par_bodies: Vec::new(), consts: ConstGlobals::default() }
+        let (find, thunks, closures, env_copies) = (HashMap::new(), HashMap::new(), HashMap::new(), HashMap::new());
+        let (funcs, par_bodies, consts) = (Vec::new(), Vec::new(), ConstGlobals::default());
+        Helpers { base, funcs, copy, drop, print, find, thunks, closures, env_copies, par_bodies, consts }
     }
 
     /// Adds an outlined `par for` body, named for its index.
@@ -85,6 +88,8 @@ impl Helpers {
         let mut out = Vec::new();
         match ty {
             KTy::Str => out.push(Stmt::Dup(place)),
+            // A function value's environment holds copies of its captures; the copy gets its own.
+            KTy::Fn => out.push(Stmt::CopyFnEnv(place)),
             KTy::Array(_) | KTy::List(_) => out.push(Stmt::Call(self.copy_fn(ty, t), vec![Arg::Ref(place)])),
             KTy::Map(..) => out.push(Stmt::Call(self.map_copy_fn(ty, t), vec![Arg::Ref(place)])),
             KTy::Optional(e) => {
@@ -231,7 +236,6 @@ impl Helpers {
         let elem = elem_of(ty, t);
         let mut body = vec![Stmt::Dup(Place::local(LocalIdx(0)))];
         if has_heap(elem, t) {
-            // (Function values have nothing to fix up yet, so a list of them needs no loop.)
             let each = Self::each(|at| self.fixup(at, elem, t));
             if !matches!(&each, Stmt::ForRange { body, .. } if body.is_empty()) {
                 body.push(each);

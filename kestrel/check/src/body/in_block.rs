@@ -50,6 +50,7 @@ impl<'a> BodyChecker<'a> {
         let name = self.t.local(root).name.clone();
         let help = match self.immutable(root) {
             None => return self.mark_changed(root),
+            Some(super::place::Immutable::Captured) => return self.error(arena.span, Self::captured_message(&name)),
             Some(super::place::Immutable::Let) => format!("declare `{name}` with `var`"),
             Some(_) => format!("take `{name}` as a `var` parameter"),
         };
