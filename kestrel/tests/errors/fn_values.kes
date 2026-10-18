@@ -1,15 +1,17 @@
-// error 26: optional function types aren't supported yet; give the field a do-nothing default instead: `on_hit: (int) = (n) { }`
-// error 31: `Button` has a field and a method both called `on_click`; rename one
-// error 46: calls through a function value take no labels
-// error 50: `f` isn't a pure function type, so a `pure` function can't call it; declare the parameter as `pure (int) -> int`
-// error 54: `min` is built in; wrap it: `(a: int, b: int) { min(a, b) }`
-// error 55: native functions can't be used as values yet; wrap it in a closure
-// error 57: methods can't be used as values yet; wrap it: `(e) { e.len2() }`
-// error 58: function values can't be compared
+// error 28: optional function types aren't supported yet; give the field a do-nothing default instead: `on_hit: (int) = (n) { }`
+// error 33: `Button` has a field and a method both called `on_click`; rename one
+// error 48: calls through a function value take no labels
+// error 52: `f` isn't a pure function type, so a `pure` function can't call it; declare the parameter as `pure (int) -> int`
+// error 56: `min` is built in; wrap it: `(a: int, b: int) { min(a, b) }`
+// error 57: native functions can't be used as values yet; wrap it in a closure
+// error 59: methods can't be used as values yet; wrap it: `(e) { e.len2() }`
 // error 60: function values can't be compared
-// error 62: `has` needs items that `==` can compare (numbers, bools and strings); `list[(int) -> int]` holds `(int) -> int`
-// error 64: expected pure (int) -> int, found (int) -> int
-// error 65: expected (int) -> int, found (int, int) -> int
+// error 62: function values can't be compared
+// error 64: `has` needs items that `==` can compare (numbers, bools and strings); `list[(int) -> int]` holds `(int) -> int`
+// error 66: expected pure (int) -> int, found (int) -> int
+// error 67: expected (int) -> int, found (float) -> int
+// error 74: `f` was removed earlier, so it can't be used here
+// error 81: `f` may have been removed earlier, so it can't be used here
 use draw
 
 struct Pt {
@@ -40,7 +42,7 @@ effect(x: int) -> int {
     x
 }
 
-two(a: int, b: int) -> int { a + b }
+half(x: float) -> int { int(x) }
 
 apply(f: (int) -> int) -> int {
     f(amount: 3)
@@ -62,6 +64,21 @@ main() {
     let found = fs.has(square)
     let ok: (int) -> int = cube
     let bad1: pure (int) -> int = effect
-    let bad2: (int) -> int = two
+    let bad2: (int) -> int = half
     print(apply(cube))
 }
+
+removed_then_called(var fs: list[(int)]) {
+    for f in fs {
+        remove f
+        f(1)
+    }
+}
+
+maybe_removed_then_called(var fs: list[(int)], n: int) {
+    for f in fs {
+        if n > 1 { remove f }
+        f(2)
+    }
+}
+

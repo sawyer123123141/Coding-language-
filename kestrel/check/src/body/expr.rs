@@ -1,10 +1,10 @@
 use kestrel_syntax::ast::{Expr, ExprKind, InterpPart};
-use kestrel_syntax::Diagnostic;
+use kestrel_syntax::{Diagnostic, Span};
 
 use super::{BodyChecker, Expect};
 use super::fnvalue::builtin_wrapper;
 use crate::builtins::Builtin;
-use crate::tables::Res;
+use crate::tables::{LocalId, Res};
 use crate::ty::Ty;
 
 pub(super) fn is_value_ty(t: Ty) -> bool {
@@ -90,25 +90,31 @@ impl<'a> BodyChecker<'a> {
         ty
     }
 
+    /// A use of `local`: it must not have been moved or removed on the way here, and a view
+    /// into a loop item can't be used once the item is removed.
+    pub(crate) fn check_local_use(&mut self, local: LocalId, name: &str, span: Span) {
+        match self.moved.get(&local).copied() {
+            Some(at) if at.removed && at.every => self.error(span, format!("`{name}` was removed earlier, so it can't be used here")),
+            Some(at) if at.removed => self.error_help(
+                span,
+                format!("`{name}` may have been removed earlier, so it can't be used here"),
+                "it's removed on some paths to this line",
+            ),
+            Some(at) if at.every => self.error(span, format!("`{name}` was moved earlier, so it can't be used here")),
+            Some(_) => self.error_help(
+                span,
+                format!("`{name}` may have been moved earlier, so it can't be used here"),
+                "it's moved on some paths to this line; give it a new value first",
+            ),
+            // A view into a loop item reads freed memory once the item is removed.
+            None => self.check_removed_view(local, span),
+        }
+    }
+
     fn ident(&mut self, e: &Expr, name: &str, want: Option<Ty>) -> Ty {
         if let Some(local) = self.lookup_local(name) {
             self.t.res.insert(e.id, Res::Local(local));
-            match self.moved.get(&local).copied() {
-                Some(at) if at.removed && at.every => self.error(e.span, format!("`{name}` was removed earlier, so it can't be used here")),
-                Some(at) if at.removed => self.error_help(
-                    e.span,
-                    format!("`{name}` may have been removed earlier, so it can't be used here"),
-                    "it's removed on some paths to this line",
-                ),
-                Some(at) if at.every => self.error(e.span, format!("`{name}` was moved earlier, so it can't be used here")),
-                Some(_) => self.error_help(
-                    e.span,
-                    format!("`{name}` may have been moved earlier, so it can't be used here"),
-                    "it's moved on some paths to this line; give it a new value first",
-                ),
-                // A view into a loop item reads freed memory once the item is removed.
-                None => self.check_removed_view(local, e.span),
-            }
+            self.check_local_use(local, name, e.span);
             let ty = self.t.locals[local.0 as usize].ty;
             if let Ty::Variant(..) = ty {
                 let msg = format!("`{name}` stands for the fields of `{}`; use them as `{name}.field`", self.tn(ty));

@@ -99,7 +99,7 @@ impl<'a> BodyChecker<'a> {
     /// `f(args)` where `f` is a local or parameter.
     pub(crate) fn check_local_call(&mut self, e: &Expr, local: LocalId, name: &str, name_span: Span, args: &[Arg]) -> Ty {
         self.t.call_local.insert(e.id, local);
-        self.check_removed_view(local, name_span);
+        self.check_local_use(local, name, name_span);
         match self.t.local(local).ty {
             Ty::Fn(sig) => {
                 let root = self.t.local(local).alias.unwrap_or(local);

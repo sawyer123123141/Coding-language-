@@ -33,15 +33,17 @@ bump(var n: int, by: int) { n += by }
 
 #[test]
 fn named_functions_are_values_with_their_signature() {
-    let t = ok(&format!("{FNS}main() {{\n    let f = square\n    let g = cube\n    let h = shout\n    let k = bump\n}}\n"));
+    let t = ok(&format!("{FNS}main() {{\n    let f = square\n    let g = cube\n    let h = shout\n    let k = bump\n    let f2 = square\n}}\n"));
     assert_eq!(local_ty(&t, "f"), "(int) -> int");
     assert_eq!(local_ty(&t, "g"), "pure (int) -> int");
     assert_eq!(local_ty(&t, "h"), "(string)");
     assert_eq!(local_ty(&t, "k"), "(var int, int)");
     assert!(t.res.values().any(|r| matches!(r, Res::FnValue(f) if t.func(*f).name == "square")));
     // The same signature is the same type.
-    let (f, f2) = (t.locals.iter().find(|l| l.name == "f").unwrap().ty, t.sig_ids.len());
-    assert!(matches!(f, Ty::Fn(_)) && f2 >= 4);
+    let ty_of = |name: &str| t.locals.iter().find(|l| l.name == name).unwrap().ty;
+    assert!(matches!(ty_of("f"), Ty::Fn(_)));
+    assert_eq!(ty_of("f"), ty_of("f2"));
+    assert_ne!(ty_of("f"), ty_of("g"), "pure is part of the type");
 }
 
 #[test]
@@ -175,7 +177,10 @@ fn function_values_are_not_map_keys_or_search_items() {
     let keys = "main() {\n    let m = map[(int), int]()\n}\n";
     assert_eq!(errors(keys), vec!["map keys must be integers, bools or strings, not `(int)`"]);
     let has = "f(x: int) {}\nmain() {\n    let xs = list[(int)]()\n    print(xs.find(f))\n}\n";
-    assert_eq!(errors(has).len(), 1);
+    assert_eq!(
+        errors(has),
+        vec!["`find` needs items that `==` can compare (numbers, bools and strings); `list[(int)]` holds `(int)`"]
+    );
 }
 
 #[test]
@@ -215,7 +220,10 @@ fn constants_and_field_defaults_may_name_functions() {
     assert_eq!(t.ty_name(t.consts.iter().find(|c| c.name == "RULE").unwrap().ty), "(int) -> int");
     // A call through a value is not a constant expression.
     let bad = errors("square(x: int) -> int { x * x }\nlet RULE = square\nlet NINE = (RULE)(3)\nmain() {}\n");
-    assert_eq!(bad.len(), 1);
+    assert_eq!(
+        bad,
+        vec!["constants can only use literals, operators, other constants, struct and enum values, and pure built-ins like `sqrt`"]
+    );
 }
 
 #[test]
@@ -229,4 +237,14 @@ fn only_a_user_functions_signature_is_its_value() {
     // A function value of a function that takes a function.
     let t = ok("apply(f: (int) -> int) -> int { f(1) }\nsquare(x: int) -> int { x * x }\nmain() {\n    let a = apply\n    print(a(square))\n}\n");
     assert_eq!(local_ty(&t, "a"), "((int) -> int) -> int");
+}
+
+#[test]
+fn a_removed_loop_item_cannot_be_called() {
+    let src = |body: &str| {
+        format!("square(x: int) -> int {{ x * x }}\nmain() {{\n    var fs = list[(int) -> int]()\n    fs.add(square)\n    for f in fs {{\n        {body}\n    }}\n}}\n")
+    };
+    assert_eq!(errors(&src("remove f\n        print(f(1))")), vec!["`f` was removed earlier, so it can't be used here"]);
+    assert_eq!(errors(&src("if true { remove f }\n        print(f(2))")), vec!["`f` may have been removed earlier, so it can't be used here"]);
+    ok(&src("print(f(3))"));
 }
