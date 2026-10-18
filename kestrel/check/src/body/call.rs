@@ -17,6 +17,10 @@ const CONVERSIONS: &[(&str, Ty)] = &[
 impl<'a> BodyChecker<'a> {
     pub(crate) fn check_call(&mut self, e: &Expr, _want: Option<Ty>) -> Ty {
         let ExprKind::Call { name, name_span, args } = &e.kind else { unreachable!("check_call on non-call") };
+        // A local or parameter of function type: `f(x)` calls through its value.
+        if let Some(local) = self.lookup_local(name) {
+            return self.check_local_call(e, local, name, *name_span, args);
+        }
         if name == "print" {
             return self.check_print(e, args);
         }

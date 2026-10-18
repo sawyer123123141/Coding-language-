@@ -1,5 +1,5 @@
 use super::{PResult, Parser};
-use crate::ast::{Block, ConstDecl, FnDecl, Item, Param, TypeExpr, TypeKind, UseClause, UseDecl};
+use crate::ast::{Block, ConstDecl, FnDecl, FnTypeParam, Item, Param, TypeExpr, TypeKind, UseClause, UseDecl};
 use crate::span::Span;
 use crate::token::Tok;
 
@@ -189,7 +189,44 @@ impl Parser {
         Ok(Item::Const(ConstDecl { is_pub, bind, ty, value, span }))
     }
 
+    /// `(A, var B) -> R`, with `pure` before it for a pure function type. The result is optional:
+    /// without `->` the function gives nothing.
+    #[inline(never)]
+    fn fn_type(&mut self) -> PResult<TypeExpr> {
+        let start = self.span();
+        let is_pure = self.eat(&Tok::Pure);
+        let (params, mut end) = self.nested_type(|p| {
+            p.expect(&Tok::LParen, "`(`")?;
+            let mut params = Vec::new();
+            while !p.at(&Tok::RParen) {
+                let is_var = p.eat(&Tok::Var);
+                params.push(FnTypeParam { is_var, ty: p.type_expr()? });
+                if !p.eat(&Tok::Comma) {
+                    break;
+                }
+            }
+            Ok((params, p.expect(&Tok::RParen, "`)` or `,`")?))
+        })?;
+        let ret = if self.eat(&Tok::Arrow) {
+            let ret = self.nested_type(Self::type_expr)?;
+            end = ret.span;
+            Some(Box::new(ret))
+        } else {
+            None
+        };
+        let mut ty = TypeExpr { kind: TypeKind::Fn { params, ret, is_pure }, span: start.to(end) };
+        if self.at(&Tok::Question) {
+            let end = self.bump().span;
+            ty = TypeExpr { span: ty.span.to(end), kind: TypeKind::Optional(Box::new(ty)) };
+        }
+        Ok(ty)
+    }
+
     pub(crate) fn type_expr(&mut self) -> PResult<TypeExpr> {
+        if self.at(&Tok::LParen) || (self.at(&Tok::Pure) && self.peek_at(1) == &Tok::LParen) {
+            // A function type is parsed apart: this frame is on the stack once per nesting level.
+            return self.fn_type();
+        }
         let start = self.span();
         let mut ty = if self.at(&Tok::LBracket) {
             let (inner, end) = self.nested_type(|p| {

@@ -171,7 +171,7 @@ fn builtin_errors() {
         ("log(x: int) {\n print(x)\n}\nmain() {}\n", "`log` is a built-in name; pick another"),
         ("main() {\n for round from 0 to 3 {\n print(round)\n }\n}\n", "`round` is a built-in name; pick another"),
         ("main() {\n PI = 3\n}\n", "can't change constant `PI`"),
-        ("main() {\n let f = sqrt\n}\n", "`sqrt` is a function; call it with `sqrt(...)`"),
+        ("main() {\n let f = sqrt\n}\n", "`sqrt` is built in; wrap it: `(x: float) { sqrt(x) }`"),
         ("main() {\n let x = PI(1)\n}\n", "`PI` is a constant; write it without `(...)`"),
         ("let X = randf()\nmain() {}\n", "constants can only use literals, operators, other constants, struct and enum values, and pure built-ins like `sqrt`"),
         ("main() {\n print(abs(\"x\"))\n}\n", "`abs` needs a number here, found string"),

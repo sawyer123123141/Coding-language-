@@ -269,6 +269,7 @@ fn expr_removes(x: &Expr, name: &str) -> bool {
         ExprKind::Binary { lhs, rhs, .. } => e(lhs) || e(rhs),
         ExprKind::Call { args: a, .. } | ExprKind::TypeCall { args: a, .. } => args(a),
         ExprKind::MethodCall { receiver, args: a, .. } => e(receiver) || args(a),
+        ExprKind::CallValue { callee, args: a } => e(callee) || args(a),
         ExprKind::Field { base, .. } => e(base),
         ExprKind::Index { base, index } => e(base) || e(index),
         ExprKind::ArrayLit(items) => items.iter().any(e),

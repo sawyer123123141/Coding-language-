@@ -9,6 +9,15 @@ use crate::natives::may_want_scratch;
 use crate::tables::{FnId, LocalId, ParamSig};
 use crate::ty::Ty;
 
+/// How a message names a parameter: a function type's parameters have no names.
+pub(super) fn param_ref(p: &ParamSig, fname: &str) -> String {
+    if p.name.is_empty() {
+        format!("this argument of {}", super::fnvalue::quote(fname))
+    } else {
+        format!("parameter `{}` of `{fname}`", p.name)
+    }
+}
+
 impl<'a> BodyChecker<'a> {
     /// Checks a call's arguments against `fid`'s parameters after the first
     /// `skip` (1 for a method's `self`). `var_roots` holds variables the call
@@ -143,7 +152,7 @@ impl<'a> BodyChecker<'a> {
 
     /// Checks an argument for a `var` parameter: a changeable variable, field or element
     /// of exactly the parameter's type. Returns the variable it is rooted at.
-    fn check_var_arg(&mut self, a: &Arg, p: &ParamSig, fname: &str) -> Option<LocalId> {
+    pub(super) fn check_var_arg(&mut self, a: &Arg, p: &ParamSig, fname: &str) -> Option<LocalId> {
         if !matches!(a.value.kind, ExprKind::Ident(_) | ExprKind::Field { .. } | ExprKind::Index { .. }) {
             self.error(a.value.span, "only a variable can be passed as `var`");
             self.check_expr(&a.value, None);
@@ -154,7 +163,7 @@ impl<'a> BodyChecker<'a> {
                 ExprKind::Ident(name) => format!("write `var {name}`"),
                 _ => "write `var` before the argument".to_string(),
             };
-            let msg = format!("parameter `{}` of `{fname}` is `var`, so the call must say so", p.name);
+            let msg = format!("{} is `var`, so the call must say so", param_ref(p, fname));
             self.error_help(a.span, msg, help);
         }
         let ty = self.check_expr(&a.value, None);
@@ -196,7 +205,8 @@ impl<'a> BodyChecker<'a> {
             }
         }
         if ty != p.ty && ty != Ty::Error && p.ty != Ty::Error {
-            let msg = format!("`var` parameter `{}` needs exactly {}, found {}", p.name, self.tn(p.ty), self.tn(ty));
+            let which = if p.name.is_empty() { "this `var` argument".to_string() } else { format!("`var` parameter `{}`", p.name) };
+            let msg = format!("{which} needs exactly {}, found {}", self.tn(p.ty), self.tn(ty));
             self.error(a.value.span, msg);
         }
         Some(root)
@@ -206,7 +216,7 @@ impl<'a> BodyChecker<'a> {
     /// it by reference: no second `var` use, and no aggregate argument (those
     /// are passed by pointer, so they would see the change). Number
     /// arguments are copied before the call, so they're fine.
-    fn check_exclusive(&mut self, args: &[Arg], var_roots: &[(LocalId, Option<usize>)], read_root: Option<LocalId>) {
+    pub(super) fn check_exclusive(&mut self, args: &[Arg], var_roots: &[(LocalId, Option<usize>)], read_root: Option<LocalId>) {
         for (i, &(root, ai)) in var_roots.iter().enumerate() {
             if let (true, Some(ai)) = (var_roots[..i].iter().any(|&(r, _)| r == root), ai) {
                 let name = self.t.local(root).name.clone();

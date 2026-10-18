@@ -131,6 +131,8 @@ impl<'a> BodyChecker<'a> {
             // constant is a literal, built again at each use.
             ExprKind::Str(_) => 0,
             ExprKind::Ident(_) if ty == Ty::Str && matches!(self.t.res.get(&e.id), Some(Res::Const(_))) => 0,
+            // A named function has no environment, so it points into no arena.
+            ExprKind::Ident(_) if matches!(self.t.res.get(&e.id), Some(Res::FnValue(_))) => 0,
             // An empty list still remembers the current arena, to grow in.
             ExprKind::ArrayLit(items) if items.is_empty() => {
                 if matches!(ty, Ty::List(_)) {

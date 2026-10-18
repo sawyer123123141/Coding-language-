@@ -2,6 +2,7 @@ use kestrel_syntax::ast::{Expr, ExprKind, InterpPart};
 use kestrel_syntax::Diagnostic;
 
 use super::{BodyChecker, Expect};
+use super::fnvalue::builtin_wrapper;
 use crate::builtins::Builtin;
 use crate::tables::Res;
 use crate::ty::Ty;
@@ -55,6 +56,7 @@ impl<'a> BodyChecker<'a> {
             ExprKind::Unary { op, expr } => self.unary(*op, expr, want),
             ExprKind::Binary { op, lhs, rhs } => self.binary(e, *op, lhs, rhs, want),
             ExprKind::Call { .. } => self.check_call(e, want),
+            ExprKind::CallValue { .. } => self.check_call_value(e),
             ExprKind::If { .. } => self.check_if(e, Expect::Value(want)),
             ExprKind::Field { .. } => self.check_field(e),
             ExprKind::MethodCall { .. } => self.check_method_call(e),
@@ -122,8 +124,12 @@ impl<'a> BodyChecker<'a> {
         if let Some(ty) = self.builtin_constant(e, name, want) {
             return ty;
         }
-        if self.t.fn_by_name.contains_key(name) || Builtin::global(name).is_some() {
-            self.error(e.span, format!("`{name}` is a function; call it with `{name}(...)`"));
+        if let Some(&fid) = self.t.fn_by_name.get(name) {
+            return self.fn_name_value(e, fid);
+        }
+        if name == "print" || Builtin::global(name).is_some() {
+            let msg = format!("`{name}` is built in; wrap it: `{}`", builtin_wrapper(name));
+            self.error(e.span, msg);
         } else if self.t.struct_by_name.contains_key(name) {
             self.error(e.span, format!("`{name}` is a struct; build one with `{name}(...)`"));
         } else if let Some(&id) = self.t.enum_by_name.get(name) {
@@ -200,7 +206,7 @@ impl<'a> BodyChecker<'a> {
         let ty = match &e.kind {
             ExprKind::If { .. } => self.check_if(e, Expect::Discard),
             ExprKind::Match { .. } => self.check_match(e, Expect::Discard),
-            ExprKind::Call { .. } | ExprKind::MethodCall { .. } => self.check_discarded_call(e),
+            ExprKind::Call { .. } | ExprKind::MethodCall { .. } | ExprKind::CallValue { .. } => self.check_discarded_call(e),
             _ => {
                 let ty = self.check_expr(e, None);
                 if ty != Ty::Error {

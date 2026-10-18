@@ -203,5 +203,6 @@ fn type_text(t: &TypeExpr) -> String {
         TypeKind::Named { name, args } => format!("{name}[{}]", args.iter().map(type_text).collect::<Vec<_>>().join(", ")),
         TypeKind::Array(inner) => format!("[{}]", type_text(inner)),
         TypeKind::Optional(inner) => format!("{}?", type_text(inner)),
+        TypeKind::Fn { .. } => t.to_sexpr(),
     }
 }

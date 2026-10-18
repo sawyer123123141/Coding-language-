@@ -5,6 +5,7 @@ use kestrel_syntax::{Diagnostic, Span};
 
 use crate::builtins::Builtin;
 use crate::collect_ty::{check_self_containment, resolve_type};
+use crate::sig::{Sig, SigParam};
 use crate::tables::{
     ConstInfo, EnumId, EnumInfo, FieldInfo, FnId, FnInfo, ParamSig, StructId, StructInfo, Tables, VariantInfo,
     BUILTIN_STRUCTS,
@@ -180,24 +181,39 @@ fn default_allocates(default: &Expr, ty: Ty, t: &Tables) -> bool {
     match &default.kind {
         ExprKind::None | ExprKind::Str(_) => false,
         ExprKind::Ident(name) if inner == Ty::Str => !t.consts.iter().any(|c| &c.name == name),
+        // A named function has no environment: it holds no memory.
+        ExprKind::Ident(name) if matches!(inner, Ty::Fn(_)) && t.fn_by_name.contains_key(name) => false,
         ExprKind::ArrayLit(items) if items.is_empty() => matches!(inner, Ty::List(_)),
         _ => true,
     }
 }
 
-/// Registers methods; `taken` names (fields or variants) can't be reused.
+/// A field or variant name a method can't reuse; `is_fn` for a field of function type.
+struct Taken<'a> {
+    name: &'a str,
+    is_fn: bool,
+}
+
+/// Registers methods; `taken` names (of `taken_noun`s: fields or variants) can't be reused.
 fn methods_of(
     owner: &str,
     item_idx: usize,
     decls: &[FnDecl],
-    taken: &[&str],
+    taken: &[Taken],
     taken_noun: &str,
     t: &mut Tables,
     diags: &mut Vec<Diagnostic>,
 ) -> HashMap<String, FnId> {
     let mut methods = HashMap::new();
     for (mi, m) in decls.iter().enumerate() {
-        if taken.contains(&m.name.as_str()) {
+        let clash = taken.iter().find(|k| k.name == m.name);
+        if clash.is_some_and(|k| k.is_fn) {
+            // `b.on_click()` would mean both.
+            let msg = format!("`{owner}` has a field and a method both called `{}`; rename one", m.name);
+            diags.push(Diagnostic::error(m.name_span, msg));
+            continue;
+        }
+        if clash.is_some() {
             diags.push(Diagnostic::error(m.name_span, format!("`{owner}` already has a {taken_noun} named `{}`", m.name)));
             continue;
         }
@@ -213,7 +229,7 @@ fn methods_of(
 
 fn add_struct_members(s: &StructDecl, item_idx: usize, id: StructId, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
     let fields = fields_of(&s.name, &s.fields, t, diags);
-    let names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
+    let names: Vec<Taken> = fields.iter().map(|f| Taken { name: &f.name, is_fn: matches!(f.ty, Ty::Fn(_)) }).collect();
     let methods = methods_of(&s.name, item_idx, &s.methods, &names, "field", t, diags);
     let info = &mut t.structs[id.0 as usize];
     info.fields = fields;
@@ -233,7 +249,7 @@ fn add_enum_members(e: &EnumDecl, item_idx: usize, id: EnumId, t: &mut Tables, d
     if e.variants.is_empty() {
         diags.push(Diagnostic::error(e.name_span, format!("`{}` needs at least one variant", e.name)));
     }
-    let names: Vec<&str> = variants.iter().map(|v| v.name.as_str()).collect();
+    let names: Vec<Taken> = variants.iter().map(|v| Taken { name: &v.name, is_fn: false }).collect();
     let methods = methods_of(&e.name, item_idx, &e.methods, &names, "variant", t, diags);
     let info = &mut t.enums[id.0 as usize];
     info.variants = variants;
@@ -249,6 +265,8 @@ fn add_fn(f: &FnDecl, item_idx: usize, method: Option<(usize, &str)>, t: &mut Ta
     }
     let ret = f.ret.as_ref().map_or(Ty::Unit, |r| resolve_type(r, t, diags));
     let id = FnId(t.fns.len() as u32);
+    let sig = Sig { params: params.iter().map(|p| SigParam { ty: p.ty, is_var: p.is_var }).collect(), ret, is_pure: f.is_pure };
+    let sig = t.intern_sig(sig);
     let name = match method {
         Some((_, owner)) => format!("{owner}.{}", f.name),
         None => f.name.clone(),
@@ -261,6 +279,7 @@ fn add_fn(f: &FnDecl, item_idx: usize, method: Option<(usize, &str)>, t: &mut Ta
         is_native: f.is_native,
         params,
         ret,
+        sig,
         span: f.name_span,
         locals: Vec::new(),
         // A native may do anything; only `pure` ones promise not to.

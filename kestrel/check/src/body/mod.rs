@@ -6,6 +6,7 @@ mod consts;
 mod default_cycles;
 mod enums;
 mod expr;
+mod fnvalue;
 mod let_else;
 mod in_block;
 mod lists;
@@ -33,6 +34,7 @@ use std::collections::{HashMap, HashSet};
 use kestrel_syntax::ast::{Binding, Expr, ExprId, Program, Stmt};
 use kestrel_syntax::{Diagnostic, Span};
 
+use crate::sig::sig_accepts;
 use crate::tables::{FnId, LocalId, LocalInfo, Tables};
 use crate::ty::Ty;
 
@@ -245,6 +247,13 @@ impl<'a> BodyChecker<'a> {
         if from.coerces_to(to) {
             self.t.coerce.insert(e.id, to);
             return;
+        }
+        // A pure function value goes where a non-pure one of the same shape is expected; they
+        // are the same value, so nothing converts.
+        if let (Ty::Fn(got), Ty::Fn(want)) = (from, to) {
+            if sig_accepts(self.t, want, got) {
+                return;
+            }
         }
         // A `T` is a `T?` that has a value.
         if let Ty::Optional(inner) = to {

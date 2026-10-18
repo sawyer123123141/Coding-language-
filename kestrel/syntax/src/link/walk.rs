@@ -66,6 +66,12 @@ impl Rewriter<'_> {
                 args.iter_mut().for_each(|a| self.ty(a));
             }
             TypeKind::Array(inner) | TypeKind::Optional(inner) => self.ty(inner),
+            TypeKind::Fn { params, ret, .. } => {
+                params.iter_mut().for_each(|p| self.ty(&mut p.ty));
+                if let Some(r) = ret {
+                    self.ty(r);
+                }
+            }
         }
     }
 
@@ -167,6 +173,10 @@ impl Rewriter<'_> {
                 }
                 None => self.expr(base),
             },
+            ExprKind::CallValue { callee, args } => {
+                self.expr(callee);
+                self.args(args);
+            }
             ExprKind::Unary { expr, .. } => self.expr(expr),
             ExprKind::Binary { lhs, rhs, .. } => {
                 self.expr(lhs);

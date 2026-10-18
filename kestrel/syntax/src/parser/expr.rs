@@ -126,7 +126,7 @@ impl Parser {
         Ok(self.expr_node(ExprKind::Unary { op, expr: Box::new(inner) }, span))
     }
 
-    /// A primary expression followed by any `.field` / `.method(args)` / `[index]`.
+    /// A primary expression followed by any `.field` / `.method(args)` / `[index]` / `(args)`.
     fn postfix(&mut self) -> PResult<Expr> {
         let mut e = self.primary()?;
         loop {
@@ -138,6 +138,13 @@ impl Parser {
                 })?;
                 let span = e.span.to(end);
                 e = self.expr_node(ExprKind::Index { base: Box::new(e), index: Box::new(index) }, span);
+                continue;
+            }
+            if self.at(&Tok::LParen) {
+                // Not a bare name (`primary` takes those) and not `.name(`: a call of a value.
+                let (args, end) = self.call_args()?;
+                let span = e.span.to(end);
+                e = self.expr_node(ExprKind::CallValue { callee: Box::new(e), args }, span);
                 continue;
             }
             if !self.eat(&Tok::Dot) {

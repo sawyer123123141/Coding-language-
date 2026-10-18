@@ -356,3 +356,53 @@ fn remove_is_still_a_name_everywhere_else() {
     assert_eq!(body("x.remove(k)"), "{(.call x remove k)}");
     assert_eq!(body("remove\nb"), "{remove; b}");
 }
+
+/// The first parameter's type of `f`, as written back.
+fn param_type(ty: &str) -> String {
+    let p = ok(&format!("f(g: {ty}) {{}}\nmain() {{}}\n"));
+    fn_decl(&p, 0).params[0].ty.to_sexpr()
+}
+
+#[test]
+fn function_types_in_type_position() {
+    assert_eq!(param_type("(int, var vec2) -> bool"), "(int, var vec2) -> bool");
+    assert_eq!(param_type("pure (int) -> int"), "pure (int) -> int");
+    assert_eq!(param_type("()"), "()");
+    assert_eq!(param_type("(int)"), "(int)");
+    assert_eq!(param_type("list[(int)]"), "list[(int)]");
+    assert_eq!(param_type("[(int) -> int]"), "[(int) -> int]");
+    // A function that gives a function, and one that takes one.
+    assert_eq!(param_type("(int) -> (int) -> int"), "(int) -> (int) -> int");
+    assert_eq!(param_type("((int) -> bool) -> int"), "((int) -> bool) -> int");
+    // `?` binds to the result of an arrow type, and to the whole of a type with no arrow.
+    assert_eq!(param_type("(int) -> int?"), "(int) -> int?");
+    assert_eq!(param_type("(int)?"), "(int)?");
+}
+
+#[test]
+fn function_types_in_the_other_type_places() {
+    let p = ok("struct S {\n    cb: (int) -> int\n    on_hit: (int)\n}\nmake() -> (int) -> int { f }\nmain() {\n    let g: pure (int) -> int = f\n    let xs = list[(int) -> int]()\n}\n");
+    let Item::Struct(s) = &p.items[0] else { panic!("a struct") };
+    assert_eq!(s.fields[0].ty.to_sexpr(), "(int) -> int");
+    assert_eq!(s.fields[1].ty.to_sexpr(), "(int)");
+    assert_eq!(fn_decl(&p, 1).ret.as_ref().unwrap().to_sexpr(), "(int) -> int");
+    assert_eq!(fn_decl(&p, 2).body.to_sexpr(), "{(let g f); (let xs (make list[(int) -> int]))}");
+}
+
+#[test]
+fn function_type_errors() {
+    assert_eq!(errs("f(g: (int) ->) {}\nmain() {}\n"), vec!["expected a type, found `)`"]);
+}
+
+#[test]
+fn a_postfix_call_is_a_call_of_a_value() {
+    assert_eq!(body("handlers[i](3)"), "{(callv (index handlers i) 3)}");
+    assert_eq!(body("handlers[i](3).len"), "{(. (callv (index handlers i) 3) len)}");
+    assert_eq!(body("make_adder(2)(5)"), "{(callv (call make_adder 2) 5)}");
+    assert_eq!(body("(f)(var p, 0.5)"), "{(callv f var p 0.5)}");
+    assert_eq!(body("b.on_click()"), "{(.call b on_click)}");
+    assert_eq!(body("a.b(1)(2)"), "{(callv (.call a b 1) 2)}");
+    assert_eq!(body("f(1)(2)(3)"), "{(callv (callv (call f 1) 2) 3)}");
+    // The call has to start on the same line as its callee.
+    assert_eq!(body("f\n(1)"), "{f; 1}");
+}

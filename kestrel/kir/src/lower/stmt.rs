@@ -95,6 +95,7 @@ impl<'a> FnLowerer<'a> {
             ast::ExprKind::Match { .. } => return self.match_stmt(e, out),
             ast::ExprKind::Call { args, .. } => (None, args),
             ast::ExprKind::MethodCall { receiver, args, .. } => (Some(&**receiver), args),
+            ast::ExprKind::CallValue { .. } => todo!("calls through function values are not lowered yet"),
             _ => unreachable!("checker rejects statements with no effect"),
         };
         match self.t.res[&e.id] {

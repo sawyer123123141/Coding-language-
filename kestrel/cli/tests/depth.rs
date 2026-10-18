@@ -91,6 +91,7 @@ fn every_kind_of_nesting_counts() {
         ("fields", format!("vec2(1, 2){}", ".x".repeat(deep))),
         ("methods", format!("\"a\"{}", ".len()".repeat(deep))),
         ("indexes", format!("[1]{}", "[0]".repeat(deep))),
+        ("call_values", format!("f{}", "(1)".repeat(deep))),
         ("ifs", format!("{}1{}", "if true { ".repeat(deep), " } else { 0 }".repeat(deep))),
         ("else_ifs", format!("if false {{ 0 }}{} else {{ 1 }}", " else if false { 0 }".repeat(deep))),
         ("matches", format!("{}1{}", "match x { A { ".repeat(deep), " } else { 0 } }".repeat(deep))),
@@ -127,4 +128,23 @@ fn deep_types_have_their_own_message() {
     refused("types_1001", &arrays(1001), 2, TYPE_TOO_DEEP);
     let (_, errors) = check("types_1000", &arrays(1000));
     assert!(!errors.iter().any(|e| e.contains("nests more than")), "{errors:?}");
+}
+
+#[test]
+fn deep_function_types_have_the_type_message_too() {
+    // A function type nests through its parameters and through its result.
+    let params = |n: usize| format!("f(x: {}int{}) {{}}
+main() {{}}
+", "(".repeat(n), ")".repeat(n));
+    let results = |n: usize| format!("f(x: {}int) {{}}
+main() {{}}
+", "() -> ".repeat(n));
+    refused("fn_params_50000", &params(50_000), 1, TYPE_TOO_DEEP);
+    refused("fn_params_1001", &params(1001), 1, TYPE_TOO_DEEP);
+    refused("fn_results_50000", &results(50_000), 1, TYPE_TOO_DEEP);
+    refused("fn_results_1001", &results(1001), 1, TYPE_TOO_DEEP);
+    for (name, src) in [("fn_params_1000", params(1000)), ("fn_results_1000", results(1000))] {
+        let (_, errors) = check(name, &src);
+        assert!(!errors.iter().any(|e| e.contains("nests more than")), "{errors:?}");
+    }
 }

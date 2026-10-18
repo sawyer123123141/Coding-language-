@@ -110,6 +110,9 @@ impl<'a> BodyChecker<'a> {
         if base_ty == Ty::Str {
             return self.str_field(e, name, *name_span);
         }
+        if self.method_value_error(base_ty, name, *name_span) {
+            return Ty::Error;
+        }
         let (owner, fields) = match base_ty {
             Ty::Struct(sid) => {
                 let info = self.t.strukt(sid);
@@ -164,6 +167,10 @@ impl<'a> BodyChecker<'a> {
         }
         if let (Some(_), Some(b)) = (self.t.vec_dims(receiver_ty), Builtin::vector_method(name)) {
             return self.check_vector_method(e, b, receiver, receiver_ty, args);
+        }
+        // `b.on_click()` calls a field of function type, when no method has that name.
+        if let Some((field, sig)) = self.fn_field(receiver_ty, name) {
+            return self.check_field_call(e, receiver, name, field, sig, args);
         }
         let found = match receiver_ty {
             Ty::Struct(sid) => {

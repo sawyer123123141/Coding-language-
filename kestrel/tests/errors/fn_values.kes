@@ -1,0 +1,67 @@
+// error 26: optional function types aren't supported yet; give the field a do-nothing default instead: `on_hit: (int) = (n) { }`
+// error 31: `Button` has a field and a method both called `on_click`; rename one
+// error 46: calls through a function value take no labels
+// error 50: `f` isn't a pure function type, so a `pure` function can't call it; declare the parameter as `pure (int) -> int`
+// error 54: `min` is built in; wrap it: `(a: int, b: int) { min(a, b) }`
+// error 55: native functions can't be used as values yet; wrap it in a closure
+// error 57: methods can't be used as values yet; wrap it: `(e) { e.len2() }`
+// error 58: function values can't be compared
+// error 60: function values can't be compared
+// error 62: `has` needs items that `==` can compare (numbers, bools and strings); `list[(int) -> int]` holds `(int) -> int`
+// error 64: expected pure (int) -> int, found (int) -> int
+// error 65: expected (int) -> int, found (int, int) -> int
+use draw
+
+struct Pt {
+    x: float
+    y: float
+    len2(self) -> float { self.x * self.x + self.y * self.y }
+}
+
+struct Holder {
+    f: (int) -> int
+}
+
+struct Opt {
+    x: (int)?
+}
+
+struct Button {
+    on_click: ()
+    on_click(self) { }
+}
+
+square(x: int) -> int { x * x }
+
+pure cube(x: int) -> int { x * x * x }
+
+effect(x: int) -> int {
+    print(x)
+    x
+}
+
+two(a: int, b: int) -> int { a + b }
+
+apply(f: (int) -> int) -> int {
+    f(amount: 3)
+}
+
+pure pure_apply(f: (int) -> int) -> int {
+    f(1)
+}
+
+main() {
+    let m = min
+    let r = draw.rect
+    let p = Pt(1, 2)
+    let l = p.len2
+    let same = square == square
+    let h = Holder(square)
+    let same2 = h == h
+    let fs = list[(int) -> int]()
+    let found = fs.has(square)
+    let ok: (int) -> int = cube
+    let bad1: pure (int) -> int = effect
+    let bad2: (int) -> int = two
+    print(apply(cube))
+}

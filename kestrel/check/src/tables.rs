@@ -4,6 +4,7 @@ use kestrel_syntax::ast::{BindId, ExprId, FnDecl, Item, Program};
 use kestrel_syntax::Span;
 
 use crate::builtins::Builtin;
+use crate::sig::{Sig, SigId};
 use crate::ty::Ty;
 
 pub use crate::str_method::StrMethod;
@@ -78,6 +79,11 @@ pub enum Res {
     NewArena,
     /// A global built-in function or constant (`sqrt(x)`, `PI`).
     Builtin(Builtin),
+    /// A user function named as a value (`let f = score`): its type is `Ty::Fn(fn_sig(f))`.
+    FnValue(FnId),
+    /// A call through a function value (a local by name, a struct field, or `CallValue`).
+    /// For a field call (`b.on_click()`), `field_index` of the call has the field.
+    CallValue(SigId),
 }
 
 #[derive(Clone, Debug)]
@@ -115,6 +121,8 @@ pub struct FnInfo {
     pub is_native: bool,
     pub params: Vec<ParamSig>,
     pub ret: Ty,
+    /// The function's type as a value (see `Tables::fn_sig`).
+    pub sig: SigId,
     pub span: Span,
     /// Every local owned by this function, parameters first in order.
     pub locals: Vec<LocalId>,
@@ -188,6 +196,8 @@ pub struct Tables {
     /// For a call: entry `i` is the index (into the call's args) of the
     /// argument bound to parameter `i`.
     pub call_args: HashMap<ExprId, Vec<usize>>,
+    /// For a call by a local's name (`f(x)`, `Res::CallValue`): the local that holds the function.
+    pub call_local: HashMap<ExprId, LocalId>,
     pub locals: Vec<LocalInfo>,
     pub fns: Vec<FnInfo>,
     pub consts: Vec<ConstInfo>,
@@ -228,6 +238,9 @@ pub struct Tables {
     /// Each `remove b` statement, by its span (it has no id): the loop item it removes.
     pub removes: HashMap<Span, LocalId>,
     pub elem_ids: HashMap<Ty, ElemId>,
+    /// Function signatures, indexed by `SigId` (see `intern_sig`).
+    pub sigs: Vec<Sig>,
+    pub sig_ids: HashMap<Sig, SigId>,
     pub fn_by_name: HashMap<String, FnId>,
     pub const_by_name: HashMap<String, ConstId>,
     /// Every constant in the order `check_consts` checked it: each comes after the constants it uses.

@@ -89,6 +89,7 @@ impl Parser {
             ExprKind::Binary { lhs, rhs, .. } => self.height(lhs).max(self.height(rhs)) + 1,
             ExprKind::Call { args, .. } | ExprKind::TypeCall { args, .. } => self.tallest(args.iter().map(|a| &a.value)),
             ExprKind::If { cond, .. } => self.height(cond) + 1,
+            ExprKind::CallValue { callee, args } => self.tallest(std::iter::once(&**callee).chain(args.iter().map(|a| &a.value))),
             ExprKind::Field { base, .. } => self.height(base) + 1,
             ExprKind::MethodCall { receiver, args, .. } => self.tallest(std::iter::once(&**receiver).chain(args.iter().map(|a| &a.value))),
             ExprKind::Match { scrutinee, .. } => self.height(scrutinee) + 1,

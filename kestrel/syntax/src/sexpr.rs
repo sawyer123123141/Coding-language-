@@ -110,6 +110,7 @@ impl Expr {
                 let tys: Vec<String> = type_args.iter().map(TypeExpr::to_sexpr).collect();
                 format!("(make {name}[{}]{})", tys.join(", "), args_sexpr(args))
             }
+            ExprKind::CallValue { callee, args } => format!("(callv {}{})", callee.to_sexpr(), args_sexpr(args)),
             ExprKind::If { cond, then_block, else_block } => match else_block {
                 Some(e) => format!("(if {} {} else {})", cond.to_sexpr(), then_block.to_sexpr(), e.to_sexpr()),
                 None => format!("(if {} {})", cond.to_sexpr(), then_block.to_sexpr()),
@@ -128,6 +129,13 @@ impl TypeExpr {
             }
             TypeKind::Array(inner) => format!("[{}]", inner.to_sexpr()),
             TypeKind::Optional(inner) => format!("{}?", inner.to_sexpr()),
+            TypeKind::Fn { params, ret, is_pure } => {
+                let params: Vec<String> =
+                    params.iter().map(|p| format!("{}{}", if p.is_var { "var " } else { "" }, p.ty.to_sexpr())).collect();
+                let pure = if *is_pure { "pure " } else { "" };
+                let ret = ret.as_ref().map_or(String::new(), |r| format!(" -> {}", r.to_sexpr()));
+                format!("{pure}({}){ret}", params.join(", "))
+            }
         }
     }
 }

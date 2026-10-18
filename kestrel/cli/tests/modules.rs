@@ -316,3 +316,39 @@ fn a_module_cant_see_the_programs_own_names() {
     }
     assert_eq!(err.lines().count(), 2, "{err}");
 }
+
+#[test]
+fn a_modules_function_name_is_a_value_in_the_importing_file() {
+    let geom = "pub pure sq(x: int) -> int { x * x }
+pub shout(x: int) { print(x) }
+hidden(x: int) -> int { x }
+";
+    // The one error is the last line's, which shows what `geom.shout` is a value of.
+    let main = "use geom
+use { sq from geom }
+                struct S {
+    f: pure (int) -> int
+}
+                main() {
+    let a: pure (int) -> int = geom.sq
+    let b: (int) -> int = sq
+    let s = S(geom.sq)
+    let c: int = geom.shout
+}
+";
+    let dir = project("modules_fn_values", &[("main.kes", main), ("geom.kes", geom)]);
+    let out = kestrel(&["check", "--diagnostics=short"], &dir.join("main.kes"));
+    let err = String::from_utf8_lossy(&out.stderr);
+    let errors: Vec<&str> = err.lines().filter(|l| l.contains(": error: ")).collect();
+    assert_eq!(errors, ["10:18: error: expected int, found (int)"], "{err}");
+    // The rules for names still hold: a function that isn't `pub` can't be named, as a value either.
+    let bad = "use geom
+main() {
+    let f = geom.hidden
+}
+";
+    let dir = project("modules_fn_values_hidden", &[("main.kes", bad), ("geom.kes", geom)]);
+    let out = kestrel(&["check", "--diagnostics=short"], &dir.join("main.kes"));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("3:18: error: `hidden` isn't `pub` in `geom`"), "{err}");
+}

@@ -17,7 +17,8 @@ impl Tables {
     /// error reported elsewhere, and looking into it again would never end.
     fn has_heap_below(&self, ty: Ty, seen: &mut Vec<Ty>) -> bool {
         match ty {
-            Ty::Str | Ty::Array(_) | Ty::List(_) | Ty::Map(..) => true,
+            // A closure's environment is heap memory (a function value with none holds nothing).
+            Ty::Str | Ty::Array(_) | Ty::List(_) | Ty::Map(..) | Ty::Fn(_) => true,
             Ty::Optional(e) => self.has_heap_below(self.elem(e), seen),
             Ty::Struct(_) | Ty::Enum(_) if seen.contains(&ty) => false,
             Ty::Struct(s) => {
@@ -27,6 +28,32 @@ impl Tables {
             Ty::Enum(e) => {
                 seen.push(ty);
                 self.enm(e).variants.iter().flat_map(|v| &v.fields).any(|f| self.has_heap_below(f.ty, seen))
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether `ty` is a function type, or holds one in a field, a payload, an element or an
+    /// optional. Such values can't be compared.
+    pub fn holds_fn(&self, ty: Ty) -> bool {
+        self.holds_fn_below(ty, &mut Vec::new())
+    }
+
+    /// `holds_fn`, skipping the types in `seen`: a type that contains itself is an error
+    /// reported elsewhere, and looking into it again would never end.
+    fn holds_fn_below(&self, ty: Ty, seen: &mut Vec<Ty>) -> bool {
+        match ty {
+            Ty::Fn(_) => true,
+            Ty::Array(e) | Ty::List(e) | Ty::Optional(e) => self.holds_fn_below(self.elem(e), seen),
+            Ty::Map(k, v) => self.holds_fn_below(self.elem(k), seen) || self.holds_fn_below(self.elem(v), seen),
+            Ty::Struct(_) | Ty::Enum(_) if seen.contains(&ty) => false,
+            Ty::Struct(s) => {
+                seen.push(ty);
+                self.strukt(s).fields.iter().any(|f| self.holds_fn_below(f.ty, seen))
+            }
+            Ty::Enum(e) => {
+                seen.push(ty);
+                self.enm(e).variants.iter().flat_map(|v| &v.fields).any(|f| self.holds_fn_below(f.ty, seen))
             }
             _ => false,
         }
@@ -113,6 +140,7 @@ impl Tables {
             Ty::List(e) => format!("list[{}]", self.ty_name(self.elem(e))),
             Ty::Map(k, v) => format!("map[{}, {}]", self.ty_name(self.elem(k)), self.ty_name(self.elem(v))),
             Ty::Optional(e) => format!("{}?", self.ty_name(self.elem(e))),
+            Ty::Fn(s) => self.sig_name(s),
             other => other.name().to_string(),
         }
     }

@@ -5,8 +5,14 @@ use std::collections::HashSet;
 use kestrel_syntax::ast::{TypeExpr, TypeKind};
 use kestrel_syntax::{Diagnostic, Span};
 
+use crate::sig::{Sig, SigParam};
 use crate::tables::{EnumId, StructId, Tables};
 use crate::ty::Ty;
+
+/// `((int) -> bool)?` can't be told from a function that takes a function, so an optional
+/// function type isn't offered; a do-nothing default does the same job.
+const OPTIONAL_FN: &str =
+    "optional function types aren't supported yet; give the field a do-nothing default instead: `on_hit: (int) = (n) { }`";
 
 pub(crate) fn resolve_type(ty: &TypeExpr, t: &mut Tables, diags: &mut Vec<Diagnostic>) -> Ty {
     let msg = match &ty.kind {
@@ -42,7 +48,20 @@ pub(crate) fn resolve_type(ty: &TypeExpr, t: &mut Tables, diags: &mut Vec<Diagno
         }
         TypeKind::Optional(inner) => {
             let elem = resolve_type(inner, t, diags);
-            return if elem == Ty::Error { Ty::Error } else { Ty::Optional(t.intern_elem(elem)) };
+            if matches!(elem, Ty::Fn(_)) {
+                OPTIONAL_FN.to_string()
+            } else {
+                return if elem == Ty::Error { Ty::Error } else { Ty::Optional(t.intern_elem(elem)) };
+            }
+        }
+        TypeKind::Fn { params, ret, is_pure } => {
+            let params: Vec<SigParam> =
+                params.iter().map(|p| SigParam { ty: resolve_type(&p.ty, t, diags), is_var: p.is_var }).collect();
+            let ret = ret.as_ref().map_or(Ty::Unit, |r| resolve_type(r, t, diags));
+            if ret == Ty::Error || params.iter().any(|p| p.ty == Ty::Error) {
+                return Ty::Error;
+            }
+            return Ty::Fn(t.intern_sig(Sig { params, ret, is_pure: *is_pure }));
         }
     };
     diags.push(Diagnostic::error(ty.span, msg));

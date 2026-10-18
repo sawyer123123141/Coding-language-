@@ -1,5 +1,6 @@
 /// A checked type. `Never` is the type of code that doesn't finish
 /// (`return`, `break`); `Error` suppresses follow-on errors.
+use crate::sig::SigId;
 use crate::tables::{ElemId, EnumId, StructId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -33,6 +34,9 @@ pub enum Ty {
     Gpu,
     /// `T?`: a `T` or `none`.
     Optional(ElemId),
+    /// A function value: a named function or a closure. The signature is in `Tables::sigs`.
+    /// It is two words, `{code, env}`, passed by pointer like a struct.
+    Fn(SigId),
     Error,
 }
 
@@ -72,6 +76,7 @@ impl Ty {
             Ty::Arena => "Arena",
             Ty::Gpu => "GpuHandle",
             Ty::Optional(_) => "optional",
+            Ty::Fn(_) => "function",
             Ty::Error => "{error}",
         }
     }
@@ -101,6 +106,7 @@ impl Ty {
                 | Ty::Arena
                 | Ty::Gpu
                 | Ty::Optional(_)
+                | Ty::Fn(_)
         )
     }
 

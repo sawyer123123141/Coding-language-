@@ -168,6 +168,8 @@ impl<'a> FnLowerer<'a> {
                 }
             }
             ast::ExprKind::MapLit(entries) => self.map_lit(entries, ty, line),
+            // The checker accepts function values; lowering them comes with closures.
+            ast::ExprKind::CallValue { .. } => todo!("calls through function values are not lowered yet"),
         };
         Expr { kind, ty, line }
     }

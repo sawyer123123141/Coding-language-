@@ -160,7 +160,12 @@ pub(crate) fn is_const_expr(e: &Expr, t: &Tables) -> bool {
         ExprKind::ArrayLit(items) => items.iter().all(|i| is_const_expr(i, t)),
         ExprKind::MapLit(entries) => entries.iter().all(|(k, v)| is_const_expr(k, t) && is_const_expr(v, t)),
         ExprKind::TypeCall { args, .. } => all(args),
-        ExprKind::Interp(_) | ExprKind::Index { .. } | ExprKind::Call { .. } | ExprKind::If { .. } | ExprKind::Match { .. } => false,
+        ExprKind::Interp(_)
+        | ExprKind::Index { .. }
+        | ExprKind::Call { .. }
+        | ExprKind::CallValue { .. }
+        | ExprKind::If { .. }
+        | ExprKind::Match { .. } => false,
     }
 }
 

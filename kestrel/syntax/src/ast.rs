@@ -133,6 +133,15 @@ pub enum TypeKind {
     Named { name: String, args: Vec<TypeExpr> },
     Array(Box<TypeExpr>),
     Optional(Box<TypeExpr>),
+    /// `(A, var B) -> R`, `(A)` (gives nothing) or `pure (A) -> R`: the type of a function value.
+    Fn { params: Vec<FnTypeParam>, ret: Option<Box<TypeExpr>>, is_pure: bool },
+}
+
+/// One parameter of a function type: `A`, or `var A` for one the function changes in place.
+#[derive(Clone, Debug)]
+pub struct FnTypeParam {
+    pub is_var: bool,
+    pub ty: TypeExpr,
 }
 
 #[derive(Clone, Debug)]
@@ -199,6 +208,9 @@ pub enum ExprKind {
     MapLit(Vec<(Expr, Expr)>),
     /// `array[int](n)`, `list[vec3]()`: a built-in generic type, called.
     TypeCall { name: String, name_span: Span, type_args: Vec<TypeExpr>, args: Vec<Arg> },
+    /// `callee(args)` where the callee is neither a bare name (`Call`) nor a method:
+    /// `handlers[i](3)`, `make_adder(2)(5)`, `(f)(x)`.
+    CallValue { callee: Box<Expr>, args: Vec<Arg> },
 }
 
 #[derive(Clone, Debug)]

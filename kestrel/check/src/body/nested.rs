@@ -26,6 +26,10 @@ impl<'a> BodyChecker<'a> {
                 self.changed_by_args(args, out);
             }
             ExprKind::TypeCall { args, .. } => self.changed_by_args(args, out),
+            ExprKind::CallValue { callee, args } => {
+                self.changed_inside(callee, out);
+                self.changed_by_args(args, out);
+            }
             ExprKind::Unary { expr, .. } => self.changed_inside(expr, out),
             ExprKind::Binary { lhs, rhs, .. } => {
                 self.changed_inside(lhs, out);

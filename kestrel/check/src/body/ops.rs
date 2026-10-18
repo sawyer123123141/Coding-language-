@@ -65,6 +65,10 @@ impl<'a> BodyChecker<'a> {
             _ if op.is_comparison() => {
                 let lt = self.check_expr(lhs, None);
                 let rt = self.check_expr(rhs, Some(lt).filter(|t| t.is_numeric()));
+                if matches!(op, BinaryOp::Eq | BinaryOp::Ne) && [lt, rt].iter().any(|&t| self.t.holds_fn(t)) {
+                    self.error(e.span, "function values can't be compared");
+                    return Ty::Bool;
+                }
                 if matches!(op, BinaryOp::Eq | BinaryOp::Ne) && [lt, rt].iter().any(|t| matches!(t, Ty::Bool | Ty::Str)) {
                     if lt != rt && lt != Ty::Error && rt != Ty::Error {
                         let msg = format!("`{}` needs two numbers, two bools or two strings, found {} and {}", op.symbol(), self.tn(lt), self.tn(rt));
