@@ -257,6 +257,47 @@ From `docs/superpowers/specs/2026-10-17-lists-strings-design.md` (its "As built"
 
 **File sizes** (the 400-line guide): `kir/src/ir.rs` is 415 lines and `check/src/tables.rs` 401 (`check/src/body/mod.rs` went back to 389 in the `remove b` task).
 
+## Found while building closures (2026-10-18)
+
+From `docs/superpowers/specs/2026-10-18-closures-design.md` (its "As built" section) and the task reviews. None blocks anything. Not fixed:
+
+**Owed before the round is closed:**
+- **The kernels.** `filter` (1M ints, keep the evens), `map` (1M `vec2` to lengths) and `sort_by` (100,000 structs by a float field) against the hand-written Kestrel loop and against Rust (`filter().collect()`, `map`, `sort_by(|a, b| a.x.total_cmp(&b.x))`), in `kestrel/bench/kernels` with `measure.py`'s method, results in `results.md`, losses included. Not built or run, because the machine was in use; until then "runs like a hand-written loop" is a KIR-shape claim (the closure is inlined into the loop), not a timing. The `sort_by` key runs about twice per comparison and in a scratch arena unless the key can't build memory, so an expensive key may lose to Rust's `sort_by_key`; caching number keys is the optimisation if it does.
+- **The full workspace suite, workspace clippy and the Godot clippy** over everything since `dc98b3d`. The `sort` task passed 834 tests; the fix round after it (the map-loop refusal) ran only the check, KIR, runtime and CLI targets that touch it.
+- **The final whole-round review.** Tasks 1 (the file splits), 4b (the inliner fix) and 9 (docs and measurements) had no task review of their own. It should also look at the closure frame's loop floor (a later check that ignores `loop_floor` and `removing_floor` would leak across a closure boundary).
+
+**Follow-ups to build:**
+- **Devirtualising.** After inlining, an indirect call of a value known to be a particular function is still `CallIndirect`: a named function passed through a function-typed parameter, or a closure stored in a local and called once. Turning it into a direct call (and inlining that) is the next step. Literals passed straight to the list methods already run as direct calls into inlined code.
+- **Methods, built-in functions and natives as values** (`e.take_damage`, `min`, `draw.rect`). They are refused with a "wrap it in a closure" message.
+- **Optional function types** (`((int) -> bool)?`). They need a grouping syntax, since `(int)?` reads as a function taking an optional.
+- **`reduce`, `reverse`, `min_by`, `max_by`, `find_by` and a comparator sort** (`sort_custom`). Left out on purpose; add them when asked.
+- **Calling a function field of a `match` binding** (`r.go(5)`), `m[k](x)` and `xs.pop()(x)` (optionals) are not supported.
+- **`promote` doesn't keep a capture in a register.** Captures are `RefParam`s that aren't parameters, so `promote` never sees them. This may matter for the closure bodies inlined into `filter` and `map` loops.
+- **Capture-copy chains.** A `compose(f, g)` chain N deep copies N levels on the native stack, and each `h = compose(h, inc)` copies the whole chain (O(N^2)). Accepted by ruling 7b; a long chain could overflow the stack.
+- **A codegen stack slot is per `MakeFn` site.** The same site evaluated again while its previous stack environment is live would share the slot. Calls nest strictly and the value never outlives its call, so nothing does this today; a pass that moves a stack environment out of its call would.
+- **The exclusivity rule relies on** no mutable globals, read-only captures, and a callee changing only what its `var` arguments and `var self` give it. A feature that breaks one (mutable statics, mutable captures, methods that change their receiver without `var self`) must update `changes_in` and `call_changes`. The unchecked indexing in the list-method loops relies on the same facts.
+- **Poison mode catches reads, not writes.** A write into a freed block isn't seen. A check that the `0xDB` bytes are still intact at some later point (when the block is dropped for good, or at exit) would catch it. The `codegen` tests that call thunks in-process run without poisoning; a public `set_poison` would cover them.
+
+**Gaps and rough edges:**
+- **Error lines in closure code.** A native's error line was wrong when a list-method loop (which calls user code) sat in its arguments; that is fixed (`runs_user_code`). An indirect call still counts as possibly setting a line, even of a `pure` type, which only costs a spill of the other arguments. The `sort_by` helpers aren't treated as running user code, which is right because the key is `pure`. No program test checks a native's error line through a closure; the KIR tests cover the lowering.
+- Inside `in w.mem { (if c { w.cb } else { h })(var w) }` the copy of the callee lands in `w.mem`, which the call replaces. The run aborts with "an arena was freed while allocating into it" (safe, but a compile error would be kinder).
+- A stack environment is checked by a debug-only walk (`check_stack_envs`); a release build and a pass that runs after it don't. A structural check in place of the counting one was left out.
+- Stack-environment tests rely on stack slot reuse showing up as garbage; poisoning doesn't cover stack frames.
+- The owning-capture message says "an Arena" without backticks; the other messages have them.
+- `check_capture` takes two bool parameters.
+- A must-be-pure closure that calls `zs.any(noisy)` with a named non-pure function says "which isn't a pure function type" (the `Impure::Value` wording, `check/src/body/list_fns.rs`), where "isn't `pure`" would be right. A named non-pure function in a `pure` function says "declare the parameter as `pure (int) -> bool`", which suits a parameter better.
+- A constant of function type used as a field default counts as allocating (`default_allocates`). A forward reference to a function-typed constant called by name gives the old "is a constant" message.
+- Several test assertions are weak or missing: `check/tests/fn_values.rs` (a few `contains` checks), no tests for a side-effecting `var` index through a value, a runtime `remove` on `list[(int)]`, or a function value returning a function value through `sret`. No committed end-to-end test that a real program's freed blocks get poisoned (checked by hand: 1,008 blocks in `arenas.kes`).
+- `local_place` duplicates `place()`'s `Ident` arm (`kir/src/lower/fnvalue.rs`, `lower/call.rs`).
+- The `start_*` unit tests in `runtime/src/start.rs` reset the global poison flag from the environment (use `start_with(entry, false)`), and `start_with` is `pub` only for tests (`#[doc(hidden)]`).
+- A `par for` job failure (`par.rs`) leaks the thread arenas without poisoning them.
+- `sort`'s compare function returns an `i8` that codegen reads from `al`; Cranelift leaves the upper bits unspecified and the runtime reads only the byte. JIT and exe pass. A key that is a temporary copy of a function value read from the list's own item is refused even though the runtime copies the 16 bytes before sorting.
+- A `sort_by` key that is a native or any indirect call keeps its scratch arena (a push and pop per comparison) because `builds_memory` can't see inside it.
+- Closure parameters can't shadow an outer local, so `(e) { ... }` inside `for e in ...` is refused; someone coming from GDScript may hit it often.
+- Rust-side formatting: `cargo fmt --check` wasn't clean before this round, so it wasn't run.
+
+**File sizes** (the 400-line guide): the new files are under 340 lines (`check/src/tables.rs` is 339, `kir/src/lower/sort.rs` 246, `check/src/body/list_fns.rs` 225); `check/src/body/lists.rs` is 295.
+
 ## Maps (built 2026-10-09)
 
 - **Not yet:**

@@ -237,6 +237,7 @@ use {
 | `[T]` | array of `T`, fixed length once created (fast, arena/SIMD friendly) |
 | `list[T]` | growable list: `add`, `remove_at`, `pop`, `insert`, `clear`, `has`, `find`, `join`, `.len`; `remove b` in a `for b in xs` loop. See "Lists and strings" |
 | `map[K, V]` | hash map: `m[k] = v`; `m[k]` is a `V?` (so `let v = m[k] else { ... }`); `m.has(k)`, `m.remove(k)`, `m.len`, `for k, v in m` (decided 2026-10-10). Literal `{"a": 1, "b": 2}`, empty `{}`; `m.get(k, default)`; `for k in m` gives keys (decided 2026-10-09). Insertion order. Details: `2026-10-09-map-design.md` |
+| `(A, B) -> R` | a function value: `(A, B)` gives nothing, `pure (A) -> R` is pure, `var A` marks a parameter changed in place. See "Closures and function values" |
 | `T?` | a `T` or `none` |
 | `Arena` | a memory bucket |
 
@@ -380,6 +381,8 @@ Design and rulings: `2026-10-17-lists-strings-design.md`. Names follow GDScript 
 | `xs.find(v)` | the index of the first item `== v`, as an `int?` (GDScript returns -1) |
 | `parts.join(sep)` | one string from a list or array of strings |
 
+`filter`, `map`, `any`, `all`, `sort` and `sort_by` are under "Closures and function values".
+
 An index outside `0..xs.len` panics. `remove_at`, `pop`, `insert` and `clear` are refused inside a `for` loop over the same list, because the loop read the length once. `add` is allowed there; the loop doesn't see the new items.
 
 **`remove b`** removes the current item of a `for b in xs` loop over a list. The loop compacts the list in one pass, so items keep their order and none is skipped (in GDScript, `xs.erase(b)` inside `for b in xs` skips the next item).
@@ -424,6 +427,81 @@ for part in "go, stop ,  jump".split(",") {
 }
 print(words.join("-"))      // GO-STOP-JUMP
 ```
+
+## Closures and function values
+
+Design and rulings: `2026-10-18-closures-design.md` (its "As built" section lists what differs). A closure is a function with its name cut off, as GDScript's `func(e): ...` is `func name(e): ...` without the name.
+
+```
+square(x: int) -> int { x * x }                    // named function
+let sq = (x: int) -> int { x * x }                 // the same, as a closure
+let alive = enemies.filter((e) { e.hp > 0 })       // e's type comes from context
+let hurt = (amount: int) { print("ouch {amount}") }
+hurt(3)
+```
+
+**Literal.** `(params) [-> Type] { body }` is an expression. A parameter is `name: Type` or `var name: Type`; the type can be left out where a function type is expected (a list method's argument, a function-typed parameter, an annotated `let`, a field, a default, a `return`). The body is a block whose last expression is the result, and `return v` leaves the closure. The result type is inferred from the body unless written with `->`. A closure is `pure` when its body is. A closure parameter can't share a name with a local that is already visible, like any other local.
+
+**Parentheses.** In expression position, a `(` whose `)` is followed by `{` or `->` starts a closure. In the head of an `if`, `while`, `for`, `match` or `in`, `(cond) {` stays a parenthesised condition, so `if (ready) { go() }` still works. A closure in a head goes inside a call's parentheses: `if xs.any((e) { e.dead }) { ... }`.
+
+**Function types.** `(A, B) -> R`, `(A, B)` (gives nothing), `()`, `pure (A) -> R`, and `var A` for a parameter changed in place. They work in every type position: `list[(int) -> int]`, fields, parameters, results. `T?` of a function type is refused; give a callback a do-nothing default instead (`on_hit: (int) = (n) { }`). A function value of a `pure` type goes where a non-pure type is expected, not the other way round.
+
+**Named functions are values:** `let f = square`, `xs.sort_by(score)`, `util.score`. Methods, built-in functions (`min`, `sqrt`, `print`) and natives (`draw.rect`) are not; wrap them in a closure. Function values can't be compared with `==` or used as map keys, and `print` writes `<function>`.
+
+**Calling.** `f(x)` for a local, parameter or constant of function type, `self.on_hit(3)` for a field (a struct can't have a function field and a method with the same name), and `handlers[i](3)` or `make_adder(2)(5)` for any other expression. Arguments are positional (no labels), and a `var` parameter is marked as usual: `f(var p, 0.5)`.
+
+```
+struct Button {
+    label: string
+    on_click: (int) = (n) { }
+
+    press(self) { self.on_click(1) }
+}
+
+make_adder(k: int) -> (int) -> int {
+    (x) { x + k }
+}
+
+main() {
+    let add2 = make_adder(2)
+    print(add2(5))              // 7
+    let b = Button(label: "ok", on_click: (n) { print("clicked {n}") })
+    b.press()
+}
+```
+
+**Captures.** A closure captures the locals and parameters it names, **by value**, as GDScript does: it sees what they held when it was made. What is captured is a path (`self.name`, `w.score`), not the whole variable. A closure can't change what it captured (assigning, `+=`, `var` arguments, changing methods and moves are errors; use a `for` loop to accumulate), and it can't capture a value that owns an `Arena` or a GPU object. A stored closure can't capture a whole struct that holds a function value (`self.cb = () { self.fire() }`); copy what it needs into a local first. A function value, or a list or map of them, can be captured. `break`, `continue` and `remove` can't cross a closure's boundary.
+
+**Memory.** A stored closure with captures lives in the arena that was current when it was made, like a string, so storing it somewhere longer-lived needs `in x.mem { }`. A closure without captures, and a named function, allocate nothing and can go anywhere. A closure literal written directly as an argument to a call of a user function, a method or a function value allocates nothing either, so the call must not change anything the closure reads: "`xs` is changed by this call, so the closure passed to it can't read it".
+
+**`pure` and `par for`.** A `pure` function or a `par for` body may call a function value only if its type is `pure`, and a closure literal written there must be pure.
+
+### List methods that take functions
+
+`filter`, `map`, `any`, `all`, `sort` and `sort_by` work on lists and arrays (`sort` and `sort_by` need a `var` list).
+
+| Kestrel | Meaning |
+|---|---|
+| `xs.filter(f)` | a new list of the items for which `f(item)` is `true` |
+| `xs.map(f)` | a new list of `f(item)` for each item |
+| `xs.any(f)` | `true` when `f` is `true` for some item; stops at the first |
+| `xs.all(f)` | `true` when `f` is `true` for every item; stops at the first `false` |
+| `xs.sort()` | sorts in place, smallest first; items are numbers, strings or bools |
+| `xs.sort_by(key)` | sorts in place by `key(item)`, a number, string or bool; `key` must be `pure` |
+
+```
+let alive = enemies.filter((e) { e.hp > 0 })
+let spots = enemies.map((e) { e.pos })
+if enemies.any((e) { e.boss }) { alarm() }
+enemies.sort_by((e) { e.pos.distance_to(player) })
+```
+
+- `f` takes the item read-only. Any function value of the right type works, not only a literal.
+- `filter`, `map`, `any` and `all` call `f` once per item, first to last. The `sort_by` key runs twice per comparison, so its order is not promised, and it runs in a scratch arena freed after each comparison.
+- Sorting is stable. Strings compare by code point, `false` comes before `true`, and a float NaN sorts last. For largest first, negate a number key.
+- `filter` copies the kept items, so it refuses items that own memory (use a `for` loop with `remove`). `map` results may own memory.
+- `sort` and `sort_by` are refused inside a loop over the same list (or over a map held in it), and a key can't read the list it sorts. `remove_at`, `insert`, `pop` and `clear` are refused inside a loop over a map held in the list as well.
+- Not built: `reduce`, a comparator sort, `reverse`, `min_by` and `max_by`.
 
 ## Memory
 
@@ -471,10 +549,13 @@ field     := IDENT ':' type ('=' expr)?
 enum      := 'enum' IDENT '{' (variant | func)* '}'
 variant   := IDENT ('{' IDENT ':' type (',' IDENT ':' type)* '}')?
 type      := IDENT ('[' type (',' type)* ']')? '?'? | '[' type ']' '?'?
+           | 'pure'? '(' ('var'? type (',' 'var'? type)*)? ')' ('->' type)?
 block     := '{' stmt* '}'
 stmt      := 'let' binding | 'var' binding | assign | if | while | for
            | 'par' for | match | arena | in | 'break' | 'continue'
            | 'return' expr? | 'remove' IDENT | expr
+closure   := '(' (cparam (',' cparam)*)? ')' ('->' type)? block
+cparam    := 'var'? IDENT (':' type)?
 binding   := IDENT (':' type)? '=' expr ('else' block)?
 for       := 'for' IDENT ('from' expr 'to' expr | (',' IDENT)? 'in' expr) block
 arena     := 'arena' block
@@ -487,9 +568,9 @@ A `native` function has no block, and every other function has one. `native` is 
 
 ## Out of scope (later specs)
 
-User-defined generic types/functions, interfaces, closures/lambdas,
-sorting and `map`/`filter` on lists, error types beyond `?`, fixed-size arrays,
-C FFI declarations, GPU/shader code.
+User-defined generic types/functions, interfaces, error types beyond `?`, fixed-size arrays,
+C FFI declarations, GPU/shader code. Also not yet: optional function types, methods and
+built-ins as values, `reduce`, `reverse`, a comparator sort.
 
 ## Resolved in review
 

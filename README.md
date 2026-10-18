@@ -63,6 +63,25 @@ main() {
 
 The full list is in the "Lists and strings" section of `docs/superpowers/specs/2026-10-09-kestrel-syntax-design.md`.
 
+Functions are values, and closures capture by value, as in GDScript. Lists have `filter`, `map`, `any`, `all`, `sort` and `sort_by`. A closure literal passed straight to one of these (or to a function) allocates nothing, and the compiler inlines it into the loop. A closure can't change what it captured, so `for` is still how you accumulate:
+
+```kestrel
+make_adder(k: int) -> (int) -> int {
+    (x) { x + k }
+}
+
+main() {
+    let add2 = make_adder(2)
+    var hp: list[int] = [30, 0, 12, 7]
+    let alive = hp.filter((h) { h > 0 })
+    print(alive.map(add2))                  // [32, 14, 9]
+    hp.sort_by((h) { -h })                  // largest first
+    print(hp, hp.any((h) { h == 0 }))       // [30, 12, 7, 0] true
+}
+```
+
+Sorting is stable, strings sort by code point, and `sort_by` keys must be `pure`. Methods, built-ins and natives aren't values yet; wrap them in a closure. The details are in the "Closures and function values" section of the same file.
+
 ## Use
 
 Needs Rust (stable) and, on Windows, Visual Studio's C++ build tools (for `link.exe`).
@@ -150,6 +169,6 @@ The core language works: functions, structs with methods, enums and `match`, vec
 
 It also runs inside Godot 4: see [`kestrel/godot`](kestrel/godot/README.md). GDScript calls Kestrel functions, and edits hot-reload.
 
-Also built: `map`, `par for` (loops that run on every core over `pure` code), global math and random numbers, and the window above with textures, 3D and the voxel viewer. Small structs now stay in registers. Next: a stronger (faster) backend.
+Also built: closures and function values with the list methods that take them, `map` (the hash map), `par for` (loops that run on every core over `pure` code), global math and random numbers, and the window above with textures, 3D and the voxel viewer. Small structs now stay in registers. Next: a stronger (faster) backend.
 
 Speed versus Rust is between 1.0x and 1.5x on loops and structs, and about 3x on the voxel heightmap milestone. The particle demo's update step is close now that small structs stay in registers: on one thread it takes 1.07 times Rust's time (1.15 times with the `pow` hoisted out, down from 1.5 and 3.4), but its copy loop is still about 4 times behind, and a whole frame with bulk drawing was only 2-7% behind before that change. The numbers are in `kestrel/bench/*/results.md`.
