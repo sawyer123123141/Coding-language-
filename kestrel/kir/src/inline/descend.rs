@@ -32,6 +32,10 @@ impl Inliner<'_> {
                 self.stmts(body, depth);
             }
             Stmt::Call(_, args) => self.args(args, depth),
+            Stmt::CallIndirect { callee, args, .. } => {
+                self.place(callee, depth);
+                self.args(args, depth);
+            }
             Stmt::Print(parts) | Stmt::Write(parts) => self.print(parts, depth),
             Stmt::Bind(_, p) | Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::DropGpu(p) | Stmt::PushArena(Some(p)) => self.place(p, depth),
             Stmt::MapSet(p, k, v, _) => {
@@ -85,7 +89,7 @@ impl Inliner<'_> {
                 e.kind = if body.is_empty() { value.kind } else { ExprKind::Seq(body, Box::new(value)) };
             }
             ExprKind::Format(parts) => self.print(parts, depth),
-            ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::Move(p) => self.place(p, depth),
+            ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::Move(p) | ExprKind::FnEnv(p) => self.place(p, depth),
             ExprKind::Map(_, p, xs) => {
                 self.place(p, depth);
                 for x in xs {
@@ -98,6 +102,10 @@ impl Inliner<'_> {
                 self.expr(b, depth);
             }
             ExprKind::Call(_, args) => self.args(args, depth),
+            ExprKind::CallIndirect { callee, args, .. } => {
+                self.place(callee, depth);
+                self.args(args, depth);
+            }
             ExprKind::StructLit(_, xs) | ExprKind::VariantLit(_, _, xs) | ExprKind::ArrayLit(xs) | ExprKind::Math(_, xs) | ExprKind::Str(_, xs) => {
                 for x in xs {
                     self.expr(x, depth);
@@ -124,6 +132,7 @@ impl Inliner<'_> {
             | ExprKind::NewArena
             | ExprKind::StaticArena
             | ExprKind::NoneLit
+            | ExprKind::FnRef(_)
             | ExprKind::RandFloat => {}
         }
     }

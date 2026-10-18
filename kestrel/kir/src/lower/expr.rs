@@ -56,6 +56,7 @@ impl<'a> FnLowerer<'a> {
                 Res::Const(c) if hoisted(self.t, c) => ExprKind::Load(Place::local(self.const_local(c))),
                 Res::Const(c) => return self.const_value(c),
                 Res::Builtin(b) => Self::builtin_constant(b),
+                Res::FnValue(f) => self.fn_ref(f),
                 other => unreachable!("name resolved to {other:?}"),
             },
             ast::ExprKind::Unary { op: ast::UnaryOp::Neg, expr } if self.vec_ty(e).is_some() => {
@@ -87,6 +88,12 @@ impl<'a> FnLowerer<'a> {
                         ExprKind::Binary(op, l, r)
                     }
                 }
+            }
+            // A call through a function value: a local or constant by name, a field, or any expression.
+            ast::ExprKind::Call { .. } | ast::ExprKind::MethodCall { .. } | ast::ExprKind::CallValue { .. }
+                if matches!(self.t.res.get(&e.id), Some(Res::CallValue(_))) =>
+            {
+                self.call_value(e, ty, line)
             }
             ast::ExprKind::Call { args, .. } => match self.t.res[&e.id] {
                 Res::Convert(_) => ExprKind::Cast(Box::new(self.expr(&args[0].value))),
@@ -168,14 +175,13 @@ impl<'a> FnLowerer<'a> {
                 }
             }
             ast::ExprKind::MapLit(entries) => self.map_lit(entries, ty, line),
-            // The checker accepts function values; lowering them comes with closures.
-            ast::ExprKind::CallValue { .. } => todo!("calls through function values are not lowered yet"),
+            ast::ExprKind::CallValue { .. } => unreachable!("the checker resolves a call of a value to `Res::CallValue`"),
         };
         Expr { kind, ty, line }
     }
 
     /// The initializer of a constant that holds no array, list or map, written out at each use.
-    fn const_value(&mut self, c: ConstId) -> Expr {
+    pub(super) fn const_value(&mut self, c: ConstId) -> Expr {
         let (t, program) = (self.t, self.program);
         self.expr(&decl(program, t, c).value)
     }

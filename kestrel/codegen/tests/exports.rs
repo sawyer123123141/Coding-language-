@@ -77,3 +77,20 @@ fn thunks_call_through_a_byte_buffer() {
     unsafe { thunk("big")(args.as_ptr(), ret.as_mut_ptr()) };
     assert_eq!(ret[0], 1);
 }
+
+#[test]
+fn a_function_type_in_a_signature_is_listed_as_unsupported_for_a_host() {
+    let src = "pub apply(f: (int) -> int, x: int) -> int { f(x) }
+pub pick() -> (int) -> int { twice }
+twice(x: int) -> int { x * 2 }
+main() {}
+";
+    let p = jit_with(src, Options::default());
+    let exports = p.exports();
+    let apply = &exports.iter().find(|(i, _)| i.name == "apply").expect("compiled and exported").0;
+    assert_eq!(apply.params, [ExportTy::Other("a function".into()), ExportTy::Int]);
+    let pick = &exports.iter().find(|(i, _)| i.name == "pick").expect("compiled and exported").0;
+    assert_eq!(pick.ret, Some(ExportTy::Other("a function".into())));
+    // The thunks that make function values are not exports.
+    assert!(exports.iter().all(|(i, _)| !i.name.starts_with("__kestrel_fn_")));
+}

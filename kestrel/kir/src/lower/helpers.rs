@@ -53,6 +53,8 @@ pub(crate) struct Helpers {
     pub(crate) print: HashMap<KTy, FuncIdx>,
     /// The search behind `has` and `find`, per list or array type.
     pub(super) find: HashMap<KTy, FuncIdx>,
+    /// The thunk of each function used as a value (see `thunk_for`).
+    pub(super) thunks: HashMap<FuncIdx, FuncIdx>,
     pub(crate) par_bodies: Vec<FuncIdx>,
     /// The heap constants the functions use, and their globals.
     pub(super) consts: ConstGlobals,
@@ -61,8 +63,8 @@ pub(crate) struct Helpers {
 impl Helpers {
     pub(crate) fn new(base: u32) -> Self {
         let (copy, drop, print) = (HashMap::new(), HashMap::new(), HashMap::new());
-        let find = HashMap::new();
-        Helpers { base, funcs: Vec::new(), copy, drop, print, find, par_bodies: Vec::new(), consts: ConstGlobals::default() }
+        let (find, thunks) = (HashMap::new(), HashMap::new());
+        Helpers { base, funcs: Vec::new(), copy, drop, print, find, thunks, par_bodies: Vec::new(), consts: ConstGlobals::default() }
     }
 
     /// Adds an outlined `par for` body, named for its index.
@@ -226,7 +228,11 @@ impl Helpers {
         let elem = elem_of(ty, t);
         let mut body = vec![Stmt::Dup(Place::local(LocalIdx(0)))];
         if has_heap(elem, t) {
-            body.push(Self::each(|at| self.fixup(at, elem, t)));
+            // (Function values have nothing to fix up yet, so a list of them needs no loop.)
+            let each = Self::each(|at| self.fixup(at, elem, t));
+            if !matches!(&each, Stmt::ForRange { body, .. } if body.is_empty()) {
+                body.push(each);
+            }
         }
         self.funcs[(idx.0 - self.base) as usize] = Func {
             name: format!("__kestrel_copy_{}", idx.0),

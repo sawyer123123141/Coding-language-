@@ -3,6 +3,7 @@ mod call;
 mod collections;
 mod consts;
 mod expr;
+mod fnvalue;
 mod heap;
 mod helpers;
 mod helpers_print;
@@ -65,6 +66,7 @@ pub(crate) fn kty(ty: Ty) -> KTy {
         Ty::Gpu => KTy::Gpu,
         Ty::Optional(e) => KTy::Optional(ElemIdx(e.0)),
         Ty::Map(k, v) => KTy::Map(ElemIdx(k.0), ElemIdx(v.0)),
+        Ty::Fn(_) => KTy::Fn,
         other => panic!("type {other:?} has no runtime representation"),
     }
 }

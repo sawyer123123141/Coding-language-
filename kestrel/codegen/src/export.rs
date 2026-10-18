@@ -64,6 +64,7 @@ pub(crate) fn export_ty(m: &kir::Module, ty: KTy) -> ExportTy {
         KTy::Gpu => ExportTy::Other("GpuHandle".into()),
         KTy::Optional(_) => ExportTy::Other("an optional".into()),
         KTy::Map(..) => ExportTy::Other("a map".into()),
+        KTy::Fn => ExportTy::Other("a function".into()),
     }
 }
 

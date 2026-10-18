@@ -53,6 +53,19 @@ pub enum KTy {
     /// `map[K, V]`: a 64-byte header (see `MapLayout`) over entries and an
     /// index table in the map's arena.
     Map(ElemIdx, ElemIdx),
+    /// A function value, whatever its signature: the code's address at offset 0 and the
+    /// environment (an `i64`; 0 when there is none) at 8. The code takes the environment first,
+    /// then the parameters (see `KSig`).
+    Fn,
+}
+
+/// What an indirect call needs to know about the function it calls: each parameter's type and
+/// whether it is passed by pointer (`var`, or an aggregate: the same rule as `LocalKind::RefParam`
+/// for a parameter), and the result.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct KSig {
+    pub params: Vec<(KTy, bool)>,
+    pub ret: Option<KTy>,
 }
 
 impl KTy {
@@ -68,6 +81,7 @@ impl KTy {
                 | KTy::Arena
                 | KTy::Gpu
                 | KTy::Optional(_)
+                | KTy::Fn
         )
     }
 

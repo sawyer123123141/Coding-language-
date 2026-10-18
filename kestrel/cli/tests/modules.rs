@@ -352,3 +352,25 @@ main() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("3:18: error: `hidden` isn't `pub` in `geom`"), "{err}");
 }
+
+#[test]
+fn a_modules_function_value_runs() {
+    let util = "pub triple(x: int) -> int { scale(x) }
+scale(x: int) -> int { x * 3 }
+pub pure plus(a: int, b: int) -> int { a + b }
+";
+    let main = "use util
+use { plus from util }
+
+main() {
+    let h = util.triple
+    print(h(2))
+    let fs = [plus, plus]
+    print(fs[1](4, 5))
+}
+";
+    let dir = project("modules_fn_values_run", &[("main.kes", main), ("util.kes", util)]);
+    let out = kestrel(&["run"], &dir.join("main.kes"));
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "6\n9\n");
+}

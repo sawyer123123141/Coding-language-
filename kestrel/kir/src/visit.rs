@@ -73,6 +73,10 @@ fn stmt<'a>(s: &'a Stmt, f: &mut impl FnMut(Node<'a>)) {
             walk(body, f);
         }
         Stmt::Call(_, args) => self::args(args, f),
+        Stmt::CallIndirect { callee, args, .. } => {
+            place(callee, false, f);
+            self::args(args, f);
+        }
         Stmt::Print(parts) | Stmt::Write(parts) => print_args(parts, f),
         // None reads or writes a place. (`BindGlobal` only points a local at a global.)
         Stmt::BindGlobal(..) | Stmt::SetLine(_) | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
@@ -118,6 +122,7 @@ pub fn walk_expr<'a>(e: &'a Expr, f: &mut impl FnMut(Node<'a>)) {
         | ExprKind::NewArena
         | ExprKind::StaticArena
         | ExprKind::NoneLit
+        | ExprKind::FnRef(_)
         | ExprKind::RandFloat => {}
         ExprKind::Move(p) => place(p, true, f),
         ExprKind::Map(op, p, xs) => {
@@ -127,13 +132,17 @@ pub fn walk_expr<'a>(e: &'a Expr, f: &mut impl FnMut(Node<'a>)) {
             place(p, matches!(op, MapOp::Remove | MapOp::Lock), f);
         }
         ExprKind::Format(parts) => print_args(parts, f),
-        ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) => place(p, false, f),
+        ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::FnEnv(p) => place(p, false, f),
         ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) => walk_expr(x, f),
         ExprKind::Binary(_, a, b) | ExprKind::And(a, b) | ExprKind::Or(a, b) | ExprKind::RandInt(a, b) => {
             walk_expr(a, f);
             walk_expr(b, f);
         }
         ExprKind::Call(_, a) => args(a, f),
+        ExprKind::CallIndirect { callee, args: a, .. } => {
+            place(callee, false, f);
+            args(a, f);
+        }
         ExprKind::StructLit(_, xs) | ExprKind::VariantLit(_, _, xs) | ExprKind::ArrayLit(xs) | ExprKind::Math(_, xs) | ExprKind::Str(_, xs) => {
             for x in xs {
                 walk_expr(x, f);

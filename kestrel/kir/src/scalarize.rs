@@ -58,6 +58,12 @@ fn pinned(body: &[Stmt]) -> HashSet<LocalIdx> {
     walk(body, &mut |n| match n {
         Node::Stmt(Stmt::Call(_, a)) | Node::Stmt(Stmt::ParFor { args: a, .. }) => args(a, &mut out),
         Node::Expr(Expr { kind: ExprKind::Call(_, a), .. }) => args(a, &mut out),
+        // An indirect call takes the address of the function value it calls, and of its `var` arguments.
+        Node::Stmt(Stmt::CallIndirect { callee, args: a, .. })
+        | Node::Expr(Expr { kind: ExprKind::CallIndirect { callee, args: a, .. }, .. }) => {
+            out.insert(callee.root);
+            args(a, &mut out);
+        }
         Node::Stmt(
             Stmt::Bind(_, p)
             | Stmt::ListAdd(p, _)
@@ -72,7 +78,7 @@ fn pinned(body: &[Stmt]) -> HashSet<LocalIdx> {
         ) => {
             out.insert(p.root);
         }
-        Node::Expr(Expr { kind: ExprKind::Move(p) | ExprKind::Len(p) | ExprKind::Tag(p) | ExprKind::Map(_, p, _), .. }) => {
+        Node::Expr(Expr { kind: ExprKind::Move(p) | ExprKind::Len(p) | ExprKind::Tag(p) | ExprKind::FnEnv(p) | ExprKind::Map(_, p, _), .. }) => {
             out.insert(p.root);
         }
         _ => {}

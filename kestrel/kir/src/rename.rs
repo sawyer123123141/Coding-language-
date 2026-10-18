@@ -65,6 +65,10 @@ pub(crate) fn rename_stmts(stmts: &mut [Stmt], subst: &[Subst]) {
                 rename_stmts(body, subst);
             }
             Stmt::Call(_, args) => rename_args(args, subst),
+            Stmt::CallIndirect { callee, args, .. } => {
+                rename_place(callee, subst);
+                rename_args(args, subst);
+            }
             Stmt::Print(parts) | Stmt::Write(parts) => rename_print(parts, subst),
             Stmt::Bind(l, p) => {
                 rename_local(l, subst);
@@ -112,7 +116,7 @@ fn rename_print(parts: &mut [PrintArg], subst: &[Subst]) {
 pub(crate) fn rename_expr(e: &mut Expr, subst: &[Subst]) {
     match &mut e.kind {
         ExprKind::Format(parts) => rename_print(parts, subst),
-        ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::Move(p) => rename_place(p, subst),
+        ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::Move(p) | ExprKind::FnEnv(p) => rename_place(p, subst),
         ExprKind::Map(_, p, xs) => {
             rename_place(p, subst);
             for x in xs {
@@ -125,6 +129,10 @@ pub(crate) fn rename_expr(e: &mut Expr, subst: &[Subst]) {
             rename_expr(b, subst);
         }
         ExprKind::Call(_, args) => rename_args(args, subst),
+        ExprKind::CallIndirect { callee, args, .. } => {
+            rename_place(callee, subst);
+            rename_args(args, subst);
+        }
         ExprKind::StructLit(_, xs) | ExprKind::VariantLit(_, _, xs) | ExprKind::ArrayLit(xs) | ExprKind::Math(_, xs) | ExprKind::Str(_, xs) => {
             for x in xs {
                 rename_expr(x, subst);
@@ -151,6 +159,7 @@ pub(crate) fn rename_expr(e: &mut Expr, subst: &[Subst]) {
         | ExprKind::NewArena
         | ExprKind::StaticArena
         | ExprKind::NoneLit
+        | ExprKind::FnRef(_)
         | ExprKind::RandFloat => {}
     }
 }

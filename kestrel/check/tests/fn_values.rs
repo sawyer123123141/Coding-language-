@@ -248,3 +248,24 @@ fn a_removed_loop_item_cannot_be_called() {
     assert_eq!(errors(&src("if true { remove f }\n        print(f(2))")), vec!["`f` may have been removed earlier, so it can't be used here"]);
     ok(&src("print(f(3))"));
 }
+
+#[test]
+fn a_constant_of_function_type_is_called_by_its_name() {
+    let t = ok("square(x: int) -> int { x * x }\nlet RULE = square\nmain() {\n    print(RULE(3))\n    RULE(4)\n}\n");
+    assert!(t.res.values().filter(|r| matches!(r, Res::CallValue(_))).count() == 2);
+    assert_eq!(t.call_const.len(), 2);
+    // The call is checked like any call through a value.
+    let src = |call: &str| format!("square(x: int) -> int {{ x * x }}\nlet RULE = square\nmain() {{\n    print({call})\n}}\n");
+    assert_eq!(errors(&src("RULE(1, 2)")), vec!["`RULE` takes 1 argument(s), got 2"]);
+    assert_eq!(errors(&src("RULE(x: 1)")), vec!["calls through a function value take no labels"]);
+    assert_eq!(
+        errors("square(x: int) -> int { x * x }\nlet RULE = square\npure f() -> int { RULE(2) }\nmain() {}\n"),
+        vec!["`RULE` isn't a pure function type, so a `pure` function can't call it; declare the parameter as `pure (int) -> int`"]
+    );
+    ok("pure square(x: int) -> int { x * x }\nlet RULE = square\npure f() -> int { RULE(2) }\nmain() {}\n");
+    // A constant that isn't a function keeps its message.
+    assert_eq!(
+        errors("let RED = 1\nmain() {\n    print(RED(2))\n}\n"),
+        vec!["`RED` is a constant, not a function"]
+    );
+}

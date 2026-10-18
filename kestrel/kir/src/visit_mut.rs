@@ -54,6 +54,10 @@ pub fn walk_stmt<V: VisitMut + ?Sized>(v: &mut V, s: &mut Stmt) {
             v.visit_stmts(body);
         }
         Stmt::Call(_, args) => walk_args(v, args),
+        Stmt::CallIndirect { callee, args, .. } => {
+            v.visit_place(callee);
+            walk_args(v, args);
+        }
         Stmt::Print(parts) | Stmt::Write(parts) => walk_print(v, parts),
         Stmt::Bind(_, p) | Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::DropGpu(p) | Stmt::PushArena(Some(p)) => v.visit_place(p),
         Stmt::MapSet(p, k, val, _) => {
@@ -77,7 +81,7 @@ pub fn walk_stmt<V: VisitMut + ?Sized>(v: &mut V, s: &mut Stmt) {
 pub fn walk_expr<V: VisitMut + ?Sized>(v: &mut V, e: &mut Expr) {
     match &mut e.kind {
         ExprKind::Format(parts) => walk_print(v, parts),
-        ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::Move(p) => v.visit_place(p),
+        ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::Move(p) | ExprKind::FnEnv(p) => v.visit_place(p),
         ExprKind::Map(_, p, xs) => {
             for x in xs {
                 v.visit_expr(x);
@@ -90,6 +94,10 @@ pub fn walk_expr<V: VisitMut + ?Sized>(v: &mut V, e: &mut Expr) {
             v.visit_expr(b);
         }
         ExprKind::Call(_, args) => walk_args(v, args),
+        ExprKind::CallIndirect { callee, args, .. } => {
+            v.visit_place(callee);
+            walk_args(v, args);
+        }
         ExprKind::StructLit(_, xs) | ExprKind::VariantLit(_, _, xs) | ExprKind::ArrayLit(xs) | ExprKind::Math(_, xs) | ExprKind::Str(_, xs) => {
             for x in xs {
                 v.visit_expr(x);
@@ -119,6 +127,7 @@ pub fn walk_expr<V: VisitMut + ?Sized>(v: &mut V, e: &mut Expr) {
         | ExprKind::NewArena
         | ExprKind::StaticArena
         | ExprKind::NoneLit
+        | ExprKind::FnRef(_)
         | ExprKind::RandFloat => {}
     }
 }

@@ -270,7 +270,7 @@ impl<'a> FnLowerer<'a> {
     fn fresh(kind: &ExprKind) -> bool {
         match kind {
             ExprKind::Load(_) => false,
-            ExprKind::FieldOf(base, _) => matches!(base.kind, ExprKind::Call(..) | ExprKind::StructLit(..) | ExprKind::VariantLit(..)),
+            ExprKind::FieldOf(base, _) => matches!(base.kind, ExprKind::Call(..) | ExprKind::CallIndirect { .. } | ExprKind::StructLit(..) | ExprKind::VariantLit(..)),
             _ => true,
         }
     }

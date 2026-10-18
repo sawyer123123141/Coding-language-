@@ -18,6 +18,14 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             };
             vals.push(d);
         }
+        vals.extend(self.call_args(args)?);
+        let id = self.shared.funcs[fi.0 as usize];
+        Ok(self.call_id(id, &vals))
+    }
+
+    /// The values a call passes for `args`, in order: a pointer for a struct or a `var` argument.
+    pub(crate) fn call_args(&mut self, args: &[kir::Arg]) -> Result<Vec<Value>, String> {
+        let mut vals = Vec::with_capacity(args.len());
         for a in args {
             vals.push(match a {
                 kir::Arg::Value(e) if e.ty.is_aggregate() => self.materialize(e)?,
@@ -25,8 +33,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 kir::Arg::Ref(p) => self.place_addr(p)?,
             });
         }
-        let id = self.shared.funcs[fi.0 as usize];
-        Ok(self.call_id(id, &vals))
+        Ok(vals)
     }
 
     pub(crate) fn call_id(&mut self, id: FuncId, args: &[Value]) -> Option<Value> {

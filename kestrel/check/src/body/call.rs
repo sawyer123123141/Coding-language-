@@ -57,6 +57,13 @@ impl<'a> BodyChecker<'a> {
                     format!("build a value from one of its variants, like {example}"),
                 );
             } else if self.t.consts.iter().any(|c| c.name == *name) {
+                // A constant of function type is called by its name, like a local.
+                if let Some((c, sig)) = self.t.const_by_name.get(name).and_then(|&c| match self.t.consts[c.0 as usize].ty {
+                    Ty::Fn(sig) => Some((c, sig)),
+                    _ => None,
+                }) {
+                    return self.check_const_call(e, c, sig, *name_span, args);
+                }
                 self.error_help(*name_span, format!("`{name}` is a constant, not a function"), format!("use it without `()`: `{name}`"));
             } else if name.starts_with(|c: char| c.is_ascii_uppercase()) {
                 self.error_help(

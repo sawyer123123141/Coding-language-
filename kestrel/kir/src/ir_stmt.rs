@@ -16,6 +16,8 @@ pub enum Stmt {
     Return(Option<Expr>),
     /// A call whose result (if any) is discarded.
     Call(FuncIdx, Vec<Arg>),
+    /// A call through a function value whose result (if any) is discarded.
+    CallIndirect { callee: Place, args: Vec<Arg>, sig: KSig },
     Print(Vec<PrintArg>),
     /// Prints with no separators and no newline (used by generated printers).
     Write(Vec<PrintArg>),

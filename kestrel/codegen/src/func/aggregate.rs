@@ -65,6 +65,10 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             ExprKind::Call(fi, args) => {
                 self.call(*fi, args, Some(dest))?;
             }
+            ExprKind::CallIndirect { callee, args, sig } => {
+                self.call_indirect(callee, args, sig, Some(dest))?;
+            }
+            ExprKind::FnRef(thunk) => self.fn_ref_into(*thunk, dest),
             ExprKind::Seq(stmts, value) => {
                 self.stmts(stmts)?;
                 self.lower_into(value, dest)?;

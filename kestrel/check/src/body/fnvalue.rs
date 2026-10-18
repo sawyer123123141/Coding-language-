@@ -9,7 +9,7 @@ use super::lists::written;
 use super::BodyChecker;
 use crate::builtins::Builtin;
 use crate::sig::SigId;
-use crate::tables::{FnId, LocalId, ParamSig, Res};
+use crate::tables::{ConstId, FnId, LocalId, ParamSig, Res};
 use crate::ty::Ty;
 
 /// The closure that wraps built-in `name`, for the message that says it can't be a value:
@@ -114,6 +114,13 @@ impl<'a> BodyChecker<'a> {
                 Ty::Error
             }
         }
+    }
+
+    /// `RULE(args)` where `RULE` is a constant of function type (`let RULE = square`).
+    pub(crate) fn check_const_call(&mut self, e: &Expr, c: ConstId, sig: SigId, name_span: Span, args: &[Arg]) -> Ty {
+        self.t.call_const.insert(e.id, c);
+        let name = self.t.consts[c.0 as usize].name.clone();
+        self.call_through(e, &name, sig, name_span, args, None)
     }
 
     /// `b.on_click(args)` where `on_click` is a field of function type.

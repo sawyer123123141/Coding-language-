@@ -63,6 +63,9 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             kir::Stmt::Call(fi, args) => {
                 self.call(*fi, args, None)?;
             }
+            kir::Stmt::CallIndirect { callee, args, sig } => {
+                self.call_indirect(callee, args, sig, None)?;
+            }
             kir::Stmt::Print(args) => self.print(args, true)?,
             kir::Stmt::Write(args) => self.print(args, false)?,
             kir::Stmt::RandSeed(n) => self.rand_seed(n)?,

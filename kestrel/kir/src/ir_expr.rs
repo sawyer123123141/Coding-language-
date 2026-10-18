@@ -64,6 +64,14 @@ pub enum ExprKind {
     /// An integer between the two operands, both included, of this expression's type.
     RandInt(Box<Expr>, Box<Expr>),
     Call(FuncIdx, Vec<Arg>),
+    /// The function value of a named function: the address of its thunk (the function this
+    /// index names; see `Helpers::thunk_for`) and no environment.
+    FnRef(FuncIdx),
+    /// The environment word (an `i64`) of the function value at a place.
+    FnEnv(Place),
+    /// A call through the function value at `callee`: its code gets the environment, then
+    /// `args`, which follow `sig` as a direct call's follow the callee's parameters.
+    CallIndirect { callee: Place, args: Vec<Arg>, sig: KSig },
     /// A struct with every field given, in declaration order.
     StructLit(StructIdx, Vec<Expr>),
     /// An enum value: the variant and its fields in declaration order.

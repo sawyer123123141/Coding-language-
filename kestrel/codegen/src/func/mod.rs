@@ -5,6 +5,7 @@ mod call;
 mod collections;
 mod divide;
 mod expr;
+mod fnvalue;
 mod globals;
 mod lists;
 mod maps;
@@ -45,7 +46,8 @@ pub(crate) fn cl_type(t: KTy) -> Type {
         | KTy::Map(..)
         | KTy::Arena
         | KTy::Gpu
-        | KTy::Optional(_) => {
+        | KTy::Optional(_)
+        | KTy::Fn => {
             unreachable!("aggregates live in memory, not registers")
         }
     }

@@ -1,0 +1,41 @@
+// expect: clicked 2
+// expect: clicked 0
+// expect: clicked 2
+// expect: 10
+// expect: 9
+// expect: 8
+// expect: clicked 3
+// expect: Button(label: "ok", on_click: <function>)
+struct Button {
+    label: string
+    on_click: (int) = noop
+}
+noop(n: int) { }
+shout(n: int) { print("clicked", n) }
+pure square(x: int) -> int { x * x }
+pure double(x: int) -> int { x * 2 }
+let RULES = [square, double]
+let RULE = square
+
+make() -> (int) -> int {
+    arena {
+        return double
+    }
+}
+
+main() {
+    var b = Button(label: "ok")
+    b.on_click(1)
+    b.on_click = shout
+    b.on_click(2)
+    var handlers: list[(int)] = [shout, noop, shout]
+    for i from 0 to 3 {
+        handlers[i](i)
+    }
+    print(RULES[1](5))
+    print(RULE(3))
+    print(make()(4))
+    let copy = b
+    copy.on_click(3)
+    print(b)
+}

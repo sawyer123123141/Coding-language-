@@ -1,0 +1,24 @@
+// expect: 9
+// expect: 7
+// expect: [2, 2, 3]
+// expect: 12
+// expect: <function>
+pure square(x: int) -> int { x * x }
+pure add(a: int, b: int) -> int { a + b }
+pure sub(a: int, b: int) -> int { a - b }
+twice(f: (int) -> int, x: int) -> int { f(f(x)) }
+pick(big: bool) -> (int, int) -> int {
+    if big { add } else { sub }
+}
+bump(var p: int, by: int) { p += by }
+main() {
+    let f = square
+    print(f(3))
+    print(pick(true)(3, 4))
+    var xs: list[int] = [1, 2, 3]
+    let g: (var int, int) = bump
+    g(var xs[0], 1)
+    print(xs)
+    print(twice(square, 2) - 4)
+    print(f)
+}

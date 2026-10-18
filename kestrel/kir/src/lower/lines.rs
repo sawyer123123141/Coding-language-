@@ -35,6 +35,8 @@ impl FnLowerer<'_> {
                 // Past the checked functions are generated helpers, which make no such calls.
                 found |= self.t.fns.get(callee.0 as usize).is_some_and(|info| !info.is_pure);
             }
+            // A function value may be any function that isn't `pure`.
+            Node::Expr(Expr { kind: ExprKind::CallIndirect { .. }, .. }) | Node::Stmt(Stmt::CallIndirect { .. }) => found = true,
             _ => {}
         };
         match arg {

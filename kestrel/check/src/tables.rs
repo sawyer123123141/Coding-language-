@@ -198,6 +198,9 @@ pub struct Tables {
     pub call_args: HashMap<ExprId, Vec<usize>>,
     /// For a call by a local's name (`f(x)`, `Res::CallValue`): the local that holds the function.
     pub call_local: HashMap<ExprId, LocalId>,
+    /// For a call by a constant's name (`RULE(3)` with `let RULE = square`, `Res::CallValue`): the
+    /// constant that holds the function.
+    pub call_const: HashMap<ExprId, ConstId>,
     pub locals: Vec<LocalInfo>,
     pub fns: Vec<FnInfo>,
     pub consts: Vec<ConstInfo>,

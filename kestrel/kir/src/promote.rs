@@ -145,6 +145,7 @@ fn exclusive(stmts: &[Stmt], root: LocalIdx, homes: &HashMap<LocalIdx, LocalIdx>
     walk(stmts, &mut |n| match n {
         Node::Place(p, _) if p.root != root && home(p.root, homes) == mine => ok = false,
         Node::Stmt(Stmt::Call(_, a) | Stmt::ParFor { args: a, .. }) | Node::Expr(Expr { kind: ExprKind::Call(_, a), .. }) if refs(a) => ok = false,
+        Node::Stmt(Stmt::CallIndirect { args: a, .. }) | Node::Expr(Expr { kind: ExprKind::CallIndirect { args: a, .. }, .. }) if refs(a) => ok = false,
         Node::Stmt(Stmt::Bind(_, p)) if p.root == root => ok = false,
         _ => {}
     });
@@ -164,6 +165,7 @@ fn returns_after_freeing(stmts: &[Stmt]) -> bool {
         Node::Stmt(Stmt::Return(_)) => returns = true,
         Node::Stmt(Stmt::PopArena { free: true } | Stmt::FreeArena(_) | Stmt::DropGpu(_)) => frees = true,
         Node::Stmt(Stmt::Call(_, a)) | Node::Expr(Expr { kind: ExprKind::Call(_, a), .. }) if by_ref(a) => frees = true,
+        Node::Stmt(Stmt::CallIndirect { args: a, .. }) | Node::Expr(Expr { kind: ExprKind::CallIndirect { args: a, .. }, .. }) if by_ref(a) => frees = true,
         _ => {}
     });
     returns && frees

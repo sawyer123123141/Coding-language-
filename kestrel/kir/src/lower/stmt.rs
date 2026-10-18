@@ -81,6 +81,9 @@ impl<'a> FnLowerer<'a> {
 
     /// An expression whose value is discarded.
     fn expr_stmt(&mut self, e: &ast::Expr, out: &mut Vec<Stmt>) {
+        if matches!(self.t.res.get(&e.id), Some(Res::CallValue(_))) {
+            return self.call_value_stmt(e, out);
+        }
         let (receiver, args) = match &e.kind {
             ast::ExprKind::If { cond, then_block, else_block } => {
                 let cond = self.expr(cond);
@@ -95,7 +98,6 @@ impl<'a> FnLowerer<'a> {
             ast::ExprKind::Match { .. } => return self.match_stmt(e, out),
             ast::ExprKind::Call { args, .. } => (None, args),
             ast::ExprKind::MethodCall { receiver, args, .. } => (Some(&**receiver), args),
-            ast::ExprKind::CallValue { .. } => todo!("calls through function values are not lowered yet"),
             _ => unreachable!("checker rejects statements with no effect"),
         };
         match self.t.res[&e.id] {

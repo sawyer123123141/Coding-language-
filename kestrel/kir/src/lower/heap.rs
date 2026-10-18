@@ -16,7 +16,8 @@ pub(crate) fn has_heap(ty: KTy, t: &Tables) -> bool {
 /// contains itself, but a layout walk that looped would crash the compiler.
 fn has_heap_below(ty: KTy, t: &Tables, seen: &mut Vec<KTy>) -> bool {
     match ty {
-        KTy::Str | KTy::Array(_) | KTy::List(_) | KTy::Map(..) => true,
+        // A function value's environment will be heap memory (closures come later).
+        KTy::Str | KTy::Array(_) | KTy::List(_) | KTy::Map(..) | KTy::Fn => true,
         KTy::Optional(e) => has_heap_below(kty(t.elems[e.0 as usize]), t, seen),
         KTy::Struct(_) | KTy::Enum(_) if seen.contains(&ty) => false,
         KTy::Struct(s) => {
