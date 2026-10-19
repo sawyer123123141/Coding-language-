@@ -140,13 +140,13 @@ The templates to follow:
 - Produces:
   - `Res::IfaceCall { iface: IfaceId, slot: u32 }`;
   - `Tables::coerce` entries `ExprId -> Ty::Iface(..)` (or an `Optional` of one) wherever a concrete value is coerced;
-  - `Tables::iface_borrows: HashSet<ExprId>`: arguments that are directly a concrete **place** passed to an interface parameter, `var` or not. KIR borrows exactly these, and boxes every other coercion.
+  - `Tables::iface_borrows: HashSet<ExprId>`: arguments that are directly a concrete **place as KIR's `place()` defines it** (`kir/src/lower/call.rs:29`: no map lookups, no string indexes) passed to an interface parameter, `var` or not. KIR borrows exactly these, and boxes every other coercion.
 
 - [ ] **Step 1: Write the failing tests.** `tests/errors/iface_use.kes`, with the spec's messages:
   - "can't replace `d`: it may be the caller's `Goblin`; change it through its methods", for a function, a closure and a function type;
   - `var g` passed to `var o: Damageable?` and to `var list[Damageable]` (the existing mismatch message);
   - `list[Goblin]` passed as `list[Damageable]` (mismatch);
-  - "interface values can't be compared", for `==` on two interface values and on a struct holding one;
+  - "interface values can't be compared", for `==` on two interface values and on a struct holding one (and `d == none` on a `Damageable?` is allowed: a program-test line in Task 3);
   - `has` on a `list[Damageable]` (the existing message);
   - "give the list a type: `var foes: list[Damageable] = [...]`";
   - "`array[Damageable](n)` would start with empty items; build it with a literal or `add`";
@@ -190,7 +190,7 @@ The templates to follow:
   - `Module::tables: Vec<MethodTable>`, with `MethodTable { type_id: u32, copy: FuncIdx, print: FuncIdx, methods: Vec<FuncIdx> }`;
   - the table's memory layout: `[type_id: u64, copy, print, method_0, method_1, ...]`, 8 bytes each. It is static data written with `declare_func_in_data` and `write_function_addr`, which both the JIT and object backends relocate.
 
-  The copy entry is a stub in this task (Task 4 builds copies); a test that copies must not exist yet.
+  The copy entry is a trapping stub in this task (Task 4 builds copies), and `fixup(KTy::Iface)` already emits `CopyIface` to it, so an accidental copy fails loudly instead of sharing boxes. No Task 3 test may copy an interface value (`let p = o` of a `Damageable?`, a non-view `let ... else`, a return of a stored one).
 
 - [ ] **Step 1: Write the failing tests.**
   - `tests/programs/ifaces.kes`:
@@ -207,7 +207,7 @@ The templates to follow:
     - labelled and reordered arguments with a borrowed argument, both `var` and not;
     - in a `var self` method, `self.hp = 5` then `show(self)` prints 5 (promote writes back first);
     - an owning implementor passed borrowed through two calls, `var` and not;
-    - `show(Goblin())` (boxed, not a place).
+    - `show(Goblin())` and `show(m["a"])` with a `map[string, Goblin]` (both boxed, not places).
   - `cli/tests/modules.rs`: an interface declared `pub` in `shapes.kes`, implemented in the entry file and in the module, and used through `use { Shape from shapes }`.
   - `cli/tests/iface_memory.rs`: `show(g)` called 10 times and 100,000 times in `main` gives equal reports.
 - [ ] **Step 2: Run them.** Expected: KIR panics on `Ty::Iface`.
