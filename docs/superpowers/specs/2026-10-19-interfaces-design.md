@@ -15,9 +15,9 @@ interface Damageable {
 }
 
 struct Goblin: Damageable {
-    hp: int = 10
-    take_damage(var self, amount: int) { self.hp -= amount }
-    pure hp(self) -> int { self.hp }
+    health: int = 10
+    take_damage(var self, amount: int) { self.health -= amount }
+    pure hp(self) -> int { self.health }
 }
 
 enum Barrel: Damageable, Drawable { ... }
