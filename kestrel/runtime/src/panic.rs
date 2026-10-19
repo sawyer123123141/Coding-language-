@@ -98,6 +98,18 @@ pub extern "C" fn kestrel_rt_panic(kind: i32, line: i32, file: *const FileName) 
     fail(&format!("{what} on line {line}{}", of_file(file)));
 }
 
+/// Fails with the message in the `len` bytes at `msg`: a compiled error message with no line (the
+/// copy function of an owning type's method table).
+///
+/// # Safety
+/// `msg` points at `len` bytes of UTF-8 that stay valid (compiled code passes static data).
+#[no_mangle]
+pub unsafe extern "C" fn kestrel_rt_fail(msg: *const u8, len: i64) -> ! {
+    // SAFETY: the caller passes `len` readable bytes at `msg`.
+    let bytes = unsafe { std::slice::from_raw_parts(msg, len as usize) };
+    fail(&String::from_utf8_lossy(bytes));
+}
+
 #[no_mangle]
 pub extern "C" fn kestrel_rt_fmod_f32(a: f32, b: f32) -> f32 {
     a % b

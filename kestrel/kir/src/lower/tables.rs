@@ -4,8 +4,8 @@
 //! are: their `self` is already a pointer, which is what an interface value holds.
 //!
 //! The print function, one per concrete type, writes the value it is given a pointer to. The copy
-//! function, one per table, is a stub that stops the program for now: nothing copies an interface
-//! value yet, and a copy that sneaks in must fail loudly rather than share a box.
+//! function, one per table, gives a copied interface value its own concrete value (see
+//! `iface_copy`).
 
 use std::collections::HashMap;
 
@@ -61,7 +61,7 @@ impl Helpers {
         let next_id = self.ifaces.type_ids.len() as u32 + 1;
         let type_id = *self.ifaces.type_ids.entry(concrete).or_insert(next_id);
         let print = self.iface_print_fn(concrete, t);
-        let copy = self.iface_copy_stub();
+        let copy = self.iface_copy_fn(ty, iface, t);
         let idx = TableIdx(self.ifaces.tables.len() as u32);
         self.ifaces.tables.push(MethodTable { type_id, copy, print, methods });
         self.ifaces.concrete.push(concrete);
@@ -86,25 +86,6 @@ impl Helpers {
             body: vec![Stmt::Write(vec![PrintArg::Value(value)])],
             is_pure: false,
             io: true,
-            mutates_params: false,
-            exported: false,
-            native: None,
-        };
-        idx
-    }
-
-    /// The copy entry of a table: `(data: i64) -> i64`. For now it stops the program (see the
-    /// module's comment).
-    fn iface_copy_stub(&mut self) -> FuncIdx {
-        let idx = self.reserve();
-        self.funcs[(idx.0 - self.base) as usize] = Func {
-            name: format!("__kestrel_iface_copy_{}", idx.0),
-            params: vec![LocalIdx(0)],
-            ret: Some(KTy::I64),
-            locals: vec![Local { name: "data".into(), ty: KTy::I64, kind: LocalKind::Value }],
-            body: vec![Stmt::Trap],
-            is_pure: true,
-            io: false,
             mutates_params: false,
             exported: false,
             native: None,

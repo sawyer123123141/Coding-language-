@@ -1,0 +1,165 @@
+// expect: 10 7 0 1
+// expect: 10 6
+// expect: 10 20 9 18
+// expect: 33 3
+// expect: Goblin(health: 33, tags: [1, 1, 1])
+// expect: 5 10
+// expect: 4 50 3
+// expect: 1 1 2 2
+// expect: 3 2
+// expect: 11
+// Copies of interface values get their own copy of the concrete value, through the method table.
+interface Damageable {
+    hit(var self, n: int)
+    pure hp(self) -> int
+    pure marks(self) -> int
+}
+
+// Holds a list, so a copy that shared memory with its source would show it.
+struct Goblin: Damageable {
+    health: int = 10
+    tags: list[int] = []
+
+    hit(var self, n: int) {
+        self.health -= n
+        self.tags.add(n)
+    }
+    pure hp(self) -> int { self.health }
+    pure marks(self) -> int { self.tags.len }
+}
+
+struct Holder {
+    d: Damageable
+}
+
+struct Keeper {
+    mem: Arena = Arena()
+    d: Damageable = Goblin(health: 0)
+}
+
+struct Keep {
+    mem: Arena = Arena()
+    items: list[Damageable] = []
+}
+
+interface Brain {
+    pure think(self) -> int
+}
+
+struct Dumb: Brain {
+    n: int = 1
+    pure think(self) -> int { self.n }
+}
+
+// An interface constant and a field default holding an interface value.
+let DEFAULT: Brain = Dumb()
+
+struct Mob {
+    brain: Brain = Dumb(n: 2)
+}
+
+same(d: Damageable) -> Damageable { d }
+
+stash(var keep: Keep, d: Damageable) {
+    in keep.mem {
+        keep.items.add(d)
+    }
+}
+
+// Interface receivers that aren't places (here an `if` of places) are copied before the call, so an
+// argument that frees their memory doesn't matter.
+interface D {
+    pure plus(self, n: int) -> int
+}
+
+struct G: D {
+    h: int = 7
+    big: string = ""
+    pure plus(self, n: int) -> int { self.h + n }
+}
+
+struct W {
+    mem: Arena = Arena()
+    ds: list[D] = []
+
+    fill(var self) {
+        in self.mem {
+            self.ds.add(G(h: 9))
+        }
+    }
+}
+
+drop_first(var ws: list[W]) -> int {
+    ws.remove_at(0)
+    var t = W()
+    in t.mem {
+        for i from 0 to 50 {
+            t.ds.add(G(h: 1000 + i))
+        }
+    }
+    2
+}
+
+main() {
+    var a: Damageable = Goblin()
+    var b = a
+    b.hit(3)
+    print(a.hp(), b.hp(), a.marks(), b.marks())
+
+    var h1 = Holder(d: Goblin())
+    var h2 = h1
+    h2.d.hit(4)
+    print(h1.d.hp(), h2.d.hp())
+
+    var xs: list[Damageable] = [Goblin(), Goblin(health: 20)]
+    var ys = xs
+    ys[0].hit(1)
+    ys[1].hit(2)
+    print(xs[0].hp(), xs[1].hp(), ys[0].hp(), ys[1].hp())
+
+    // Stored into a longer-lived arena; the block's arena (and the source's box) is then freed.
+    var k = Keeper()
+    arena {
+        var src: Damageable = Goblin(health: 36)
+        src.hit(1)
+        src.hit(1)
+        src.hit(1)
+        in k.mem {
+            k.d = src
+        }
+    }
+    print(k.d.hp(), k.d.marks())
+    print(k.d)
+
+    // A returned parameter is a copy: changing the original leaves it alone.
+    var g = Goblin()
+    let r = same(g)
+    g.hit(5)
+    print(g.hp(), r.hp())
+
+    var keep = Keep()
+    var g2 = Goblin(health: 4)
+    stash(var keep, g2)
+    g2.hit(1)
+    arena {
+        stash(var keep, Goblin(health: 50))
+    }
+    print(keep.items[0].hp(), keep.items[1].hp(), g2.hp())
+
+    let b1 = DEFAULT
+    var m = Mob()
+    var m2 = m
+    print(b1.think(), DEFAULT.think(), m.brain.think(), m2.brain.think())
+
+    var hs: list[Holder] = [Holder(d: Goblin(health: 3))]
+    var copy = hs
+    copy[0].d.hit(1)
+    print(hs[0].d.hp(), copy[0].d.hp())
+
+    var ws: list[W] = []
+    ws.add(W())
+    ws[0].fill()
+    let hd: D = G(h: 2)
+    let c = true
+    print((if c { ws[0].ds[0] } else { hd }).plus(drop_first(var ws)))
+}

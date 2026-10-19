@@ -83,6 +83,7 @@ impl<'a> FnLowerer<'a> {
                 lowered.push(Arg::Ref(p));
             } else {
                 let v = self.expr(r);
+                let v = self.own_iface_receiver(r, v);
                 let v = if in_order { self.held(v) } else { self.spill_held(v, &mut pre) };
                 lowered.push(Arg::Value(v));
             }

@@ -1,0 +1,63 @@
+// expect: 2 5 9
+// expect: [4, 2, 9]
+// expect: [Slime(size: 2), Goblin(health: 4), Goblin(health: 9)]
+// expect: 3 4 none
+// expect: 7 5
+// expect: 2 1
+// Lists, maps and closures holding interface values: each copy is its own.
+interface Damageable {
+    hit(var self, n: int)
+    pure hp(self) -> int
+}
+
+struct Goblin: Damageable {
+    health: int = 10
+    hit(var self, n: int) { self.health -= n }
+    pure hp(self) -> int { self.health }
+}
+
+struct Slime: Damageable {
+    size: int
+    hit(var self, n: int) { self.size -= n }
+    pure hp(self) -> int { self.size }
+}
+
+struct Bag {
+    mem: Arena = Arena()
+    m: map[string, Damageable] = {}
+}
+
+main() {
+    var foes: list[Damageable] = [Goblin(health: 5), Slime(size: 2), Goblin(health: 9)]
+    let alive = foes.filter((d) { d.hp() > 3 })
+    foes[0].hit(1)
+    print(alive.len, alive[0].hp(), alive[1].hp())
+    print(foes.map((d) { d.hp() }))
+    foes.sort_by((d) { d.hp() })
+    print(foes)
+
+    // A map built in a block's arena, copied into a longer-lived one; the block's arena is freed.
+    var bag = Bag()
+    arena {
+        var m: map[string, Damageable] = {}
+        m["a"] = Goblin(health: 3)
+        m["b"] = Slime(size: 4)
+        in bag.mem {
+            bag.m = m
+        }
+    }
+    let a = bag.m["a"] else { return }
+    let b = bag.m["b"] else { return }
+    print(a.hp(), b.hp(), bag.m["c"])
+
+    // A closure gets its own copy of what it captures.
+    var g: Damageable = Goblin(health: 7)
+    let f = () { g.hp() }
+    g.hit(2)
+    print(f(), g.hp())
+
+    var gs: list[Damageable] = [Goblin(health: 2)]
+    let count = () { gs[0].hp() }
+    gs[0].hit(1)
+    print(count(), gs[0].hp())
+}

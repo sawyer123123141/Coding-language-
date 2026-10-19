@@ -82,6 +82,9 @@ pub enum Stmt {
     /// Stops the program with a run-time error. The body of an interface method's stub, which
     /// nothing calls.
     Trap,
+    /// Stops the program with this run-time error message (no line: the copy function of an
+    /// owning type's method table, which no line of the program calls directly).
+    Fail(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]

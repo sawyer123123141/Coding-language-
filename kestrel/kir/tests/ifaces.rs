@@ -104,12 +104,99 @@ fn each_type_and_interface_pair_gets_one_table_of_its_own_methods() {
     let damageable = goblin.iter().find(|t| t.methods.len() == 3).unwrap();
     assert_eq!(damageable.methods, vec![idx(&m, "Goblin.hit"), idx(&m, "Goblin.hp"), idx(&m, "Goblin.at")]);
     assert_eq!(goblin.iter().find(|t| t.methods.len() == 1).unwrap().methods, vec![idx(&m, "Goblin.hp")]);
-    // The print entry writes the concrete value; the copy entry stops the program for now.
+    // The print entry writes the concrete value; the copy entry copies it (see below).
     let print = &m.funcs[damageable.print.0 as usize];
     assert!(matches!(print.body[..], [Stmt::Write(_)]), "{print:#?}");
     assert_eq!(print.locals[0].kind, LocalKind::RefParam);
     let copy = &m.funcs[damageable.copy.0 as usize];
-    assert_eq!((copy.ret, &copy.body[..]), (Some(KTy::I64), &[Stmt::Trap][..]));
+    assert_eq!(copy.ret, Some(KTy::I64));
+    assert_ne!(damageable.copy, barrel.copy, "one copy entry per table");
+}
+
+#[test]
+fn a_copy_entry_copies_the_concrete_bytes_and_then_what_they_hold() {
+    let m = lowered(
+        "interface Named {
+    pure size(self) -> int
+}
+struct Pack: Named {
+    n: int = 1
+    tags: list[int] = []
+    pure size(self) -> int { self.tags.len }
+}
+main() {
+    let d: Named = Pack()
+    print(d.size())
+}
+",
+    );
+    let copy = &m.funcs[m.tables[0].copy.0 as usize];
+    let [Stmt::Let(c, Expr { kind: ExprKind::BlockDup { size, align, .. }, .. }), Stmt::BindEnv { local, offset: 0, .. }, fix, Stmt::Return(Some(_))] = &copy.body[..] else {
+        panic!("{copy:#?}")
+    };
+    // The concrete type's size, as codegen lays it out.
+    let value = &copy.locals[local.0 as usize];
+    assert_eq!(value.kind, LocalKind::RefParam);
+    assert!(matches!(value.ty, KTy::Struct(_)));
+    assert_eq!((*size, *align), m.size_align(value.ty));
+    assert_eq!(copy.locals[c.0 as usize].ty, KTy::I64);
+    // The list gets its own items, through the list's copy function.
+    assert!(matches!(fix, Stmt::Call(_, a) if matches!(&a[..], [Arg::Ref(p)] if p.root == *local)), "{fix:#?}");
+}
+
+#[test]
+fn an_owning_types_copy_entry_fails_with_both_names() {
+    let m = lowered(
+        "interface Named {
+    pure size(self) -> int
+}
+struct Pool: Named {
+    mem: Arena = Arena()
+    pure size(self) -> int { 0 }
+}
+show(d: Named) -> int { d.size() }
+main() {
+    var p = Pool()
+    print(show(p))
+}
+",
+    );
+    let copy = &m.funcs[m.tables[0].copy.0 as usize];
+    let msg = "can't copy a `Pool` into a `Named`: it owns an `Arena`; pass it as `var` or keep it in a `list[Pool]`";
+    assert_eq!(copy.body, vec![Stmt::Fail(msg.to_string())]);
+}
+
+#[test]
+fn a_receiver_that_isnt_a_place_is_copied_before_the_arguments() {
+    let m = lowered(
+        "interface Named {
+    pure plus(self, n: int) -> int
+}
+struct Pack: Named {
+    n: int = 1
+    pure plus(self, k: int) -> int { self.n + k }
+}
+bump(var n: int) -> int {
+    n += 1
+    n
+}
+main() {
+    let a: Named = Pack()
+    let b: Named = Pack(n: 2)
+    var n = 0
+    let c = n == 0
+    print((if c { a } else { b }).plus(bump(var n)), a.plus(bump(var n)))
+}
+",
+    );
+    // One copy for each branch of the `if`, none for the place `a`.
+    let mut copies = 0;
+    visit::walk(&func(&m, "main").body, &mut |n| {
+        if let visit::Node::Stmt(Stmt::CopyIface(_)) = n {
+            copies += 1;
+        }
+    });
+    assert_eq!(copies, 2, "{:#?}", func(&m, "main").body);
 }
 
 #[test]

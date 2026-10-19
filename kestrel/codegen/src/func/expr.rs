@@ -32,6 +32,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             }
             ExprKind::FnEnv(p) => self.fn_env(p)?,
             ExprKind::EnvDup(env) => self.env_dup(env)?,
+            ExprKind::BlockDup { src, size, align } => self.block_dup(src, *size, *align)?,
             ExprKind::Tag(p) => {
                 let addr = self.place_addr(p)?;
                 self.b.ins().load(types::I8, MemFlags::trusted(), addr, 0)

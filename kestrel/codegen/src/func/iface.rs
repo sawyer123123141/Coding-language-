@@ -93,6 +93,15 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         self.b.ins().call_indirect(sigref, print, &[data]);
     }
 
+    /// A copy of the `size` bytes at the address `src` gives, in a new block of the current arena
+    /// aligned to `align`: the block's address.
+    pub(crate) fn block_dup(&mut self, src: &kir::Expr, size: u32, align: u32) -> Result<Value, String> {
+        let src = self.expr(src)?;
+        let size = self.b.ins().iconst(types::I64, i64::from(size));
+        let align = self.b.ins().iconst(types::I64, i64::from(align));
+        Ok(self.call_id(self.shared.rt.dup, &[src, size, align]).expect("returns a pointer"))
+    }
+
     /// Gives the interface value at `p` its own copy of its concrete value, through the copy
     /// function in its table, which returns the copy's address.
     pub(crate) fn copy_iface(&mut self, p: &Place) -> Result<(), String> {

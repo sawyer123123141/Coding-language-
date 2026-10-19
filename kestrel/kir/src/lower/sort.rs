@@ -274,7 +274,8 @@ fn stmt_builds(s: &Stmt, calls: &mut Vec<FuncIdx>) -> bool {
         | Stmt::DropGpu(_)
         | Stmt::MapUnlock(..)
         | Stmt::SetLine(_)
-        | Stmt::Trap => false,
+        | Stmt::Trap
+        | Stmt::Fail(_) => false,
     }
 }
 
@@ -282,7 +283,7 @@ fn stmt_builds(s: &Stmt, calls: &mut Vec<FuncIdx>) -> bool {
 /// statement.
 fn expr_builds(e: &Expr, calls: &mut Vec<FuncIdx>) -> bool {
     match &e.kind {
-        ExprKind::Format(_) | ExprKind::ArrayNew(_) | ExprKind::ArrayLit(_) | ExprKind::NewArena | ExprKind::StaticArena | ExprKind::EnvDup(_) | ExprKind::CallIndirect { .. } => {
+        ExprKind::Format(_) | ExprKind::ArrayNew(_) | ExprKind::ArrayLit(_) | ExprKind::NewArena | ExprKind::StaticArena | ExprKind::EnvDup(_) | ExprKind::BlockDup { .. } | ExprKind::CallIndirect { .. } => {
             true
         }
         // Any method may build memory; a boxed value is allocated in the current arena.

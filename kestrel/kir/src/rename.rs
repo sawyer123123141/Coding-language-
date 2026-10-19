@@ -98,7 +98,7 @@ pub(crate) fn rename_stmts(stmts: &mut [Stmt], subst: &[Subst]) {
                 rename_args(args, subst);
                 rename_expr(count, subst);
             }
-            Stmt::PushArena(None) | Stmt::PopArena { .. } | Stmt::SetLine(_) | Stmt::Trap | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
+            Stmt::PushArena(None) | Stmt::PopArena { .. } | Stmt::SetLine(_) | Stmt::Trap | Stmt::Fail(_) | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
         }
     }
 }
@@ -132,7 +132,7 @@ pub(crate) fn rename_expr(e: &mut Expr, subst: &[Subst]) {
                 rename_expr(x, subst);
             }
         }
-        ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) | ExprKind::EnvDup(x) => {
+        ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) | ExprKind::EnvDup(x) | ExprKind::BlockDup { src: x, .. } => {
             rename_expr(x, subst)
         }
         ExprKind::MakeFn { env: EnvKind::Heap(env) | EnvKind::Stack(env), .. } => {

@@ -80,7 +80,7 @@ pub fn walk_stmt<V: VisitMut + ?Sized>(v: &mut V, s: &mut Stmt) {
             walk_args(v, args);
             v.visit_expr(count);
         }
-        Stmt::BindGlobal(..) | Stmt::PushArena(None) | Stmt::PopArena { .. } | Stmt::SetLine(_) | Stmt::Trap | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
+        Stmt::BindGlobal(..) | Stmt::PushArena(None) | Stmt::PopArena { .. } | Stmt::SetLine(_) | Stmt::Trap | Stmt::Fail(_) | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
     }
 }
 
@@ -95,7 +95,7 @@ pub fn walk_expr<V: VisitMut + ?Sized>(v: &mut V, e: &mut Expr) {
             }
             v.visit_place(p);
         }
-        ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) | ExprKind::EnvDup(x) => {
+        ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) | ExprKind::EnvDup(x) | ExprKind::BlockDup { src: x, .. } => {
             v.visit_expr(x)
         }
         ExprKind::MakeFn { env: EnvKind::Heap(env) | EnvKind::Stack(env), .. } => {

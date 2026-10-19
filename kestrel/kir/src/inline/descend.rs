@@ -58,7 +58,7 @@ impl Inliner<'_> {
                 self.args(args, depth);
                 self.expr(count, depth);
             }
-            Stmt::BindGlobal(..) | Stmt::PushArena(None) | Stmt::PopArena { .. } | Stmt::SetLine(_) | Stmt::Trap | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
+            Stmt::BindGlobal(..) | Stmt::PushArena(None) | Stmt::PopArena { .. } | Stmt::SetLine(_) | Stmt::Trap | Stmt::Fail(_) | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
         }
     }
 
@@ -103,7 +103,7 @@ impl Inliner<'_> {
                     self.expr(x, depth);
                 }
             }
-            ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) | ExprKind::EnvDup(x) => {
+            ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) | ExprKind::EnvDup(x) | ExprKind::BlockDup { src: x, .. } => {
                 self.expr(x, depth)
             }
             ExprKind::MakeFn { env: EnvKind::Heap(env) | EnvKind::Stack(env), .. } => {

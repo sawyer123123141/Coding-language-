@@ -1,0 +1,32 @@
+// expect: 3
+// expect-stderr: can't copy a `Pool` into a `Damageable`: it owns an `Arena`; pass it as `var` or keep it in a `list[Pool]`
+// expect-exit: 101
+// An owning implementor can be lent to an interface parameter, but a callee that stores it fails.
+interface Damageable {
+    pure hp(self) -> int
+}
+
+struct Pool: Damageable {
+    mem: Arena = Arena()
+    hits: int = 3
+    pure hp(self) -> int { self.hits }
+}
+
+struct Keep {
+    mem: Arena = Arena()
+    items: list[Damageable] = []
+}
+
+stash(var keep: Keep, d: Damageable) {
+    in keep.mem {
+        keep.items.add(d)
+    }
+}
+
+main() {
+    var keep = Keep()
+    var p = Pool()
+    print(p.hp())
+    stash(var keep, p)
+    print("not reached")
+}

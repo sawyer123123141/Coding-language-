@@ -98,6 +98,12 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 self.b.ins().trap(TrapCode::unwrap_user(2));
                 return Ok(false);
             }
+            kir::Stmt::Fail(msg) => {
+                let (p, n) = self.string(msg)?;
+                self.call_id(self.shared.rt.fail, &[p, n]);
+                self.b.ins().trap(TrapCode::unwrap_user(2));
+                return Ok(false);
+            }
         }
         Ok(true)
     }
