@@ -1,13 +1,24 @@
-// error 34: can't pass `hs` as `var` while looping over a map inside it; change it after the loop
-// error 40: can't pass `w` as `var` while looping over a map inside it; change it after the loop
-// error 41: can't call `reorder` on `w` while looping over a map inside it; call it after the loop
-// error 44: can't change how many items `hs` has while looping over it; change `hs` after the loop
+// error 46: can't pass `hs` as `var` while looping over a map inside it; change it after the loop
+// error 48: can't pass `hs[0]` as `var` while looping over a map inside it; change it after the loop
+// error 49: can't pass `hs[0].m` as `var` while looping over a map inside it; change it after the loop
+// error 50: can't call `refill` on `hs[0]` while looping over a map inside it; call it after the loop
+// error 51: can't pass `hs[0]` as `var` while looping over a map inside it; change it after the loop
+// error 54: can't pass `w` as `var` while looping over a map inside it; change it after the loop
+// error 55: can't call `reorder` on `w` while looping over a map inside it; call it after the loop
+// error 58: can't change how many items `hs` has while looping over it; change `hs` after the loop
 // A loop over a map that is held in a list's item re-reads the map by its place, so a call that
-// may move the list's items can't be given the list (or what holds it) as `var` while it runs.
-// Giving it the item, the map itself, or another list, is fine: those can't move the items.
+// may change that place can't be given the map, the item, or what holds them as `var` while it
+// runs. Giving it another list, or a sibling field of the map, is fine.
 struct Holder {
     id: int
+    mem: Arena = Arena()
     m: map[int, int] = map[int, int]()
+
+    refill(var self) {
+        in self.mem {
+            self.m = map[int, int]()
+        }
+    }
 }
 
 struct World {
@@ -25,6 +36,7 @@ reorder(var hs: list[Holder]) {
 touch(var w: World) { }
 bump(var h: Holder) { h.id += 1 }
 set(var m: map[int, int]) { m[1] = 5 }
+refill_it(var h: Holder) { h.refill() }
 
 main() {
     var hs: list[Holder] = [Holder(id: 2), Holder(id: 1)]
@@ -35,6 +47,8 @@ main() {
         reorder(var other)
         bump(var hs[0])
         set(var hs[0].m)
+        hs[0].refill()
+        refill_it(var hs[0])
     }
     for k in w.hs[0].m {
         touch(var w)

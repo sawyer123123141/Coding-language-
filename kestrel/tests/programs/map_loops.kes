@@ -2,6 +2,12 @@
 // expect: {1: 1}
 // expect: 5 6
 // expect: 7 4
+// expect: 3 1
+struct Cell {
+    m: map[int, int] = {1: 1}
+    n: map[int, int] = map[int, int]()
+}
+
 main() {
     // Removing during a loop is fine, the current key included.
     var m = {1: 1, 2: 2, 3: 3}
@@ -28,6 +34,17 @@ main() {
     // Still unlocked after the `return`: adding a key works.
     scores[50] = 1
     print(big, scores.len)
+    // A sibling of the looped map can be changed through `var`, even inside a list's item.
+    var cells = [Cell()]
+    for k, v in cells[0].m {
+        add_two(var cells[0].n)
+    }
+    print(cells[0].n.len + 1, cells[0].m.len)
+}
+
+add_two(var m: map[int, int]) {
+    m[1] = 1
+    m[2] = 2
 }
 
 // `return` inside the loop unlocks the map.
