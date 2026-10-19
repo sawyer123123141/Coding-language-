@@ -1,0 +1,53 @@
+// error 31: `vs` is passed here, but a later argument changes it
+// error 35: `xs` is passed here, but a later argument changes it
+// error 36: `xs` is passed here, but a later argument changes it
+// error 40: `m` is passed here, but a later argument changes it
+// A built-in method's receiver (a string, list or map) is read by pointer before the arguments,
+// so an argument may not change it.
+struct V {
+    mem: Arena = Arena()
+    name: string = ""
+
+    fill(var self) {
+        in self.mem {
+            self.name = "ab{1 + 1}c"
+        }
+    }
+}
+
+drop_first(var vs: list[V]) -> string {
+    vs.remove_at(0)
+    "c"
+}
+
+clear(var xs: list[list[int]]) -> int {
+    xs.remove_at(0)
+    2
+}
+
+strings() {
+    var vs: list[V] = [V()]
+    vs[0].fill()
+    print(vs[0].name.find(drop_first(var vs)))
+}
+
+lists(var xs: list[list[int]]) {
+    print(xs[0].has(clear(var xs)))
+    xs[0].add(clear(var xs))
+}
+
+maps(var m: map[string, list[int]], var n: int) {
+    print(m.get("a", [n]), m.get("b", [bump(var m)]))
+}
+
+bump(var m: map[string, list[int]]) -> int {
+    m.remove("a")
+    1
+}
+
+fine(var xs: list[list[int]], var ys: list[list[int]]) {
+    // A different variable, or an argument that only reads, is fine.
+    print(xs[0].has(clear(var ys)), xs[0].has(xs.len))
+}
+
+main() { }

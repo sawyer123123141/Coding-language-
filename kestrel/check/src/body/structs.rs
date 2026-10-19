@@ -158,14 +158,20 @@ impl<'a> BodyChecker<'a> {
             return self.variant_construct(e, id, name, *name_span, args);
         }
         let receiver_ty = self.check_expr(receiver, None);
-        if matches!(receiver_ty, Ty::Array(_) | Ty::List(_)) {
-            return self.list_method(e, receiver, receiver_ty, args);
-        }
-        if let Ty::Map(..) = receiver_ty {
-            return self.map_method(e, receiver, receiver_ty, args);
-        }
-        if receiver_ty == Ty::Str {
-            return self.str_method(e, name, *name_span, args);
+        let builtin = if matches!(receiver_ty, Ty::Array(_) | Ty::List(_)) {
+            Some(self.list_method(e, receiver, receiver_ty, args))
+        } else if let Ty::Map(..) = receiver_ty {
+            Some(self.map_method(e, receiver, receiver_ty, args))
+        } else if receiver_ty == Ty::Str {
+            Some(self.str_method(e, name, *name_span, args))
+        } else {
+            None
+        };
+        if let Some(ty) = builtin {
+            // A collection or a string is passed by pointer, before the arguments are evaluated.
+            let later: Vec<&Expr> = args.iter().map(|a| &a.value).collect();
+            self.check_changed_later(&[receiver], &later);
+            return ty;
         }
         if let (Some(_), Some(b)) = (self.t.vec_dims(receiver_ty), Builtin::vector_method(name)) {
             return self.check_vector_method(e, b, receiver, receiver_ty, args);
