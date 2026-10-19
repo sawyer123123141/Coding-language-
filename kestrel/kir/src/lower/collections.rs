@@ -253,6 +253,8 @@ impl<'a> FnLowerer<'a> {
                 let values = values.into_iter().map(|v| self.owned(v, false)).collect();
                 ExprKind::MakeFn { code, env: EnvKind::Heap(Env { copy, layout, values }) }
             }
+            // A borrowed interface value points at a place that may die first: it is boxed.
+            ExprKind::MakeIface { table, data } => self.owned_iface(table, data, line),
             // Everything else builds a fresh value.
             other => other,
         };
@@ -276,7 +278,9 @@ impl<'a> FnLowerer<'a> {
     fn fresh(kind: &ExprKind) -> bool {
         match kind {
             ExprKind::Load(_) => false,
-            ExprKind::FieldOf(base, _) => matches!(base.kind, ExprKind::Call(..) | ExprKind::CallIndirect { .. } | ExprKind::StructLit(..) | ExprKind::VariantLit(..)),
+            ExprKind::FieldOf(base, _) => {
+                matches!(base.kind, ExprKind::Call(..) | ExprKind::CallIndirect { .. } | ExprKind::CallVirtual { .. } | ExprKind::StructLit(..) | ExprKind::VariantLit(..))
+            }
             _ => true,
         }
     }

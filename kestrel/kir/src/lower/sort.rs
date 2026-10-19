@@ -243,6 +243,8 @@ fn builds_memory(funcs: &[Func], f: FuncIdx, seen: &mut HashSet<u32>) -> bool {
 fn stmt_builds(s: &Stmt, calls: &mut Vec<FuncIdx>) -> bool {
     match s {
         Stmt::Dup(_) | Stmt::ListAdd(..) | Stmt::MapSet(..) | Stmt::CopyFnEnv(_) | Stmt::ParFor { .. } | Stmt::CallIndirect { .. } => true,
+        // A call through a table may run any method; a copy allocates the concrete value.
+        Stmt::CallVirtual { .. } | Stmt::CopyIface(_) => true,
         Stmt::List(op, ..) => match op {
             ListOp::Insert => true,
             ListOp::RemoveAt | ListOp::Clear | ListOp::Compact | ListOp::Sort => false,
@@ -283,6 +285,12 @@ fn expr_builds(e: &Expr, calls: &mut Vec<FuncIdx>) -> bool {
         ExprKind::Format(_) | ExprKind::ArrayNew(_) | ExprKind::ArrayLit(_) | ExprKind::NewArena | ExprKind::StaticArena | ExprKind::EnvDup(_) | ExprKind::CallIndirect { .. } => {
             true
         }
+        // Any method may build memory; a boxed value is allocated in the current arena.
+        ExprKind::CallVirtual { .. } => true,
+        ExprKind::MakeIface { data, .. } => match data {
+            IfaceData::Boxed(_) => true,
+            IfaceData::Borrowed(_) => false,
+        },
         ExprKind::MakeFn { env, .. } => match env {
             EnvKind::Heap(_) => true,
             EnvKind::None | EnvKind::Stack(_) => false,

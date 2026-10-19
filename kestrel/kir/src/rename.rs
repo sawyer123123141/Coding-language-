@@ -79,7 +79,11 @@ pub(crate) fn rename_stmts(stmts: &mut [Stmt], subst: &[Subst]) {
                 rename_local(local, subst);
                 rename_expr(env, subst);
             }
-            Stmt::CopyFnEnv(p) => rename_place(p, subst),
+            Stmt::CopyFnEnv(p) | Stmt::CopyIface(p) => rename_place(p, subst),
+            Stmt::CallVirtual { recv, args, .. } => {
+                rename_place(recv, subst);
+                rename_args(args, subst);
+            }
             Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::DropGpu(p) | Stmt::PushArena(Some(p)) => rename_place(p, subst),
             Stmt::MapSet(p, k, v, _) => {
                 rename_place(p, subst);
@@ -143,6 +147,13 @@ pub(crate) fn rename_expr(e: &mut Expr, subst: &[Subst]) {
         ExprKind::Call(_, args) => rename_args(args, subst),
         ExprKind::CallIndirect { callee, args, .. } => {
             rename_place(callee, subst);
+            rename_args(args, subst);
+        }
+        // A by-pointer parameter's place is spliced in front of the borrowed path.
+        ExprKind::MakeIface { data: IfaceData::Borrowed(p), .. } => rename_place(p, subst),
+        ExprKind::MakeIface { data: IfaceData::Boxed(x), .. } => rename_expr(x, subst),
+        ExprKind::CallVirtual { recv, args, .. } => {
+            rename_place(recv, subst);
             rename_args(args, subst);
         }
         ExprKind::StructLit(_, xs) | ExprKind::VariantLit(_, _, xs) | ExprKind::ArrayLit(xs) | ExprKind::Math(_, xs) | ExprKind::Str(_, xs) => {

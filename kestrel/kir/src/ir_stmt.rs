@@ -18,6 +18,9 @@ pub enum Stmt {
     Call(FuncIdx, Vec<Arg>),
     /// A call through a function value whose result (if any) is discarded.
     CallIndirect { callee: Place, args: Vec<Arg>, sig: KSig },
+    /// A call through an interface value whose result (if any) is discarded (see
+    /// `ExprKind::CallVirtual`).
+    CallVirtual { recv: Place, slot: u32, args: Vec<Arg>, sig: KSig },
     Print(Vec<PrintArg>),
     /// Prints with no separators and no newline (used by generated printers).
     Write(Vec<PrintArg>),
@@ -42,6 +45,10 @@ pub enum Stmt {
     /// through the copy function in the environment's header (the captures are copied deep). A
     /// value with no environment (0) is left alone. `fixup` emits it for a copied function value.
     CopyFnEnv(Place),
+    /// Gives the interface value at a place its own copy of its concrete value, in the current
+    /// arena, through the copy function in its method table. `fixup` emits it for a copied
+    /// interface value.
+    CopyIface(Place),
     /// Makes an arena current: a fresh one (`arena { }`), or the one at a
     /// place (`in x { }`, creating it there if it's still null).
     PushArena(Option<Place>),

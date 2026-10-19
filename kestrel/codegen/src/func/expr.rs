@@ -50,6 +50,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             | ExprKind::NoneLit
             | ExprKind::FnRef(_)
             | ExprKind::MakeFn { .. }
+            | ExprKind::MakeIface { .. }
             | ExprKind::Move(_) => unreachable!("aggregate values are built in memory"),
             ExprKind::Unary(UnOp::Not, inner) => {
                 let v = self.expr(inner)?;
@@ -86,6 +87,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             ExprKind::RandInt(lo, hi) => self.rand_int(lo, hi, e.ty)?,
             ExprKind::Call(fi, args) => self.call(*fi, args, None)?.expect("value-returning call"),
             ExprKind::CallIndirect { callee, args, sig } => self.call_indirect(callee, args, sig, None)?.expect("value-returning call"),
+            ExprKind::CallVirtual { recv, slot, args, sig } => self.call_virtual(recv, *slot, args, sig, None)?.expect("value-returning call"),
             ExprKind::If { cond, then_body, then_val, else_body, else_val } => {
                 let c = self.expr(cond)?;
                 let (then_b, else_b, merge) = (self.b.create_block(), self.b.create_block(), self.b.create_block());

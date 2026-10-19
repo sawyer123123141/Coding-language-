@@ -20,7 +20,8 @@ fn bits(t: KTy) -> u32 {
         | KTy::Arena
         | KTy::Gpu
         | KTy::Optional(_)
-        | KTy::Fn => {
+        | KTy::Fn
+        | KTy::Iface => {
             unreachable!("aggregates and arenas aren't numbers")
         }
     }

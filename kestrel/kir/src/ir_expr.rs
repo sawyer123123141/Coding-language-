@@ -80,6 +80,13 @@ pub enum ExprKind {
     /// A call through the function value at `callee`: its code gets the environment, then
     /// `args`, which follow `sig` as a direct call's follow the callee's parameters.
     CallIndirect { callee: Place, args: Vec<Arg>, sig: KSig },
+    /// An interface value: the concrete value `data` names, and method table `table` (see
+    /// `MethodTable`).
+    MakeIface { table: TableIdx, data: IfaceData },
+    /// A call of method `slot` of the interface value at `recv`, through its table: the method
+    /// gets the result pointer (if any), the value's data pointer as `self`, then `args`, which
+    /// follow `sig` (whose parameters leave out `self`).
+    CallVirtual { recv: Place, slot: u32, args: Vec<Arg>, sig: KSig },
     /// A struct with every field given, in declaration order.
     StructLit(StructIdx, Vec<Expr>),
     /// An enum value: the variant and its fields in declaration order.
@@ -154,10 +161,24 @@ pub enum EnvKind {
     /// An environment in a stack slot of the function making it, holding shallow copies of the
     /// captured values (a string's header, not its bytes), read with plain loads when the value
     /// is made. Only a closure literal that is directly a call's argument gets one
-    /// (`Tables::stack_closures`), so its value appears only as an `Arg::Value` of a `Call` or a
-    /// `CallIndirect` (see `check_stack_envs`). Its header holds the real copy function: a callee
+    /// (`Tables::stack_closures`), so its value appears only as an `Arg::Value` of a `Call`, a
+    /// `CallIndirect` or a `CallVirtual` (see `check_stack_envs`). Its header holds the real copy function: a callee
     /// that stores its parameter copies it into a heap environment.
     Stack(Env),
+}
+
+/// Where an interface value's concrete value is.
+#[derive(Clone, Debug, PartialEq)]
+pub enum IfaceData {
+    /// At this place, where it already is (lent to a call): the data pointer is the place's
+    /// address, so a `var self` method called through the value changes the place. Like a stack
+    /// environment, such a value appears only as an `Arg::Value` of a `Call`, a `CallIndirect` or
+    /// a `CallVirtual` (see `check_stack_envs`), never in a temporary of its own, so it lives
+    /// exactly as long as the call. `owned` turns it into a boxed one.
+    Borrowed(Place),
+    /// In a new block of the current arena, of the concrete value's size, holding this value
+    /// (made independent with `owned` before it gets here).
+    Boxed(Box<Expr>),
 }
 
 /// A closure's environment: a 16-byte header, then the captured values.

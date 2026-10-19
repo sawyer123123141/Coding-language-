@@ -9,6 +9,7 @@ mod fnvalue;
 mod heap;
 mod helpers;
 mod helpers_print;
+mod iface;
 mod layout;
 mod lines;
 mod list_fns;
@@ -23,6 +24,7 @@ mod scopes;
 mod sort;
 mod stmt;
 mod strings;
+mod tables;
 mod temps;
 mod vector;
 
@@ -51,7 +53,8 @@ pub fn lower(program: &Program, t: &Tables, lines: &LineIndex) -> Module {
         funcs[main.0 as usize].body.insert(0, Stmt::Call(init, Vec::new()));
     }
     let globals = helpers.consts.into_globals();
-    let m = Module { funcs, structs, enums, elems, print_fns: helpers.print, par_bodies: helpers.par_bodies, globals, init, main, files: Vec::new() };
+    let tables = helpers.ifaces.tables;
+    let m = Module { funcs, structs, enums, elems, print_fns: helpers.print, par_bodies: helpers.par_bodies, globals, init, main, files: Vec::new(), tables };
     // Stack environments live only as long as the call they are passed to.
     if cfg!(debug_assertions) {
         if let Err(e) = crate::check_stack_envs(&m) {
@@ -79,9 +82,7 @@ pub(crate) fn kty(ty: Ty) -> KTy {
         Ty::Optional(e) => KTy::Optional(ElemIdx(e.0)),
         Ty::Map(k, v) => KTy::Map(ElemIdx(k.0), ElemIdx(v.0)),
         Ty::Fn(_) => KTy::Fn,
-        // Interface values have no representation yet. Only the signatures of an interface's
-        // abstract methods (see `abstract_stub`) reach here; a word stands in for them.
-        Ty::Iface(_) => KTy::I64,
+        Ty::Iface(_) => KTy::Iface,
         other => panic!("type {other:?} has no runtime representation"),
     }
 }

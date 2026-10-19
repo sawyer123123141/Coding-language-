@@ -79,6 +79,7 @@ fn module() -> Module {
         init: None,
         main: None,
         files: Vec::new(),
+        tables: Vec::new(),
     }
 }
 

@@ -37,8 +37,12 @@ impl Inliner<'_> {
                 self.args(args, depth);
             }
             Stmt::Print(parts) | Stmt::Write(parts) => self.print(parts, depth),
-            Stmt::Bind(_, p) | Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::DropGpu(p) | Stmt::PushArena(Some(p)) | Stmt::CopyFnEnv(p) => {
+            Stmt::Bind(_, p) | Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::DropGpu(p) | Stmt::PushArena(Some(p)) | Stmt::CopyFnEnv(p) | Stmt::CopyIface(p) => {
                 self.place(p, depth)
+            }
+            Stmt::CallVirtual { recv, args, .. } => {
+                self.place(recv, depth);
+                self.args(args, depth);
             }
             Stmt::BindEnv { env, .. } => self.expr(env, depth),
             Stmt::MapSet(p, k, v, _) => {
@@ -114,6 +118,12 @@ impl Inliner<'_> {
             ExprKind::Call(_, args) => self.args(args, depth),
             ExprKind::CallIndirect { callee, args, .. } => {
                 self.place(callee, depth);
+                self.args(args, depth);
+            }
+            ExprKind::MakeIface { data: IfaceData::Borrowed(p), .. } => self.place(p, depth),
+            ExprKind::MakeIface { data: IfaceData::Boxed(x), .. } => self.expr(x, depth),
+            ExprKind::CallVirtual { recv, args, .. } => {
+                self.place(recv, depth);
                 self.args(args, depth);
             }
             ExprKind::StructLit(_, xs) | ExprKind::VariantLit(_, _, xs) | ExprKind::ArrayLit(xs) | ExprKind::Math(_, xs) | ExprKind::Str(_, xs) => {

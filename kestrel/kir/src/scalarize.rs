@@ -44,7 +44,8 @@ pub fn scalarize(m: &mut Module) {
     }
 }
 
-/// The locals whose address something needs: passed as `var` (to a call or a `par for`), bound
+/// The locals whose address something needs: passed as `var` (to a call or a `par for`) or lent
+/// to an interface value, bound
 /// by a loop, or used whole by an operation on memory (moved, dropped, measured, ...).
 fn pinned(body: &[Stmt]) -> HashSet<LocalIdx> {
     let mut out = HashSet::new();
@@ -64,6 +65,15 @@ fn pinned(body: &[Stmt]) -> HashSet<LocalIdx> {
             out.insert(callee.root);
             args(a, &mut out);
         }
+        // A call through an interface value reads it in memory; a borrowed one takes its place's
+        // address (as a `var` argument does).
+        Node::Stmt(Stmt::CallVirtual { recv, args: a, .. }) | Node::Expr(Expr { kind: ExprKind::CallVirtual { recv, args: a, .. }, .. }) => {
+            out.insert(recv.root);
+            args(a, &mut out);
+        }
+        Node::Expr(Expr { kind: ExprKind::MakeIface { data: IfaceData::Borrowed(p), .. }, .. }) => {
+            out.insert(p.root);
+        }
         Node::Stmt(
             Stmt::Bind(_, p)
             | Stmt::ListAdd(p, _)
@@ -75,7 +85,8 @@ fn pinned(body: &[Stmt]) -> HashSet<LocalIdx> {
             | Stmt::PushArena(Some(p))
             | Stmt::MapSet(p, ..)
             | Stmt::MapUnlock(p, _)
-            | Stmt::CopyFnEnv(p),
+            | Stmt::CopyFnEnv(p)
+            | Stmt::CopyIface(p),
         ) => {
             out.insert(p.root);
         }

@@ -159,7 +159,8 @@ impl FnLowerer<'_> {
             .zip(params)
             .map(|(a, p)| {
                 if p.is_var {
-                    Arg::Ref(self.place(&a.value).expect("checker requires a place for a `var` argument"))
+                    let place = self.place(&a.value).expect("checker requires a place for a `var` argument");
+                    self.var_arg(&a.value, place)
                 } else {
                     let v = self.expr(&a.value);
                     Arg::Value(self.held(v))

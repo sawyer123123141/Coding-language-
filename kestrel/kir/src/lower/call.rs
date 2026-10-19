@@ -4,7 +4,6 @@ use kestrel_check::{EnumId, FnId, Res, StructId};
 use kestrel_syntax::ast;
 
 use super::consts::hoisted;
-use crate::stack_envs::is_stack_fn;
 use super::FnLowerer;
 use crate::ir::*;
 
@@ -99,10 +98,7 @@ impl<'a> FnLowerer<'a> {
                     refs.insert(ai, p);
                 } else {
                     let v = self.expr(&a.value);
-                    // A function value with a stack environment stays an argument of the call (see
-                    // `check_stack_envs`). Making it after its turn changes nothing: the checker's
-                    // exclusivity rule keeps the call's arguments from changing what it reads.
-                    let v = if is_stack_fn(&v) { v } else { self.spill_held(v, &mut pre) };
+                    let v = self.arg_in_turn(v, &mut pre);
                     temps.insert(ai, v);
                 }
             }
@@ -110,9 +106,10 @@ impl<'a> FnLowerer<'a> {
         for (pi, &ai) in order.iter().enumerate() {
             let value = &args[ai].value;
             lowered.push(if let Some(p) = refs.remove(&ai) {
-                Arg::Ref(p)
+                self.var_arg(value, p)
             } else if params[skip + pi].is_var {
-                Arg::Ref(self.place(value).expect("checker requires a place for a `var` argument"))
+                let p = self.place(value).expect("checker requires a place for a `var` argument");
+                self.var_arg(value, p)
             } else if let Some(v) = temps.remove(&ai) {
                 Arg::Value(v)
             } else {

@@ -1,0 +1,110 @@
+// expect: 8 1 6 0
+// expect: [Goblin(health: 8), Slime(size: 1), Barrel.Full(oil: 6), Barrel.Empty]
+// expect: Goblin(health: 8)
+// expect: vec2(x: 3, y: 1)
+// expect: vec2(x: 0, y: 2)
+// expect: -1 4 2
+// expect: Slime(size: 2) none
+// expect: 9 11 7 0
+// expect: 109 1111 107 100
+// Interface values: a mixed list called through its method tables.
+interface Damageable {
+    take_damage(var self, amount: int)
+    pure hp(self) -> int
+    pure heal(var self, n: int)
+    apply(self, f: (int) -> int) -> int
+}
+
+interface Placed {
+    pure at(self) -> vec2
+}
+
+struct Goblin: Damageable, Placed {
+    health: int = 10
+
+    take_damage(var self, amount: int) { self.health -= amount }
+    pure hp(self) -> int { self.health }
+    pure heal(var self, n: int) { self.health += n }
+    apply(self, f: (int) -> int) -> int { f(self.health) }
+    // A struct result comes back through a pointer the caller passes.
+    pure at(self) -> vec2 { vec2(self.health, 1) }
+}
+
+struct Slime: Damageable {
+    size: int
+
+    take_damage(var self, amount: int) { self.size -= amount * 2 }
+    pure hp(self) -> int { self.size }
+    pure heal(var self, n: int) { self.size += n * 10 }
+    apply(self, f: (int) -> int) -> int { f(self.size) + 1000 }
+}
+
+// An enum's `self` is the enum value.
+enum Barrel: Damageable, Placed {
+    Full { oil: int }
+    Empty
+
+    take_damage(var self, amount: int) {
+        match self {
+            Full f { f.oil -= amount }
+            else { }
+        }
+    }
+
+    pure hp(self) -> int {
+        match self {
+            Full f { f.oil }
+            else { 0 }
+        }
+    }
+
+    pure heal(var self, n: int) {
+        match self {
+            Full f { f.oil += n }
+            else { }
+        }
+    }
+
+    apply(self, f: (int) -> int) -> int { f(self.hp()) }
+    pure at(self) -> vec2 { vec2(0, self.hp()) }
+}
+
+pure describe(o: Damageable?) -> int {
+    let d = o else { return -1 }
+    d.hp()
+}
+
+main() {
+    var foes: list[Damageable] = []
+    foes.add(Goblin())
+    foes.add(Slime(size: 5))
+    foes.add(Barrel.Full(oil: 8))
+    foes.add(Barrel.Empty)
+    for i from 0 to 2 {
+        for f in foes {
+            f.take_damage(1)
+        }
+    }
+    print(foes[0].hp(), foes[1].hp(), foes[2].hp(), foes[3].hp())
+    print(foes)
+    print(foes[0])
+
+    var spots: list[Placed] = [Goblin(health: 3), Barrel.Full(oil: 2)]
+    for p in spots {
+        print(p.at())
+    }
+
+    let some: Damageable? = Slime(size: 2)
+    let nothing: Damageable? = none
+    print(describe(nothing), describe(Goblin(health: 4)), describe(some))
+    print(some, nothing)
+
+    // Each item is its own box, so iterations change only their own.
+    par for f in foes {
+        f.heal(1)
+    }
+    print(foes[0].hp(), foes[1].hp(), foes[2].hp(), foes[3].hp())
+
+    let k = 100
+    print(foes[0].apply((x) { x + k }), foes[1].apply((x) { x + k }), foes[2].apply((x) { x + k }), foes[3].apply((x) { x + k }))
+}

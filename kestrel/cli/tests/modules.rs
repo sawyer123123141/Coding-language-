@@ -407,3 +407,51 @@ main() {
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("`Shape` isn't an interface"));
 }
+
+#[test]
+fn an_interface_from_another_module_is_called_through_its_tables() {
+    let shapes = "pub interface Shape {
+    pure area(self) -> int
+}
+
+pub struct Square: Shape {
+    side: int
+    pure area(self) -> int { self.side * self.side }
+}
+
+pub pure total(shapes: list[Shape]) -> int {
+    var n = 0
+    for s in shapes {
+        n += s.area()
+    }
+    n
+}
+";
+    let main = "use { Shape, Square, total from shapes }
+struct Rect: Shape {
+    w: int
+    h: int
+    pure area(self) -> int { self.w * self.h }
+}
+pure measure(s: Shape) -> int { s.area() }
+main() {
+    var all: list[Shape] = [Square(3), Rect(2, 5)]
+    all.add(Square(1))
+    let r = Rect(1, 4)
+    print(total(all), measure(r), measure(Square(2)))
+    print(all[1])
+}
+";
+    let dir = project("modules_iface_values", &[("main.kes", main), ("shapes.kes", shapes)]);
+    let expected = "20 4 4\nRect(w: 2, h: 5)\n";
+    let out = kestrel(&["run"], &dir.join("main.kes"));
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8_lossy(&out.stdout), expected);
+    // The tables hold function addresses, which the object file relocates too.
+    let exe = dir.join("main").with_extension(std::env::consts::EXE_EXTENSION);
+    let built = common::hermetic(Command::new(env!("CARGO_BIN_EXE_kestrel")).arg("build").arg(dir.join("main.kes")).arg("-o").arg(&exe)).output().unwrap();
+    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+    let ran = common::hermetic(&mut Command::new(&exe)).output().unwrap();
+    assert!(ran.status.success(), "{}", String::from_utf8_lossy(&ran.stderr));
+    assert_eq!(String::from_utf8_lossy(&ran.stdout), expected);
+}

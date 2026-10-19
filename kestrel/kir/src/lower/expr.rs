@@ -10,6 +10,10 @@ impl<'a> FnLowerer<'a> {
     /// Lowers `e` and applies any implicit conversion the checker recorded.
     pub(crate) fn expr(&mut self, e: &ast::Expr) -> Expr {
         let Some(&to) = self.t.coerce.get(&e.id) else { return self.expr_raw(e) };
+        // A struct or enum value used as an interface value (or an optional of one).
+        if let Some(v) = self.iface_coercion(e, to) {
+            return v;
+        }
         // A `T` used as a `T?`: wrap it (converting it to the inner type first).
         if let Ty::Optional(inner) = to {
             let inner = kty(self.t.elem(inner));
@@ -33,7 +37,7 @@ impl<'a> FnLowerer<'a> {
         Expr { ty: to, line: raw.line, kind: ExprKind::Cast(Box::new(raw)) }
     }
 
-    fn expr_raw(&mut self, e: &ast::Expr) -> Expr {
+    pub(crate) fn expr_raw(&mut self, e: &ast::Expr) -> Expr {
         let ty = kty(self.t.ty(e.id));
         let line = self.line(e.span);
         let kind = match &e.kind {
@@ -120,6 +124,7 @@ impl<'a> FnLowerer<'a> {
                     let (pre, fi, a) = self.call_parts(e, f, args, Some(receiver));
                     Self::with_pre(pre, ExprKind::Call(fi, a), ty, line)
                 }
+                Res::IfaceCall { iface, slot } => self.iface_call_value(e, iface, slot, ty, line),
                 Res::Variant(id, v) => {
                     let (pre, kind) = self.variant_construct(e, id, v, args);
                     Self::with_pre(pre, kind, ty, line)

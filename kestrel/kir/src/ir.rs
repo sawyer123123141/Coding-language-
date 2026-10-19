@@ -57,6 +57,9 @@ pub enum KTy {
     /// environment (an `i64`; 0 when there is none) at 8. The code takes the environment first,
     /// then the parameters (see `KSig`).
     Fn,
+    /// An interface value, whatever its interface: a pointer to the concrete value at offset 0
+    /// and a pointer to its method table (see `MethodTable`) at 8.
+    Iface,
 }
 
 /// What an indirect call needs to know about the function it calls: each parameter's type and
@@ -82,6 +85,7 @@ impl KTy {
                 | KTy::Gpu
                 | KTy::Optional(_)
                 | KTy::Fn
+                | KTy::Iface
         )
     }
 
@@ -114,6 +118,32 @@ pub struct EnumIdx(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ElemIdx(pub u32);
 
+/// A method table in `Module::tables`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TableIdx(pub u32);
+
+/// The method table of one concrete type as one interface: static data of 8-byte words,
+/// `[type_id, copy, print, method_0, method_1, ...]` (see `TABLE_METHODS`). Every entry after the
+/// type id is a function's address. `copy` gives an interface value its own copy of the concrete
+/// value: `(data: i64) -> i64`, the copy's address. `print` writes the concrete value, taken by
+/// pointer. The methods are the type's own methods, in the interface's declaration order, so a
+/// call passes the result pointer (if any), the data pointer as `self`, then the arguments.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MethodTable {
+    /// The concrete type's id: the same for every table of one type.
+    pub type_id: u32,
+    pub copy: FuncIdx,
+    pub print: FuncIdx,
+    pub methods: Vec<FuncIdx>,
+}
+
+/// The word of a method table that holds its copy function's address.
+pub const TABLE_COPY: u32 = 1;
+/// The word of a method table that holds its print function's address.
+pub const TABLE_PRINT: u32 = 2;
+/// The word of a method table that holds method 0's address; method `n` is at `TABLE_METHODS + n`.
+pub const TABLE_METHODS: u32 = 3;
+
 /// A zero-filled global in `Module::globals`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct GlobalIdx(pub u32);
@@ -141,6 +171,8 @@ pub struct Module {
     /// (see `pack_line`). Empty when the compiler wasn't given names: runtime errors then give
     /// only the line.
     pub files: Vec<String>,
+    /// The method table of each (concrete type, interface) pair an interface value is made from.
+    pub tables: Vec<MethodTable>,
 }
 
 /// A memory location: a local, or a path of fields and elements inside one.

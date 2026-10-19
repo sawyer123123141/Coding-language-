@@ -74,6 +74,8 @@ pub(crate) struct Helpers {
     pub(crate) par_bodies: Vec<FuncIdx>,
     /// The heap constants the functions use, and their globals.
     pub(super) consts: ConstGlobals,
+    /// The method tables of interface values (see `tables`).
+    pub(crate) ifaces: super::tables::IfaceTables,
 }
 
 impl Helpers {
@@ -100,6 +102,7 @@ impl Helpers {
             env_layouts,
             par_bodies,
             consts,
+            ifaces: Default::default(),
         }
     }
 
@@ -120,6 +123,8 @@ impl Helpers {
             KTy::Str => out.push(Stmt::Dup(place)),
             // A function value's environment holds copies of its captures; the copy gets its own.
             KTy::Fn => out.push(Stmt::CopyFnEnv(place)),
+            // An interface value's copy gets its own copy of the concrete value, through its table.
+            KTy::Iface => out.push(Stmt::CopyIface(place)),
             KTy::Array(_) | KTy::List(_) => out.push(Stmt::Call(self.copy_fn(ty, t), vec![Arg::Ref(place)])),
             KTy::Map(..) => out.push(Stmt::Call(self.map_copy_fn(ty, t), vec![Arg::Ref(place)])),
             KTy::Optional(e) => {

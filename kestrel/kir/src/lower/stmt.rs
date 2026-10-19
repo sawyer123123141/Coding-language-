@@ -125,6 +125,7 @@ impl<'a> FnLowerer<'a> {
                 out.extend(pre);
                 self.call_stmt(fi, args, self.t.func(f).ret, self.line(e.span), out);
             }
+            Res::IfaceCall { iface, slot } => self.iface_call_stmt(e, iface, slot, out),
             other => unreachable!("checker rejects a discarded {other:?}"),
         }
     }

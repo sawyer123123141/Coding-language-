@@ -44,7 +44,7 @@ fn stmt<'a>(s: &'a Stmt, f: &mut impl FnMut(Node<'a>)) {
         Stmt::Bind(_, p) => place(p, false, f),
         // A capture's place is in the environment, which no local owns.
         Stmt::BindEnv { env, .. } => walk_expr(env, f),
-        Stmt::CopyFnEnv(p) => place(p, true, f),
+        Stmt::CopyFnEnv(p) | Stmt::CopyIface(p) => place(p, true, f),
         Stmt::MapSet(p, k, v, _) => {
             walk_expr(k, f);
             walk_expr(v, f);
@@ -78,6 +78,11 @@ fn stmt<'a>(s: &'a Stmt, f: &mut impl FnMut(Node<'a>)) {
         Stmt::Call(_, args) => self::args(args, f),
         Stmt::CallIndirect { callee, args, .. } => {
             place(callee, false, f);
+            self::args(args, f);
+        }
+        // The interface value itself isn't changed (a `var self` method changes what it points at).
+        Stmt::CallVirtual { recv, args, .. } => {
+            place(recv, false, f);
             self::args(args, f);
         }
         Stmt::Print(parts) | Stmt::Write(parts) => print_args(parts, f),
@@ -145,11 +150,18 @@ pub fn walk_expr<'a>(e: &'a Expr, f: &mut impl FnMut(Node<'a>)) {
                 walk_expr(v, f);
             }
         }
+        // A borrowed value lends its place to the call, which may change it (as for `Arg::Ref`).
+        ExprKind::MakeIface { data: IfaceData::Borrowed(p), .. } => place(p, true, f),
+        ExprKind::MakeIface { data: IfaceData::Boxed(v), .. } => walk_expr(v, f),
         ExprKind::Binary(_, a, b) | ExprKind::And(a, b) | ExprKind::Or(a, b) | ExprKind::RandInt(a, b) => {
             walk_expr(a, f);
             walk_expr(b, f);
         }
         ExprKind::Call(_, a) => args(a, f),
+        ExprKind::CallVirtual { recv, args: a, .. } => {
+            place(recv, false, f);
+            args(a, f);
+        }
         ExprKind::CallIndirect { callee, args: a, .. } => {
             place(callee, false, f);
             args(a, f);

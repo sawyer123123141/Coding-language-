@@ -1,0 +1,94 @@
+// expect: 15
+// expect: 15
+// expect: eval 3
+// expect: eval 0
+// expect: eval 1
+// expect: pair 8 17 3
+// expect: pair 7 16 1
+// expect: 16
+// expect: 5
+// expect: 5
+// expect: -4
+// expect: -4
+// expect: -4
+// expect: 2
+// expect: 3
+// Values passed straight to interface parameters point at the caller's place (borrowed).
+interface Damageable {
+    take_damage(var self, amount: int)
+    pure hp(self) -> int
+}
+
+// Plain (numbers only), so it would live in registers if nothing took its address.
+struct Goblin: Damageable {
+    health: int = 10
+
+    take_damage(var self, amount: int) { self.health -= amount }
+    pure hp(self) -> int { self.health }
+
+    // `self.health` is written back before `show` reads `self` through the interface.
+    reset(var self) {
+        self.health = 5
+        show(self)
+    }
+}
+
+// Owns an arena: it can be lent to an interface parameter, never stored as one.
+struct Pool: Damageable {
+    mem: Arena = Arena()
+    hits: int = 0
+
+    take_damage(var self, amount: int) { self.hits += amount }
+    pure hp(self) -> int { self.hits }
+}
+
+heal(var d: Damageable) { d.take_damage(-5) }
+
+show(d: Damageable) { print(d.hp()) }
+
+show_twice(d: Damageable) {
+    show(d)
+    show(d)
+}
+
+hit_twice(var d: Damageable) {
+    d.take_damage(1)
+    heal(var d)
+}
+
+noisy(n: int) -> int {
+    print("eval", n)
+    n
+}
+
+pair(a: Damageable, var b: Damageable, n: int) {
+    b.take_damage(n)
+    print("pair", a.hp(), b.hp(), n)
+}
+
+main() {
+    var g = Goblin()
+    heal(var g)
+    print(g.health)
+    show(g)
+
+    var gs = [Goblin(health: 7), Goblin(health: 8)]
+    var hs = [Goblin(health: 20)]
+    pair(n: noisy(3), b: var hs[noisy(0)], a: gs[noisy(1)])
+    pair(gs[0], var hs[0], 1)
+    print(hs[0].health)
+
+    g.reset()
+    print(g.health)
+
+    var p = Pool()
+    hit_twice(var p)
+    show_twice(p)
+    print(p.hits)
+
+    // Not places: each is boxed in the current arena.
+    show(Goblin(health: 2))
+    var m: map[string, Goblin] = {}
+    m["a"] = Goblin(health: 3)
+    show(m.get("a", Goblin()))
+}

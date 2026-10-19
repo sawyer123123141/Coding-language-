@@ -12,7 +12,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use kestrel_check::{ConstId, Res, Tables, Ty};
+use kestrel_check::{ConstId, Res, Tables};
 use kestrel_syntax::ast::{self, Program};
 use kestrel_syntax::LineIndex;
 
@@ -61,26 +61,7 @@ impl ConstGlobals {
 /// somewhere inside, and isn't owning (an `Arena()` constant makes a new arena at each use).
 pub(crate) fn hoisted(t: &Tables, c: ConstId) -> bool {
     let ty = t.consts[c.0 as usize].ty;
-    !t.is_owning(ty) && holds_collection(t, ty, &mut Vec::new())
-}
-
-/// Whether `ty` is, or holds in a field, a payload or an optional, an array, list or map.
-/// `seen` stops a walk through a type that contains itself.
-fn holds_collection(t: &Tables, ty: Ty, seen: &mut Vec<Ty>) -> bool {
-    match ty {
-        Ty::Array(_) | Ty::List(_) | Ty::Map(..) => true,
-        Ty::Optional(e) => holds_collection(t, t.elem(e), seen),
-        Ty::Struct(_) | Ty::Enum(_) if seen.contains(&ty) => false,
-        Ty::Struct(s) => {
-            seen.push(ty);
-            t.strukt(s).fields.iter().any(|f| holds_collection(t, f.ty, seen))
-        }
-        Ty::Enum(e) => {
-            seen.push(ty);
-            t.enm(e).variants.iter().flat_map(|v| &v.fields).any(|f| holds_collection(t, f.ty, seen))
-        }
-        _ => false,
-    }
+    !t.is_owning(ty) && t.holds_collection(ty)
 }
 
 /// The declaration of constant `c`.

@@ -59,8 +59,12 @@ pub fn walk_stmt<V: VisitMut + ?Sized>(v: &mut V, s: &mut Stmt) {
             walk_args(v, args);
         }
         Stmt::Print(parts) | Stmt::Write(parts) => walk_print(v, parts),
-        Stmt::Bind(_, p) | Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::DropGpu(p) | Stmt::PushArena(Some(p)) | Stmt::CopyFnEnv(p) => {
+        Stmt::Bind(_, p) | Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::DropGpu(p) | Stmt::PushArena(Some(p)) | Stmt::CopyFnEnv(p) | Stmt::CopyIface(p) => {
             v.visit_place(p)
+        }
+        Stmt::CallVirtual { recv, args, .. } => {
+            v.visit_place(recv);
+            walk_args(v, args);
         }
         Stmt::BindEnv { env, .. } => v.visit_expr(env),
         Stmt::MapSet(p, k, val, _) => {
@@ -106,6 +110,12 @@ pub fn walk_expr<V: VisitMut + ?Sized>(v: &mut V, e: &mut Expr) {
         ExprKind::Call(_, args) => walk_args(v, args),
         ExprKind::CallIndirect { callee, args, .. } => {
             v.visit_place(callee);
+            walk_args(v, args);
+        }
+        ExprKind::MakeIface { data: IfaceData::Borrowed(p), .. } => v.visit_place(p),
+        ExprKind::MakeIface { data: IfaceData::Boxed(x), .. } => v.visit_expr(x),
+        ExprKind::CallVirtual { recv, args, .. } => {
+            v.visit_place(recv);
             walk_args(v, args);
         }
         ExprKind::StructLit(_, xs) | ExprKind::VariantLit(_, _, xs) | ExprKind::ArrayLit(xs) | ExprKind::Math(_, xs) | ExprKind::Str(_, xs) => {

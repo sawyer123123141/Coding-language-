@@ -7,6 +7,7 @@ mod divide;
 mod expr;
 mod fnvalue;
 mod globals;
+mod iface;
 mod lists;
 mod maps;
 mod math;
@@ -47,7 +48,8 @@ pub(crate) fn cl_type(t: KTy) -> Type {
         | KTy::Arena
         | KTy::Gpu
         | KTy::Optional(_)
-        | KTy::Fn => {
+        | KTy::Fn
+        | KTy::Iface => {
             unreachable!("aggregates live in memory, not registers")
         }
     }
@@ -97,6 +99,8 @@ pub(crate) struct Shared<'a> {
     pub globals: &'a [DataId],
     /// Each source file's `FileName` record, by the file index in a KIR line.
     pub files: &'a [DataId],
+    /// The data of each method table, by `TableIdx`.
+    pub tables: &'a [DataId],
     pub opts: Options,
     /// The whole program: struct layouts and callees' signatures.
     pub kir: &'a kir::Module,

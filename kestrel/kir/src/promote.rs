@@ -137,7 +137,8 @@ fn region(
 
 /// Whether `stmts` reach `root`'s memory only through plain reads and writes of its fields: it
 /// isn't passed as `var`, captured by a `par for` or bound, and no other local into the same
-/// memory (for a loop element: its collection, or another element of it) is used.
+/// memory (for a loop element: its collection, or another element of it) is used. An interface
+/// value borrowing it counts as passing it as `var`.
 fn exclusive(stmts: &[Stmt], root: LocalIdx, homes: &HashMap<LocalIdx, LocalIdx>) -> bool {
     let mine = home(root, homes);
     let mut ok = true;
@@ -145,8 +146,16 @@ fn exclusive(stmts: &[Stmt], root: LocalIdx, homes: &HashMap<LocalIdx, LocalIdx>
     walk(stmts, &mut |n| match n {
         Node::Place(p, _) if p.root != root && home(p.root, homes) == mine => ok = false,
         Node::Stmt(Stmt::Call(_, a) | Stmt::ParFor { args: a, .. }) | Node::Expr(Expr { kind: ExprKind::Call(_, a), .. }) if refs(a) => ok = false,
-        Node::Stmt(Stmt::CallIndirect { args: a, .. }) | Node::Expr(Expr { kind: ExprKind::CallIndirect { args: a, .. }, .. }) if refs(a) => ok = false,
+        Node::Stmt(Stmt::CallIndirect { args: a, .. } | Stmt::CallVirtual { args: a, .. })
+        | Node::Expr(Expr { kind: ExprKind::CallIndirect { args: a, .. } | ExprKind::CallVirtual { args: a, .. }, .. })
+            if refs(a) =>
+        {
+            ok = false
+        }
         Node::Stmt(Stmt::Bind(_, p)) if p.root == root => ok = false,
+        // An interface value borrowing the place (a call's argument, or the `Let` that inlining
+        // makes of one) reaches it like a `var` argument does.
+        Node::Expr(Expr { kind: ExprKind::MakeIface { data: IfaceData::Borrowed(p), .. }, .. }) if p.root == root => ok = false,
         // (A capture bound by `BindEnv` points into a closure's environment, which no local is.)
         _ => {}
     });
@@ -168,6 +177,10 @@ fn returns_after_freeing(stmts: &[Stmt]) -> bool {
         // (Copying a function value's environment, `CopyFnEnv`, or making one only allocates.)
         Node::Stmt(Stmt::Call(_, a)) | Node::Expr(Expr { kind: ExprKind::Call(_, a), .. }) if by_ref(a) => frees = true,
         Node::Stmt(Stmt::CallIndirect { args: a, .. }) | Node::Expr(Expr { kind: ExprKind::CallIndirect { args: a, .. }, .. }) if by_ref(a) => frees = true,
+        // A method called through an interface value may free memory its value holds, and so may
+        // a call given a borrowed interface value (through its `var self` methods).
+        Node::Stmt(Stmt::CallVirtual { .. }) | Node::Expr(Expr { kind: ExprKind::CallVirtual { .. }, .. }) => frees = true,
+        Node::Expr(Expr { kind: ExprKind::MakeIface { data: IfaceData::Borrowed(_), .. }, .. }) => frees = true,
         _ => {}
     });
     returns && frees

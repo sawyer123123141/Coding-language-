@@ -40,8 +40,13 @@ impl FnLowerer<'_> {
                     None => self.helpers.runs_user_code(*callee),
                 };
             }
-            // A function value may be any function that isn't `pure`.
-            Node::Expr(Expr { kind: ExprKind::CallIndirect { .. }, .. }) | Node::Stmt(Stmt::CallIndirect { .. }) => found = true,
+            // A function value may be any function that isn't `pure`, and so may an interface's
+            // method. A boxed interface value is counted too (conservative: it only allocates).
+            Node::Expr(Expr {
+                kind: ExprKind::CallIndirect { .. } | ExprKind::CallVirtual { .. } | ExprKind::MakeIface { data: IfaceData::Boxed(_), .. },
+                ..
+            })
+            | Node::Stmt(Stmt::CallIndirect { .. } | Stmt::CallVirtual { .. }) => found = true,
             // (An environment's copy function, `CopyFnEnv`, only copies memory, and so does making
             // a heap environment, whose values are walked like any others: neither sets a line.)
             _ => {}
@@ -71,6 +76,12 @@ impl FnLowerer<'_> {
                     // only reads places that no argument can change (the exclusivity rule), so it
                     // may be made after the others.
                     Arg::Value(v) if is_stack_fn(&v) => Arg::Value(v),
+                    // A borrowed interface value stays the call's argument too; its place's
+                    // indexes are evaluated in turn.
+                    Arg::Value(Expr { kind: ExprKind::MakeIface { table, data: IfaceData::Borrowed(mut p) }, ty, line }) => {
+                        self.stabilize(&mut p, pre);
+                        Arg::Value(Expr { kind: ExprKind::MakeIface { table, data: IfaceData::Borrowed(p) }, ty, line })
+                    }
                     Arg::Value(v) => Arg::Value(self.spill(v, pre)),
                     Arg::Ref(mut p) => {
                         self.stabilize(&mut p, pre);

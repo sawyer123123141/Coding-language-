@@ -68,6 +68,10 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             ExprKind::CallIndirect { callee, args, sig } => {
                 self.call_indirect(callee, args, sig, Some(dest))?;
             }
+            ExprKind::CallVirtual { recv, slot, args, sig } => {
+                self.call_virtual(recv, *slot, args, sig, Some(dest))?;
+            }
+            ExprKind::MakeIface { table, data } => self.make_iface_into(*table, data, e.line, dest)?,
             ExprKind::FnRef(thunk) => self.fn_ref_into(*thunk, dest),
             // A closure with nothing to capture: its code and a zero environment, like a named function.
             ExprKind::MakeFn { code, env: EnvKind::None } => self.fn_ref_into(*code, dest),

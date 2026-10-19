@@ -8,6 +8,7 @@ mod par_thunk;
 pub mod jit;
 pub mod object;
 mod rt;
+mod tables;
 
 use cranelift_codegen::ir::Function;
 use cranelift_frontend::FunctionBuilderContext;
@@ -61,7 +62,9 @@ pub(crate) fn define_module<M: Module>(
     let par_thunks = par_thunk::define_par_thunks(module, m, &ids)?;
     let globals = globals::define_globals(module, m)?;
     let files = globals::define_file_names(module, m)?;
-    let shared = func::Shared { funcs: &ids, par_thunks: &par_thunks, rt: &rt, globals: &globals, files: &files, opts, kir: m };
+    // The tables hold the functions' addresses, so they come after the functions are declared.
+    let tables = tables::define_tables(module, m, &ids)?;
+    let shared = func::Shared { funcs: &ids, par_thunks: &par_thunks, rt: &rt, globals: &globals, files: &files, tables: &tables, opts, kir: m };
     let mut strings = func::Strings::default();
     let mut ctx = module.make_context();
     let mut fb_ctx = FunctionBuilderContext::new();

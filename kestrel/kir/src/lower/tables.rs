@@ -1,0 +1,114 @@
+//! Method tables: one per (concrete type, interface) pair that an interface value is made from
+//! (see `MethodTable`). A table holds the type's id, its copy function, its print function, then
+//! the type's own methods in the interface's declaration order. The methods are called as they
+//! are: their `self` is already a pointer, which is what an interface value holds.
+//!
+//! The print function, one per concrete type, writes the value it is given a pointer to. The copy
+//! function, one per table, is a stub that stops the program for now: nothing copies an interface
+//! value yet, and a copy that sneaks in must fail loudly rather than share a box.
+
+use std::collections::HashMap;
+
+use kestrel_check::{IfaceId, Tables, Ty};
+use kestrel_syntax::ast::Program;
+
+use super::helpers::Helpers;
+use super::kty;
+use crate::ir::*;
+
+/// The method tables made so far, and what they are made of.
+#[derive(Default)]
+pub(crate) struct IfaceTables {
+    pub(crate) tables: Vec<MethodTable>,
+    /// The concrete type of each table, by `TableIdx`.
+    concrete: Vec<KTy>,
+    by_pair: HashMap<(KTy, IfaceId), TableIdx>,
+    /// Each concrete type's id: 1, 2, ... in the order types first get a table.
+    type_ids: HashMap<KTy, u32>,
+    /// The print function of each concrete type.
+    prints: HashMap<KTy, FuncIdx>,
+}
+
+impl IfaceTables {
+    /// The concrete type of the values table `table` serves.
+    pub(crate) fn concrete(&self, table: TableIdx) -> KTy {
+        self.concrete[table.0 as usize]
+    }
+}
+
+impl Helpers {
+    /// The method table of concrete type `ty` (a struct or enum that lists `iface`) as `iface`,
+    /// made at its first use.
+    pub(crate) fn table_for(&mut self, ty: Ty, iface: IfaceId, t: &Tables, program: &Program) -> TableIdx {
+        let concrete = kty(ty);
+        if let Some(&idx) = self.ifaces.by_pair.get(&(concrete, iface)) {
+            return idx;
+        }
+        let own = match ty {
+            Ty::Struct(s) => &t.strukt(s).methods,
+            Ty::Enum(e) => &t.enm(e).methods,
+            other => unreachable!("only structs and enums implement interfaces, not {other:?}"),
+        };
+        let methods = t
+            .iface(iface)
+            .methods
+            .iter()
+            .map(|&m| {
+                let name = &t.func(m).decl(program).name;
+                FuncIdx(own.get(name).unwrap_or_else(|| panic!("conformance guarantees a method `{name}`")).0)
+            })
+            .collect();
+        let next_id = self.ifaces.type_ids.len() as u32 + 1;
+        let type_id = *self.ifaces.type_ids.entry(concrete).or_insert(next_id);
+        let print = self.iface_print_fn(concrete, t);
+        let copy = self.iface_copy_stub();
+        let idx = TableIdx(self.ifaces.tables.len() as u32);
+        self.ifaces.tables.push(MethodTable { type_id, copy, print, methods });
+        self.ifaces.concrete.push(concrete);
+        self.ifaces.by_pair.insert((concrete, iface), idx);
+        idx
+    }
+
+    /// `print(value)` without a newline for the concrete type `ty`, its value taken by pointer.
+    fn iface_print_fn(&mut self, ty: KTy, t: &Tables) -> FuncIdx {
+        if let Some(&f) = self.ifaces.prints.get(&ty) {
+            return f;
+        }
+        self.ensure_print(ty, t);
+        let idx = self.reserve();
+        self.ifaces.prints.insert(ty, idx);
+        let value = Expr { kind: ExprKind::Load(Place::local(LocalIdx(0))), ty, line: 0 };
+        self.funcs[(idx.0 - self.base) as usize] = Func {
+            name: format!("__kestrel_iface_print_{}", idx.0),
+            params: vec![LocalIdx(0)],
+            ret: None,
+            locals: vec![Local { name: "value".into(), ty, kind: LocalKind::RefParam }],
+            body: vec![Stmt::Write(vec![PrintArg::Value(value)])],
+            is_pure: false,
+            io: true,
+            mutates_params: false,
+            exported: false,
+            native: None,
+        };
+        idx
+    }
+
+    /// The copy entry of a table: `(data: i64) -> i64`. For now it stops the program (see the
+    /// module's comment).
+    fn iface_copy_stub(&mut self) -> FuncIdx {
+        let idx = self.reserve();
+        self.funcs[(idx.0 - self.base) as usize] = Func {
+            name: format!("__kestrel_iface_copy_{}", idx.0),
+            params: vec![LocalIdx(0)],
+            ret: Some(KTy::I64),
+            locals: vec![Local { name: "data".into(), ty: KTy::I64, kind: LocalKind::Value }],
+            body: vec![Stmt::Trap],
+            is_pure: true,
+            io: false,
+            mutates_params: false,
+            exported: false,
+            native: None,
+        };
+        idx
+    }
+}

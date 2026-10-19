@@ -65,6 +65,7 @@ pub(crate) fn export_ty(m: &kir::Module, ty: KTy) -> ExportTy {
         KTy::Optional(_) => ExportTy::Other("an optional".into()),
         KTy::Map(..) => ExportTy::Other("a map".into()),
         KTy::Fn => ExportTy::Other("a function".into()),
+        KTy::Iface => ExportTy::Other("an interface value".into()),
     }
 }
 
