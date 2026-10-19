@@ -26,6 +26,13 @@ pub(crate) fn resolve_type(ty: &TypeExpr, t: &mut Tables, diags: &mut Vec<Diagno
                 if let Some(&id) = t.enum_by_name.get(name) {
                     return Ty::Enum(id);
                 }
+                if let Some(&id) = t.iface_by_name.get(name) {
+                    if t.iface_ty_ok {
+                        return Ty::Iface(id);
+                    }
+                    diags.push(Diagnostic::error(ty.span, "interface types can't be used yet"));
+                    return Ty::Error;
+                }
                 format!("unknown type `{name}`")
             }
         },

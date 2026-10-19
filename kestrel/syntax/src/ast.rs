@@ -26,6 +26,7 @@ pub enum Item {
     Const(ConstDecl),
     Struct(StructDecl),
     Enum(EnumDecl),
+    Interface(InterfaceDecl),
     Use(UseDecl),
 }
 
@@ -50,7 +51,21 @@ pub struct EnumDecl {
     pub is_pub: bool,
     pub name: String,
     pub name_span: Span,
+    /// `enum E: A, B`: the interfaces it says it implements, with where each is written.
+    pub ifaces: Vec<(String, Span)>,
     pub variants: Vec<VariantDecl>,
+    pub methods: Vec<FnDecl>,
+    pub span: Span,
+}
+
+/// `interface Name { methods }`: a list of method signatures. Each method is a `FnDecl` with
+/// an empty body (spanned at the end of the signature), like a native's; its `self` is typed
+/// as the interface.
+#[derive(Clone, Debug)]
+pub struct InterfaceDecl {
+    pub is_pub: bool,
+    pub name: String,
+    pub name_span: Span,
     pub methods: Vec<FnDecl>,
     pub span: Span,
 }
@@ -68,6 +83,8 @@ pub struct StructDecl {
     pub is_pub: bool,
     pub name: String,
     pub name_span: Span,
+    /// `struct S: A, B`: the interfaces it says it implements, with where each is written.
+    pub ifaces: Vec<(String, Span)>,
     pub fields: Vec<FieldDecl>,
     pub methods: Vec<FnDecl>,
     pub span: Span,

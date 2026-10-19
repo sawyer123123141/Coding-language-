@@ -1,0 +1,57 @@
+// error 17: `NoMethod` says it is a `One` but has no method `go`; add `pure go(self) -> int`
+// error 22: `WrongType.go` doesn't match `One.go`: it should be `pure go(self) -> int`
+// error 26: `NoVar.set` doesn't match `Two.set`: it should be `set(var self, n: int)`
+// error 30: `VarArg.hit` doesn't match `Three.hit`: it should be `hit(var self, var n: int)`
+// error 34: `Impure.go` doesn't match `One.go`: it should be `pure go(self) -> int`
+// error 37: `One` is listed twice
+// error 41: `Thing` isn't an interface
+// error 44: `Nowhere` isn't an interface
+// error 47: an interface needs at least one method
+// error 53: `area` in `Plane` needs `self` or `var self` first
+// error 51: `Shape` declares `area` twice
+// error 55: `Clash` is defined twice
+interface One { pure go(self) -> int }
+interface Two { set(var self, n: int) }
+interface Three { hit(var self, var n: int) }
+
+struct NoMethod: One {
+    x: int
+}
+
+struct WrongType: One {
+    pure go(self) -> float { 1.0 }
+}
+
+struct NoVar: Two {
+    set(self, n: int) { }
+}
+
+struct VarArg: Three {
+    hit(var self, n: int) { }
+}
+
+struct Impure: One {
+    go(self) -> int { 1 }
+}
+
+struct Twice: One, One {
+    pure go(self) -> int { 1 }
+}
+struct Thing { x: int }
+struct NotIface: Thing {
+    x: int
+}
+enum Lost: Nowhere {
+    A
+}
+interface Empty { }
+
+interface Shape {
+    pure area(self) -> int
+    area(var self)
+}
+interface Plane { area(x: float) }
+struct Clash { x: int }
+interface Clash { go(self) }
+
+main() { }

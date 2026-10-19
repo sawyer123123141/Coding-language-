@@ -1,7 +1,7 @@
 /// A checked type. `Never` is the type of code that doesn't finish
 /// (`return`, `break`); `Error` suppresses follow-on errors.
 use crate::sig::SigId;
-use crate::tables::{ElemId, EnumId, StructId};
+use crate::tables::{ElemId, EnumId, IfaceId, StructId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Ty {
@@ -37,6 +37,8 @@ pub enum Ty {
     /// A function value: a named function or a closure. The signature is in `Tables::sigs`.
     /// It is two words, `{code, env}`, passed by pointer like a struct.
     Fn(SigId),
+    /// An interface: any struct or enum that implements it. Two words, `{data, table}`.
+    Iface(IfaceId),
     Error,
 }
 
@@ -77,6 +79,7 @@ impl Ty {
             Ty::Gpu => "GpuHandle",
             Ty::Optional(_) => "optional",
             Ty::Fn(_) => "function",
+            Ty::Iface(_) => "interface",
             Ty::Error => "{error}",
         }
     }
@@ -107,6 +110,7 @@ impl Ty {
                 | Ty::Gpu
                 | Ty::Optional(_)
                 | Ty::Fn(_)
+                | Ty::Iface(_)
         )
     }
 

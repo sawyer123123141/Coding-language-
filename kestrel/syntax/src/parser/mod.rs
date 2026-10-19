@@ -2,6 +2,7 @@ mod branch;
 mod closure;
 mod depth;
 mod expr;
+mod iface;
 mod item;
 mod members;
 mod primary;

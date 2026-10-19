@@ -72,6 +72,9 @@ pub enum Stmt {
     /// program's own code to a built-in function that isn't `pure`, for the errors that function
     /// raises.
     SetLine(u32),
+    /// Stops the program with a run-time error. The body of an interface method's stub, which
+    /// nothing calls.
+    Trap,
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -57,7 +57,7 @@ mod tests {
     }
 
     fn strukt(name: &str, fields: Vec<FieldInfo>) -> StructInfo {
-        StructInfo { name: name.into(), item: 0, span: Span { start: 0, end: 0 }, fields, methods: Default::default() }
+        StructInfo { name: name.into(), item: 0, span: Span { start: 0, end: 0 }, fields, methods: Default::default(), ifaces: Vec::new() }
     }
 
     /// The checker refuses a struct that holds itself, so this can't happen in a

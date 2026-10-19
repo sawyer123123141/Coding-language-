@@ -79,6 +79,9 @@ pub(crate) fn kty(ty: Ty) -> KTy {
         Ty::Optional(e) => KTy::Optional(ElemIdx(e.0)),
         Ty::Map(k, v) => KTy::Map(ElemIdx(k.0), ElemIdx(v.0)),
         Ty::Fn(_) => KTy::Fn,
+        // Interface values have no representation yet. Only the signatures of an interface's
+        // abstract methods (see `abstract_stub`) reach here; a word stands in for them.
+        Ty::Iface(_) => KTy::I64,
         other => panic!("type {other:?} has no runtime representation"),
     }
 }
@@ -147,6 +150,9 @@ impl<'a> FnLowerer<'a> {
         let (t, program) = (self.t, self.program);
         let info = t.func(self.fn_id.expect("a function is lowered with its id"));
         let decl = info.decl(program);
+        if info.is_abstract {
+            return Self::abstract_stub(info);
+        }
         self.declare_locals(&info.locals);
         let params = (0..info.params.len()).map(|i| LocalIdx(i as u32)).collect();
         let ret = if info.ret == Ty::Unit { None } else { Some(kty(info.ret)) };
@@ -163,6 +169,32 @@ impl<'a> FnLowerer<'a> {
             // Items of other modules are named `module.name`.
             exported: decl.is_pub && info.method.is_none() && !info.name.contains('.') && !info.is_native,
             native: info.is_native.then(|| native_symbol(&info.name)),
+        }
+    }
+
+    /// The function standing for an interface's method, so that `FuncIdx == FnId` holds for
+    /// every `FnInfo`. Nothing calls it (calls go to the implementing type's own method); its
+    /// parameters follow the signature and its body stops the program, so a stray call fails loudly.
+    fn abstract_stub(info: &kestrel_check::FnInfo) -> Func {
+        let mut locals = Vec::new();
+        for p in &info.params {
+            let ty = kty(p.ty);
+            let kind = if p.is_var || ty.is_aggregate() { LocalKind::RefParam } else { LocalKind::Value };
+            locals.push(Local { name: p.name.clone(), ty, kind });
+        }
+        let params = (0..locals.len()).map(|i| LocalIdx(i as u32)).collect();
+        let ret = if info.ret == Ty::Unit { None } else { Some(kty(info.ret)) };
+        Func {
+            name: info.name.clone(),
+            params,
+            ret,
+            locals,
+            body: vec![Stmt::Trap],
+            is_pure: false,
+            io: false,
+            mutates_params: false,
+            exported: false,
+            native: None,
         }
     }
 

@@ -271,7 +271,8 @@ fn stmt_builds(s: &Stmt, calls: &mut Vec<FuncIdx>) -> bool {
         | Stmt::FreeArena(_)
         | Stmt::DropGpu(_)
         | Stmt::MapUnlock(..)
-        | Stmt::SetLine(_) => false,
+        | Stmt::SetLine(_)
+        | Stmt::Trap => false,
     }
 }
 

@@ -76,7 +76,7 @@ pub fn walk_stmt<V: VisitMut + ?Sized>(v: &mut V, s: &mut Stmt) {
             walk_args(v, args);
             v.visit_expr(count);
         }
-        Stmt::BindGlobal(..) | Stmt::PushArena(None) | Stmt::PopArena { .. } | Stmt::SetLine(_) | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
+        Stmt::BindGlobal(..) | Stmt::PushArena(None) | Stmt::PopArena { .. } | Stmt::SetLine(_) | Stmt::Trap | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
     }
 }
 

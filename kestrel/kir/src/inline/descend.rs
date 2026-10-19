@@ -54,7 +54,7 @@ impl Inliner<'_> {
                 self.args(args, depth);
                 self.expr(count, depth);
             }
-            Stmt::BindGlobal(..) | Stmt::PushArena(None) | Stmt::PopArena { .. } | Stmt::SetLine(_) | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
+            Stmt::BindGlobal(..) | Stmt::PushArena(None) | Stmt::PopArena { .. } | Stmt::SetLine(_) | Stmt::Trap | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
         }
     }
 

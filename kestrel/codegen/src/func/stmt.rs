@@ -1,7 +1,7 @@
 //! Lowering KIR statements and control flow: `if`, `while`, `for` ranges, `break`, `return`.
 
 use cranelift_codegen::ir::condcodes::IntCC;
-use cranelift_codegen::ir::{InstBuilder, TrapCode};
+use cranelift_codegen::ir::{types, InstBuilder, TrapCode};
 use cranelift_module::Module;
 use kestrel_kir::{self as kir, LocalIdx, Place};
 
@@ -87,6 +87,13 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             kir::Stmt::CopyFnEnv(p) => self.copy_fn_env(p)?,
             kir::Stmt::BindGlobal(l, g) => self.bind_global(*l, *g),
             kir::Stmt::SetLine(line) => self.set_line(*line),
+            kir::Stmt::Trap => {
+                let kind = self.b.ins().iconst(types::I32, kestrel_runtime::PANIC_ABSTRACT as i64);
+                let (line, file) = self.loc_args(kir::pack_line(kir::NO_FILE as usize, 0));
+                self.call_id(self.shared.rt.panic, &[kind, line, file]);
+                self.b.ins().trap(TrapCode::unwrap_user(2));
+                return Ok(false);
+            }
         }
         Ok(true)
     }

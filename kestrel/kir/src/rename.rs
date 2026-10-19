@@ -94,7 +94,7 @@ pub(crate) fn rename_stmts(stmts: &mut [Stmt], subst: &[Subst]) {
                 rename_args(args, subst);
                 rename_expr(count, subst);
             }
-            Stmt::PushArena(None) | Stmt::PopArena { .. } | Stmt::SetLine(_) | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
+            Stmt::PushArena(None) | Stmt::PopArena { .. } | Stmt::SetLine(_) | Stmt::Trap | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
         }
     }
 }

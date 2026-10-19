@@ -18,6 +18,7 @@ impl Parser {
     pub(super) fn struct_decl(&mut self, is_pub: bool, start: Span) -> PResult<Item> {
         self.bump();
         let (name, name_span) = self.expect_ident("a struct name")?;
+        let ifaces = self.iface_list()?;
         self.expect(&Tok::LBrace, "`{`")?;
         let (mut fields, mut methods) = (Vec::new(), Vec::new());
         self.skip_newlines();
@@ -36,12 +37,13 @@ impl Parser {
             self.skip_newlines();
         }
         let end = self.expect(&Tok::RBrace, "`}`")?;
-        Ok(Item::Struct(StructDecl { is_pub, name, name_span, fields, methods, span: start.to(end) }))
+        Ok(Item::Struct(StructDecl { is_pub, name, name_span, ifaces, fields, methods, span: start.to(end) }))
     }
 
     pub(super) fn enum_decl(&mut self, is_pub: bool, start: Span) -> PResult<Item> {
         self.bump();
         let (name, name_span) = self.expect_ident("an enum name")?;
+        let ifaces = self.iface_list()?;
         self.expect(&Tok::LBrace, "`{`")?;
         let (mut variants, mut methods) = (Vec::new(), Vec::new());
         self.skip_newlines();
@@ -60,7 +62,7 @@ impl Parser {
             self.skip_newlines();
         }
         let end = self.expect(&Tok::RBrace, "`}`")?;
-        Ok(Item::Enum(EnumDecl { is_pub, name, name_span, variants, methods, span: start.to(end) }))
+        Ok(Item::Enum(EnumDecl { is_pub, name, name_span, ifaces, variants, methods, span: start.to(end) }))
     }
 
     /// One variant (`Name` or `Name { field: Type, ... }`) or one method.

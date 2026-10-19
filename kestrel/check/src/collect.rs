@@ -7,7 +7,7 @@ use crate::builtins::Builtin;
 use crate::collect_ty::{check_self_containment, resolve_type};
 use crate::sig::{Sig, SigParam};
 use crate::tables::{
-    ConstInfo, EnumId, EnumInfo, FieldInfo, FnId, FnInfo, ParamSig, StructId, StructInfo, Tables, VariantInfo,
+    ConstInfo, EnumId, EnumInfo, FieldInfo, FnId, FnInfo, IfaceId, IfaceInfo, ParamSig, StructId, StructInfo, Tables, VariantInfo,
     BUILTIN_STRUCTS,
 };
 use crate::ty::Ty;
@@ -54,19 +54,24 @@ pub(crate) fn collect(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnos
             Item::Struct(s) => {
                 let id = StructId(t.structs.len() as u32);
                 t.struct_by_name.entry(s.name.clone()).or_insert(id);
-                let info = StructInfo { name: s.name.clone(), item: item_idx, span: s.name_span, fields: Vec::new(), methods: HashMap::new() };
+                let info = StructInfo { name: s.name.clone(), item: item_idx, span: s.name_span, fields: Vec::new(), methods: HashMap::new(), ifaces: Vec::new() };
                 t.structs.push(info);
             }
             Item::Enum(e) => {
                 let id = EnumId(t.enums.len() as u32);
                 t.enum_by_name.entry(e.name.clone()).or_insert(id);
-                let info = EnumInfo { name: e.name.clone(), item: item_idx, span: e.name_span, variants: Vec::new(), methods: HashMap::new() };
+                let info = EnumInfo { name: e.name.clone(), item: item_idx, span: e.name_span, variants: Vec::new(), methods: HashMap::new(), ifaces: Vec::new() };
                 t.enums.push(info);
+            }
+            Item::Interface(i) => {
+                let id = IfaceId(t.ifaces.len() as u32);
+                t.iface_by_name.entry(i.name.clone()).or_insert(id);
+                t.ifaces.push(IfaceInfo { name: i.name.clone(), item: item_idx, span: i.name_span, methods: Vec::new() });
             }
             Item::Fn(_) | Item::Const(_) | Item::Use(_) => {}
         }
     }
-    let (mut struct_id, mut enum_id) = (BUILTIN_STRUCTS, 0);
+    let (mut struct_id, mut enum_id, mut iface_id) = (BUILTIN_STRUCTS, 0, 0);
     for (item_idx, item) in program.items.iter().enumerate() {
         match item {
             Item::Fn(f) => {
@@ -90,9 +95,14 @@ pub(crate) fn collect(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnos
                 add_enum_members(e, item_idx, EnumId(enum_id), t, diags);
                 enum_id += 1;
             }
+            Item::Interface(i) => {
+                crate::iface::add_iface_members(i, item_idx, IfaceId(iface_id), t, diags);
+                iface_id += 1;
+            }
             Item::Use(_) => {}
         }
     }
+    crate::iface::check_conformance(program, t, diags);
     mark_default_allocation(program, t);
     check_self_containment(t, diags);
     crate::natives::check_natives(program, t, diags);
@@ -110,7 +120,7 @@ fn add_builtin_vectors(t: &mut Tables) {
             .iter()
             .map(|c| FieldInfo { name: c.to_string(), ty: Ty::Float, span: Span::default(), has_default: false, default_allocates: false })
             .collect();
-        t.structs.push(StructInfo { name: name.to_string(), item: usize::MAX, span: Span::default(), fields, methods: HashMap::new() });
+        t.structs.push(StructInfo { name: name.to_string(), item: usize::MAX, span: Span::default(), fields, methods: HashMap::new(), ifaces: Vec::new() });
     }
 }
 
@@ -123,6 +133,7 @@ fn check_names(program: &Program, diags: &mut Vec<Diagnostic>) {
             Item::Const(c) => (&c.bind.name, c.bind.span),
             Item::Struct(s) => (&s.name, s.name_span),
             Item::Enum(e) => (&e.name, e.name_span),
+            Item::Interface(i) => (&i.name, i.name_span),
             Item::Use(_) => continue,
         };
         // Items from other modules are named `module.name`.
@@ -259,7 +270,7 @@ fn add_enum_members(e: &EnumDecl, item_idx: usize, id: EnumId, t: &mut Tables, d
 }
 
 /// Registers a function's signature. `method` is (index in its type, type name).
-fn add_fn(f: &FnDecl, item_idx: usize, method: Option<(usize, &str)>, t: &mut Tables, diags: &mut Vec<Diagnostic>) -> FnId {
+pub(crate) fn add_fn(f: &FnDecl, item_idx: usize, method: Option<(usize, &str)>, t: &mut Tables, diags: &mut Vec<Diagnostic>) -> FnId {
     let mut params = Vec::new();
     for p in &f.params {
         let ty = resolve_type(&p.ty, t, diags);
@@ -287,6 +298,7 @@ fn add_fn(f: &FnDecl, item_idx: usize, method: Option<(usize, &str)>, t: &mut Ta
         // A native may do anything; only `pure` ones promise not to.
         io: f.is_native && !f.is_pure,
         mutates_params: false,
+        is_abstract: false,
     });
     id
 }

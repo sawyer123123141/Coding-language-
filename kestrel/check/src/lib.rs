@@ -3,6 +3,7 @@ mod builtins;
 mod collect;
 mod closure;
 mod collect_ty;
+mod iface;
 mod natives;
 mod sig;
 mod str_method;
@@ -17,11 +18,12 @@ pub use builtins::Builtin;
 pub use collect::is_reserved_name;
 pub use natives::wants_scratch;
 pub use tables::{
-    ConstId, ConstInfo, EnumId, EnumInfo, FieldInfo, FnId, FnInfo, ListMethod, LocalId, LocalInfo, ParamSig, Res, StrMethod, StructId,
+    ConstId, ConstInfo, EnumId, EnumInfo, FieldInfo, FnId, FnInfo, IfaceId, IfaceInfo, ListMethod, LocalId, LocalInfo, ParamSig, Res, StrMethod, StructId,
     StructInfo, Tables, VariantInfo, BUILTIN_STRUCTS, VEC2, VEC3,
 };
 pub use closure::{Capture, ClosureInfo};
 pub use sig::{sig_accepts, Sig, SigId, SigParam};
+pub use iface::implements;
 pub use ty::Ty;
 
 /// Resolves names and checks types. Tables are returned only when there
@@ -48,6 +50,9 @@ pub fn check_with(program: &Program, needs_main: bool) -> (Option<Tables>, Vec<D
         body::check_default_cycles(program, &t, &mut diags);
     }
     for f in 0..t.fns.len() {
+        if t.fns[f].is_abstract {
+            continue;
+        }
         body::check_fn(program, FnId(f as u32), &mut t, &mut diags);
     }
     collect_ty::check_map_values(&t, &mut diags);

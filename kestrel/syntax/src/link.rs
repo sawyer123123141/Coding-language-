@@ -54,6 +54,7 @@ pub fn link(modules: Vec<Module>, reserved: fn(&str) -> bool) -> (Program, Vec<D
                     Item::Fn(f) => Some((f.name.clone(), f.is_pub)),
                     Item::Struct(s) => Some((s.name.clone(), s.is_pub)),
                     Item::Enum(e) => Some((e.name.clone(), e.is_pub)),
+                    Item::Interface(i) => Some((i.name.clone(), i.is_pub)),
                     Item::Const(c) => Some((c.bind.name.clone(), c.is_pub)),
                     Item::Use(_) => None,
                 })

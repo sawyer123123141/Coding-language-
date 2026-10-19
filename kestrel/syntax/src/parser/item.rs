@@ -53,6 +53,7 @@ impl Parser {
                 Err(())
             }
             Tok::Enum => self.enum_decl(is_pub, start),
+            Tok::Interface => self.interface_decl(is_pub, start),
             Tok::Use if is_pub => {
                 self.error_here("`use` can't be `pub`");
                 Err(())
@@ -123,7 +124,7 @@ impl Parser {
 
     /// `(params) -> Type`, the return type being optional. Also gives the span
     /// of the signature's last token.
-    fn signature(&mut self, owner: Option<&str>) -> PResult<(Vec<Param>, Option<TypeExpr>, Span)> {
+    pub(super) fn signature(&mut self, owner: Option<&str>) -> PResult<(Vec<Param>, Option<TypeExpr>, Span)> {
         self.expect(&Tok::LParen, "`(`")?;
         let mut params = Vec::new();
         while !self.at(&Tok::RParen) {

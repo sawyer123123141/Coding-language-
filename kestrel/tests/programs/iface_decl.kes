@@ -1,0 +1,71 @@
+// expect: Goblin 7 3
+// expect: Slime 4 1
+// expect: 12
+// expect: Barrel.Full(oil: 5) 5
+// expect: Barrel.Empty 0
+interface Damageable {
+    take_damage(var self, amount: int)
+    pure hp(self) -> int
+    pure score(self, bonus: int, var out: int) -> int
+}
+
+interface Named {
+    pure label(self) -> string
+}
+
+struct Goblin: Damageable, Named {
+    health: int = 10
+
+    take_damage(var self, amount: int) { self.health -= amount }
+    // A `pure` method satisfies a declaration that isn't `pure`.
+    pure hp(self) -> int { self.health }
+    pure score(self, bonus: int, var out: int) -> int { self.health + bonus }
+    pure label(self) -> string { "Goblin" }
+}
+
+struct Slime: Damageable, Named {
+    size: int
+
+    take_damage(var self, amount: int) { self.size -= amount }
+    pure hp(self) -> int { self.size }
+    pure score(self, bonus: int, var out: int) -> int { self.size * bonus }
+    pure label(self) -> string { "Slime" }
+    // Extra methods are fine.
+    pure double(self) -> int { self.size * 2 }
+}
+
+enum Barrel: Damageable {
+    Full { oil: int }
+    Empty
+
+    take_damage(var self, amount: int) {
+        match self {
+            Full f { f.oil -= amount }
+            else { }
+        }
+    }
+
+    pure hp(self) -> int {
+        match self {
+            Full f { f.oil }
+            else { 0 }
+        }
+    }
+
+    pure score(self, bonus: int, var out: int) -> int { 0 }
+}
+
+main() {
+    var g = Goblin()
+    var o = 0
+    g.take_damage(3)
+    print(g.label(), g.hp(), g.score(-4, var o))
+    var s = Slime(size: 5)
+    s.take_damage(1)
+    print(s.label(), s.hp(), s.double() - 7)
+    print(s.score(3, var o))
+    var b = Barrel.Full(oil: 8)
+    b.take_damage(3)
+    print(b, b.hp())
+    print(Barrel.Empty, Barrel.Empty.hp())
+}

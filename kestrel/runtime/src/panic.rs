@@ -9,6 +9,8 @@ pub const PANIC_NARROW_U8: i32 = 4;
 pub const PANIC_SHIFT: i32 = 5;
 /// A loop over a map found its entry gone: the body replaced the map.
 pub const PANIC_MAP_CHANGED: i32 = 6;
+/// A bodiless interface method was called (the compiler never emits such a call).
+pub const PANIC_ABSTRACT: i32 = 7;
 
 static FAILURE_HOOK: std::sync::OnceLock<fn(&str) -> !> = std::sync::OnceLock::new();
 
@@ -90,6 +92,7 @@ pub extern "C" fn kestrel_rt_panic(kind: i32, line: i32, file: *const FileName) 
         PANIC_NARROW_U8 => "value doesn't fit in u8",
         PANIC_SHIFT => "shift amount out of range",
         PANIC_MAP_CHANGED => "a map was replaced while looping over it",
+        PANIC_ABSTRACT => "an interface method with no body was called",
         _ => "runtime error",
     };
     fail(&format!("{what} on line {line}{}", of_file(file)));

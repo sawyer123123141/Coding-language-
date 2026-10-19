@@ -9,7 +9,7 @@ pub enum Tok {
     /// A string with `{...}` interpolation.
     StrParts(Vec<StrPart>),
     // keywords
-    Pure, Let, Var, If, Else, While, For, From, To, In, Par, Match, Struct, Enum, Arena,
+    Pure, Let, Var, If, Else, While, For, From, To, In, Par, Match, Struct, Enum, Interface, Arena,
     Return, Break, Continue, And, Or, Not, True, False, NoneKw, Use, Pub, SelfKw, Native,
     // punctuation
     LParen, RParen, LBrace, RBrace, LBracket, RBracket, Comma, Colon, Dot, Arrow, Question,
@@ -50,6 +50,7 @@ pub fn keyword(s: &str) -> Option<Tok> {
         "match" => Tok::Match,
         "struct" => Tok::Struct,
         "enum" => Tok::Enum,
+        "interface" => Tok::Interface,
         "arena" => Tok::Arena,
         "return" => Tok::Return,
         "break" => Tok::Break,
@@ -100,7 +101,7 @@ impl Tok {
         match self {
             Pure => "pure", Let => "let", Var => "var", If => "if", Else => "else",
             While => "while", For => "for", From => "from", To => "to", In => "in",
-            Par => "par", Match => "match", Struct => "struct", Enum => "enum",
+            Par => "par", Match => "match", Struct => "struct", Enum => "enum", Interface => "interface",
             Arena => "arena", Return => "return", Break => "break", Continue => "continue",
             And => "and", Or => "or", Not => "not", True => "true", False => "false", NoneKw => "none",
             Use => "use", Pub => "pub", SelfKw => "self", Native => "native",

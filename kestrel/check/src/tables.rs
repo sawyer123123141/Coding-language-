@@ -30,6 +30,10 @@ pub const BUILTIN_STRUCTS: u32 = 2;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EnumId(pub u32);
 
+/// An interface, an index into `Tables::ifaces`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct IfaceId(pub u32);
+
 /// An interned element type of an array or list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ElemId(pub u32);
@@ -157,6 +161,9 @@ pub struct FnInfo {
     pub locals: Vec<LocalId>,
     pub io: bool,
     pub mutates_params: bool,
+    /// An interface's method: a signature with no body. It is never called or checked; KIR
+    /// lowers it as a stub (see `kir::lower`).
+    pub is_abstract: bool,
 }
 
 impl FnInfo {
@@ -166,6 +173,7 @@ impl FnInfo {
             (Item::Fn(f), None) => f,
             (Item::Struct(s), Some(m)) => &s.methods[m],
             (Item::Enum(e), Some(m)) => &e.methods[m],
+            (Item::Interface(i), Some(m)) => &i.methods[m],
             _ => unreachable!("FnInfo points at a function or a method"),
         }
     }
@@ -179,6 +187,8 @@ pub struct StructInfo {
     pub span: Span,
     pub fields: Vec<FieldInfo>,
     pub methods: HashMap<String, FnId>,
+    /// The interfaces it says it implements (`struct S: A, B`), in the order written, each once.
+    pub ifaces: Vec<IfaceId>,
 }
 
 #[derive(Clone, Debug)]
@@ -188,6 +198,18 @@ pub struct EnumInfo {
     pub span: Span,
     pub variants: Vec<VariantInfo>,
     pub methods: HashMap<String, FnId>,
+    pub ifaces: Vec<IfaceId>,
+}
+
+#[derive(Clone, Debug)]
+pub struct IfaceInfo {
+    pub name: String,
+    /// Index into `Program::items`.
+    pub item: usize,
+    pub span: Span,
+    /// The methods as abstract `FnInfo`s, in declaration order: also their slot order in a
+    /// method table.
+    pub methods: Vec<FnId>,
 }
 
 #[derive(Clone, Debug)]
@@ -251,6 +273,11 @@ pub struct Tables {
     pub struct_by_name: HashMap<String, StructId>,
     pub enums: Vec<EnumInfo>,
     pub enum_by_name: HashMap<String, EnumId>,
+    pub ifaces: Vec<IfaceInfo>,
+    pub iface_by_name: HashMap<String, IfaceId>,
+    /// Set while an interface's method signatures are resolved: until interface types can be
+    /// used in bodies, only there may a type name an interface (its `self`).
+    pub iface_ty_ok: bool,
     /// For a `match`: per arm, the variant it matches, or `None` for `else`.
     pub match_arms: HashMap<ExprId, Vec<Option<u32>>>,
     /// For a field access `a.b`: the index of `b` in its struct.
@@ -325,6 +352,10 @@ impl Tables {
 
     pub fn enm(&self, id: EnumId) -> &EnumInfo {
         &self.enums[id.0 as usize]
+    }
+
+    pub fn iface(&self, id: IfaceId) -> &IfaceInfo {
+        &self.ifaces[id.0 as usize]
     }
 
     pub fn elem(&self, id: ElemId) -> Ty {

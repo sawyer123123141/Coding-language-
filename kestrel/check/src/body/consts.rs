@@ -19,7 +19,7 @@ pub(crate) fn check_consts(program: &Program, t: &mut Tables, diags: &mut Vec<Di
         .iter()
         .filter_map(|it| match it {
             Item::Const(c) => Some(c),
-            Item::Fn(_) | Item::Struct(_) | Item::Enum(_) | Item::Use(_) => None,
+            Item::Fn(_) | Item::Struct(_) | Item::Enum(_) | Item::Interface(_) | Item::Use(_) => None,
         })
         .collect();
     // A constant is checked after the constants it uses, whichever file they are in

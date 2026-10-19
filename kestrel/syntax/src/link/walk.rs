@@ -19,10 +19,16 @@ impl Rewriter<'_> {
                         self.expr(d);
                     }
                 }
+                self.iface_names(&mut s.ifaces);
                 s.methods.iter_mut().for_each(|m| self.func(m));
+            }
+            Item::Interface(i) => {
+                i.name = self.qualified(&i.name).unwrap_or_else(|| i.name.clone());
+                i.methods.iter_mut().for_each(|m| self.func(m));
             }
             Item::Enum(e) => {
                 e.name = self.qualified(&e.name).unwrap_or_else(|| e.name.clone());
+                self.iface_names(&mut e.ifaces);
                 for v in &mut e.variants {
                     v.fields.iter_mut().for_each(|f| self.ty(&mut f.ty));
                 }
@@ -36,6 +42,16 @@ impl Rewriter<'_> {
                 self.expr(&mut c.value);
             }
             Item::Use(_) => {}
+        }
+    }
+
+    /// The interfaces in `struct S: A, B` are named like types.
+    fn iface_names(&mut self, ifaces: &mut [(String, crate::span::Span)]) {
+        for (name, span) in ifaces {
+            match self.qualified(name) {
+                Some(q) => *name = q,
+                None => self.unseen(&name.clone(), *span, "type", false),
+            }
         }
     }
 

@@ -18,7 +18,7 @@ impl Tables {
     fn has_heap_below(&self, ty: Ty, seen: &mut Vec<Ty>) -> bool {
         match ty {
             // A closure's environment is heap memory (a function value with none holds nothing).
-            Ty::Str | Ty::Array(_) | Ty::List(_) | Ty::Map(..) | Ty::Fn(_) => true,
+            Ty::Str | Ty::Array(_) | Ty::List(_) | Ty::Map(..) | Ty::Fn(_) | Ty::Iface(_) => true,
             Ty::Optional(e) => self.has_heap_below(self.elem(e), seen),
             Ty::Struct(_) | Ty::Enum(_) if seen.contains(&ty) => false,
             Ty::Struct(s) => {
@@ -135,6 +135,7 @@ impl Tables {
         match ty {
             Ty::Struct(id) => self.strukt(id).name.clone(),
             Ty::Enum(id) => self.enm(id).name.clone(),
+            Ty::Iface(id) => self.iface(id).name.clone(),
             Ty::Variant(id, v) => format!("{}.{}", self.enm(id).name, self.enm(id).variants[v as usize].name),
             Ty::Array(e) => format!("[{}]", self.ty_name(self.elem(e))),
             Ty::List(e) => format!("list[{}]", self.ty_name(self.elem(e))),

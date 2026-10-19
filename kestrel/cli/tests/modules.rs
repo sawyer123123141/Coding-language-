@@ -374,3 +374,36 @@ main() {
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert_eq!(String::from_utf8_lossy(&out.stdout), "6\n9\n");
 }
+
+#[test]
+fn a_type_can_list_an_interface_from_another_module() {
+    let shapes = "pub interface Shape {
+    pure area(self) -> int
+}
+
+pub struct Square: Shape {
+    side: int
+    pure area(self) -> int { self.side * self.side }
+}
+";
+    let main = "use { Shape, Square from shapes }
+struct Rect: Shape {
+    w: int
+    h: int
+    pure area(self) -> int { self.w * self.h }
+}
+main() {
+    print(Square(3).area(), Rect(2, 5).area())
+}
+";
+    let dir = project("modules_iface", &[("main.kes", main), ("shapes.kes", shapes)]);
+    let out = kestrel(&["run"], &dir.join("main.kes"));
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "9 10\n");
+    // A module that doesn't import the interface can't list it.
+    let main = "use shapes\nstruct Rect: Shape {\n    w: int\n    pure area(self) -> int { self.w }\n}\nmain() { }\n";
+    let dir = project("modules_iface_unseen", &[("main.kes", main), ("shapes.kes", shapes)]);
+    let out = kestrel(&["check", "--diagnostics=short"], &dir.join("main.kes"));
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("`Shape` isn't an interface"));
+}
