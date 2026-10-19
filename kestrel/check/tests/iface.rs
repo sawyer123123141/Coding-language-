@@ -71,9 +71,9 @@ fn abstract_methods_are_numbered_where_the_interface_appears() {
 }
 
 #[test]
-fn an_interface_type_is_not_usable_yet() {
+fn an_interface_type_can_be_named_and_only_implementors_convert() {
     let (_, errs) = run("interface I { g(self) }\nmain() {\n    let x: I = 1\n}\n");
-    assert_eq!(errs, vec!["interface types can't be used yet"]);
+    assert_eq!(errs, vec!["expected I, found int"]);
 }
 
 #[test]

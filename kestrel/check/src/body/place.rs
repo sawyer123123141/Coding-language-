@@ -154,6 +154,10 @@ impl<'a> BodyChecker<'a> {
             self.error(target.span, msg);
         }
         self.check_value(value, Some(target_ty));
+        // (Nothing is stored then, so the memory rules have nothing to add.)
+        if op == AssignOp::Set && self.check_iface_replace(target, value, target_ty) {
+            return;
+        }
         self.consume(value);
         if appends {
             self.check_store_new(target, value);

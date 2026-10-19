@@ -36,7 +36,14 @@ impl<'a> BodyChecker<'a> {
         };
         let elem = self.check_element(first, None);
         for item in rest {
-            self.check_element(item, if elem == Ty::Error { None } else { Some(elem) });
+            let want = if elem == Ty::Error { None } else { Some(elem) };
+            let found = self.check_expr(item, want);
+            // Two types that share an interface: the program probably wants a list of it.
+            if let Some(iface) = self.mixed_by_iface(elem, found) {
+                self.error(item.span, format!("give the list a type: `var foes: list[{iface}] = [...]`"));
+                continue;
+            }
+            self.finish_element(item, found, want);
         }
         if elem == Ty::Error {
             return Ty::Error;
@@ -46,7 +53,13 @@ impl<'a> BodyChecker<'a> {
 
     /// A value stored into a collection: a literal element or an `.add` argument.
     pub(crate) fn check_element(&mut self, item: &Expr, want: Option<Ty>) -> Ty {
-        let ty = self.check_value(item, want);
+        let found = self.check_expr(item, want);
+        self.finish_element(item, found, want)
+    }
+
+    /// The rest of `check_element`, once `item` has been checked and found to be `found`.
+    fn finish_element(&mut self, item: &Expr, found: Ty, want: Option<Ty>) -> Ty {
+        let ty = self.finish_value(item, found, want);
         if ty == Ty::Unit {
             self.error(item.span, "this has no value to store");
             return Ty::Error;
@@ -110,6 +123,11 @@ impl<'a> BodyChecker<'a> {
         }
         if elem == Ty::Error {
             return Ty::Error;
+        }
+        // Zero-filling would leave interface values empty, and calling one would crash.
+        if name == "array" && self.t.zero_fill_breaks(elem) {
+            let msg = format!("`array[{}](n)` would start with empty items; build it with a literal or `add`", self.tn(elem));
+            self.error(e.span, msg);
         }
         let id = self.t.intern_elem(elem);
         if name == "array" {

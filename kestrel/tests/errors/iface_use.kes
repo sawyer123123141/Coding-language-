@@ -1,0 +1,143 @@
+// error 64: can't replace `d`: it may be the caller's `Goblin`; change it through its methods
+// error 68: can't replace `d`: it may be the caller's `Goblin`; change it through its methods
+// error 72: can't replace `d`: it may be the caller's `Goblin`; change it through its methods
+// error 77: `var` parameter `o` needs exactly Damageable?, found Goblin
+// error 78: `var` parameter `os` needs exactly list[Damageable], found Goblin
+// error 85: expected list[Damageable], found list[Goblin]
+// error 89: interface values can't be compared
+// error 90: interface values can't be compared
+// error 94: `has` needs items that `==` can compare (numbers, bools and strings); `list[Damageable]` holds `Damageable`
+// error 98: give the list a type: `var foes: list[Damageable] = [...]`
+// error 102: `array[Damageable](n)` would start with empty items; build it with a literal or `add`
+// error 106: pure functions can only call pure functions; `Damageable.log` isn't pure
+// error 112: `par for` bodies can only call `pure` functions; `Damageable.log` isn't `pure`
+// error 117: can't call `hit` on parameter `d`: it changes `d`, which isn't `var`
+// error 122: `Pool` owns an `Arena`, so it can't be stored as a `Damageable`; keep it in a `list[Pool]`
+// error 123: `Pool()` owns an `Arena`; store it in a `let` first, then pass it
+// error 131: this memory is freed at the end of the `arena { }` block, but `keep` lives longer
+// error 136: this memory is in the caller's current arena, which may not live as long as `h`
+// error 140: expected Drawable, found Damageable
+interface Damageable {
+    hit(var self, n: int)
+    pure hp(self) -> int
+    log(self, n: int)
+}
+
+interface Drawable {
+    pure glyph(self) -> int
+}
+
+struct Goblin: Damageable {
+    health: int = 10
+    hit(var self, n: int) { self.health -= n }
+    pure hp(self) -> int { self.health }
+    log(self, n: int) { print(n) }
+}
+
+struct Slime: Damageable {
+    size: int = 3
+    hit(var self, n: int) { self.size -= n }
+    pure hp(self) -> int { self.size }
+    log(self, n: int) { print(n) }
+}
+
+struct Pool: Damageable {
+    mem: Arena = Arena()
+    hits: int = 0
+    hit(var self, n: int) { self.hits += n }
+    pure hp(self) -> int { self.hits }
+    log(self, n: int) { print(n) }
+}
+
+struct Holder {
+    d: Damageable
+}
+
+show(d: Damageable) { }
+heal(var d: Damageable) { }
+heal_opt(var o: Damageable?) { }
+heal_list(var os: list[Damageable]) { }
+take_list(os: list[Damageable]) { }
+draw(x: Drawable) { }
+
+swap(var d: Damageable) {
+    d = Slime()
+}
+
+closure_replace() {
+    let f = (var d: Damageable) { d = Slime() }
+}
+
+typed_replace() {
+    let f: (var Damageable) = (var d) { d = Slime() }
+}
+
+var_conversions() {
+    var g = Goblin()
+    heal_opt(var g)
+    heal_list(var g)
+    heal(var g)
+    show(g)
+}
+
+shallow() {
+    var gs: list[Goblin] = [Goblin()]
+    take_list(gs)
+}
+
+compare(a: Damageable, b: Damageable, h1: Holder, h2: Holder) {
+    if a == b { }
+    if h1 == h2 { }
+}
+
+find_in(os: list[Damageable], g: Goblin) {
+    let found = os.has(g)
+}
+
+mixed() {
+    let foes = [Goblin(), Slime()]
+}
+
+empty_items() {
+    let items = array[Damageable](3)
+}
+
+pure impure_call(d: Damageable) -> int {
+    d.log(1)
+    d.hp()
+}
+
+parallel(foes: list[Damageable]) {
+    par for f in foes {
+        f.log(1)
+    }
+}
+
+changing(d: Damageable) {
+    d.hit(1)
+}
+
+owning() {
+    var p = Pool()
+    let d: Damageable = p
+    show(Pool())
+    show(p)
+    heal(var p)
+}
+
+arena_store() {
+    var keep: list[Damageable] = []
+    arena {
+        keep.add(Goblin())
+    }
+}
+
+param_store(var h: Holder) {
+    h.d = Goblin()
+}
+
+other_interface(d: Damageable) {
+    draw(d)
+}
+
+main() { }

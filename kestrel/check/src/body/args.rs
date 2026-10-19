@@ -80,7 +80,7 @@ impl<'a> BodyChecker<'a> {
                             self.note_stack_closure(a);
                         }
                     }
-                    self.check_value(&a.value, Some(p.ty));
+                    self.check_arg_value(&a.value, p.ty);
                 }
             }
         }
@@ -227,7 +227,9 @@ impl<'a> BodyChecker<'a> {
                 }
             }
         }
-        if ty != p.ty && ty != Ty::Error && p.ty != Ty::Error {
+        // A concrete place goes to exactly `var I`, lent (see `lend_var_arg`).
+        let lent = ty != p.ty && self.lend_var_arg(&a.value, ty, p.ty);
+        if ty != p.ty && ty != Ty::Error && p.ty != Ty::Error && !lent {
             let which = if p.name.is_empty() { "this `var` argument".to_string() } else { format!("`var` parameter `{}`", p.name) };
             let msg = format!("{which} needs exactly {}, found {}", self.tn(p.ty), self.tn(ty));
             self.error(a.value.span, msg);

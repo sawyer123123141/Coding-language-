@@ -8,6 +8,8 @@ use crate::tables::{FnInfo, ListMethod, Res, Tables};
 use crate::ty::Ty;
 
 const BAD_TYPE: &str = "native functions can only take numbers, bools, strings, vectors, arrays of plain values, and enums or structs of those";
+/// Rust can't read an interface value (a data pointer and a method table), however it is wrapped.
+const NO_IFACE: &str = "native functions can't take interface values";
 const BAD_TYPE_HELP: &str = concat!(
     "a native can take int, i64, u8, float, f64, bool, string, vec2, vec3, an enum with no fields, ",
     "an array `[T]` of numbers, bools or structs of those, or a struct of all of these (a struct field ",
@@ -67,12 +69,16 @@ pub(crate) fn check_natives(program: &Program, t: &Tables, diags: &mut Vec<Diagn
                 let help = "natives only read their arguments; remove `var`";
                 diags.push(Diagnostic::error(p.bind.span, "native functions can't take `var` parameters").with_help(help));
             }
-            if !param_ok(t, sig.ty) {
+            if t.holds_iface(sig.ty) {
+                diags.push(Diagnostic::error(p.ty.span, NO_IFACE));
+            } else if !param_ok(t, sig.ty) {
                 diags.push(Diagnostic::error(p.ty.span, BAD_TYPE).with_help(BAD_TYPE_HELP));
             }
         }
         if let Some(ret) = &decl.ret {
-            if !result_ok(t, f.ret) {
+            if t.holds_iface(f.ret) {
+                diags.push(Diagnostic::error(ret.span, NO_IFACE));
+            } else if !result_ok(t, f.ret) {
                 diags.push(Diagnostic::error(ret.span, BAD_TYPE).with_help(BAD_TYPE_HELP));
             }
         }

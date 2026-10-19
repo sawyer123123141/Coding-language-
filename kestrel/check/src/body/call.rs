@@ -89,10 +89,15 @@ impl<'a> BodyChecker<'a> {
     pub(crate) fn check_discarded_call(&mut self, e: &Expr) -> Ty {
         self.discarded = Some(e.id);
         let ty = self.check_expr(e, None);
-        match self.t.res.get(&e.id).copied() {
+        let res = self.t.res.get(&e.id).copied();
+        // A user function or method, or an interface method called through an interface value.
+        let callee = self.t.callee(res.as_ref());
+        match res {
             // A pure function changes nothing but its `var` arguments.
-            Some(Res::Fn(f)) if self.t.fns[f.0 as usize].is_pure && !self.t.fns[f.0 as usize].params.iter().any(|p| p.is_var) => {
-                let name = self.t.fns[f.0 as usize].name.clone();
+            Some(Res::Fn(_) | Res::IfaceCall { .. })
+                if callee.is_some_and(|f| self.t.fns[f.0 as usize].is_pure && !self.t.fns[f.0 as usize].params.iter().any(|p| p.is_var)) =>
+            {
+                let name = self.t.fns[callee.expect("a call").0 as usize].name.clone();
                 self.error(e.span, format!("the result of pure function `{name}` is unused, so this line does nothing"));
             }
             Some(Res::Builtin(b)) if b.is_pure() => {

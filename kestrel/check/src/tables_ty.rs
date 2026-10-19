@@ -34,29 +34,75 @@ impl Tables {
     }
 
     /// Whether `ty` is a function type, or holds one in a field, a payload, an element or an
-    /// optional. Such values can't be compared.
+    /// optional. Such values can't be compared. (Rule 7b of the closures spec asks this; it
+    /// doesn't look inside interface values.)
     pub fn holds_fn(&self, ty: Ty) -> bool {
-        self.holds_fn_below(ty, &mut Vec::new())
+        self.holds_where(ty, &mut Vec::new(), &|t| matches!(t, Ty::Fn(_)))
     }
 
-    /// `holds_fn`, skipping the types in `seen`: a type that contains itself is an error
-    /// reported elsewhere, and looking into it again would never end.
-    fn holds_fn_below(&self, ty: Ty, seen: &mut Vec<Ty>) -> bool {
+    /// Whether `ty` is an interface type, or holds one in a field, a payload, an element, a map
+    /// value or an optional.
+    pub fn holds_iface(&self, ty: Ty) -> bool {
+        self.holds_where(ty, &mut Vec::new(), &|t| matches!(t, Ty::Iface(_)))
+    }
+
+    /// Whether values of `ty` can't be compared with `==`: it is, or holds, a function type or an
+    /// interface type.
+    pub fn holds_uncomparable(&self, ty: Ty) -> bool {
+        self.holds_where(ty, &mut Vec::new(), &|t| matches!(t, Ty::Fn(_) | Ty::Iface(_)))
+    }
+
+    /// Whether `ty` holds an interface value that a zero-filled array would leave empty: one
+    /// directly, in a field, a payload or an array element (an optional starts as `none`, and a
+    /// list or map starts empty).
+    pub fn zero_fill_breaks(&self, ty: Ty) -> bool {
+        self.zero_fill_below(ty, &mut Vec::new())
+    }
+
+    fn zero_fill_below(&self, ty: Ty, seen: &mut Vec<Ty>) -> bool {
         match ty {
-            Ty::Fn(_) => true,
-            Ty::Array(e) | Ty::List(e) | Ty::Optional(e) => self.holds_fn_below(self.elem(e), seen),
-            Ty::Map(k, v) => self.holds_fn_below(self.elem(k), seen) || self.holds_fn_below(self.elem(v), seen),
+            Ty::Iface(_) => true,
+            Ty::Array(e) => self.zero_fill_below(self.elem(e), seen),
             Ty::Struct(_) | Ty::Enum(_) if seen.contains(&ty) => false,
             Ty::Struct(s) => {
                 seen.push(ty);
-                self.strukt(s).fields.iter().any(|f| self.holds_fn_below(f.ty, seen))
+                self.strukt(s).fields.iter().any(|f| self.zero_fill_below(f.ty, seen))
             }
             Ty::Enum(e) => {
                 seen.push(ty);
-                self.enm(e).variants.iter().flat_map(|v| &v.fields).any(|f| self.holds_fn_below(f.ty, seen))
+                self.enm(e).variants.iter().flat_map(|v| &v.fields).any(|f| self.zero_fill_below(f.ty, seen))
             }
             _ => false,
         }
+    }
+
+    /// Whether `ty` is, or holds in a field, a payload, an element or an optional, a type for which
+    /// `leaf` is true. `seen` stops a walk through a type that contains itself (an error reported
+    /// elsewhere). The walk does not go inside function or interface types.
+    fn holds_where(&self, ty: Ty, seen: &mut Vec<Ty>, leaf: &dyn Fn(Ty) -> bool) -> bool {
+        if leaf(ty) {
+            return true;
+        }
+        match ty {
+            Ty::Array(e) | Ty::List(e) | Ty::Optional(e) => self.holds_where(self.elem(e), seen, leaf),
+            Ty::Map(k, v) => self.holds_where(self.elem(k), seen, leaf) || self.holds_where(self.elem(v), seen, leaf),
+            Ty::Struct(_) | Ty::Enum(_) if seen.contains(&ty) => false,
+            Ty::Struct(s) => {
+                seen.push(ty);
+                self.strukt(s).fields.iter().any(|f| self.holds_where(f.ty, seen, leaf))
+            }
+            Ty::Enum(e) => {
+                seen.push(ty);
+                self.enm(e).variants.iter().flat_map(|v| &v.fields).any(|f| self.holds_where(f.ty, seen, leaf))
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether `ty` is, or holds in a field, a payload, an element or an optional, an array, list
+    /// or map. (KIR reads a constant of such a type in place; see `kir::lower::consts::hoisted`.)
+    pub fn holds_collection(&self, ty: Ty) -> bool {
+        self.holds_where(ty, &mut Vec::new(), &|t| matches!(t, Ty::Array(_) | Ty::List(_) | Ty::Map(..)))
     }
 
     /// Whether `ty` holds an `Arena` or a `GpuHandle` (in fields, payloads or elements):
@@ -67,7 +113,9 @@ impl Tables {
             Ty::Struct(s) => self.owning_structs.get(s.0 as usize).copied().unwrap_or(false),
             Ty::Enum(e) => self.owning_enums.get(e.0 as usize).copied().unwrap_or(false),
             Ty::Array(e) | Ty::List(e) | Ty::Optional(e) => self.is_owning(self.elem(e)),
-            // Maps can't hold owning values (see `check_map_values`).
+            // Maps can't hold owning values (see `check_map_values`), and an interface value never
+            // owns anything: an owning implementor can only be lent to one, not stored as one.
+            Ty::Iface(_) => false,
             _ => false,
         }
     }

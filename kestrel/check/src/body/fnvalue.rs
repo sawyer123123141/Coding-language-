@@ -54,6 +54,7 @@ impl<'a> BodyChecker<'a> {
                 self.t.strukt(sid).methods.contains_key(name) || (self.t.vec_dims(base_ty).is_some() && Builtin::vector_method(name).is_some())
             }
             Ty::Enum(id) => self.t.enm(id).methods.contains_key(name),
+            Ty::Iface(id) => self.iface_method(id, name).is_some(),
             _ => false,
         };
         if is_method {
@@ -194,7 +195,7 @@ impl<'a> BodyChecker<'a> {
                         self.error_help(a.span, format!("{} isn't `var`", param_ref(p, shown)), "remove `var`");
                     }
                     self.note_stack_closure(a);
-                    self.check_value(&a.value, Some(p.ty));
+                    self.check_arg_value(&a.value, p.ty);
                 }
                 None => {
                     self.check_expr(&a.value, None);

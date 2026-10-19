@@ -1,6 +1,6 @@
 //! Unary and binary operators: numbers, bit operators, comparisons, vectors and string `+`.
 
-use kestrel_syntax::ast::{BinaryOp, Expr, UnaryOp};
+use kestrel_syntax::ast::{BinaryOp, Expr, ExprKind, UnaryOp};
 
 use super::BodyChecker;
 use crate::ty::Ty;
@@ -65,8 +65,13 @@ impl<'a> BodyChecker<'a> {
             _ if op.is_comparison() => {
                 let lt = self.check_expr(lhs, None);
                 let rt = self.check_expr(rhs, Some(lt).filter(|t| t.is_numeric()));
-                if matches!(op, BinaryOp::Eq | BinaryOp::Ne) && [lt, rt].iter().any(|&t| self.t.holds_fn(t)) {
-                    self.error(e.span, "function values can't be compared");
+                // (Rule 7b's `holds_fn` stays separate: it doesn't look inside interface values.)
+                // Testing against `none` compares no values (it asks only whether there is one), so
+                // `d == none` is not a comparison of interface values.
+                let against_none = matches!(lhs.kind, ExprKind::None) || matches!(rhs.kind, ExprKind::None);
+                let functions = [lt, rt].iter().any(|&t| self.t.holds_fn(t));
+                if matches!(op, BinaryOp::Eq | BinaryOp::Ne) && [lt, rt].iter().any(|&t| self.t.holds_uncomparable(t)) && (functions || !against_none) {
+                    self.error(e.span, if functions { "function values can't be compared" } else { "interface values can't be compared" });
                     return Ty::Bool;
                 }
                 if matches!(op, BinaryOp::Eq | BinaryOp::Ne) && [lt, rt].iter().any(|t| matches!(t, Ty::Bool | Ty::Str)) {

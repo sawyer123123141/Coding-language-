@@ -37,9 +37,7 @@ pub(crate) fn add_iface_members(decl: &InterfaceDecl, item_idx: usize, id: Iface
         }
         seen.push(&m.name);
         // The `self` parameter is typed as the interface itself.
-        t.iface_ty_ok = true;
         let fid = add_fn(m, item_idx, Some((mi, &decl.name)), t, diags);
-        t.iface_ty_ok = false;
         t.fns[fid.0 as usize].is_abstract = true;
         methods.push(fid);
     }

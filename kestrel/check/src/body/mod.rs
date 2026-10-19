@@ -11,6 +11,7 @@ mod enums;
 mod exclusive;
 mod expr;
 mod fnvalue;
+mod iface;
 mod let_else;
 mod in_block;
 mod list_fns;
@@ -235,6 +236,11 @@ impl<'a> BodyChecker<'a> {
     /// Checks `e` against an expected type, recording a conversion or an error.
     pub(crate) fn check_value(&mut self, e: &Expr, want: Option<Ty>) -> Ty {
         let found = self.check_expr(e, want);
+        self.finish_value(e, found, want)
+    }
+
+    /// The rest of `check_value`, once `e` has been checked and found to be `found`.
+    pub(crate) fn finish_value(&mut self, e: &Expr, found: Ty, want: Option<Ty>) -> Ty {
         if found == Ty::Never {
             return self.reject_never(e, found);
         }
@@ -279,6 +285,10 @@ impl<'a> BodyChecker<'a> {
         }
         if from.coerces_to(to) {
             self.t.coerce.insert(e.id, to);
+            return;
+        }
+        // A struct or enum goes where an interface it lists is expected (or that interface's optional).
+        if self.coerce_to_iface(e, from, to) {
             return;
         }
         // A pure function value goes where a non-pure one of the same shape is expected; they

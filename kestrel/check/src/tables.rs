@@ -112,6 +112,9 @@ pub enum Res {
     /// A call through a function value (a local by name, a struct field, or `CallValue`).
     /// For a field call (`b.on_click()`), `field_index` of the call has the field.
     CallValue(SigId),
+    /// `d.hp()` where `d` is an interface value: the method in slot `slot` of the interface's method
+    /// table, which is `Tables::iface(iface).methods[slot]` (declaration order).
+    IfaceCall { iface: IfaceId, slot: u32 },
 }
 
 #[derive(Clone, Debug)]
@@ -242,6 +245,12 @@ pub struct ConstInfo {
 pub struct Tables {
     pub expr_ty: Vec<Ty>,
     pub coerce: HashMap<ExprId, Ty>,
+    /// The arguments that are lent to an interface parameter instead of being copied: each is
+    /// directly a concrete struct or enum **place** (as KIR's `place()` defines one: a local, a
+    /// field, a list or array element, a heap constant; not a map lookup or a string index) passed
+    /// to a parameter of interface type, `var` or not. Each also has a `coerce` entry. KIR borrows
+    /// exactly these and boxes every other coercion to an interface.
+    pub iface_borrows: HashSet<ExprId>,
     pub res: HashMap<ExprId, Res>,
     pub bind_local: HashMap<BindId, LocalId>,
     /// For a call: entry `i` is the index (into the call's args) of the
@@ -275,9 +284,6 @@ pub struct Tables {
     pub enum_by_name: HashMap<String, EnumId>,
     pub ifaces: Vec<IfaceInfo>,
     pub iface_by_name: HashMap<String, IfaceId>,
-    /// Set while an interface's method signatures are resolved: until interface types can be
-    /// used in bodies, only there may a type name an interface (its `self`).
-    pub iface_ty_ok: bool,
     /// For a `match`: per arm, the variant it matches, or `None` for `else`.
     pub match_arms: HashMap<ExprId, Vec<Option<u32>>>,
     /// For a field access `a.b`: the index of `b` in its struct.

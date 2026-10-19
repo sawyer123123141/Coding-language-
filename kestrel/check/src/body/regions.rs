@@ -122,6 +122,18 @@ impl<'a> BodyChecker<'a> {
     /// it holds may hold the value's memory and is dropped on the way out, so
     /// the value is copied.
     fn region(&self, e: &Expr, moving: bool) -> u64 {
+        let inner = self.region_of_value(e, moving);
+        // A value stored as an interface value is copied into the current arena whatever it is, so
+        // a struct of plain numbers has a region once it is one (like a string).
+        if self.boxes_iface(e) {
+            inner | self.current()
+        } else {
+            inner
+        }
+    }
+
+    /// `region` for the value `e` has before any conversion to an interface value.
+    fn region_of_value(&self, e: &Expr, moving: bool) -> u64 {
         let ty = self.t.ty(e.id);
         if !self.t.has_heap(ty) {
             return 0;

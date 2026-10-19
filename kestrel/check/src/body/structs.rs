@@ -183,6 +183,9 @@ impl<'a> BodyChecker<'a> {
                 let info = self.t.enm(id);
                 info.methods.get(name).copied().ok_or_else(|| Some(format!("`{}` has no method `{name}`", info.name)))
             }
+            Ty::Iface(id) => {
+                self.iface_method(id, name).map(|(f, _)| f).ok_or_else(|| Some(format!("`{}` has no method `{name}`", self.t.iface(id).name)))
+            }
             Ty::Error => Err(None),
             other => Err(Some(format!("{} has no method `{name}`", self.tn(other)))),
         };
@@ -198,7 +201,12 @@ impl<'a> BodyChecker<'a> {
                 return Ty::Error;
             }
         };
-        self.t.res.insert(e.id, Res::Fn(fid));
+        // A call through an interface value names the method by its slot in the method table.
+        let res = match receiver_ty {
+            Ty::Iface(iface) => Res::IfaceCall { iface, slot: self.iface_method(iface, name).expect("found above").1 },
+            _ => Res::Fn(fid),
+        };
+        self.t.res.insert(e.id, res);
         self.check_callee_purity(*name_span, fid);
         let by_pointer = self.t.func(fid).params[0].is_var || receiver_ty.is_aggregate();
         let mut recv = Receiver { expr: receiver, var_root: None, read_root: None };

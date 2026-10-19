@@ -25,10 +25,12 @@ impl<'a> BodyChecker<'a> {
         match &e.kind {
             ExprKind::Call { args, .. } => self.changes_by_args(args, out),
             ExprKind::MethodCall { receiver, args, .. } => {
-                let changes_receiver = match self.t.res.get(&e.id) {
-                    Some(Res::Fn(f)) => self.t.func(*f).params.first().is_some_and(|p| p.is_var),
-                    Some(Res::ListAdd | Res::MapRemove) => true,
-                    Some(Res::List(m)) => m.changes_receiver(),
+                let res = self.t.res.get(&e.id);
+                // A user method, or an interface method called through an interface value.
+                let changes_receiver = match (self.t.callee(res), res) {
+                    (Some(f), _) => self.t.func(f).params.first().is_some_and(|p| p.is_var),
+                    (None, Some(Res::ListAdd | Res::MapRemove)) => true,
+                    (None, Some(Res::List(m))) => m.changes_receiver(),
                     _ => false,
                 };
                 if changes_receiver {

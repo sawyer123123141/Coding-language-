@@ -152,6 +152,11 @@ impl<'a> BodyChecker<'a> {
     /// `consume`, where `every` says whether every path through the enclosing `if` / `match`
     /// values reaches `v`.
     fn consume_on(&mut self, v: &Expr, every: bool) {
+        // Stored as an interface value, it is copied into the current arena (an owning one was
+        // refused where it was converted), so nothing of the variable moves.
+        if self.boxes_iface(v) {
+            return;
+        }
         let ty = self.t.ty(v.id);
         if !self.t.is_owning(ty) {
             return;
