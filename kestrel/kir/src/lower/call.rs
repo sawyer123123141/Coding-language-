@@ -132,7 +132,7 @@ impl<'a> FnLowerer<'a> {
     /// that push the arena and evaluate the arguments, the call's own parts, and the
     /// statements that pop it. Leaving early from an argument pops it too (see `scratch`).
     fn scratch_parts(&mut self, e: &ast::Expr, f: FnId, args: &[ast::Arg]) -> (Vec<Stmt>, FuncIdx, Vec<Arg>, Vec<Stmt>) {
-        let mut before = vec![Stmt::PushArena(None)];
+        let mut before = vec![Stmt::PushArena(None, 0)];
         let ((pre, fi, lowered), after) = self.scratch(|this| this.call_parts(e, f, args, None));
         before.extend(pre);
         (before, fi, lowered, after)
@@ -150,7 +150,7 @@ impl<'a> FnLowerer<'a> {
             out.extend(after);
             self.declared(result);
         } else {
-            out.push(Stmt::Call(fi, lowered));
+            out.push(Stmt::Call(fi, lowered, line));
             out.extend(after);
         }
     }

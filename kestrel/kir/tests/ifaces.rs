@@ -30,7 +30,7 @@ fn call_args(stmts: &[Stmt]) -> Vec<Arg> {
     let mut out = Vec::new();
     visit::walk(stmts, &mut |n| match n {
         visit::Node::Expr(Expr { kind: ExprKind::Call(_, a) | ExprKind::CallIndirect { args: a, .. } | ExprKind::CallVirtual { args: a, .. }, .. })
-        | visit::Node::Stmt(Stmt::Call(_, a) | Stmt::CallIndirect { args: a, .. } | Stmt::CallVirtual { args: a, .. }) => out.extend(a.iter().cloned()),
+        | visit::Node::Stmt(Stmt::Call(_, a, _) | Stmt::CallIndirect { args: a, .. } | Stmt::CallVirtual { args: a, .. }) => out.extend(a.iter().cloned()),
         _ => {}
     });
     out
@@ -141,7 +141,7 @@ main() {
     assert_eq!((*size, *align), m.size_align(value.ty));
     assert_eq!(copy.locals[c.0 as usize].ty, KTy::I64);
     // The list gets its own items, through the list's copy function.
-    assert!(matches!(fix, Stmt::Call(_, a) if matches!(&a[..], [Arg::Ref(p)] if p.root == *local)), "{fix:#?}");
+    assert!(matches!(fix, Stmt::Call(_, a, _) if matches!(&a[..], [Arg::Ref(p)] if p.root == *local)), "{fix:#?}");
 }
 
 #[test]
@@ -247,7 +247,7 @@ fn a_reordered_call_keeps_the_borrowed_value_its_own_argument() {
     let pair = idx(&m, "pair");
     let mut found = None;
     visit::walk(&func(&m, "main").body, &mut |n| {
-        if let visit::Node::Stmt(Stmt::Call(f, a)) = n {
+        if let visit::Node::Stmt(Stmt::Call(f, a, _)) = n {
             if *f == pair {
                 found = Some(a.clone());
             }

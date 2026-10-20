@@ -49,9 +49,9 @@ fn arena_ops(m: &Module, name: &str) -> Vec<&'static str> {
     visit::walk(&func(m, name).body, &mut |node| {
         if let visit::Node::Stmt(s) = node {
             match s {
-                Stmt::PushArena(None) => ops.push("push"),
+                Stmt::PushArena(None, _) => ops.push("push"),
                 Stmt::PopArena { free: true } => ops.push("pop"),
-                Stmt::PushArena(Some(_)) | Stmt::PopArena { free: false } => ops.push("keep"),
+                Stmt::PushArena(Some(_), _) | Stmt::PopArena { free: false } => ops.push("keep"),
                 _ => {}
             }
         }
@@ -68,13 +68,13 @@ fn an_interpolated_argument_is_built_in_a_scratch_arena_freed_after_the_call() {
     // A value-returning call: the arena is pushed, the call's result kept in a temporary,
     // the arena popped, and only then is the result read.
     let Stmt::Let(_, Expr { kind: ExprKind::Seq(inside, result), .. }) = &body[1] else { panic!("{body:#?}") };
-    assert!(matches!(inside.first(), Some(Stmt::PushArena(None))), "{inside:#?}");
+    assert!(matches!(inside.first(), Some(Stmt::PushArena(None, _))), "{inside:#?}");
     assert!(matches!(inside.last(), Some(Stmt::PopArena { free: true })), "{inside:#?}");
     assert!(matches!(&inside[1], Stmt::Let(_, Expr { kind: ExprKind::Call(..), .. })), "{inside:#?}");
     assert_eq!(inside.len(), 3, "{inside:#?}");
     assert!(matches!(result.kind, ExprKind::Load(_)), "{result:#?}");
     // A call with no result: the same three statements, in the caller's own list.
-    assert!(matches!(body[2], Stmt::PushArena(None)), "{body:#?}");
+    assert!(matches!(body[2], Stmt::PushArena(None, _)), "{body:#?}");
     assert!(matches!(&body[3], Stmt::Call(..)), "{body:#?}");
     assert!(matches!(body[4], Stmt::PopArena { free: true }), "{body:#?}");
     assert_eq!(body.len(), 6, "{body:#?}");
@@ -199,7 +199,7 @@ fn steps(m: &Module, name: &str) -> Vec<Step> {
     let mut steps = Vec::new();
     visit::walk(&func(m, name).body, &mut |node| match node {
         visit::Node::Stmt(Stmt::SetLine(n)) => steps.push(Step::Line(*n)),
-        visit::Node::Expr(Expr { kind: ExprKind::Call(f, _), .. }) | visit::Node::Stmt(Stmt::Call(f, _)) => {
+        visit::Node::Expr(Expr { kind: ExprKind::Call(f, _), .. }) | visit::Node::Stmt(Stmt::Call(f, _, _)) => {
             steps.push(Step::Call(m.funcs[f.0 as usize].name.clone()));
         }
         _ => {}

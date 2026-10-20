@@ -116,7 +116,7 @@ pub fn operands(s: &Stmt) -> Vec<&Expr> {
             out.push(saved);
             index_exprs(p, &mut out);
         }
-        Stmt::Call(_, args) => args_of(args, &mut out),
+        Stmt::Call(_, args, _) => args_of(args, &mut out),
         Stmt::CallIndirect { callee: p, args, .. } | Stmt::CallVirtual { recv: p, args, .. } => {
             index_exprs(p, &mut out);
             args_of(args, &mut out);
@@ -133,7 +133,7 @@ pub fn operands(s: &Stmt) -> Vec<&Expr> {
         | Stmt::Dup(p)
         | Stmt::FreeArena(p)
         | Stmt::DropGpu(p)
-        | Stmt::PushArena(Some(p)) => index_exprs(p, &mut out),
+        | Stmt::PushArena(Some(p), _) => index_exprs(p, &mut out),
         Stmt::If { .. }
         | Stmt::While { .. }
         | Stmt::ForRange { .. }
@@ -141,7 +141,7 @@ pub fn operands(s: &Stmt) -> Vec<&Expr> {
         | Stmt::Continue
         | Stmt::Return(None)
         | Stmt::BindGlobal(..)
-        | Stmt::PushArena(None)
+        | Stmt::PushArena(None, _)
         | Stmt::PopArena { .. }
         | Stmt::SetLine(_)
         | Stmt::Trap

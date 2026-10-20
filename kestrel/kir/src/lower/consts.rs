@@ -121,7 +121,7 @@ pub(super) fn lower_init(program: &Program, t: &Tables, lines: &LineIndex, helpe
         Stmt::Assign(Place::local(built), flag(KTy::Bool, ExprKind::Bool(true))),
         // Never freed: the constants live as long as the program. (Not counted by `KESTREL_ARENA_COUNT`.)
         Stmt::Assign(Place::local(arena), flag(KTy::Arena, ExprKind::StaticArena)),
-        Stmt::PushArena(Some(Place::local(arena))),
+        Stmt::PushArena(Some(Place::local(arena)), 0),
     ];
     for (&c, &local) in order.iter().zip(&locals) {
         let value = cx.value(&decl(program, t, c).value);
@@ -149,6 +149,7 @@ pub(super) fn lower_init(program: &Program, t: &Tables, lines: &LineIndex, helpe
         io: false,
         mutates_params: false,
         exported: false,
+        lines: (0, 0),
         native: None,
     };
     // Lowering the values added helpers (copies), so the init comes after them.

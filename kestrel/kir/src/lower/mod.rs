@@ -51,11 +51,11 @@ pub fn lower(program: &Program, t: &Tables, lines: &LineIndex) -> Module {
     let elems = t.elems.iter().map(|&e| kty(e)).collect();
     let main = t.main.map(|m| FuncIdx(m.0));
     if let (Some(init), Some(main)) = (init, main) {
-        funcs[main.0 as usize].body.insert(0, Stmt::Call(init, Vec::new()));
+        funcs[main.0 as usize].body.insert(0, Stmt::Call(init, Vec::new(), 0));
     }
     let globals = helpers.consts.into_globals();
     let tables = helpers.ifaces.tables;
-    let m = Module { funcs, structs, enums, elems, print_fns: helpers.print, par_bodies: helpers.par_bodies, globals, init, main, files: Vec::new(), tables };
+    let m = Module { funcs, structs, enums, elems, print_fns: helpers.print, par_bodies: helpers.par_bodies, globals, init, main, files: Vec::new(), tables, not_inlined: Vec::new() };
     // Stack environments live only as long as the call they are passed to.
     if cfg!(debug_assertions) {
         if let Err(e) = crate::check_stack_envs(&m) {
@@ -159,6 +159,7 @@ impl<'a> FnLowerer<'a> {
         let params = (0..info.params.len()).map(|i| LocalIdx(i as u32)).collect();
         let ret = if info.ret == Ty::Unit { None } else { Some(kty(info.ret)) };
         let body = if info.is_native { Vec::new() } else { self.lower_body(&decl.body, ret) };
+        let lines = self.lines_of(decl.span);
         Func {
             name: info.name.clone(),
             params,
@@ -170,8 +171,14 @@ impl<'a> FnLowerer<'a> {
             mutates_params: info.mutates_params,
             // Items of other modules are named `module.name`.
             exported: decl.is_pub && info.method.is_none() && !info.name.contains('.') && !info.is_native,
+            lines,
             native: info.is_native.then(|| native_symbol(&info.name)),
         }
+    }
+
+    /// The packed lines of the first and last line of `span` (a declaration, or a closure's body).
+    pub(crate) fn lines_of(&self, span: Span) -> (u32, u32) {
+        (self.line(span), self.line(Span { start: span.end.saturating_sub(1).max(span.start), end: span.end }))
     }
 
     /// The function standing for an interface's method, so that `FuncIdx == FnId` holds for
@@ -196,6 +203,7 @@ impl<'a> FnLowerer<'a> {
             io: false,
             mutates_params: false,
             exported: false,
+            lines: (0, 0),
             native: None,
         }
     }

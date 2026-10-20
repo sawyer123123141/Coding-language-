@@ -71,6 +71,7 @@ impl Helpers {
             io: false,
             mutates_params: true,
             exported: false,
+            lines: (0, 0),
             native: None,
         };
         idx
@@ -120,6 +121,7 @@ impl Helpers {
             io: true,
             mutates_params: false,
             exported: false,
+            lines: (0, 0),
             native: None,
         };
         idx

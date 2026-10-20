@@ -32,6 +32,7 @@ fn func(name: &str, params: u32, locals: Vec<Local>, ret: Option<KTy>, body: Vec
         io: false,
         mutates_params: false,
         exported: false,
+        lines: (0, 0),
         native: None,
     }
 }
@@ -80,6 +81,7 @@ fn module() -> Module {
         main: None,
         files: Vec::new(),
         tables: Vec::new(),
+        not_inlined: Vec::new(),
     }
 }
 

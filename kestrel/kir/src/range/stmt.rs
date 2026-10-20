@@ -137,7 +137,7 @@ impl Cx<'_> {
                 self.eval(st, saved, true);
                 self.place(st, p, true);
             }
-            Stmt::Call(_, args) => self.args(st, args, true),
+            Stmt::Call(_, args, _) => self.args(st, args, true),
             Stmt::CallIndirect { callee: p, args, .. } | Stmt::CallVirtual { recv: p, args, .. } => {
                 self.place(st, p, true);
                 self.args(st, args, true);
@@ -156,7 +156,7 @@ impl Cx<'_> {
             | Stmt::Dup(p)
             | Stmt::FreeArena(p)
             | Stmt::DropGpu(p)
-            | Stmt::PushArena(Some(p)) => self.place(st, p, true),
+            | Stmt::PushArena(Some(p), _) => self.place(st, p, true),
             Stmt::If { .. }
             | Stmt::While { .. }
             | Stmt::ForRange { .. }
@@ -164,7 +164,7 @@ impl Cx<'_> {
             | Stmt::Continue
             | Stmt::Return(None)
             | Stmt::BindGlobal(..)
-            | Stmt::PushArena(None)
+            | Stmt::PushArena(None, _)
             | Stmt::PopArena { .. }
             | Stmt::SetLine(_)
             | Stmt::Trap

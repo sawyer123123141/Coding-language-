@@ -57,7 +57,7 @@ fn pinned(body: &[Stmt]) -> HashSet<LocalIdx> {
         }
     };
     walk(body, &mut |n| match n {
-        Node::Stmt(Stmt::Call(_, a)) | Node::Stmt(Stmt::ParFor { args: a, .. }) => args(a, &mut out),
+        Node::Stmt(Stmt::Call(_, a, _)) | Node::Stmt(Stmt::ParFor { args: a, .. }) => args(a, &mut out),
         Node::Expr(Expr { kind: ExprKind::Call(_, a), .. }) => args(a, &mut out),
         // An indirect call takes the address of the function value it calls, and of its `var` arguments.
         Node::Stmt(Stmt::CallIndirect { callee, args: a, .. })
@@ -82,7 +82,7 @@ fn pinned(body: &[Stmt]) -> HashSet<LocalIdx> {
             | Stmt::Dup(p)
             | Stmt::FreeArena(p)
             | Stmt::DropGpu(p)
-            | Stmt::PushArena(Some(p))
+            | Stmt::PushArena(Some(p), _)
             | Stmt::MapSet(p, ..)
             | Stmt::MapUnlock(p, _)
             | Stmt::CopyFnEnv(p)

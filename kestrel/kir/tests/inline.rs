@@ -105,7 +105,7 @@ fn the_constants_init_is_correct_whether_or_not_it_is_inlined_into_main() {
         _ => {}
     });
     // Still called, or spliced in with its build; either way nothing in it ends `main` early.
-    assert!(main.body.contains(&Stmt::Call(init, Vec::new())) || pops == 1, "{:#?}", main.body);
+    assert!(main.body.contains(&Stmt::Call(init, Vec::new(), 0)) || pops == 1, "{:#?}", main.body);
     assert_eq!(returns, 0, "{:#?}", main.body);
     assert_eq!(prints, 2, "{:#?}", main.body);
 }

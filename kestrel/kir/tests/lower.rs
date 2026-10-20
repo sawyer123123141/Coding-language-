@@ -41,7 +41,7 @@ fn var_params_and_addressed_locals() {
     }
     let main = func(&m, "main");
     assert_eq!(main.locals[0].kind, LocalKind::Addressed);
-    assert!(matches!(&main.body[1], Stmt::Call(FuncIdx(0), args) if args == &vec![Arg::Ref(Place::local(LocalIdx(0)))]));
+    assert!(matches!(&main.body[1], Stmt::Call(FuncIdx(0), args, _) if args == &vec![Arg::Ref(Place::local(LocalIdx(0)))]));
 }
 
 #[test]
@@ -165,7 +165,7 @@ fn constructors_fill_defaults_and_fields_are_places() {
     let main = func(&m, "main");
     assert!(matches!(&main.body[1], Stmt::Assign(Place { root: LocalIdx(0), path }, _) if path == &vec![Proj::Field(1), Proj::Field(1)]));
     match &main.body[2] {
-        Stmt::Call(_, args) => assert_eq!(args[0], Arg::Ref(Place { root: LocalIdx(0), path: vec![Proj::Field(0)] })),
+        Stmt::Call(_, args, _) => assert_eq!(args[0], Arg::Ref(Place { root: LocalIdx(0), path: vec![Proj::Field(0)] })),
         other => panic!("{other:?}"),
     }
     match &main.body[4] {
@@ -295,7 +295,7 @@ fn heap_constants_become_globals_built_once() {
     let init = m.init.expect("a used heap constant needs the init function");
     assert_eq!(m.funcs[init.0 as usize].name, "__kestrel_constants");
     let main = func(&m, "main");
-    assert_eq!(main.body[0], Stmt::Call(init, Vec::new()), "{:#?}", main.body);
+    assert_eq!(main.body[0], Stmt::Call(init, Vec::new(), 0), "{:#?}", main.body);
     let bound = bound_globals(main);
     assert_eq!(bound.len(), 1, "{:#?}", main.body);
     let (local, global) = bound[0];
@@ -334,7 +334,7 @@ fn the_init_builds_inside_one_guard_and_never_returns_early() {
     );
     // The arena is a static one (not counted by `KESTREL_ARENA_COUNT`), then made current.
     assert!(matches!(&then_body[1], Stmt::Assign(_, Expr { kind: ExprKind::StaticArena, .. })), "{then_body:#?}");
-    assert!(matches!(&then_body[2], Stmt::PushArena(Some(_))), "{then_body:#?}");
+    assert!(matches!(&then_body[2], Stmt::PushArena(Some(_), _)), "{then_body:#?}");
     assert!(then_body[3..then_body.len() - 1].iter().all(|s| matches!(s, Stmt::Assign(..))), "{then_body:#?}");
     assert_eq!(then_body.last(), Some(&Stmt::PopArena { free: false }));
 }

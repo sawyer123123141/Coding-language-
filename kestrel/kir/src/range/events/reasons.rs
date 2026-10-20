@@ -1,0 +1,202 @@
+//! The sentences for what a call, a list operation or a string operation does: each candidate's
+//! allocation and way to fail, checked against its arm in codegen and the runtime function it
+//! calls.
+
+use super::{Walk, What};
+use crate::range::show::{expr_text, place_text, type_name};
+use crate::range::MAX_ITEMS;
+use crate::ir::*;
+
+/// The limit on a list's or array's length, as the report writes it.
+pub(super) fn limit() -> String {
+    crate::range::show::number(MAX_ITEMS)
+}
+
+impl Walk<'_> {
+    /// The events of a statement that copies, makes an arena, frees one or sets a map key.
+    pub(super) fn memory_stmt(&mut self, s: &Stmt) {
+        match s {
+            Stmt::CopyFnEnv(p) => {
+                self.place_walk(p);
+                let at = self.place(p);
+                self.alloc(0, Some(format!("copying the function value {at} makes a new environment for what it captured")), format!("copies the function value {at}"), "");
+            }
+            Stmt::CopyIface(p) => {
+                self.place_walk(p);
+                let at = self.place(p);
+                self.alloc(0, Some(format!("copying the interface value {at} makes a new copy of its data")), format!("copies the interface value {at}"), "");
+            }
+            // (An arena the compiler pushes has no line: the scratch arena of a native function's text,
+            // already part of the native's own item.)
+            Stmt::PushArena(None, line) if *line != 0 => {
+                self.alloc(*line, Some("`arena { }` makes a new arena".to_string()), "makes a new arena for `arena { }`".to_string(), "");
+            }
+            Stmt::PushArena(Some(p), line) if *line != 0 => {
+                self.place_walk(p);
+                let at = self.place(p);
+                self.alloc(*line, Some(format!("`in {at} {{ }}` makes the arena the first time")), format!("enters `in {at} {{ }}`"), " and makes its arena the first time");
+            }
+            Stmt::FreeArena(p) => {
+                self.place_walk(p);
+                let at = self.place(p);
+                let tail = " and fails if it is being allocated into";
+                self.fail(0, Some(format!("freeing the arena at {at} fails if it is being allocated into")), format!("frees the arena at {at}"), tail);
+            }
+            Stmt::Dup(p) => {
+                self.place_walk(p);
+                let at = self.place(p);
+                self.alloc(0, Some(format!("makes a copy of {at}")), format!("copies {at}"), "");
+            }
+            Stmt::MapSet(p, key, value, _) => {
+                self.expr(key);
+                self.expr(value);
+                self.place_walk(p);
+                let at = self.place(p);
+                self.alloc(key.line, Some(format!("setting a key of {at} may grow the map")), format!("sets a key of {at}"), " and may grow the map");
+                let direct = format!("setting a key of {at} fails while looping over the map, or if it would hold more than 2,147,483,647 keys");
+                self.fail(key.line, Some(direct), format!("sets a key of {at}"), " and fails while looping over it, or if it would hold more than 2,147,483,647 keys");
+            }
+            Stmt::Trap => {
+                self.fail(0, Some("calling an interface method with no body stops the program".to_string()), "calls an interface method with no body".to_string(), "");
+            }
+            Stmt::Fail(msg) => {
+                self.fail(0, Some(format!("stops the program with the error \"{msg}\"")), "stops the program with an error".to_string(), "");
+            }
+            _ => {}
+        }
+    }
+
+    pub(super) fn call(&mut self, g: FuncIdx, line: u32) {
+        let callee = &self.m.funcs[g.0 as usize];
+        if callee.native.is_some() {
+            let via = format!("calls the native function `{}`", callee.name);
+            self.alloc(line, None, via.clone(), "; its body isn't known here");
+            self.fail(line, None, via, "; its body isn't known here");
+        } else if self.m.init != Some(g) {
+            // (The constants are built once, before `main`: not a cost of the call.)
+            self.push(line, What::Call(g));
+        }
+    }
+
+    pub(super) fn indirect(&mut self, callee: &Place, line: u32) {
+        let via = format!("calls the function value `{}`", place_text(self.m, self.f, callee, callee.path.len()));
+        self.alloc(line, None, via.clone(), "; its body isn't known here");
+        self.fail(line, None, via, "; its body isn't known here");
+    }
+
+    pub(super) fn virtual_call(&mut self, recv: &Place, line: u32) {
+        let via = format!("calls a method of the interface value `{}`", place_text(self.m, self.f, recv, recv.path.len()));
+        self.alloc(line, None, via.clone(), "; its body isn't known here");
+        self.fail(line, None, via, "; its body isn't known here");
+    }
+
+    pub(super) fn list_add(&mut self, p: &Place, line: u32) {
+        let (xs, limit) = (self.place(p), limit());
+        let fail_tail = format!(" and fails if the list would hold more than {limit} items");
+        if let Some(name) = self.builtin_of(p.root).filter(|n| matches!(*n, "filter" | "map")) {
+            let via = format!("builds a new list with `{name}`");
+            self.alloc(line, Some(format!("`{name}` builds a new list")), via.clone(), "");
+            self.fail(line, Some(format!("`{name}` fails if its list would hold more than {limit} items")), via, &fail_tail);
+            return;
+        }
+        self.alloc(line, Some(format!("`add` may grow {xs}")), format!("adds to {xs}"), " and may grow the list");
+        self.fail(line, Some(format!("`add` fails if {xs} would hold more than {limit} items")), format!("adds to {xs}"), &fail_tail);
+    }
+
+    pub(super) fn list_op(&mut self, op: ListOp, p: &Place, xs: &[Expr]) {
+        let (list, limit) = (self.place(p), limit());
+        let line = xs.first().map_or(0, |x| x.line);
+        let index = quoted(xs.first().map_or(String::new(), |x| expr_text(self.m, self.f, x)), "the index");
+        match op {
+            ListOp::RemoveAt => {
+                let direct = format!("`remove_at` fails if {index} is outside {list}");
+                self.fail(line, Some(direct), format!("removes from {list}"), " and fails if the index is outside it");
+            }
+            ListOp::Insert => {
+                self.alloc(line, Some(format!("`insert` may grow {list}")), format!("inserts into {list}"), " and may grow the list");
+                let direct = format!("`insert` fails if {index} is outside {list} or {list} would hold more than {limit} items");
+                let tail = format!(" and fails if the index is outside it or the list would hold more than {limit} items");
+                self.fail(line, Some(direct), format!("inserts into {list}"), &tail);
+            }
+            ListOp::Sort => {
+                let name = if xs.len() > 1 { "sort_by" } else { "sort" };
+                self.alloc(line, Some(format!("`{name}` makes a buffer to sort {list} in")), format!("sorts {list} with `{name}`"), " and makes a buffer to sort in");
+            }
+            ListOp::Clear | ListOp::Compact => {}
+        }
+    }
+
+    /// The events of a string operation.
+    pub(super) fn str_op(&mut self, op: StrOp, xs: &[Expr], line: u32) {
+        let text = |i: usize| xs.get(i).map_or(String::new(), |x| expr_text(self.m, self.f, x));
+        let makes = |what: &str| (format!("`{what}` makes a new string"), format!("makes a new string with `{what}`"));
+        let (direct, via) = match op {
+            StrOp::At => (format!("`{}[{}]` makes a new string", text(0), text(1)), "indexes a string into a new string".to_string()),
+            StrOp::Piece => ("cutting a piece out of a string makes a new string".to_string(), "cuts a piece out of a string".to_string()),
+            StrOp::Slice => (format!("`{}.slice({}, {})` makes a new string", text(0), text(1), text(2)), "slices a string into a new string".to_string()),
+            StrOp::Trim => makes("trim"),
+            StrOp::Upper => makes("upper"),
+            StrOp::Lower => makes("lower"),
+            StrOp::Join => makes("join"),
+            StrOp::Split => (format!("`{}.split({})` makes a new list", text(0), text(1)), "splits a string into a new list".to_string()),
+            StrOp::Chars | StrOp::CharLen | StrOp::Find | StrOp::Starts | StrOp::Cmp | StrOp::Ends | StrOp::ToInt | StrOp::ToFloat => return,
+        };
+        self.alloc(line, Some(direct), via, "");
+        match op {
+            StrOp::At => {
+                let direct = format!("`{}[{}]` fails if `{}` is outside `{}`", text(0), text(1), text(1), text(0));
+                self.fail(line, Some(direct), "indexes a string".to_string(), " and fails if the index is outside it");
+            }
+            StrOp::Slice => {
+                let direct = format!("`{}.slice({}, {})` fails unless the range is inside `{}`", text(0), text(1), text(2), text(0));
+                self.fail(line, Some(direct), "slices a string".to_string(), " and fails unless the range is inside it");
+            }
+            StrOp::Split => {
+                let sep = quoted(text(1), "the separator");
+                let direct = format!("`{}.split({})` fails if {sep} is empty or the list would hold more than {} items", text(0), text(1), limit());
+                let tail = format!(" and fails if the separator is empty or the list would hold more than {} items", limit());
+                self.fail(line, Some(direct), "splits a string".to_string(), &tail);
+            }
+            _ => {}
+        }
+    }
+
+}
+
+/// The type of the place `p` in `f`.
+pub(super) fn place_ty(m: &Module, f: &Func, p: &Place) -> KTy {
+    let mut ty = f.locals[p.root.0 as usize].ty;
+    for proj in &p.path {
+        ty = match (proj, ty) {
+            (Proj::Field(i), KTy::Struct(s)) => m.layout(s).fields[*i as usize].ty,
+            (Proj::Variant(v, i), KTy::Enum(en)) => m.enum_layout(en).variants[*v as usize].fields[*i as usize].ty,
+            (Proj::Payload, KTy::Optional(el)) => m.elem(el),
+            (Proj::Index { .. }, KTy::Array(el) | KTy::List(el)) => m.elem(el),
+            (Proj::MapKey { .. }, KTy::Map(k, _)) => m.elem(k),
+            (Proj::MapValue { .. }, KTy::Map(_, v)) => m.elem(v),
+            _ => return ty,
+        };
+    }
+    ty
+}
+
+/// An element type as the report writes it.
+pub(super) fn elem_text(m: &Module, ty: KTy) -> String {
+    match ty {
+        KTy::Struct(s) => m.layout(s).name.clone(),
+        KTy::Enum(e) => m.enum_layout(e).name.clone(),
+        KTy::Str => "string".to_string(),
+        KTy::List(el) => format!("list[{}]", elem_text(m, m.elem(el))),
+        KTy::Array(el) => format!("[{}]", elem_text(m, m.elem(el))),
+        other => type_name(other).to_string(),
+    }
+}
+
+/// `text` in backticks, or `unnamed` for a value the compiler made (`(...)`).
+pub(super) fn quoted(text: String, unnamed: &str) -> String {
+    if text.is_empty() || text == "(...)" {
+        unnamed.to_string()
+    } else {
+        format!("`{text}`")
+    }
+}

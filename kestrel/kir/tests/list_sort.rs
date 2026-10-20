@@ -23,7 +23,7 @@ fn func<'m>(m: &'m Module, name: &str) -> &'m Func {
 
 /// The top-level statements of `f` that open or close an arena.
 fn arenas(f: &Func) -> Vec<&Stmt> {
-    f.body.iter().filter(|s| matches!(s, Stmt::PushArena(_) | Stmt::PopArena { .. })).collect()
+    f.body.iter().filter(|s| matches!(s, Stmt::PushArena(..) | Stmt::PopArena { .. })).collect()
 }
 
 fn sorts(f: &Func) -> Vec<usize> {
@@ -88,7 +88,7 @@ fn a_literal_key_is_a_stack_environment_passed_straight_to_the_sorting_function(
     // `main` calls it with the list by reference and the literal itself.
     let mut found = false;
     visit::walk(&func(&m, "main").body, &mut |n| {
-        if let visit::Node::Stmt(Stmt::Call(f, args)) = n {
+        if let visit::Node::Stmt(Stmt::Call(f, args, _)) = n {
             if m.funcs[f.0 as usize].name.starts_with("__kestrel_sort_by_") {
                 found = true;
                 assert!(matches!(&args[0], Arg::Ref(_)));
@@ -141,10 +141,10 @@ fn a_key_that_builds_strings_is_run_in_a_scratch_arena_freed_before_the_answer()
     for c in compares {
         let a = arenas(c);
         assert_eq!(a.len(), 2, "{c:?}");
-        assert!(matches!(a[0], Stmt::PushArena(None)));
+        assert!(matches!(a[0], Stmt::PushArena(None, _)));
         assert!(matches!(a[1], Stmt::PopArena { free: true }));
         // The arena is open first and closed just before the answer is returned.
-        assert!(matches!(c.body.first(), Some(Stmt::PushArena(None))));
+        assert!(matches!(c.body.first(), Some(Stmt::PushArena(None, _))));
         assert!(matches!(&c.body[c.body.len() - 2], Stmt::PopArena { free: true }));
         assert!(matches!(c.body.last(), Some(Stmt::Return(Some(_)))));
     }

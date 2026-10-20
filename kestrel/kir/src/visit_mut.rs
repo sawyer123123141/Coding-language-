@@ -53,13 +53,13 @@ pub fn walk_stmt<V: VisitMut + ?Sized>(v: &mut V, s: &mut Stmt) {
             v.visit_expr(end);
             v.visit_stmts(body);
         }
-        Stmt::Call(_, args) => walk_args(v, args),
+        Stmt::Call(_, args, _) => walk_args(v, args),
         Stmt::CallIndirect { callee, args, .. } => {
             v.visit_place(callee);
             walk_args(v, args);
         }
         Stmt::Print(parts) | Stmt::Write(parts) => walk_print(v, parts),
-        Stmt::Bind(_, p) | Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::DropGpu(p) | Stmt::PushArena(Some(p)) | Stmt::CopyFnEnv(p) | Stmt::CopyIface(p) => {
+        Stmt::Bind(_, p) | Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::DropGpu(p) | Stmt::PushArena(Some(p), _) | Stmt::CopyFnEnv(p) | Stmt::CopyIface(p) => {
             v.visit_place(p)
         }
         Stmt::CallVirtual { recv, args, .. } => {
@@ -80,7 +80,7 @@ pub fn walk_stmt<V: VisitMut + ?Sized>(v: &mut V, s: &mut Stmt) {
             walk_args(v, args);
             v.visit_expr(count);
         }
-        Stmt::BindGlobal(..) | Stmt::PushArena(None) | Stmt::PopArena { .. } | Stmt::SetLine(_) | Stmt::Trap | Stmt::Fail(_) | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
+        Stmt::BindGlobal(..) | Stmt::PushArena(None, _) | Stmt::PopArena { .. } | Stmt::SetLine(_) | Stmt::Trap | Stmt::Fail(_) | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
     }
 }
 

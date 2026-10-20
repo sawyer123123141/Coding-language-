@@ -86,7 +86,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
 
     pub(crate) fn arena_stmt(&mut self, s: &kir::Stmt) -> Result<(), String> {
         match s {
-            kir::Stmt::PushArena(p) => self.push_arena(p.as_ref())?,
+            kir::Stmt::PushArena(p, _) => self.push_arena(p.as_ref())?,
             kir::Stmt::PopArena { free } => self.pop_arena(*free),
             kir::Stmt::FreeArena(p) => self.free_arena(p)?,
             kir::Stmt::DropGpu(p) => self.drop_gpu(p)?,

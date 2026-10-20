@@ -63,6 +63,7 @@ fn lower_closure(program: &Program, t: &Tables, lines: &LineIndex, e: &ast::Expr
     let params = (0..=sig.params.len() as u32).map(LocalIdx).collect();
     let ret = (sig.ret != Ty::Unit).then(|| kty(sig.ret));
     let binds = cx.bind_closure_captures(e.id);
+    let lines = cx.lines_of(e.span);
     let mut body = cx.lower_body(&lit.body, ret);
     body.splice(0..0, binds);
     Func {
@@ -75,6 +76,7 @@ fn lower_closure(program: &Program, t: &Tables, lines: &LineIndex, e: &ast::Expr
         io: !info.is_pure,
         mutates_params: info.mutates_params,
         exported: false,
+        lines,
         native: None,
     }
 }

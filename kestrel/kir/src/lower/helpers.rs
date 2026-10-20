@@ -125,8 +125,8 @@ impl Helpers {
             KTy::Fn => out.push(Stmt::CopyFnEnv(place)),
             // An interface value's copy gets its own copy of the concrete value, through its table.
             KTy::Iface => out.push(Stmt::CopyIface(place)),
-            KTy::Array(_) | KTy::List(_) => out.push(Stmt::Call(self.copy_fn(ty, t), vec![Arg::Ref(place)])),
-            KTy::Map(..) => out.push(Stmt::Call(self.map_copy_fn(ty, t), vec![Arg::Ref(place)])),
+            KTy::Array(_) | KTy::List(_) => out.push(Stmt::Call(self.copy_fn(ty, t), vec![Arg::Ref(place)], 0)),
+            KTy::Map(..) => out.push(Stmt::Call(self.map_copy_fn(ty, t), vec![Arg::Ref(place)], 0)),
             KTy::Optional(e) => {
                 let then_body = self.fixup(with(&place, Proj::Payload), kty(t.elems[e.0 as usize]), t);
                 if !then_body.is_empty() {
@@ -170,7 +170,7 @@ impl Helpers {
                 let then_body = self.drop_stmts(with(&place, Proj::Payload), kty(t.elems[e.0 as usize]), t);
                 out.push(Stmt::If { cond: has_value(&place), then_body, else_body: Vec::new() });
             }
-            KTy::Array(_) | KTy::List(_) => out.push(Stmt::Call(self.drop_fn(ty, t), vec![Arg::Ref(place)])),
+            KTy::Array(_) | KTy::List(_) => out.push(Stmt::Call(self.drop_fn(ty, t), vec![Arg::Ref(place)], 0)),
             KTy::Struct(s) => {
                 // Other fields' memory may live in the struct's own arenas, so those go last.
                 let fields = &t.structs[s.0 as usize].fields;
@@ -216,6 +216,7 @@ impl Helpers {
             io: false,
             mutates_params: true,
             exported: false,
+            lines: (0, 0),
             native: None,
         };
         idx
@@ -234,6 +235,7 @@ impl Helpers {
             io: false,
             mutates_params: false,
             exported: false,
+            lines: (0, 0),
             native: None,
         };
         self.funcs.push(placeholder);
@@ -286,6 +288,7 @@ impl Helpers {
             io: false,
             mutates_params: true,
             exported: false,
+            lines: (0, 0),
             native: None,
         };
         idx

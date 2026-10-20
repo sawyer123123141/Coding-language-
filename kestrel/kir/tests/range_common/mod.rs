@@ -83,3 +83,22 @@ pub fn proven_of(m: &Module, name: &str, kind: CheckKind) -> usize {
 pub fn line(packed: u32) -> u32 {
     unpack_line(packed).0
 }
+
+/// `src` optimised, analysed in `arith` and reported on; the module is given one file name, so
+/// the report can be written out.
+pub fn reported(src: &str, arith: Arith) -> (Module, kestrel_kir::range::report::Report) {
+    let (mut m, a) = analysed(src, arith);
+    m.files = vec!["t.kes".to_string()];
+    let r = kestrel_kir::range::report::build(&m, &a, arith);
+    (m, r)
+}
+
+/// The report of the function called `name`.
+pub fn func_report<'a>(r: &'a kestrel_kir::range::report::Report, name: &str) -> &'a kestrel_kir::range::report::FuncReport {
+    r.funcs.iter().find(|f| f.name == name).unwrap_or_else(|| panic!("no report for `{name}`"))
+}
+
+/// The (source line, text) of the items of `kind` in `f`, in the order they are printed.
+pub fn items_of(f: &kestrel_kir::range::report::FuncReport, kind: kestrel_kir::range::report::ItemKind) -> Vec<(u32, String)> {
+    f.items.iter().filter(|i| i.kind == kind).map(|i| (line(i.line), i.text.clone())).collect()
+}

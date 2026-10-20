@@ -1,0 +1,167 @@
+//! `kestrel check --report`: what range analysis, the runtime and the inliner leave in a program,
+//! as text.
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+
+/// A fresh directory holding `files` (name, text).
+fn project(name: &str, files: &[(&str, &str)]) -> PathBuf {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("report_{name}"));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    for (file, text) in files {
+        fs::write(dir.join(file), text).unwrap();
+    }
+    dir
+}
+
+fn kestrel(args: &[&str], file: &Path) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_kestrel")).args(args).arg(file).output().expect("run kestrel")
+}
+
+fn stdout(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+fn stderr(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stderr).into_owned()
+}
+
+/// Lines 8 and 14 are empty.
+const FIXTURE: &str = "pub total(xs: list[int], k: int) -> int {
+    var s = 0
+    for i from 0 to xs.len {
+        s += xs[i]
+    }
+    s + xs[k]
+}
+
+pub grow(var ys: list[int], n: int) {
+    for i from 0 to n {
+        ys.add(i * 2)
+    }
+}
+
+main() {}
+";
+
+#[test]
+fn the_report_matches_exactly() {
+    let dir = project("exact", &[("report_fixture.kes", FIXTURE)]);
+    let out = kestrel(&["check", "--report"], &dir.join("report_fixture.kes"));
+    assert!(out.status.success(), "{}", stderr(&out));
+    let want = "report_fixture.kes
+  function `total` (line 1): 3 checks left (2 removed), no allocations
+    loop at line 3
+      line 4: overflow check: `s + xs[i]` may exceed `int` (`s` can be any `int`; `xs[i]` can be any `int`)
+    line 6: bounds check: `xs[k]` may be outside `xs` (`k` can be any `int`)
+    line 6: overflow check: `s + xs[k]` may exceed `int` (`s` can be any `int`; `xs[k]` can be any `int`)
+  function `grow` (line 9): 1 check left (0 removed), 1 allocation, 1 other way to fail
+    loop at line 10
+      line 11: overflow check: `i * 2` may exceed `int` (`i` is 0 to 2,147,483,646)
+      line 11: allocation: `add` may grow `ys`
+      line 11: can fail: `add` fails if `ys` would hold more than 2,147,483,647 items
+  function `main` (line 15): no checks, no allocations
+total: 6 checks, 2 removed, 4 left; 1 allocation; 1 other way to fail
+";
+    assert_eq!(stdout(&out), want);
+    // The diagnostics go to standard error, and there are none.
+    assert_eq!(stderr(&out), "");
+}
+
+#[test]
+fn release_reports_only_release_checks() {
+    let dir = project("release", &[("report_fixture.kes", FIXTURE)]);
+    let out = kestrel(&["check", "--report", "--release"], &dir.join("report_fixture.kes"));
+    assert!(out.status.success(), "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(!text.contains("overflow check"), "{text}");
+    assert!(text.contains("    line 6: bounds check: `xs[k]` may be outside `xs` (`k` can be any `int`)\n"), "{text}");
+    // `--release` before `--report` is the same.
+    let again = kestrel(&["check", "--release", "--report"], &dir.join("report_fixture.kes"));
+    assert_eq!(stdout(&again), text);
+}
+
+#[test]
+fn report_needs_check() {
+    let dir = project("needs_check", &[("f.kes", "main() {}\n")]);
+    for cmd in ["run", "build"] {
+        let out = kestrel(&[cmd, "--report"], &dir.join("f.kes"));
+        assert_eq!(out.status.code(), Some(2), "{cmd}");
+        assert!(stderr(&out).contains("`--report` goes with `check`: kestrel check --report file.kes"), "{}", stderr(&out));
+        assert_eq!(stdout(&out), "", "{cmd} prints nothing else");
+    }
+    // `check` without it prints no report.
+    let out = kestrel(&["check"], &dir.join("f.kes"));
+    assert!(out.status.success());
+    assert_eq!(stdout(&out), "");
+}
+
+#[test]
+fn a_program_with_errors_gets_no_report() {
+    let dir = project("errors", &[("bad.kes", "main() {\n    let x: int = true\n}\n")]);
+    let out = kestrel(&["check", "--report"], &dir.join("bad.kes"));
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(stdout(&out), "");
+    assert!(stderr(&out).contains("error"), "{}", stderr(&out));
+}
+
+#[test]
+fn the_limits_are_reported() {
+    // 300 nested `if`s: past the 256 the analysis goes down.
+    let depth = 300;
+    let mut src = String::from("pub f(x: int) -> int {\n    var y = 0\n");
+    for d in 0..depth {
+        src.push_str(&format!("if x > {d} {{\n"));
+    }
+    src.push_str("y = x * 2\n");
+    for _ in 0..depth {
+        src.push_str("}\n");
+    }
+    src.push_str("y\n}\n\nmain() {}\n");
+    let dir = project("limits", &[("deep.kes", &src)]);
+    let out = kestrel(&["check", "--report"], &dir.join("deep.kes"));
+    assert!(out.status.success(), "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(text.contains("range analysis stopped early in `f` (its code nests too deeply), so every check in it stays\n"), "{text}");
+    assert!(text.contains("overflow check: `x * 2` may exceed `int`"), "{text}");
+}
+
+#[test]
+fn an_item_in_another_file_names_it() {
+    let geom = "pub helper(a: int, b: int) -> int {\n    a * b\n}\n";
+    let main = "use { helper from geom }\n\npub density(x: int, y: int) -> int {\n    helper(x, y) + y\n}\n\nmain() {}\n";
+    let dir = project("modules", &[("main.kes", main), ("geom.kes", geom)]);
+    let out = kestrel(&["check", "--report"], &dir.join("main.kes"));
+    assert!(out.status.success(), "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(text.contains("    geom.kes:2 (in `helper`): overflow check: `a * b` may exceed `int` (`a` can be any `int`; `b` can be any `int`)\n"), "{text}");
+    // Files are grouped in the order they were loaded: the program, then `geom.kes`.
+    let at = |s: &str| text.find(s).unwrap_or_else(|| panic!("no {s:?} in\n{text}"));
+    assert!(at("main.kes\n") < at("geom.kes\n  function `helper` (line 1)"), "{text}");
+}
+
+#[test]
+fn an_inlined_item_names_its_function() {
+    let src = "density(seed: int) -> int {\n    seed + 1\n}\n\npub solids(seed: int) -> int {\n    density(seed) * 2\n}\n\nmain() {}\n";
+    let dir = project("inlined", &[("world.kes", src)]);
+    let out = kestrel(&["check", "--report"], &dir.join("world.kes"));
+    assert!(out.status.success(), "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(text.contains("  function `density` (line 1): its own copy is never called; its checks are listed where it is inlined\n"), "{text}");
+    assert!(text.contains("    line 2 (in `density`): overflow check: `seed + 1` may exceed `int` (`seed` can be any `int`)\n"), "{text}");
+    assert!(text.contains("    line 6: overflow check: `(...) * 2` may exceed `int`"), "{text}");
+}
+
+#[test]
+fn built_in_modules_are_left_out() {
+    // `window.open` is a native: it may allocate and fail. The module's own functions aren't listed.
+    let src = "use window\n\nmain() {\n    window.open(64, 64, \"report\")\n}\n";
+    let dir = project("builtin", &[("w.kes", src)]);
+    let out = kestrel(&["check", "--report"], &dir.join("w.kes"));
+    assert!(out.status.success(), "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(text.starts_with("w.kes\n  function `main` (line 3): "), "{text}");
+    assert!(text.contains("calls the native function `window.open` (line 4); its body isn't known here"), "{text}");
+    assert!(!text.contains("<builtin>") && !text.contains("window.kes"), "{text}");
+}

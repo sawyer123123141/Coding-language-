@@ -138,7 +138,7 @@ fn local_name(m: &Module, f: &Func, l: LocalIdx) -> String {
     if made {
         "(...)".to_string()
     } else {
-        name.strip_suffix("_ref").unwrap_or(name).to_string()
+        name.strip_suffix("_ref").or_else(|| name.strip_suffix("_capture")).unwrap_or(name).to_string()
     }
 }
 

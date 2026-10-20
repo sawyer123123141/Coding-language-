@@ -91,7 +91,7 @@ impl<'a> FnLowerer<'a> {
             let call = Expr { kind: ExprKind::Call(f, args), ty: kty(ret), line };
             self.keep(call, out);
         } else {
-            out.push(Stmt::Call(f, args));
+            out.push(Stmt::Call(f, args, line));
         }
     }
 

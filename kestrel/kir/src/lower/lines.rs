@@ -32,7 +32,7 @@ impl FnLowerer<'_> {
         let mut found = false;
         let mut look = |node: Node| match node {
             Node::Stmt(Stmt::SetLine(_)) => found = true,
-            Node::Expr(Expr { kind: ExprKind::Call(callee, _), .. }) | Node::Stmt(Stmt::Call(callee, _)) => {
+            Node::Expr(Expr { kind: ExprKind::Call(callee, _), .. }) | Node::Stmt(Stmt::Call(callee, _, _)) => {
                 // Past the checked functions are generated helpers: most make no such calls, but
                 // a list method's loop calls the function it is given (see `list_fns`).
                 found |= match self.t.fns.get(callee.0 as usize) {

@@ -120,7 +120,7 @@ impl Helpers {
                 Callee::Value(sig) => expr(ExprKind::CallIndirect { callee: f.clone(), args: vec![arg], sig: ksig(t, sig) }, key),
             }
         };
-        let mut body = vec![Stmt::PushArena(None), Stmt::Let(ka, call(&a)), Stmt::Let(kb, call(&b))];
+        let mut body = vec![Stmt::PushArena(None, 0), Stmt::Let(ka, call(&a)), Stmt::Let(kb, call(&b))];
         body.extend(order(key, &Place::local(ka), &Place::local(kb), r));
         body.push(Stmt::PopArena { free: true });
         body.push(Stmt::Return(Some(load(&Place::local(r), KTy::U8))));
@@ -143,6 +143,7 @@ impl Helpers {
             io: false,
             mutates_params: false,
             exported: false,
+            lines: (0, 0),
             native: None,
         };
     }
@@ -168,6 +169,7 @@ impl Helpers {
             io: false,
             mutates_params: true,
             exported: false,
+            lines: (0, 0),
             native: None,
         };
         idx
@@ -186,7 +188,9 @@ impl FnLowerer<'_> {
         let list = self.place_or_temp(receiver, out, true);
         if method == ListMethod::Sort {
             let compare = self.helpers.sort_items_fn(elem_of(list_ty, self.t));
-            out.push(Stmt::List(ListOp::Sort, list, vec![expr(ExprKind::FnRef(compare), KTy::Fn)]));
+            // (The reference carries the line of the call, for the report.)
+            let compare = Expr { kind: ExprKind::FnRef(compare), ty: KTy::Fn, line: self.line(receiver.span) };
+            out.push(Stmt::List(ListOp::Sort, list, vec![compare]));
             return;
         }
         let f = &args[0].value;
@@ -201,7 +205,7 @@ impl FnLowerer<'_> {
         let key = kty(self.t.sig(sig).ret);
         let helper = self.helpers.sort_by_call_fn(list_ty, key, callee, self.t);
         // The literal is directly the call's argument (see `check_stack_envs`).
-        out.push(Stmt::Call(helper, vec![Arg::Ref(list), Arg::Value(value)]));
+        out.push(Stmt::Call(helper, vec![Arg::Ref(list), Arg::Value(value)], self.line(receiver.span)));
     }
 }
 
@@ -211,7 +215,7 @@ impl FnLowerer<'_> {
 pub(super) fn strip_idle_scratch(funcs: &mut [Func], idle: &[(FuncIdx, FuncIdx)]) {
     for &(compare, code) in idle {
         if !builds_memory(funcs, code, &mut HashSet::new()) {
-            funcs[compare.0 as usize].body.retain(|s| !matches!(s, Stmt::PushArena(None) | Stmt::PopArena { .. }));
+            funcs[compare.0 as usize].body.retain(|s| !matches!(s, Stmt::PushArena(None, _) | Stmt::PopArena { .. }));
         }
     }
 }
@@ -249,7 +253,7 @@ fn stmt_builds(s: &Stmt, calls: &mut Vec<FuncIdx>) -> bool {
             ListOp::Insert => true,
             ListOp::RemoveAt | ListOp::Clear | ListOp::Compact | ListOp::Sort => false,
         },
-        Stmt::Call(g, _) => {
+        Stmt::Call(g, _, _) => {
             calls.push(*g);
             false
         }
@@ -268,7 +272,7 @@ fn stmt_builds(s: &Stmt, calls: &mut Vec<FuncIdx>) -> bool {
         | Stmt::Bind(..)
         | Stmt::BindGlobal(..)
         | Stmt::BindEnv { .. }
-        | Stmt::PushArena(_)
+        | Stmt::PushArena(..)
         | Stmt::PopArena { .. }
         | Stmt::FreeArena(_)
         | Stmt::DropGpu(_)

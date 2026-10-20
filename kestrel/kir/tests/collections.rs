@@ -172,7 +172,7 @@ fn clear_drops_the_items_then_empties_the_list() {
     let main = func(&m, "main");
     // The runtime's clear zeroes every item and sets the length, so no freed arena stays reachable.
     let at = main.body.iter().position(|s| matches!(s, Stmt::List(ListOp::Clear, _, args) if args.is_empty())).expect("a clear");
-    assert!(matches!(&main.body[at - 1], Stmt::Call(f, _) if m.funcs[f.0 as usize].name.starts_with("__kestrel_drop_")), "{:#?}", main.body);
+    assert!(matches!(&main.body[at - 1], Stmt::Call(f, _, _) if m.funcs[f.0 as usize].name.starts_with("__kestrel_drop_")), "{:#?}", main.body);
 }
 
 #[test]

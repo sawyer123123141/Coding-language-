@@ -110,11 +110,11 @@ main() {
 }
 ";
     let m = lower_src(src, &[]);
-    let by_name = |f: &str| thunks(&m).into_iter().find(|t| matches!(&t.body[..], [Stmt::Call(c, _) | Stmt::Return(Some(Expr { kind: ExprKind::Call(c, _), .. }))] if *c == index(&m, f))).unwrap();
+    let by_name = |f: &str| thunks(&m).into_iter().find(|t| matches!(&t.body[..], [Stmt::Call(c, _, _) | Stmt::Return(Some(Expr { kind: ExprKind::Call(c, _), .. }))] if *c == index(&m, f))).unwrap();
     // A `var` parameter is passed on by place, a read-only struct or string by its pointer.
     let bump = by_name("bump");
     assert_eq!([bump.locals[1].kind, bump.locals[2].kind], [LocalKind::RefParam, LocalKind::Value]);
-    assert!(matches!(&bump.body[..], [Stmt::Call(_, a)] if a[0] == Arg::Ref(Place::local(LocalIdx(1))) && matches!(&a[1], Arg::Value(_))));
+    assert!(matches!(&bump.body[..], [Stmt::Call(_, a, _)] if a[0] == Arg::Ref(Place::local(LocalIdx(1))) && matches!(&a[1], Arg::Value(_))));
     assert_eq!(bump.ret, None);
     let mk = by_name("mk");
     assert_eq!([mk.locals[1].kind, mk.locals[2].kind], [LocalKind::RefParam, LocalKind::RefParam]);
@@ -159,7 +159,7 @@ main() {
     assert_eq!(calls.len(), 1, "{:#?}", main.body);
     // `f` was a pointer to the caller's `g`, so the call reads `g` directly.
     assert_eq!(main.locals[calls[0].0.root.0 as usize].name, "g");
-    assert!(!main.body.iter().any(|s| matches!(s, Stmt::Call(c, _) if m.funcs[c.0 as usize].name == "apply")));
+    assert!(!main.body.iter().any(|s| matches!(s, Stmt::Call(c, _, _) if m.funcs[c.0 as usize].name == "apply")));
     // The thunk is a small function too: `square` is inlined into it.
     let thunk = thunks(&m)[0];
     assert!(!thunk.body.iter().any(|s| matches!(s, Stmt::Return(Some(Expr { kind: ExprKind::Call(..), .. })))), "{:#?}", thunk.body);
@@ -179,7 +179,7 @@ fn steps(m: &Module, name: &str) -> Vec<Step> {
         visit::Node::Stmt(Stmt::CallIndirect { .. }) | visit::Node::Expr(Expr { kind: ExprKind::CallIndirect { .. }, .. }) => {
             steps.push(Step::Indirect);
         }
-        visit::Node::Expr(Expr { kind: ExprKind::Call(f, _), .. }) | visit::Node::Stmt(Stmt::Call(f, _)) => {
+        visit::Node::Expr(Expr { kind: ExprKind::Call(f, _), .. }) | visit::Node::Stmt(Stmt::Call(f, _, _)) => {
             steps.push(Step::Call(m.funcs[f.0 as usize].name.clone()));
         }
         _ => {}

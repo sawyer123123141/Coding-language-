@@ -102,7 +102,7 @@ impl KTy {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct FuncIdx(pub u32);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -173,6 +173,8 @@ pub struct Module {
     pub files: Vec<String>,
     /// The method table of each (concrete type, interface) pair an interface value is made from.
     pub tables: Vec<MethodTable>,
+    /// Each call `inline_small` left in place and why, in the order it decided.
+    pub not_inlined: Vec<NotInlined>,
 }
 
 /// A memory location: a local, or a path of fields and elements inside one.
@@ -250,6 +252,10 @@ pub struct Func {
     pub mutates_params: bool,
     /// `pub` and in the entry file: a host (the Godot add-on) may call it.
     pub exported: bool,
+    /// The packed lines (see `pack_line`) of the declaration's first and last line: `(0, 0)` for a
+    /// generated function. A closure's code has the literal's lines. The report finds the function an
+    /// inlined item came from by them.
+    pub lines: (u32, u32),
     /// For a `native` function: the symbol it imports (see `native_symbol`).
     /// It has no body; Rust implements it with Kestrel's calling convention.
     pub native: Option<String>,
@@ -278,4 +284,19 @@ pub enum LocalKind {
     RefParam,
     /// Nothing refers to it any more: a struct `scalarize` split into one local per field.
     Unused,
+}
+
+/// A call the inliner left in place.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NotInlined {
+    /// The function holding the call (after inlining, so a call inside an inlined body belongs to
+    /// the function it was inlined into).
+    pub caller: FuncIdx,
+    /// The packed line of the call (see `pack_line`). A call statement has no line of its own: it
+    /// takes its first argument's line, or the line of the latest expression before it.
+    pub line: u32,
+    pub callee: FuncIdx,
+    /// Why, as a clause: "it calls itself", "it is 912 nodes; the limit is 256", "it has an early
+    /// `return`", "the inlining budget of `bench` ran out", "inlined calls nest more than 8 deep".
+    pub reason: String,
 }

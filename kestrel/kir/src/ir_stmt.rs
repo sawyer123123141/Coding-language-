@@ -15,7 +15,8 @@ pub enum Stmt {
     Continue,
     Return(Option<Expr>),
     /// A call whose result (if any) is discarded.
-    Call(FuncIdx, Vec<Arg>),
+    /// The call's packed line (see `pack_line`); 0 for a call the compiler made.
+    Call(FuncIdx, Vec<Arg>, u32),
     /// A call through a function value whose result (if any) is discarded.
     CallIndirect { callee: Place, args: Vec<Arg>, sig: KSig },
     /// A call through an interface value whose result (if any) is discarded (see
@@ -50,8 +51,9 @@ pub enum Stmt {
     /// interface value.
     CopyIface(Place),
     /// Makes an arena current: a fresh one (`arena { }`), or the one at a
-    /// place (`in x { }`, creating it there if it's still null).
-    PushArena(Option<Place>),
+    /// place (`in x { }`, creating it there if it's still null). The number is the packed line of the
+    /// block (0 for an arena the compiler pushes).
+    PushArena(Option<Place>, u32),
     /// Undoes the latest `PushArena`, freeing the arena for `arena { }`.
     PopArena { free: bool },
     /// Frees the arena at a place (dropping it) and nulls the place.

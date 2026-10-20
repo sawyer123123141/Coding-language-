@@ -145,7 +145,7 @@ fn exclusive(stmts: &[Stmt], root: LocalIdx, homes: &HashMap<LocalIdx, LocalIdx>
     let refs = |args: &[Arg]| args.iter().any(|a| matches!(a, Arg::Ref(p) if p.root == root));
     walk(stmts, &mut |n| match n {
         Node::Place(p, _) if p.root != root && home(p.root, homes) == mine => ok = false,
-        Node::Stmt(Stmt::Call(_, a) | Stmt::ParFor { args: a, .. }) | Node::Expr(Expr { kind: ExprKind::Call(_, a), .. }) if refs(a) => ok = false,
+        Node::Stmt(Stmt::Call(_, a, _) | Stmt::ParFor { args: a, .. }) | Node::Expr(Expr { kind: ExprKind::Call(_, a), .. }) if refs(a) => ok = false,
         Node::Stmt(Stmt::CallIndirect { args: a, .. } | Stmt::CallVirtual { args: a, .. })
         | Node::Expr(Expr { kind: ExprKind::CallIndirect { args: a, .. } | ExprKind::CallVirtual { args: a, .. }, .. })
             if refs(a) =>
@@ -175,7 +175,7 @@ fn returns_after_freeing(stmts: &[Stmt]) -> bool {
         Node::Stmt(Stmt::Return(_)) => returns = true,
         Node::Stmt(Stmt::PopArena { free: true } | Stmt::FreeArena(_) | Stmt::DropGpu(_)) => frees = true,
         // (Copying a function value's environment, `CopyFnEnv`, or making one only allocates.)
-        Node::Stmt(Stmt::Call(_, a)) | Node::Expr(Expr { kind: ExprKind::Call(_, a), .. }) if by_ref(a) => frees = true,
+        Node::Stmt(Stmt::Call(_, a, _)) | Node::Expr(Expr { kind: ExprKind::Call(_, a), .. }) if by_ref(a) => frees = true,
         Node::Stmt(Stmt::CallIndirect { args: a, .. }) | Node::Expr(Expr { kind: ExprKind::CallIndirect { args: a, .. }, .. }) if by_ref(a) => frees = true,
         // A method called through an interface value may free memory its value holds, and so may
         // a call given a borrowed interface value (through its `var self` methods).

@@ -30,6 +30,12 @@ impl SourceFile {
         SourceFile { path: path.to_path_buf(), modified: modified(path) }
     }
 
+    /// Whether this is one of the compiler's built-in modules (`window`, `draw`, ...), not a file of
+    /// the user's.
+    pub fn is_builtin(&self) -> bool {
+        builtin::is_path(&self.path)
+    }
+
     /// Whether the file changed (or vanished) since it was read.
     pub fn changed(&self) -> bool {
         self.current() != self.modified

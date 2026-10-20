@@ -18,7 +18,7 @@ fn func<'m>(m: &'m Module, name: &str) -> &'m Func {
 fn break_out_of_an_arena_block_frees_it_first() {
     let m = lower_src("main() {\n while true {\n  arena {\n   let t = [1]\n   break\n  }\n }\n}\n");
     let Stmt::While { body, .. } = &func(&m, "main").body[0] else { panic!() };
-    assert!(matches!(body[0], Stmt::PushArena(None)));
+    assert!(matches!(body[0], Stmt::PushArena(None, _)));
     let brk = body.iter().position(|s| matches!(s, Stmt::Break)).unwrap();
     assert!(matches!(body[brk - 1], Stmt::PopArena { free: true }), "{body:#?}");
 }
@@ -45,7 +45,7 @@ fn lists_of_owning_values_drop_each_element() {
 fn return_inside_in_pops_before_returning() {
     let m = lower_src("f(var c: Chunk) -> int {\n in c.mem {\n  return 1\n }\n}\nmain() {}\n");
     let f = func(&m, "f");
-    assert!(matches!(f.body[0], Stmt::PushArena(Some(_))));
+    assert!(matches!(f.body[0], Stmt::PushArena(Some(_), _)));
     let ret = f.body.iter().position(|s| matches!(s, Stmt::Return(_))).unwrap();
     assert!(matches!(f.body[ret - 1], Stmt::PopArena { free: false }), "{:#?}", f.body);
 }

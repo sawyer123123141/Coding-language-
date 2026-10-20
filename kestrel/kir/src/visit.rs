@@ -59,8 +59,8 @@ fn stmt<'a>(s: &'a Stmt, f: &mut impl FnMut(Node<'a>)) {
             args(a, f);
         }
         Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::DropGpu(p) => place(p, true, f),
-        Stmt::PushArena(Some(p)) => place(p, true, f),
-        Stmt::PushArena(None) | Stmt::PopArena { .. } => {}
+        Stmt::PushArena(Some(p), _) => place(p, true, f),
+        Stmt::PushArena(None, _) | Stmt::PopArena { .. } => {}
         Stmt::If { cond, then_body, else_body } => {
             walk_expr(cond, f);
             walk(then_body, f);
@@ -75,7 +75,7 @@ fn stmt<'a>(s: &'a Stmt, f: &mut impl FnMut(Node<'a>)) {
             walk_expr(end, f);
             walk(body, f);
         }
-        Stmt::Call(_, args) => self::args(args, f),
+        Stmt::Call(_, args, _) => self::args(args, f),
         Stmt::CallIndirect { callee, args, .. } => {
             place(callee, false, f);
             self::args(args, f);
@@ -184,4 +184,24 @@ pub fn walk_expr<'a>(e: &'a Expr, f: &mut impl FnMut(Node<'a>)) {
             }
         }
     }
+}
+
+/// The packed line of the first expression in `args` that has one (inside a `var` argument's
+/// indexes too), or 0.
+pub fn args_line(args: &[Arg]) -> u32 {
+    let mut line = 0;
+    for a in args {
+        let mut look = |n: Node| {
+            if let Node::Expr(e) = n {
+                if line == 0 {
+                    line = e.line;
+                }
+            }
+        };
+        match a {
+            Arg::Value(e) => walk_expr(e, &mut look),
+            Arg::Ref(p) => p.path.iter().filter_map(Proj::at).for_each(|at| walk_expr(at, &mut look)),
+        }
+    }
+    line
 }

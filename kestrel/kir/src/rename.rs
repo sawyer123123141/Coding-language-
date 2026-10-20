@@ -64,7 +64,7 @@ pub(crate) fn rename_stmts(stmts: &mut [Stmt], subst: &[Subst]) {
                 rename_expr(end, subst);
                 rename_stmts(body, subst);
             }
-            Stmt::Call(_, args) => rename_args(args, subst),
+            Stmt::Call(_, args, _) => rename_args(args, subst),
             Stmt::CallIndirect { callee, args, .. } => {
                 rename_place(callee, subst);
                 rename_args(args, subst);
@@ -84,7 +84,7 @@ pub(crate) fn rename_stmts(stmts: &mut [Stmt], subst: &[Subst]) {
                 rename_place(recv, subst);
                 rename_args(args, subst);
             }
-            Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::DropGpu(p) | Stmt::PushArena(Some(p)) => rename_place(p, subst),
+            Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::DropGpu(p) | Stmt::PushArena(Some(p), _) => rename_place(p, subst),
             Stmt::MapSet(p, k, v, _) => {
                 rename_place(p, subst);
                 rename_expr(k, subst);
@@ -98,7 +98,7 @@ pub(crate) fn rename_stmts(stmts: &mut [Stmt], subst: &[Subst]) {
                 rename_args(args, subst);
                 rename_expr(count, subst);
             }
-            Stmt::PushArena(None) | Stmt::PopArena { .. } | Stmt::SetLine(_) | Stmt::Trap | Stmt::Fail(_) | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
+            Stmt::PushArena(None, _) | Stmt::PopArena { .. } | Stmt::SetLine(_) | Stmt::Trap | Stmt::Fail(_) | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
         }
     }
 }

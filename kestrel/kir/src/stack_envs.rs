@@ -35,7 +35,7 @@ pub fn check_stack_envs(m: &Module) -> Result<(), String> {
             Node::Expr(Expr {
                 kind: ExprKind::Call(_, args) | ExprKind::CallIndirect { args, .. } | ExprKind::CallVirtual { args, .. }, ..
             })
-            | Node::Stmt(Stmt::Call(_, args) | Stmt::CallIndirect { args, .. } | Stmt::CallVirtual { args, .. }) => {
+            | Node::Stmt(Stmt::Call(_, args, _) | Stmt::CallIndirect { args, .. } | Stmt::CallVirtual { args, .. }) => {
                 fn_args += args.iter().filter(|a| matches!(a, Arg::Value(v) if is_stack_fn(v))).count();
                 iface_args += args.iter().filter(|a| matches!(a, Arg::Value(v) if is_borrowed_iface(v))).count();
             }

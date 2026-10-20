@@ -1,6 +1,7 @@
 //! The loops behind `xs.filter(f)`, `xs.map(f)`, `xs.any(f)` and `xs.all(f)`.
 //!
-//! Each is a generated function `(xs, f) -> result`, a `ForRange` over `xs` with unchecked
+//! Each is a generated function `(xs, f) -> result`, named for the method (`__kestrel_list_fn_filter_7`: the
+//! report names the built-in by it), a `ForRange` over `xs` with unchecked
 //! indexing (the loop's bound is the list's length, and `f` cannot change `xs`) that calls `f`
 //! for each item, read-only, in order:
 //! - `filter` copies each kept item into a new list (as an indexed read would);
@@ -120,7 +121,7 @@ impl Helpers {
             Callee::Value(sig) => t.sig(sig).is_pure,
         };
         self.funcs[(idx.0 - self.base) as usize] = Func {
-            name: format!("__kestrel_list_fn_{}", idx.0),
+            name: format!("__kestrel_list_fn_{}_{}", format!("{method:?}").to_lowercase(), idx.0),
             params: vec![LocalIdx(0), LocalIdx(1)],
             ret: Some(ret),
             locals,
@@ -129,6 +130,7 @@ impl Helpers {
             io: !pure,
             mutates_params: false,
             exported: false,
+            lines: (0, 0),
             native: None,
         };
         idx

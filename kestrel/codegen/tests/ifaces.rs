@@ -25,6 +25,7 @@ fn func(name: &str, params: u32, locals: Vec<Local>, ret: Option<KTy>, body: Vec
         io: false,
         mutates_params: false,
         exported: false,
+        lines: (0, 0),
         native: None,
     }
 }
@@ -84,6 +85,7 @@ fn module() -> Module {
         main: None,
         files: Vec::new(),
         tables: vec![MethodTable { type_id: 7, copy: FuncIdx(3), print: FuncIdx(4), methods: vec![FuncIdx(0)] }],
+        not_inlined: Vec::new(),
     }
 }
 

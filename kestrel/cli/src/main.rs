@@ -7,7 +7,10 @@ use kestrel_driver::{without_bom, DiagStyle};
 use kestrel_codegen::{emit_object, JitProgram, Options};
 use link::Lib;
 
-const USAGE: &str = "usage: kestrel <run|check|build> <file.kes> [-o <exe>] [--release] [--diagnostics=short]";
+const USAGE: &str = "usage: kestrel <run|check|build> <file.kes> [-o <exe>] [--release] [--report] [--diagnostics=short]";
+
+/// What `--report` on anything but `check` says.
+const REPORT_NEEDS_CHECK: &str = "`--report` goes with `check`: kestrel check --report file.kes";
 
 /// Turns any Rust panic in the compiler into exit 3, keeping 101 for Kestrel runtime panics.
 fn install_panic_hook() {
@@ -22,23 +25,25 @@ struct Args {
     path: String,
     out: Option<String>,
     release: bool,
+    report: bool,
     style: DiagStyle,
 }
 
 fn parse_args(raw: Vec<String>) -> Option<Args> {
     let mut it = raw.into_iter();
-    let (mut positional, mut out, mut release, mut style) = (Vec::new(), None, false, DiagStyle::Full);
+    let (mut positional, mut out, mut release, mut report, mut style) = (Vec::new(), None, false, false, DiagStyle::Full);
     while let Some(a) = it.next() {
         match a.as_str() {
             "-o" => out = Some(it.next()?),
             "--release" => release = true,
+            "--report" => report = true,
             "--diagnostics=short" => style = DiagStyle::Short,
             s if s.starts_with('-') => return None,
             _ => positional.push(a),
         }
     }
     let [cmd, path]: [String; 2] = positional.try_into().ok()?;
-    matches!(cmd.as_str(), "run" | "check" | "build").then_some(Args { cmd, path, out, release, style })
+    matches!(cmd.as_str(), "run" | "check" | "build").then_some(Args { cmd, path, out, release, report, style })
 }
 
 /// The compiler recurses over the syntax tree, so it runs on a stack far bigger than the
@@ -67,6 +72,10 @@ fn run() -> ExitCode {
         eprintln!("{USAGE}");
         return ExitCode::from(2);
     };
+    if args.report && args.cmd != "check" {
+        eprintln!("{REPORT_NEEDS_CHECK}");
+        return ExitCode::from(2);
+    }
     let src = match std::fs::read_to_string(&args.path) {
         Ok(s) => s,
         Err(e) => {
@@ -90,7 +99,12 @@ fn run() -> ExitCode {
         ..Options::default()
     };
     let result = match args.cmd.as_str() {
-        "check" => return ExitCode::SUCCESS,
+        "check" => {
+            if args.report {
+                print_report(compiled, !args.release);
+            }
+            return ExitCode::SUCCESS;
+        }
         "run" => {
             // The program's relative paths (`window.screenshot`, textures) are read from its own folder.
             kestrel_window::set_program_dir(Path::new(&args.path).parent().unwrap_or(Path::new("")));
@@ -118,6 +132,18 @@ fn run() -> ExitCode {
 /// and a failing one stops the program with a message that names the compiler bug.
 fn proofs_checked(value: Option<&std::ffi::OsStr>) -> bool {
     value.is_some_and(|v| v == "1")
+}
+
+/// Prints what range analysis leaves in the program for `kestrel check --report`, in the checks
+/// of a checked build or of a `--release` build (`checked`).
+fn print_report(mut compiled: kestrel_driver::Compiled, checked: bool) {
+    use kestrel_kir::range::{remove_checks, render::render, report::build, Arith};
+    let arith = Arith::of(checked);
+    let analysis = remove_checks(&mut compiled.module, arith);
+    let report = build(&compiled.module, &analysis, arith);
+    let files = &compiled.files;
+    let text = render(&report, &compiled.module, &|i| files.get(i as usize).is_none_or(|f| !f.is_builtin()));
+    print!("{text}");
 }
 
 fn internal_error(e: String) -> String {

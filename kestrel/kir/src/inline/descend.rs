@@ -31,13 +31,13 @@ impl Inliner<'_> {
                 self.expr(end, depth);
                 self.stmts(body, depth);
             }
-            Stmt::Call(_, args) => self.args(args, depth),
+            Stmt::Call(_, args, _) => self.args(args, depth),
             Stmt::CallIndirect { callee, args, .. } => {
                 self.place(callee, depth);
                 self.args(args, depth);
             }
             Stmt::Print(parts) | Stmt::Write(parts) => self.print(parts, depth),
-            Stmt::Bind(_, p) | Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::DropGpu(p) | Stmt::PushArena(Some(p)) | Stmt::CopyFnEnv(p) | Stmt::CopyIface(p) => {
+            Stmt::Bind(_, p) | Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::DropGpu(p) | Stmt::PushArena(Some(p), _) | Stmt::CopyFnEnv(p) | Stmt::CopyIface(p) => {
                 self.place(p, depth)
             }
             Stmt::CallVirtual { recv, args, .. } => {
@@ -58,7 +58,7 @@ impl Inliner<'_> {
                 self.args(args, depth);
                 self.expr(count, depth);
             }
-            Stmt::BindGlobal(..) | Stmt::PushArena(None) | Stmt::PopArena { .. } | Stmt::SetLine(_) | Stmt::Trap | Stmt::Fail(_) | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
+            Stmt::BindGlobal(..) | Stmt::PushArena(None, _) | Stmt::PopArena { .. } | Stmt::SetLine(_) | Stmt::Trap | Stmt::Fail(_) | Stmt::Break | Stmt::Continue | Stmt::Return(None) => {}
         }
     }
 
@@ -88,8 +88,11 @@ impl Inliner<'_> {
     }
 
     pub(super) fn expr(&mut self, e: &mut Expr, depth: u32) {
+        if e.line != 0 {
+            self.line = e.line;
+        }
         match &mut e.kind {
-            ExprKind::Call(fi, args) if self.take(*fi, depth) => {
+            ExprKind::Call(fi, args) if self.take(*fi, depth, e.line) => {
                 let (fi, args) = (*fi, std::mem::take(args));
                 let (body, value) = self.expand(fi, args, depth);
                 let value = value.expect("a value call's callee ends in `return value`");

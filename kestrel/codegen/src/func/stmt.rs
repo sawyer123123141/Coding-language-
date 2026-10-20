@@ -60,7 +60,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 }
                 return Ok(false);
             }
-            kir::Stmt::Call(fi, args) => {
+            kir::Stmt::Call(fi, args, _) => {
                 self.call(*fi, args, None)?;
             }
             kir::Stmt::CallIndirect { callee, args, sig } => {
@@ -80,7 +80,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             kir::Stmt::MapSet(map, key, value, copy_key) => self.map_set(map, key, value, *copy_key, key.line)?,
             kir::Stmt::MapUnlock(map, saved) => self.map_unlock(map, saved)?,
             kir::Stmt::ParFor { func, args, count } => self.par_for(*func, args, count)?,
-            kir::Stmt::PushArena(_) | kir::Stmt::PopArena { .. } | kir::Stmt::FreeArena(_) | kir::Stmt::DropGpu(_) => {
+            kir::Stmt::PushArena(..) | kir::Stmt::PopArena { .. } | kir::Stmt::FreeArena(_) | kir::Stmt::DropGpu(_) => {
                 self.arena_stmt(s)?
             }
             kir::Stmt::Bind(l, p) => {

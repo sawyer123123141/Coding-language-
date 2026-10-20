@@ -86,6 +86,7 @@ impl<'a> FnLowerer<'a> {
             io: false,
             mutates_params: true,
             exported: false,
+            lines: (0, 0),
             native: None,
         });
         let args = captured.into_iter().map(|c| Arg::Ref(Place::local(c))).collect();

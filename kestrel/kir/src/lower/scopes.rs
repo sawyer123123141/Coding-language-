@@ -150,7 +150,7 @@ impl<'a> FnLowerer<'a> {
     pub(crate) fn arena_block(&mut self, arena: Option<&ast::Expr>, body: &ast::Block, out: &mut Vec<Stmt>) {
         let place = arena.map(|a| self.place_or_temp(a, out, true));
         let free = place.is_none();
-        out.push(Stmt::PushArena(place));
+        out.push(Stmt::PushArena(place, self.line(body.span)));
         let inner = self.scoped_block(body, Scope { arena: Some(free), ..Scope::default() });
         out.extend(inner);
     }

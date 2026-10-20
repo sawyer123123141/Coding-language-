@@ -51,7 +51,7 @@ impl Helpers {
         let ret = (info.ret != Ty::Unit).then(|| kty(info.ret));
         let body = match ret {
             Some(r) => vec![Stmt::Return(Some(expr(ExprKind::Call(f, args), r)))],
-            None => vec![Stmt::Call(f, args)],
+            None => vec![Stmt::Call(f, args, 0)],
         };
         self.funcs[(idx.0 - self.base) as usize] = Func {
             name: format!("__kestrel_fn_{}", idx.0),
@@ -63,6 +63,7 @@ impl Helpers {
             io: info.io,
             mutates_params: info.mutates_params,
             exported: false,
+            lines: (0, 0),
             native: None,
         };
         idx

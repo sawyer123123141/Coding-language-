@@ -8,14 +8,19 @@
 mod arith;
 mod bounds;
 mod eval;
+pub mod events;
 pub mod facts;
 pub mod interval;
+mod items;
 mod loops;
 mod par;
 mod refine;
+pub mod render;
+pub mod report;
 pub mod show;
 pub mod sites;
 pub mod state;
+pub mod summary;
 mod stmt;
 pub mod terms;
 pub mod tracked;
@@ -56,6 +61,8 @@ pub struct FuncChecks {
     /// The function nests too deeply or took too long to analyse: it was left exactly as it was,
     /// with every check in `left`.
     pub gave_up: bool,
+    /// With `gave_up`: because the code nests too deeply (otherwise it took too many steps).
+    pub deep: bool,
 }
 
 /// A check the analysis couldn't prove.
@@ -124,7 +131,7 @@ fn analyse(m: &Module, f: &Func, arith: Arith, par_list: Option<&Place>) -> (Fun
     let _ = cx.stmts(start, &f.body);
     if cx.gave_up {
         let left = every_site(m, f, arith);
-        return (FuncChecks { left, removed: 0, gave_up: true }, HashMap::new());
+        return (FuncChecks { left, removed: 0, gave_up: true, deep: cx.deep }, HashMap::new());
     }
     let mut proven = HashMap::new();
     let mut left = Vec::new();
@@ -146,7 +153,7 @@ fn analyse(m: &Module, f: &Func, arith: Arith, par_list: Option<&Place>) -> (Fun
         }
     }
     let removed = proven.len() as u32;
-    (FuncChecks { left, removed, gave_up: false }, proven)
+    (FuncChecks { left, removed, gave_up: false, deep: false }, proven)
 }
 
 /// A check site found by walking a function: an arithmetic node's check, or step `i` of a place.
@@ -270,6 +277,8 @@ struct Cx<'a> {
     budget: u32,
     depth: u32,
     gave_up: bool,
+    /// The reason it gave up was the nesting limit.
+    deep: bool,
     /// The loops around the current point, innermost last.
     frames: Vec<Frame>,
     /// The packed lines of their headers.
@@ -316,6 +325,7 @@ impl<'a> Cx<'a> {
             budget: budget(f),
             depth: 0,
             gave_up: false,
+            deep: false,
             frames: Vec::new(),
             loop_lines: Vec::new(),
             learned: Vec::new(),
@@ -335,6 +345,7 @@ impl<'a> Cx<'a> {
         }
         if self.visits > self.budget || self.depth >= MAX_DEPTH {
             self.gave_up = true;
+            self.deep = self.depth >= MAX_DEPTH;
             return false;
         }
         self.depth += 1;

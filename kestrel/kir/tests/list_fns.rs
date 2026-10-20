@@ -26,7 +26,7 @@ fn helpers(m: &Module) -> Vec<&Func> {
 fn calls(m: &Module, f: &Func) -> (Vec<String>, usize) {
     let (mut direct, mut indirect) = (Vec::new(), 0);
     visit::walk(&f.body, &mut |n| match n {
-        visit::Node::Expr(Expr { kind: ExprKind::Call(callee, _), .. }) | visit::Node::Stmt(Stmt::Call(callee, _)) => {
+        visit::Node::Expr(Expr { kind: ExprKind::Call(callee, _), .. }) | visit::Node::Stmt(Stmt::Call(callee, _, _)) => {
             direct.push(m.funcs[callee.0 as usize].name.clone())
         }
         visit::Node::Expr(Expr { kind: ExprKind::CallIndirect { .. }, .. }) | visit::Node::Stmt(Stmt::CallIndirect { .. }) => indirect += 1,
@@ -147,7 +147,7 @@ fn steps(src: &str) -> Vec<Step> {
     let mut steps = Vec::new();
     visit::walk(&func(&m, "main").body, &mut |node| match node {
         visit::Node::Stmt(Stmt::SetLine(n)) => steps.push(Step::Line(*n)),
-        visit::Node::Expr(Expr { kind: ExprKind::Call(f, _), .. }) | visit::Node::Stmt(Stmt::Call(f, _)) => {
+        visit::Node::Expr(Expr { kind: ExprKind::Call(f, _), .. }) | visit::Node::Stmt(Stmt::Call(f, _, _)) => {
             steps.push(Step::Call(m.funcs[f.0 as usize].name.clone()))
         }
         _ => {}
