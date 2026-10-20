@@ -222,3 +222,29 @@ fn a_global_with_a_built_in_name_gets_one_error_not_a_cascade() {
     assert!(compiled.is_none());
     assert_eq!(text, "2:5: error: `float` is a built-in name; pick another\n");
 }
+
+/// A struct that holds a GPU object can be lent to an interface, but not copied into one: the copy
+/// entry of its method table stops the program, naming what it owns. (Checked in the compiled
+/// module, so no GPU object has to be made.)
+#[test]
+fn copying_a_gpu_holder_into_an_interface_says_it_owns_a_gpu_object() {
+    let dir = project("gpu_copy", &[]);
+    let src = "use { Texture from draw }
+interface Sized {
+    pure w(self) -> int
+}
+struct Sprite: Sized {
+    tex: Texture
+    pure w(self) -> int { self.tex.width }
+}
+width(s: Sized) -> int { s.w() }
+show(sp: Sprite) -> int { width(sp) }
+main() {}
+";
+    let (compiled, text) = build(&dir, src);
+    assert_eq!(text, "");
+    let m = compiled.expect("compiles").module;
+    let msg = "can't copy a `Sprite` into a `Sized`: it owns a GPU object; pass it as `var` or keep it in a `list[Sprite]`";
+    let copy = &m.funcs[m.tables.first().expect("one method table").copy.0 as usize];
+    assert_eq!(copy.body, vec![kestrel_kir::Stmt::Fail(msg.to_string())]);
+}

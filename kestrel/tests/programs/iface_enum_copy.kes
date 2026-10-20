@@ -1,0 +1,57 @@
+// expect: 1 2
+// expect: Crate.Full(items: [1], label: "abc") Crate.Full(items: [1, 5], label: "abc")
+// expect: Crate.Full(items: [1, 2, 3], label: "xyz")
+// expect: Crate.Full(items: [1, 5], label: "abc") {"a": Crate.Full(items: [1], label: "abc"), "b": Crate.Full(items: [1, 5], label: "abc")}
+// expect: 0
+// An enum implementing an interface, with a list and a string in a payload: a copy is its own (also
+// one stored in a longer-lived arena from a block whose arena is then freed), and it works in an
+// optional and a map.
+interface D {
+    hit(var self, n: int)
+    pure hp(self) -> int
+}
+enum Crate: D {
+    Full { items: list[int], label: string }
+    Empty
+    hit(var self, n: int) {
+        match self {
+            Full f { f.items.add(n) }
+            else { }
+        }
+    }
+    pure hp(self) -> int {
+        match self {
+            Full f { f.items.len }
+            else { -1 }
+        }
+    }
+}
+struct K {
+    mem: Arena = Arena()
+    d: D = Crate.Empty
+}
+main() {
+    var a: D = Crate.Full(items: [1], label: "abc")
+    var b = a
+    b.hit(5)
+    print(a.hp(), b.hp())
+    print(a, b)
+    var k = K()
+    arena {
+        var src: D = Crate.Full(items: [1, 2], label: "x" + "yz")
+        src.hit(3)
+        in k.mem { k.d = src }
+    }
+    arena {
+        var junk: list[string] = []
+        for i from 0 to 100 { junk.add("zzzzzzzzzzzzzzzzzz" + "q") }
+    }
+    print(k.d)
+    let o: D? = b
+    let m = {"a": a, "b": b}
+    print(o, m)
+    var c = Crate.Empty
+    c = Crate.Full(items: [], label: "")
+    let e: D = c
+    print(e.hp())
+}

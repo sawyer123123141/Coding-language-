@@ -1,0 +1,45 @@
+// expect: 5
+// expect: 106
+// expect: 5
+// expect: 106
+// expect: 106 106
+// expect: 2 2
+// expect: 104 104
+// A loop element lent to an interface parameter is the list item itself: what a `var` call changes
+// through it, and what the loop body changes around the calls, both reach the list (a `for` over a
+// list, a `par for`, and a `for` over an array).
+interface D {
+    pure hp(self) -> int
+    pure grow(var self, n: int)
+}
+struct G: D {
+    health: int = 10
+    pure hp(self) -> int { self.health }
+    pure grow(var self, n: int) { self.health += n }
+}
+show(d: D) { print(d.hp()) }
+pure seen(d: D) -> int { d.hp() }
+bump(var d: D) { d.grow(100) }
+main() {
+    var gs: list[G] = [G(), G()]
+    for g in gs {
+        g.health = 5
+        show(g)
+        g.health = 6
+        bump(var g)
+        show(g)
+    }
+    print(gs[0].health, gs[1].health)
+    par for g in gs {
+        g.health = 1
+        g.health += seen(g)
+    }
+    print(gs[0].health, gs[1].health)
+    var arr = [G(), G()]
+    for g in arr {
+        g.health = 3
+        bump(var g)
+        g.health += 1
+    }
+    print(arr[0].health, arr[1].health)
+}

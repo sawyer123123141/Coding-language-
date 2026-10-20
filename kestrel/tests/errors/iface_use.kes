@@ -4,8 +4,8 @@
 // error 77: `var` parameter `o` needs exactly Damageable?, found Goblin
 // error 78: `var` parameter `os` needs exactly list[Damageable], found Goblin
 // error 85: expected list[Damageable], found list[Goblin]
-// error 89: interface values can't be compared
-// error 90: interface values can't be compared
+// error 89: interface values can't be compared; compare what a method returns
+// error 90: interface values can't be compared; compare what a method returns
 // error 94: `has` needs items that `==` can compare (numbers, bools and strings); `list[Damageable]` holds `Damageable`
 // error 98: give the list a type: `var foes: list[Damageable] = [...]`
 // error 102: `array[Damageable](n)` would start with empty items; build it with a literal or `add`

@@ -71,7 +71,8 @@ impl<'a> BodyChecker<'a> {
                 let against_none = matches!(lhs.kind, ExprKind::None) || matches!(rhs.kind, ExprKind::None);
                 let functions = [lt, rt].iter().any(|&t| self.t.holds_fn(t));
                 if matches!(op, BinaryOp::Eq | BinaryOp::Ne) && [lt, rt].iter().any(|&t| self.t.holds_uncomparable(t)) && (functions || !against_none) {
-                    self.error(e.span, if functions { "function values can't be compared" } else { "interface values can't be compared" });
+                    let msg = if functions { "function values can't be compared" } else { "interface values can't be compared; compare what a method returns" };
+                    self.error(e.span, msg);
                     return Ty::Bool;
                 }
                 if matches!(op, BinaryOp::Eq | BinaryOp::Ne) && [lt, rt].iter().any(|t| matches!(t, Ty::Bool | Ty::Str)) {

@@ -79,7 +79,7 @@ pub enum ExprKind {
     EnvDup(Box<Expr>),
     /// A copy of the `size` bytes at the address `src` (an `i64`) gives, in a new block of the
     /// current arena aligned to `align`. The copy's address, an `i64`. Only an interface value's
-    /// copy function uses it (see `Helpers::table_for`), before it copies what the value holds.
+    /// copy function uses it (see `Helpers::iface_copy_fn`), before it copies what the value holds.
     BlockDup { src: Box<Expr>, size: u32, align: u32 },
     /// A call through the function value at `callee`: its code gets the environment, then
     /// `args`, which follow `sig` as a direct call's follow the callee's parameters.

@@ -109,7 +109,8 @@ main() {
     for f in foes { f.take_damage(2) }
     print(foes.map((f) { f.hp() }))         // [8, 0]
     print(foes)                             // [Goblin(health: 8), Barrel(oil: 0)]
-    show(Goblin())                          // 10
+    let g = Goblin()
+    show(g)                                 // 10
 }
 ```
 

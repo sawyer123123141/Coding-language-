@@ -216,9 +216,9 @@ fn no_whole_assignment_through_a_var_interface_parameter() {
 #[test]
 fn interface_values_cannot_be_compared_but_closures_may_capture_them() {
     let errs = run(&program("let a: Damageable = Goblin()\n let b: Damageable = Goblin()\n let same = a == b")).1;
-    assert_eq!(errs, ["interface values can't be compared"]);
+    assert_eq!(errs, ["interface values can't be compared; compare what a method returns"]);
     let errs = run(&program("let h = Holder(d: Goblin())\n let i = Holder(d: Goblin())\n let same = h != i")).1;
-    assert_eq!(errs, ["interface values can't be compared"]);
+    assert_eq!(errs, ["interface values can't be compared; compare what a method returns"]);
     // Rule 7b (a closure copying a struct that holds a function value) doesn't look inside interface values.
     ok(&program("let h = Holder(d: Goblin())\n let f = () { h.g.health }"));
     // The predicates behind it.
