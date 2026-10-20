@@ -59,20 +59,25 @@ struct Walk<'a> {
 }
 
 /// The closure literals in `f` that nothing can call: `let g = <literal>` where `g` is only ever
-/// read for its environment word (`FnEnv`). That is what is left of a literal passed to a built-in
+/// read for its environment word (`FnEnv`) while no call to the code remains. That is what is left of a literal passed to a built-in
 /// that was inlined: the loop calls the code inlined, and the value stays behind, unused. By the
 /// address of the literal's expression.
 pub(super) fn unused_makes(f: &Func) -> std::collections::HashSet<usize> {
     use std::collections::HashMap;
-    let mut lets: Vec<(LocalIdx, usize)> = Vec::new();
+    let mut lets: Vec<(LocalIdx, usize, FuncIdx)> = Vec::new();
+    let mut called: std::collections::HashSet<FuncIdx> = std::collections::HashSet::new();
     let (mut places, mut envs): (HashMap<LocalIdx, u32>, HashMap<LocalIdx, u32>) = (HashMap::new(), HashMap::new());
     crate::visit::walk(&f.body, &mut |n| match n {
-        crate::visit::Node::Stmt(Stmt::Let(l, e)) if matches!(e.kind, ExprKind::MakeFn { .. }) => lets.push((*l, e as *const Expr as usize)),
+        crate::visit::Node::Stmt(Stmt::Let(l, e @ Expr { kind: ExprKind::MakeFn { code, .. }, .. })) => lets.push((*l, e as *const Expr as usize, *code)),
+        crate::visit::Node::Expr(Expr { kind: ExprKind::Call(g, _), .. }) | crate::visit::Node::Stmt(Stmt::Call(g, _, _)) => {
+            called.insert(*g);
+        }
         crate::visit::Node::Place(p, _) => *places.entry(p.root).or_default() += 1,
         crate::visit::Node::Expr(Expr { kind: ExprKind::FnEnv(p), .. }) if p.path.is_empty() => *envs.entry(p.root).or_default() += 1,
         _ => {}
     });
-    lets.into_iter().filter(|(l, _)| places.get(l) == envs.get(l)).map(|(_, at)| at).collect()
+    // (A loop that stays a call to a closure too big to inline still calls the code.)
+    lets.into_iter().filter(|(l, _, code)| places.get(l) == envs.get(l) && !called.contains(code)).map(|(_, at, _)| at).collect()
 }
 
 
@@ -122,12 +127,17 @@ impl Walk<'_> {
             }
         }
         if self.f.lines == (0, 0) || text.starts_with("(...)") {
-            return match place_ty(self.m, self.f, p) {
-                KTy::List(_) => "the list".to_string(),
-                KTy::Array(_) => "the array".to_string(),
-                KTy::Map(..) => "the map".to_string(),
-                KTy::Str => "the string".to_string(),
-                _ => "the value".to_string(),
+            let noun = match place_ty(self.m, self.f, p) {
+                KTy::List(_) => "list",
+                KTy::Array(_) => "array",
+                KTy::Map(..) => "map",
+                KTy::Str => "string",
+                _ => "value",
+            };
+            // A field of something the compiler holds: the field's name says which.
+            return match (p.path.last(), text.rsplit_once('.')) {
+                (Some(Proj::Field(_) | Proj::Variant(..)), Some((_, field))) => format!("the {noun} `{field}`"),
+                _ => format!("the {noun}"),
             };
         }
         format!("`{text}`")

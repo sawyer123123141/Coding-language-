@@ -476,3 +476,30 @@ fn a_par_for_with_nothing_to_list_has_no_header() {
     assert!(text.contains("a `par for` makes an arena for each thread"), "{text}");
     assert!(!text.contains("par for at"), "{text}");
 }
+
+#[test]
+fn a_closure_too_big_to_inline_is_still_listed() {
+    // The `map` loop is inlined but the closure (past 256 nodes) stays a call: its code is live.
+    let mut body = String::from(" var t = x\n");
+    for k in 3..63 {
+        body.push_str(&format!(" t = t * {k} + x\n"));
+    }
+    let src = format!("h(d: int, ys: list[int]) -> list[int] {{\n if d > 0 {{ return h(d - 1, ys) }}\n ys.map((x) {{\n{body} t\n }})\n}}\npub top(ys: list[int]) -> list[int] {{\n h(1, ys)\n}}");
+    let (_, r) = reported(&src, Checked);
+    let h = func_report(&r, "h");
+    let left = h.checks_left();
+    assert!(left >= 60, "the closure's checks are listed in `h`: {left}");
+    let calls = items_of(func_report(&r, "top"), Call);
+    assert_eq!(calls.len(), 1);
+    assert!(calls[0].1.ends_with(&format!("(it and what it calls have {left} checks left)")), "{calls:?} vs {left}");
+    assert_eq!(r.left, left);
+}
+
+#[test]
+fn a_copy_names_the_field_it_copies() {
+    let src = "struct Person {\n name: string = \"\"\n tags: list[string] = []\n}\npub dup(p: Person) -> Person {\n var q = p\n q.name = \"x\"\n q\n}";
+    let (_, r) = reported(src, Checked);
+    let texts: Vec<String> = items_of(func_report(&r, "dup"), Allocation).into_iter().map(|(_, t)| t).collect();
+    assert!(texts.contains(&"makes a copy of the string `name`".to_string()), "{texts:?}");
+    assert!(texts.contains(&"makes a copy of the list `tags`".to_string()), "{texts:?}");
+}
