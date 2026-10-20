@@ -1,0 +1,17 @@
+// expect-exit: 101
+// expect-stderr: index -5 out of bounds for length 3 on line 15
+// Built with `--release`: a shift has no check, so `1 << n` teaches nothing about `n`.
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+main() {
+    let xs = [1, 2, 3]
+    let n = id(-5, 1)
+    let y = 1 << n
+    if n < xs.len {
+        print(xs[n] + y)
+    }
+}

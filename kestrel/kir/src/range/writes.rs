@@ -4,6 +4,8 @@
 
 use std::collections::HashMap;
 
+use super::state::State;
+use super::terms::{Full, Term};
 use crate::ir::*;
 use crate::visit::{walk, walk_expr, Node};
 
@@ -53,6 +55,24 @@ pub fn of_stmt(s: &Stmt) -> Vec<Write> {
     let mut c = Collector::default();
     walk(std::slice::from_ref(s), &mut |n| c.node(n));
     c.out
+}
+
+/// Everything running `stmts` may write.
+pub fn of_stmts(stmts: &[Stmt]) -> Vec<Write> {
+    let mut c = Collector::default();
+    walk(stmts, &mut |n| c.node(n));
+    c.out
+}
+
+/// The statement's own effect, when the analysis applies it as more than forgetting: a `let` or
+/// an assignment (the value it stores), or a list operation whose change to the length is known.
+/// It is one of `of_stmt`'s writes.
+pub fn effect(s: &Stmt) -> Option<Write> {
+    match s {
+        Stmt::Let(l, _) => Some(Write::Local(*l)),
+        Stmt::Assign(p, _) => Some(Write::Place(p.clone(), WriteKind::Whole)),
+        _ => list_change(s).map(|(p, kind)| Write::Place(p.clone(), kind)),
+    }
 }
 
 /// Everything evaluating `e` may write.
@@ -202,4 +222,91 @@ fn list_change(s: &Stmt) -> Option<(&Place, WriteKind)> {
         Stmt::List(ListOp::Sort, p, _) | Stmt::Dup(p) => (p, WriteKind::Items),
         _ => return None,
     })
+}
+
+/// The local a write gives a new value as a whole, when it is one: a `let`, or a place that is
+/// just a local (an integer local passed as `var`, for one).
+fn whole_local(w: &Write) -> Option<LocalIdx> {
+    match w {
+        Write::Local(l) => Some(*l),
+        Write::Place(p, _) if p.path.is_empty() => Some(p.root),
+        Write::Place(..) => None,
+    }
+}
+
+/// A write, with its place from its home (worked out once, for comparing with many terms).
+pub(super) struct Placed<'w> {
+    pub w: &'w Write,
+    pub full: Option<Full>,
+}
+
+impl super::Cx<'_> {
+    pub(super) fn placed<'w>(&self, w: &'w Write) -> Placed<'w> {
+        let full = match w {
+            Write::Place(p, _) => Some(self.homes.place_full(p)),
+            Write::Local(_) => None,
+        };
+        Placed { w, full }
+    }
+
+    /// Forgets everything `writes` may change: the range and facts of each tracked local they
+    /// write, and every length term they may touch.
+    pub(super) fn forget(&self, st: &mut State, writes: &[Write]) {
+        if writes.is_empty() || st.is_dead() {
+            return;
+        }
+        for w in writes {
+            if let Some(l) = whole_local(w) {
+                st.forget(&self.t, l);
+            }
+        }
+        if self.t.lens.is_empty() {
+            return;
+        }
+        let placed: Vec<Placed> = writes.iter().map(|w| self.placed(w)).collect();
+        for (i, (_, node)) in self.t.lens.iter().enumerate() {
+            if placed.iter().any(|p| self.hits_len(p, i)) {
+                st.forget_node(&self.t, *node);
+            }
+        }
+    }
+
+    /// For each node, whether one of `writes` may change its value.
+    pub(super) fn touched_nodes(&self, writes: &[Write]) -> Vec<bool> {
+        let mut out = vec![false; self.t.nodes()];
+        let placed: Vec<Placed> = writes.iter().map(|w| self.placed(w)).collect();
+        for w in writes {
+            if let Some(n) = whole_local(w).and_then(|l| self.t.node(l)) {
+                out[n] = true;
+            }
+        }
+        for (i, (_, node)) in self.t.lens.iter().enumerate() {
+            out[*node] = placed.iter().any(|p| self.hits_len(p, i));
+        }
+        out
+    }
+
+    /// Whether one of `writes` may change node `n`'s value.
+    pub(super) fn touched(&self, writes: &[Write], n: usize) -> bool {
+        match self.t.term(n) {
+            Some(Term::Local(l)) => writes.iter().any(|w| whole_local(w) == Some(*l)),
+            Some(Term::Len(_)) => {
+                let i = self.t.lens.iter().position(|(_, node)| *node == n).expect("a length term is in `lens`");
+                writes.iter().any(|w| self.hits_len(&self.placed(w), i))
+            }
+            Some(Term::Hidden(_)) | None => false,
+        }
+    }
+
+    /// Whether `w` may change length term number `i` (in `Tracked::lens`): a write of a place it
+    /// may be inside, a new value of one of its index locals, or pointing a loop element it is
+    /// inside elsewhere.
+    pub(super) fn hits_len(&self, w: &Placed, i: usize) -> bool {
+        let key = &self.t.lens[i].0;
+        match (w.w, &w.full) {
+            (Write::Local(l), _) => key.indexed_by(*l) || self.homes.through(key.root, *l),
+            (Write::Place(p, _), Some(full)) => (p.path.is_empty() && key.indexed_by(p.root)) || self.homes.meets(full, &self.len_full[i]),
+            (Write::Place(..), None) => true,
+        }
+    }
 }

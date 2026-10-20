@@ -1,62 +1,82 @@
 //! Loops, analysed as `while` loops: the state at the top is found by repeating the body to a
-//! fixed point, widening the ranges that still grow; then one more pass, with that state, decides
-//! the checks. A check is decided only in the final pass of every loop around it, so an inner
-//! loop skips its deciding pass unless every loop around it is deciding.
+//! fixed point, widening the ranges that still grow and dropping the facts that got weaker; then
+//! one more pass, with that state, decides the checks. A check is decided only in the final pass
+//! of every loop around it, so an inner loop skips its deciding pass unless every loop around it
+//! is deciding.
 
 use super::interval::Interval;
 use super::state::State;
+use super::tracked::Tracked;
 use super::{writes, Cx};
 use crate::ir::*;
+
+/// After this many rounds, a loop's top keeps only each term's bounds, so its repeats end.
+const SETTLE_ROUNDS: u32 = 8;
 
 impl Cx<'_> {
     pub(super) fn while_loop(&mut self, entry: State, cond: &Expr, body: &[Stmt]) -> State {
         self.repeat(entry, cond.line, |cx, top| {
             let (t, f) = cx.condition(top.clone(), cond);
             let (end, frame) = cx.body(t, body);
-            let back = joined(end, frame.continues);
-            (back, joined(f, frame.breaks))
+            let back = joined(&cx.t, end, frame.continues);
+            (back, joined(&cx.t, f, frame.breaks))
         })
     }
 
     /// `for var from start to end`: `var = start; end = <the end, worked out once>; while var <
     /// end { body; var = var + 1 }`, where the step wraps (as codegen emits it) and a `continue`
-    /// goes through it.
-    pub(super) fn for_range(&mut self, entry: State, var: LocalIdx, (start, end): (&Expr, &Expr), body: &[Stmt]) -> State {
+    /// goes through it. The end is a hidden term, fresh each time the loop is entered.
+    pub(super) fn for_range(&mut self, entry: State, s: &Stmt, var: LocalIdx, (start, end): (&Expr, &Expr), body: &[Stmt]) -> State {
         // The start and the end, once, as a simple statement that assigns `var`.
         let mut st = entry;
         let mut w = writes::of_expr(start);
         w.extend(writes::of_expr(end));
         self.forget(&mut st, &w);
         let mark = self.learned.len();
-        let first = self.eval(&st, start, true);
-        let last = self.eval(&st, end, true);
-        let learned: Vec<_> = self.learned.drain(mark..).collect();
-        for (l, r) in learned {
-            st.narrow(&self.t, l, r);
-        }
+        let first = self.eval_v(&st, start, true);
+        let last = self.eval_v(&st, end, true);
+        self.apply_learned(&mut st, mark);
         self.forget(&mut st, &w);
-        st.set(&self.t, var, first);
+        let hidden = self.hidden.get(&(s as *const Stmt as usize)).and_then(|&i| self.t.hidden(i));
+        if let Some(h) = hidden {
+            st.forget_node(&self.t, h);
+            st.bound(&self.t, h, last.r);
+            // The end as it was worked out: not over a term the start, the end or setting `var` wrote.
+            let mut all = w.clone();
+            all.push(writes::Write::Local(var));
+            if let Some(x) = last.lin.filter(|x| !self.touched(&all, x.node)) {
+                st.equal(&self.t, h, x.node, x.c);
+            }
+        }
+        self.assign(&mut st, var, Some(first), &w);
+        let last = last.r;
+        let var_node = self.t.node(var);
         self.repeat(st, start.line, |cx, top| {
             // `var < end` decides each round; the end was worked out once, so its range holds.
             let (mut t, mut f) = (top.clone(), top.clone());
             t.narrow(&cx.t, var, Interval::new(i128::MIN / 2, last.hi - 1));
             f.narrow(&cx.t, var, Interval::new(last.lo, i128::MAX / 2));
+            if let (Some(v), Some(h)) = (var_node, hidden) {
+                t.fact(&cx.t, v, h, -1);
+                f.fact(&cx.t, h, v, 0);
+            }
             let (end, frame) = cx.body(t, body);
-            let back = cx.step(joined(end, frame.continues), var);
-            (back, joined(f, frame.breaks))
+            let back = cx.step(joined(&cx.t, end, frame.continues), var);
+            (back, joined(&cx.t, f, frame.breaks))
         })
     }
 
-    /// `var = var + 1`, wrapping: a `for` range's step.
+    /// `var = var + 1`, wrapping: a `for` range's step. Its facts move with it while it can't
+    /// wrap.
     fn step(&self, mut st: State, var: LocalIdx) -> State {
         if let Some(v) = st.get(&self.t, var) {
             let ty = self.f.locals[var.0 as usize].ty;
             let next = Interval::new(v.lo + 1, v.hi + 1);
-            if next.fits(ty) {
-                st.set(&self.t, var, next);
-            } else {
-                st.forget(&self.t, var);
-            }
+            let value = next.fits(ty).then(|| {
+                let lin = self.t.node(var).map(|node| super::bounds::Lin { node, c: 1 });
+                super::bounds::Val::exact(next, lin)
+            });
+            self.assign(&mut st, var, value, &[]);
         }
         st
     }
@@ -69,7 +89,7 @@ impl Cx<'_> {
             // Never reached: in a deciding pass its checks are listed as kept.
             if self.deciding && !self.gave_up {
                 self.keep += 1;
-                let top = self.t.top();
+                let top = self.top.clone();
                 self.loop_lines.push(line);
                 let _ = round(self, &top);
                 self.loop_lines.pop();
@@ -81,12 +101,14 @@ impl Cx<'_> {
         let outer = self.deciding;
         self.deciding = false;
         let mut top = entry.clone();
+        let mut rounds = 0;
         let mut exit = loop {
             let (back, exit) = round(self, &top);
             if self.gave_up {
                 break exit;
             }
-            let next = top.widen(&self.t, &entry.join(&back));
+            rounds += 1;
+            let next = top.widen(&self.t, &entry.join(&self.t, &back), rounds >= SETTLE_ROUNDS);
             if next == top {
                 break exit;
             }
@@ -102,9 +124,9 @@ impl Cx<'_> {
 }
 
 /// `st` joined with what a frame's slot carried (nothing, when no path took it).
-fn joined(st: State, other: Option<State>) -> State {
+fn joined(t: &Tracked, st: State, other: Option<State>) -> State {
     match other {
-        Some(o) => st.join(&o),
+        Some(o) => st.join(t, &o),
         None => st,
     }
 }

@@ -1,0 +1,16 @@
+// expect-exit: 101
+// expect-stderr: division by zero on line 14
+// Built with `--release`: `x * 65536` wraps to 0, so the divisor isn't known to be above 0.
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+main() {
+    let x = id(65536, 1)
+    if x > 0 {
+        let d = x * 65536
+        print(100 / d)
+    }
+}

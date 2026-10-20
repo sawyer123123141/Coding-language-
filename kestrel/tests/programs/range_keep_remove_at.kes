@@ -1,0 +1,14 @@
+// expect-exit: 101
+// expect-stderr: index 1 out of bounds for length 1 on line 10
+// `remove_at` in a `while` loop shortens the list the guard compared against.
+main() {
+    var xs: list[int] = [1, 2, 3]
+    var s = 0
+    var i = 0
+    while i < xs.len {
+        xs.remove_at(0)
+        s += xs[i]
+        i += 1
+    }
+    print(s)
+}

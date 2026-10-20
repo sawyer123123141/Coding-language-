@@ -1,17 +1,24 @@
-//! Range analysis: proves which overflow, shift, division and narrowing checks can never fail,
-//! marks them (`ExprKind::Proven`), and says which checks are left and why. It runs on KIR after
-//! `optimize`, one function at a time, interpreting each function abstractly: a range for every
-//! tracked integer local, one statement at a time (see `stmt`), conditions refining the ranges
+//! Range analysis: proves which overflow, shift, division, narrowing and bounds checks can never
+//! fail, marks them (`ExprKind::Proven`, `IndexCheck::Proven`), and says which checks are left and
+//! why. It runs on KIR after `optimize`, one function at a time, interpreting each function
+//! abstractly: a range for every tracked integer local and facts `a - b <= c` between terms
+//! (`terms`, `facts`, `state`), one statement at a time (see `stmt`), conditions refining both
 //! (`refine`), loops repeated to a fixed point (`loops`). See the range-analysis design spec.
 
+mod arith;
+mod bounds;
 mod eval;
+pub mod facts;
 pub mod interval;
 mod loops;
+mod par;
 mod refine;
 pub mod show;
 pub mod sites;
 pub mod state;
 mod stmt;
+pub mod terms;
+pub mod tracked;
 pub mod writes;
 
 use std::collections::HashMap;
@@ -21,7 +28,8 @@ use crate::visit::{walk, Node};
 use crate::visit_mut::{walk_expr, walk_place, VisitMut};
 use interval::Interval;
 pub use sites::{Arith, CheckKind};
-use state::{State, Tracked};
+use state::State;
+use tracked::Tracked;
 
 /// The most items a list or an array holds (the runtime refuses more), so every `xs.len` of one
 /// fits an `int`.
@@ -29,6 +37,10 @@ pub const MAX_ITEMS: i128 = 2_147_483_647;
 
 /// How deep statements and expressions may nest before the analysis gives a function up.
 const MAX_DEPTH: u32 = 256;
+
+/// The work on facts a function may spend, per statement visit of its budget (see
+/// `Tracked::saturated`).
+const FACT_WORK: u64 = 64;
 
 /// What range analysis found in a module: one entry per `Module::funcs` (empty for natives).
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -63,12 +75,13 @@ pub struct CheckLeft {
 /// Analyses every function with a body, marks the checks it proves, and returns what is left.
 pub fn remove_checks(m: &mut Module, arith: Arith) -> Analysis {
     let mut funcs = Vec::with_capacity(m.funcs.len());
+    let lists = par::lists(m);
     for i in 0..m.funcs.len() {
         if m.funcs[i].native.is_some() {
             funcs.push(FuncChecks::default());
             continue;
         }
-        let (checks, proven) = analyse(m, &m.funcs[i], arith);
+        let (checks, proven) = analyse(m, &m.funcs[i], arith, lists.get(&i));
         if !proven.is_empty() {
             Marker { proven: &proven }.visit_stmts(&mut m.funcs[i].body);
         }
@@ -102,9 +115,12 @@ fn index_key(p: &Proj) -> Key {
 }
 
 /// One function's checks, and the sites it proved.
-fn analyse(m: &Module, f: &Func, arith: Arith) -> (FuncChecks, HashMap<Key, ()>) {
-    let mut cx = Cx::new(m, f, arith);
-    let start = cx.t.top();
+fn analyse(m: &Module, f: &Func, arith: Arith, par_list: Option<&Place>) -> (FuncChecks, HashMap<Key, ()>) {
+    let mut cx = Cx::new(m, f, arith, par_list);
+    let mut start = cx.top.clone();
+    if let Some(list) = par_list {
+        cx.par_entry(&mut start, list);
+    }
     let _ = cx.stmts(start, &f.body);
     if cx.gave_up {
         let left = every_site(m, f, arith);
@@ -222,6 +238,15 @@ struct Decision {
     left: Option<CheckLeft>,
 }
 
+/// A fact from a check that passed, waiting for its statement's step 4.
+#[derive(Clone, Copy, Debug)]
+enum Learn {
+    /// The local's value is also in the range.
+    Range(LocalIdx, Interval),
+    /// `a - b <= c` between two fact nodes.
+    Diff(usize, usize, i128),
+}
+
 /// The states that leave a loop's body other than by its end.
 #[derive(Default)]
 struct Frame {
@@ -251,17 +276,35 @@ struct Cx<'a> {
     loop_lines: Vec<u32>,
     /// Facts from checks that passed on every path of the statements being analysed: each local's
     /// value is also in the range. A statement takes the ones its operands added (step 4).
-    learned: Vec<(LocalIdx, Interval)>,
+    learned: Vec<Learn>,
+    /// Where each place belongs (see `terms::Homes`).
+    homes: terms::Homes,
+    /// Each length term's place from its home, by its number in `Tracked::lens`.
+    len_full: Vec<terms::Full>,
+    /// The state at the function's start (and in code no state reaches).
+    top: State,
+    /// Each `ForRange`'s number, by address: its hidden end is `Term::Hidden` of it.
+    hidden: HashMap<usize, u32>,
     decisions: HashMap<Key, usize>,
     order: Vec<Decision>,
 }
 
 impl<'a> Cx<'a> {
-    fn new(m: &'a Module, f: &'a Func, arith: Arith) -> Self {
+    fn new(m: &'a Module, f: &'a Func, arith: Arith, par_list: Option<&Place>) -> Self {
+        let (picked, hidden_tys, hidden) = par::terms(m, f, par_list);
+        let t = Tracked::of(f, &picked, &hidden_tys, u64::from(budget(f)) * FACT_WORK);
+        let par_body = m.par_bodies.iter().any(|b| std::ptr::eq(&m.funcs[b.0 as usize], f));
+        let homes = terms::Homes::of(f, par_body);
+        let len_full = t.lens.iter().map(|(k, _)| homes.key_full(k)).collect();
+        let top = t.top();
         Cx {
             m,
             f,
-            t: Tracked::of(f),
+            t,
+            len_full,
+            homes,
+            top,
+            hidden,
             arith,
             deciding: true,
             keep: 0,
@@ -318,28 +361,5 @@ impl<'a> Cx<'a> {
                 self.order.push(Decision { key, left });
             }
         }
-    }
-
-    /// Forgets every tracked local `writes` may change.
-    fn forget(&self, st: &mut State, writes: &[writes::Write]) {
-        for w in writes {
-            st.forget(&self.t, w.root());
-        }
-    }
-
-    /// The type of the value stored at a place.
-    fn place_ty(&self, p: &Place) -> KTy {
-        let mut ty = self.f.locals[p.root.0 as usize].ty;
-        for proj in &p.path {
-            ty = match (proj, ty) {
-                (Proj::Field(fi), KTy::Struct(s)) => self.m.layout(s).fields[*fi as usize].ty,
-                (Proj::Variant(v, fi), KTy::Enum(e)) => self.m.enum_layout(e).variants[*v as usize].fields[*fi as usize].ty,
-                (Proj::Index { .. }, KTy::Array(el) | KTy::List(el)) | (Proj::Payload, KTy::Optional(el)) => self.m.elem(el),
-                (Proj::MapKey { .. }, KTy::Map(k, _)) => self.m.elem(k),
-                (Proj::MapValue { .. }, KTy::Map(_, v)) => self.m.elem(v),
-                _ => return KTy::I64,
-            };
-        }
-        ty
     }
 }

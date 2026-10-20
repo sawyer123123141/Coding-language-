@@ -1,0 +1,28 @@
+// expect-exit: 101
+// expect-stderr: index 0 out of bounds for length 0 on line 25
+// A value lent to an interface parameter: its `var self` method empties the list after the guard.
+interface Healer {
+    heal(var self)
+}
+struct G: Healer {
+    items: list[int]
+    heal(var self) {
+        self.items.clear()
+    }
+}
+cure(var d: Healer, n: int) {
+    if n == 0 {
+        d.heal()
+        return
+    }
+    cure(var d, n - 1)
+}
+main() {
+    var g = G(items: [1, 2])
+    var s = 0
+    if g.items.len > 0 {
+        cure(var g, 1)
+        s = g.items[0]
+    }
+    print(s)
+}

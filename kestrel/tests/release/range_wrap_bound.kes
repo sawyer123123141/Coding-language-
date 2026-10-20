@@ -1,0 +1,18 @@
+// expect-exit: 101
+// expect-stderr: index 5 out of bounds for length 3 on line 16
+// Built with `--release`: `n - 1` wraps for the smallest `n`, so `i < n - 1` doesn't put `i`
+// below `n`.
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+main() {
+    let xs = [1, 2, 3]
+    let n = id(-2147483647, 1) - 1
+    let i = id(5, 1)
+    if n <= xs.len and i >= 0 and i < n - 1 {
+        print(xs[i])
+    }
+}

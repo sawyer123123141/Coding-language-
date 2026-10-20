@@ -1,0 +1,15 @@
+// expect-exit: 101
+// expect-stderr: index 0 out of bounds for length 0 on line 11
+// `grid[0] = []` inside `for row in grid` empties the row the loop element points at, after
+// its guard.
+main() {
+    var grid: list[list[int]] = [[1, 2], [3]]
+    var s = 0
+    for row in grid {
+        if row.len > 0 {
+            grid[0] = []
+            s += row[0]
+        }
+    }
+    print(s)
+}

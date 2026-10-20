@@ -1,0 +1,15 @@
+// expect-exit: 101
+// expect-stderr: index 5 out of bounds for length 1 on line 14
+// `i = xs[i]`: the passed check was about the old `i`; the new one is 5.
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+main() {
+    let xs: list[int] = [5]
+    var i = id(0, 1)
+    i = xs[i]
+    print(xs[i])
+}

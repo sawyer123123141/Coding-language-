@@ -1,0 +1,19 @@
+// expect-exit: 101
+// expect-stderr: index 0 out of bounds for length 0 on line 16
+// `grid[y].len > 0` was about the old `y`; after `y += 1` it says nothing about `grid[y]`.
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+main() {
+    let grid: list[list[int]] = [[1], []]
+    var y = id(0, 1)
+    var s = 0
+    if y >= 0 and y + 1 < grid.len and grid[y].len > 0 {
+        y += 1
+        s = grid[y][0]
+    }
+    print(s)
+}

@@ -1,0 +1,24 @@
+// expect-exit: 101
+// expect-stderr: integer overflow on line 20
+// `x < 100` holds before the comparison; inside it, the call triples `x` before the multiply.
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+bump(var x: int, d: int) -> int {
+    if d == 0 {
+        x = x * 3
+        return 1
+    }
+    bump(var x, d - 1)
+}
+main() {
+    var x = id(90, 1)
+    var y = 0
+    if x >= 0 and x < 100 and bump(var x, 1) + x * 10000000 > 5 {
+        y = 1
+    }
+    print(y)
+}

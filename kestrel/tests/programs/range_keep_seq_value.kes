@@ -1,0 +1,18 @@
+// expect-exit: 101
+// expect-stderr: integer overflow on line 14
+// The inlined `h` sets `x` to 5, then its value multiplies `x` beside a call that triples it
+// first: 15 times 200,000,000 overflows.
+bump(var x: int, d: int) -> int {
+    if d == 0 {
+        x = x * 3
+        return 1
+    }
+    bump(var x, d - 1)
+}
+h() -> int {
+    var x = 5
+    bump(var x, 1) + x * 200000000
+}
+main() {
+    print(h())
+}

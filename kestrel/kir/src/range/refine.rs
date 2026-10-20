@@ -1,7 +1,11 @@
 //! Conditions: what `if c`, `while c`, a value `if`'s condition and the right side of `and` and
-//! `or` know. A comparison of two integers narrows the range of a local on either side; `and`,
-//! `or` and `not` combine their parts in order; anything else teaches nothing.
+//! `or` know. A comparison of two integers adds a fact between their linear forms and narrows the
+//! range of a local on either side; `and`, `or` and `not` combine their parts in order; anything
+//! else teaches nothing. Each part forgets what it writes before it is evaluated and after it
+//! refines (a part may change what it reads, or what an earlier part compared).
 
+use super::bounds::{Lin, Val};
+use super::facts::ZERO;
 use super::interval::Interval;
 use super::state::State;
 use super::{writes, Cx};
@@ -26,8 +30,8 @@ impl Cx<'_> {
     }
 
     /// The true and false states of `e` evaluated in `st`, each part forgetting what it writes
-    /// once it has been refined with (a later part may change what an earlier one compared).
-    /// `sure`: `e` runs whenever its statement does.
+    /// before it is evaluated and once it has been refined with. `sure`: `e` runs whenever its
+    /// statement does.
     pub(super) fn cond_parts(&mut self, st: State, e: &Expr, sure: bool) -> (State, State) {
         if st.is_dead() {
             self.unreachable_expr(e);
@@ -50,7 +54,7 @@ impl Cx<'_> {
                     (State::dead(), af)
                 } else {
                     let (bt, bf) = self.cond_parts(at, b, false);
-                    (bt, af.join(&bf))
+                    (bt, af.join(&self.t, &bf))
                 }
             }
             ExprKind::Or(a, b) => {
@@ -60,14 +64,16 @@ impl Cx<'_> {
                     (at, State::dead())
                 } else {
                     let (bt, bf) = self.cond_parts(af, b, false);
-                    (at.join(&bt), bf)
+                    (at.join(&self.t, &bt), bf)
                 }
             }
             ExprKind::Binary(op, l, r) if op.is_comparison() && l.ty.is_int() => self.compare(st, e, *op, (l, r), sure),
             _ => {
-                self.eval(&st, e, sure);
+                let w = writes::of_expr(e);
                 let mut st = st;
-                self.forget(&mut st, &writes::of_expr(e));
+                self.forget(&mut st, &w);
+                self.eval(&st, e, sure);
+                self.forget(&mut st, &w);
                 (st.clone(), st)
             }
         };
@@ -75,34 +81,80 @@ impl Cx<'_> {
         out
     }
 
-    /// `l op r`: each side that is a tracked local is narrowed by the other side's range.
+    /// `l op r`: a fact between the two sides' linear forms, and each side that is a tracked
+    /// local narrowed by the other side's range.
     fn compare(&mut self, st: State, e: &Expr, op: BinOp, (l, r): (&Expr, &Expr), sure: bool) -> (State, State) {
-        let (a, b) = (self.eval(&st, l, sure), self.eval(&st, r, sure));
+        let w = writes::of_expr(e);
+        let mut st = st;
+        self.forget(&mut st, &w);
+        let (a, b) = (self.eval_v(&st, l, sure), self.eval_v(&st, r, sure));
         let mut t = st.clone();
         let mut f = st;
         self.holds(&mut t, op, (l, a), (r, b));
         self.holds(&mut f, negated(op), (l, a), (r, b));
-        let w = writes::of_expr(e);
         self.forget(&mut t, &w);
         self.forget(&mut f, &w);
         (t, f)
     }
 
-    /// Narrows `st` to where `l op r` holds, `a` and `b` being the two sides' ranges.
-    fn holds(&self, st: &mut State, op: BinOp, (l, a): (&Expr, Interval), (r, b): (&Expr, Interval)) {
-        if !can_hold(op, a, b) {
+    /// Narrows `st` to where `l op r` holds, `a` and `b` being what is known of the two sides.
+    fn holds(&self, st: &mut State, op: BinOp, (l, a): (&Expr, Val), (r, b): (&Expr, Val)) {
+        if !can_hold(op, a.r, b.r) {
             *st = State::dead();
             return;
         }
         if let Some(x) = self.local_of(l) {
-            if let Some(range) = side(op, a, b) {
+            if let Some(range) = side(op, a.r, b.r) {
                 st.narrow(&self.t, x, range);
             }
         }
         if let Some(y) = self.local_of(r) {
-            if let Some(range) = side(mirrored(op), b, a) {
+            if let Some(range) = side(mirrored(op), b.r, a.r) {
                 st.narrow(&self.t, y, range);
             }
+        }
+        match op {
+            BinOp::Lt => self.at_most(st, &a, &b, -1),
+            BinOp::Le => self.at_most(st, &a, &b, 0),
+            BinOp::Gt => self.at_most(st, &b, &a, -1),
+            BinOp::Ge => self.at_most(st, &b, &a, 0),
+            BinOp::Eq => {
+                self.at_most(st, &a, &b, 0);
+                self.at_most(st, &b, &a, 0);
+            }
+            _ => {
+                self.not_equal(st, &a, &b);
+                self.not_equal(st, &b, &a);
+            }
+        }
+    }
+
+    /// `x - y <= k` for the two values: a fact between their linear forms, or between one's form
+    /// and the other's range.
+    fn at_most(&self, st: &mut State, x: &Val, y: &Val, k: i128) {
+        match (x.lin, y.lin) {
+            // (xn + xc) - (yn + yc) <= k
+            (Some(xl), Some(yl)) => st.fact(&self.t, xl.node, yl.node, k - xl.c + yl.c),
+            // xn + xc <= k + y <= k + y.hi
+            (Some(xl), None) => st.fact(&self.t, xl.node, ZERO, k + y.r.hi - xl.c),
+            // yn + yc >= x - k >= x.lo - k
+            (None, Some(yl)) => st.fact(&self.t, ZERO, yl.node, k - x.r.lo + yl.c),
+            (None, None) => {}
+        }
+    }
+
+    /// `x != y` with `y` one number: `x`'s node can't be at that end of its range.
+    fn not_equal(&self, st: &mut State, x: &Val, y: &Val) {
+        let (Some(Lin { node, c }), true) = (x.lin, y.r.lo == y.r.hi) else { return };
+        if node == ZERO || st.is_dead() {
+            return;
+        }
+        let at = y.r.lo - c;
+        let r = st.node_range(&self.t, node);
+        if r.lo == at && r.hi > at {
+            st.bound(&self.t, node, Interval::new(at + 1, r.hi));
+        } else if r.hi == at && r.lo < at {
+            st.bound(&self.t, node, Interval::new(r.lo, at - 1));
         }
     }
 }

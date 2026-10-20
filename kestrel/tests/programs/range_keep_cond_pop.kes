@@ -1,0 +1,20 @@
+// expect-exit: 101
+// expect-stderr: index 2 out of bounds for length 2 on line 18
+// The condition pops after its guard: `i < xs.len` is gone by the time the arm runs.
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+pop_one(var xs: list[int]) -> int {
+    xs.pop()
+    1
+}
+main() {
+    var xs: list[int] = [1, 2, 3]
+    let i = id(2, 1)
+    if i >= 0 and i < xs.len and pop_one(var xs) > 0 {
+        print(xs[i])
+    }
+}

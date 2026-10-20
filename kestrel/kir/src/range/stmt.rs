@@ -1,11 +1,16 @@
 //! Statements. A simple statement goes through the spec's four steps ("One statement at a time"):
 //! forget what its expressions may write; analyse each operand from that state; decide its checks;
 //! then add the facts from checks that passed on every path, forget the writes again, and apply
-//! the statement's own effect. So a fact never outlives the value it is about, and the analysis
-//! never depends on the order codegen evaluates operands in.
+//! the statement's own effect (see `effect`). So a fact never outlives the value it is about, and
+//! the analysis never depends on the order codegen evaluates operands in.
 
+use super::bounds::{Lin, Val};
+use super::facts::ZERO;
+use super::interval::Interval;
 use super::state::State;
-use super::{writes, Cx, Frame};
+use super::tracked::Tracked;
+use super::writes::{LenChange, Write, WriteKind};
+use super::{terms, writes, Cx, Frame, Learn, MAX_ITEMS};
 use crate::ir::*;
 
 impl Cx<'_> {
@@ -27,7 +32,7 @@ impl Cx<'_> {
     pub(super) fn unreachable(&mut self, rest: &[Stmt]) {
         if self.deciding && !self.gave_up && !rest.is_empty() {
             self.keep += 1;
-            let top = self.t.top();
+            let top = self.top.clone();
             let _ = self.stmts(top, rest);
             self.keep -= 1;
         }
@@ -42,15 +47,15 @@ impl Cx<'_> {
                 let (t, f) = self.condition(st, cond);
                 let a = self.stmts(t, then_body);
                 let b = self.stmts(f, else_body);
-                a.join(&b)
+                a.join(&self.t, &b)
             }
             Stmt::While { cond, body } => self.while_loop(st, cond, body),
-            Stmt::ForRange { var, start, end, body } => self.for_range(st, *var, (start, end), body),
+            Stmt::ForRange { var, start, end, body } => self.for_range(st, s, *var, (start, end), body),
             Stmt::Break | Stmt::Continue => {
                 if self.keep == 0 {
                     if let Some(frame) = self.frames.last_mut() {
                         let slot = if matches!(s, Stmt::Break) { &mut frame.breaks } else { &mut frame.continues };
-                        join_into(slot, st);
+                        join_into(&self.t, slot, st);
                     }
                 }
                 State::dead()
@@ -75,30 +80,43 @@ impl Cx<'_> {
         let mark = self.learned.len();
         let value = self.operands(&st, s);
         // 4. Facts from checks that passed, then the writes again, then the statement's effect.
-        let learned: Vec<_> = self.learned.drain(mark..).collect();
-        for (l, r) in learned {
-            st.narrow(&self.t, l, r);
+        self.apply_learned(&mut st, mark);
+        let effect = writes::effect(s);
+        let mut rest = writes::of_stmt(s);
+        if let Some(e) = &effect {
+            if let Some(i) = rest.iter().position(|w| w == e) {
+                rest.remove(i);
+            }
         }
-        self.forget(&mut st, &writes::of_stmt(s));
-        match (s, value) {
-            (Stmt::Let(l, _), Some(v)) => st.set(&self.t, *l, v),
-            (Stmt::Assign(p, _), Some(v)) if p.path.is_empty() => st.set(&self.t, p.root, v),
-            _ => {}
+        self.forget(&mut st, &rest);
+        if let Some(e) = effect {
+            self.apply(&mut st, &e, value, &rest);
         }
         st
     }
 
-    /// Analyses a simple statement's operands from `st`, in the order codegen evaluates them; the
-    /// range of the value a `let` or an assignment stores.
-    fn operands(&mut self, st: &State, s: &Stmt) -> Option<super::interval::Interval> {
+    /// Adds the facts learned since `mark` to `st` (and takes them off the list).
+    pub(super) fn apply_learned(&mut self, st: &mut State, mark: usize) {
+        let learned: Vec<_> = self.learned.drain(mark..).collect();
+        for l in learned {
+            match l {
+                Learn::Range(local, r) => st.narrow(&self.t, local, r),
+                Learn::Diff(a, b, c) => st.fact(&self.t, a, b, c),
+            }
+        }
+    }
+
+    /// Analyses a simple statement's operands from `st`; the value a `let`, an assignment or a
+    /// `SetLen` stores.
+    fn operands(&mut self, st: &State, s: &Stmt) -> Option<Val> {
         match s {
-            Stmt::Let(_, e) | Stmt::Return(Some(e)) | Stmt::RandSeed(e) => return Some(self.eval(st, e, true)),
-            Stmt::Assign(p, e) => {
-                let v = self.eval(st, e, true);
+            Stmt::Let(_, e) | Stmt::Return(Some(e)) | Stmt::RandSeed(e) => return Some(self.eval_v(st, e, true)),
+            Stmt::Assign(p, e) | Stmt::SetLen(p, e) => {
+                let v = self.eval_v(st, e, true);
                 self.place(st, p, true);
                 return Some(v);
             }
-            Stmt::ListAdd(p, e) | Stmt::SetLen(p, e) => {
+            Stmt::ListAdd(p, e) => {
                 self.eval(st, e, true);
                 self.place(st, p, true);
             }
@@ -162,9 +180,13 @@ impl Cx<'_> {
         let mark = self.learned.len();
         let (mut t, mut f) = self.cond_parts(st, cond, true);
         let learned: Vec<_> = self.learned.drain(mark..).collect();
-        for (l, r) in learned {
-            t.narrow(&self.t, l, r);
-            f.narrow(&self.t, l, r);
+        for l in learned {
+            for side in [&mut t, &mut f] {
+                match l {
+                    Learn::Range(local, r) => side.narrow(&self.t, local, r),
+                    Learn::Diff(a, b, c) => side.fact(&self.t, a, b, c),
+                }
+            }
         }
         self.forget(&mut t, &w);
         self.forget(&mut f, &w);
@@ -182,9 +204,138 @@ impl Cx<'_> {
 }
 
 /// Joins `st` into a frame's slot (empty means no path yet).
-fn join_into(slot: &mut Option<State>, st: State) {
+fn join_into(t: &Tracked, slot: &mut Option<State>, st: State) {
     *slot = Some(match slot.take() {
-        Some(old) => old.join(&st),
+        Some(old) => old.join(t, &st),
         None => st,
     });
+}
+
+
+impl Cx<'_> {
+    /// Applies a statement's own effect `w` (see `writes::effect`), after the rest of its writes
+    /// (`rest`) were forgotten. `value` is what a `let`, an assignment or a `SetLen` stores. A
+    /// linear form only relates the new value to terms neither `rest` nor `w` itself writes.
+    fn apply(&self, st: &mut State, w: &Write, value: Option<Val>, rest: &[Write]) {
+        let mut all = rest.to_vec();
+        all.push(w.clone());
+        match w {
+            Write::Local(l) => self.assign(st, *l, value, rest),
+            Write::Place(p, WriteKind::Whole) if p.path.is_empty() => self.assign(st, p.root, value, rest),
+            Write::Place(p, WriteKind::Whole) => {
+                self.forget(st, std::slice::from_ref(w));
+                if let Some(n) = self.list_node(p) {
+                    self.set_len(st, n, value.and_then(|v| v.len), &all);
+                }
+            }
+            Write::Place(p, WriteKind::Length(change)) => self.change_len(st, p, change, value, (rest, &all)),
+            Write::Place(p, WriteKind::Items) => {
+                // The length stays; lengths inside the items may change (they move).
+                let wf = self.homes.place_full(p);
+                for (i, (_, node)) in self.t.lens.iter().enumerate() {
+                    if self.homes.inside(&wf, &self.len_full[i]) {
+                        st.forget_node(&self.t, *node);
+                    }
+                }
+            }
+        }
+    }
+
+    /// `l` gets a new value `value`. What was known about it goes, with every length indexed by
+    /// it or inside it; a linear form over a term nothing else in the statement wrote (and that
+    /// isn't such a length) relates `l` to that term, and `x = x + c` moves `x`'s facts by `c`
+    /// instead.
+    pub(super) fn assign(&self, st: &mut State, l: LocalIdx, value: Option<Val>, rest: &[Write]) {
+        let own = Write::Local(l);
+        let placed = self.placed(&own);
+        for (i, (_, node)) in self.t.lens.iter().enumerate() {
+            if self.hits_len(&placed, i) {
+                st.forget_node(&self.t, *node);
+            }
+        }
+        if !self.t.is_tracked(l) {
+            // A list or array gets the stored value's length.
+            if let Some(n) = self.list_node(&Place::local(l)) {
+                let mut all = rest.to_vec();
+                all.push(own);
+                self.set_len(st, n, value.and_then(|v| v.len), &all);
+            }
+            return;
+        }
+        let Some(v) = value else {
+            st.forget(&self.t, l);
+            return;
+        };
+        let node = self.t.node(l);
+        let lin = v.lin.filter(|x| !self.touched(rest, x.node) && (Some(x.node) == node || !self.touched(std::slice::from_ref(&own), x.node)));
+        match (node, lin) {
+            (Some(n), Some(x)) if x.node == n => st.shift(&self.t, n, x.c, v.r),
+            (Some(n), Some(x)) => {
+                st.set(&self.t, l, v.r);
+                st.equal(&self.t, n, x.node, x.c);
+            }
+            _ => st.set(&self.t, l, v.r),
+        }
+    }
+
+    /// The node of the length of the list or array at `p`, when it is a term.
+    fn list_node(&self, p: &Place) -> Option<usize> {
+        terms::list_key(self.m, self.f, p, p.path.len()).and_then(|k| self.t.len_node(&k))
+    }
+
+    /// Length node `n` is now `len`, when that is over a term none of `writes` (the statement's,
+    /// its effect included) changed.
+    fn set_len(&self, st: &mut State, n: usize, len: Option<Lin>, writes: &[Write]) {
+        st.forget_node(&self.t, n);
+        if let Some(x) = len.filter(|x| x.node != n && !self.touched(writes, x.node)) {
+            st.equal(&self.t, n, x.node, x.c);
+        }
+    }
+
+    /// The length of the list at `p` changes by `change`: it moves only for the term that must be
+    /// `p`'s length; every other length that may be inside `p` is forgotten. `rest` are the
+    /// statement's other writes, `all` the same with this one.
+    fn change_len(&self, st: &mut State, p: &Place, change: &LenChange, value: Option<Val>, (rest, all): (&[Write], &[Write])) {
+        let key = terms::key_of(self.f, p, p.path.len());
+        let set = match change {
+            LenChange::Set(e) => value.or_else(|| match e.kind {
+                ExprKind::Int(c) => Some(Val::exact(Interval::exact(c.into()), Some(Lin { node: ZERO, c: c.into() }))),
+                _ => None,
+            }),
+            _ => None,
+        };
+        let mut equal_to = None;
+        let wf = self.homes.place_full(p);
+        for (i, (k, node)) in self.t.lens.iter().enumerate() {
+            let n = *node;
+            if key.as_ref() != Some(k) {
+                if self.homes.meets(&wf, &self.len_full[i]) {
+                    st.forget_node(&self.t, n);
+                }
+                continue;
+            }
+            match change {
+                LenChange::Add(by) => {
+                    let (by, r) = (i128::from(*by), st.node_range(&self.t, n));
+                    st.shift(&self.t, n, by, Interval::new(r.lo + by, r.hi + by));
+                }
+                LenChange::Set(_) => match set.and_then(|v| v.lin.map(|x| (v, x))) {
+                    // `SetLen(xs, xs.len - 1)`: the length moves.
+                    Some((v, x)) if x.node == n && !self.touched(rest, n) => st.shift(&self.t, n, x.c, v.r),
+                    _ => {
+                        st.forget_node(&self.t, n);
+                        if let Some(r) = set.and_then(|v| v.r.meet(Interval::new(0, MAX_ITEMS))) {
+                            st.bound(&self.t, n, r);
+                        }
+                        equal_to = set.and_then(|v| v.lin).filter(|x| x.node != n && !self.touched(all, x.node)).map(|x| (n, x));
+                    }
+                },
+                LenChange::Unknown => st.forget_node(&self.t, n),
+            }
+        }
+        // After every other length the change may touch is forgotten.
+        if let Some((n, x)) = equal_to {
+            st.equal(&self.t, n, x.node, x.c);
+        }
+    }
 }

@@ -1,0 +1,26 @@
+// expect-exit: 101
+// expect-stderr: index 2 out of bounds for length 2 on line 23
+// The inlined `get` checks `xs[i]`, then its sibling pops: the next `xs[i]` keeps its check.
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+pure get(xs: list[int], i: int) -> int {
+    xs[i]
+}
+pop_one(var xs: list[int]) -> int {
+    xs.pop()
+    1
+}
+main() {
+    var xs: list[int] = [1, 2, 3]
+    let i = id(2, 1)
+    var t = 0
+    if i >= 0 and i < xs.len {
+        t = get(xs, i) + pop_one(var xs)
+        t += xs[i]
+    }
+    print(t)
+}

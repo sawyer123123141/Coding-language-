@@ -8,7 +8,7 @@ use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
 use super::common::hermetic;
-use super::{compare, expectations, only_prefixed, programs, Expect, PROOF_FAILED};
+use super::{build_with, compare, expectations, only_prefixed, programs, Expect, PROOF_FAILED};
 
 /// How long the release pass lets one program run: a program whose checked run stops on an
 /// overflow may loop when it wraps.
@@ -137,4 +137,43 @@ fn test_only_keeps_the_programs_whose_names_start_with_a_prefix() {
     assert_eq!(names(only_prefixed(files.clone(), Some("hello,,"))), ["hello.kes"], "empty entries are ignored");
     assert!(only_prefixed(files.clone(), Some("ello")).is_empty(), "a prefix, not a substring");
     assert!(only_prefixed(files, Some("")).is_empty(), "no prefixes keep nothing");
+}
+
+/// The programs in `tests/release`, which only fail as they should when built with `--release`
+/// (with `KESTREL_TEST_ONLY`, those whose names start with one of its prefixes).
+fn release_programs() -> Vec<PathBuf> {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/release");
+    let mut files: Vec<PathBuf> = fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("{}: {e}", dir.display()))
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|x| x == "kes"))
+        .collect();
+    files.sort();
+    only_prefixed(files, std::env::var("KESTREL_TEST_ONLY").ok().as_deref())
+}
+
+/// Every `tests/release` program built with `--release` and run, compared as
+/// `programs_run_as_executables` does; then built again with the proof check on.
+#[test]
+fn release_programs_run_as_executables() {
+    let out_dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("release_programs");
+    fs::create_dir_all(&out_dir).unwrap();
+    let mut failures = Vec::new();
+    for path in release_programs() {
+        let src = fs::read_to_string(&path).unwrap();
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        let exp = expectations(&name, &src);
+        for proofs in [false, true] {
+            let mode = if proofs { "release exe, proofs checked" } else { "release exe" };
+            let exe = out_dir.join(path.file_stem().unwrap()).with_extension(std::env::consts::EXE_EXTENSION);
+            let built = build_with(&path, &exe, &["--release"], proofs);
+            if !built.status.success() {
+                failures.push(format!("{name} [{mode}, build]: {}", String::from_utf8_lossy(&built.stderr)));
+                continue;
+            }
+            let out = hermetic(&mut Command::new(&exe)).envs(exp.env.iter().map(|(k, v)| (k, v))).output().expect("run built exe");
+            failures.extend(compare(&name, mode, &out, &exp));
+        }
+    }
+    assert!(failures.is_empty(), "\n{}", failures.join("\n"));
 }

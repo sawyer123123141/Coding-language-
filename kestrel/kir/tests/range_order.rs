@@ -105,9 +105,10 @@ f(p: i64) -> int {{
 
 #[test]
 fn a_sibling_write_wins() {
-    // The inlined `half` narrows its own copy of `x` (in its `Seq`'s value), so with ranges alone
-    // nothing reaches `x` here; with facts between values (Task 3) its copy equals `x`. The
-    // second form narrows `x` itself, in an operand that runs before its sibling triples it.
+    // The inlined `half` narrows its own copy of `x` (in its `Seq`'s value), which equals `x`
+    // inside the `Seq` (a fact between values) but not after its sibling triples `x`: kept as a
+    // regression test of facts leaving an operand. The second form narrows `x` itself, in an
+    // operand that runs before its sibling triples it.
     for statement in ["let t = half(x) + int(bump(var x, 1))", "let t = half(x) + int(x) + int(bump(var x, 1))"] {
         let (m, a) = analysed(&sibling(statement), Checked);
         let left = left_of(&m, &a, "f", Narrowing);
@@ -163,4 +164,28 @@ fn the_same_statement_does_not_teach_itself() {
     let src = "pure f(x: i64) -> int {\n int(x) ^ int(x)\n}";
     let (m, a) = analysed(src, Checked);
     assert_eq!(left_of(&m, &a, "f", Narrowing).len(), 2);
+}
+
+#[test]
+fn a_write_inside_a_seq_value_wins() {
+    // The inlined `h` sets `x`, then its value reads `x` beside a call that triples it, which may
+    // run first (codegen runs it first): the multiply keeps its check.
+    let src = format!("{BUMP}\nh(p: int) -> int {{\n var x = 5\n bump(var x, 1) + x * 200000000\n}}\nf(p: int) -> int {{\n h(p)\n}}");
+    let (m, a) = analysed(&src, Checked);
+    let left = left_of(&m, &a, "f", Overflow);
+    assert!(left.iter().any(|c| line(c.line) == 10 && c.text.starts_with("`x * 200000000`")), "{left:#?}");
+    assert_eq!(proven_of(&m, "f", Overflow), 0);
+}
+
+#[test]
+fn a_write_inside_a_comparison_wins() {
+    // `x < 100` holds before the comparison; inside it, `bump` may triple `x` before the multiply
+    // reads it.
+    let src = format!(
+        "{BUMP}\nf(p: int) -> int {{\n var x = p\n var y = 0\n if x >= 0 and x < 100 and bump(var x, 1) + x * 10000000 > 5 {{\n  y = 1\n }}\n y\n}}"
+    );
+    let (m, a) = analysed(&src, Checked);
+    let left = left_of(&m, &a, "f", Overflow);
+    assert!(left.iter().any(|c| line(c.line) == 11 && c.text.starts_with("`x * 10000000`")), "{left:#?}");
+    assert_eq!(proven_of(&m, "f", Overflow), 0);
 }
