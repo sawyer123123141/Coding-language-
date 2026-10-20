@@ -7,6 +7,7 @@ These are small loops from the particles demo, timed alone so that a change to t
 - `step_pow.kes`: the step exactly as the demo writes it, with `pow(KEEP, dt)` for every particle.
 - `copy.kes`: the demo's draw copy, every particle's position into a `list[vec2]`.
 - `src/bin/rust.rs`: the same three kernels in Rust (`step`, `pow` and `copy`), one thread, same arithmetic.
+- `iface_hp.kes`, `iface_step.kes`: calls through a `list[Damageable]` (see "Interface calls" at the end), each with an `_direct.kes` version over a `list[Goblin]`, and `dyn_hp`, `dyn_step`, `direct_hp` and `direct_step` modes in `src/bin/rust.rs`.
 - `filter.kes`, `map.kes`, `sort_by.kes`: the list methods that take a closure (see "The list methods" at the end), each with a hand-written `_loop.kes` version doing the same work, and `filter`, `map` and `sort_by` modes in `src/bin/rust.rs`.
 
 ## How to run it
@@ -19,7 +20,7 @@ py measure.py --rounds 3 --threads 1
 py measure.py --rounds 3 --threads 16
 ```
 
-`measure.py` runs every kernel for a few rounds, one after the other so they share the machine's conditions, and prints the median of the rounds' medians with their range. `--threads` sets `KESTREL_THREADS` for the Kestrel kernels, which is the thread count of their `par for`; the Rust kernels always use one thread. A single kernel can be run with `target/release/kernels.exe step.kes --release`, and takes `--n`, `--iters`, `--reps` and, without `--release`, checks integer overflow as `kestrel run` does.
+`measure.py` runs every kernel for a few rounds, one after the other so they share the machine's conditions, and prints the median of the rounds' medians with their range. `--threads` sets `KESTREL_THREADS` for the Kestrel kernels, which is the thread count of their `par for`; the Rust kernels always use one thread. `py measure.py --rounds 9 --only iface` runs just the kernels whose label contains the text (here the interface ones, Kestrel and Rust). A single kernel can be run with `target/release/kernels.exe step.kes --release`, and takes `--n`, `--iters`, `--reps` and, without `--release`, checks integer overflow as `kestrel run` does.
 
 To see what the compiler made of a loop, `target/release/kernels.exe step.kes --release --dump par` prints the optimised Cranelift IR and then the machine code of every `par for` body. `--dump NAME` does the same for the function with that name. The `explicit_slot` lines at the top of the IR are stack slots. Before scalar replacement `step.kes` had 8 of them, each holding a `vec2` temporary of the step (the vector to the target, its direction, the pull, and so on) that was stored to the stack and loaded back; now it has none.
 
@@ -261,3 +262,40 @@ All three versions of each kernel give the same checksum (checked at `--n 100000
 Together that is a spill reload, two or three more loads per item and a little more register pressure, about 0.9 ns an item. It is not a bug; the code is right and only slower. What would close it is making the inlined literal bind the item once, as the loop does, and dropping the environment an inlined literal does not read. That is not done here; this round only measured it.
 
 **In short.** `map` matches its hand loop; `filter` is about a quarter slower than its hand loop; `sort_by` is 1.4 times a hand merge sort. Against Rust all three lose: 1.8 times, 1.8 times and 6.1 times. For `filter` and `map` the hand-written loops lose to Rust by about the same factors (1.5 and 1.8), so for those two the method is not the main cost; for `sort_by` a plain loop is 4.3 times Rust and the method is 6.1 times.
+
+## Interface calls
+
+Measured on 2026-10-19 with the compiler at commit 93b4e3e (the end of the interfaces build, plus an uncommitted edit to `check/src/body/enums.rs` that was in the working tree and that these kernels don't touch), on the same machine as above (Ryzen 7 5800X, Windows 11), one thread, `--release`. It was a desktop with whatever else the user had open, and nothing of mine running but the measurement (the idle-priority watcher that keeps cargo out of the way was stopped before timing). The ranges are 1-3% except one round of `iface_hp.kes` and `iface_hp_direct.kes` in run 2, which was disturbed (7.63 and 1.07). Treat differences under 10% between two different programs as noise, as above.
+
+The claim to check is that a call through an interface costs an indirect call and nothing else: no allocation in the loop, and a price in the nanoseconds. Two kernels, each three ways: through a `list[Damageable]`, over a `list[Goblin]` (a direct call the compiler can inline), and in Rust.
+
+- **`hp`** (`iface_hp.kes`, `iface_hp_direct.kes`, Rust `dyn_hp` and `direct_hp`): 1,000,000 items, `sum += d.hp()` over all of them, 20 passes. The interface list holds `Goblin`s and `Slime`s (`hp` returns a field; `Slime.hp` adds 1, see below), chosen by the parity of the same generator the list kernels use (`x = (x * 75 + 74) % 65537`), so the branch predictor can't learn the order. Rust is a `Vec<Box<dyn Damageable>>` built the same way, against a `Vec<Goblin>`.
+- **`step`** (`iface_step.kes`, `iface_step_direct.kes`, Rust `dyn_step` and `direct_step`): the same lists, `d.step()` on every item (`Goblin` adds 1 to its field, `Slime` adds 3: a `var self` call that writes through the pointer), 20 passes, and the sum of `hp()` at the end as the checksum.
+
+Kestrel and Rust give the same checksum for each pair (checked at `--n 1000000 --iters 3`). The numbers are ns per item (one call each), the median of 9 rounds with the range in brackets (`py measure.py --rounds 9 --only iface`); the whole set was run twice and the table gives both runs.
+
+| Kernel, ns per item | Kestrel, interface list | Kestrel, `list[Goblin]` | Rust `dyn` | Rust `Vec<Goblin>` |
+|---|---:|---:|---:|---:|
+| `hp`, run 1 | 5.26 (5.20-5.52) | 0.74 (0.72-0.78) | 4.42 (4.34-4.65) | 0.07 (0.06-0.11) |
+| `hp`, run 2 | 5.21 (5.11-7.63) | 0.73 (0.70-1.07) | 4.42 (4.21-4.75) | 0.07 (0.06-0.14) |
+| `step`, run 1 | 5.24 (5.18-5.33) | 0.50 (0.49-0.54) | 4.54 (4.48-4.91) | 0.07 (0.07-0.12) |
+| `step`, run 2 | 5.23 (5.11-5.79) | 0.49 (0.48-0.59) | 4.60 (4.32-5.15) | 0.07 (0.07-0.09) |
+
+| Ratios of the medians (both runs agree) | Interface over direct, Kestrel | Kestrel interface over Rust `dyn` | Kestrel direct over Rust direct |
+|---|---:|---:|---:|
+| `hp` | 7.1 | **1.18-1.19** | 10.4-10.6 |
+| `step` | 10.7 | **1.14-1.15** | 7.0-7.1 |
+
+**What it means.**
+- **A call through an interface costs about 4.5-4.7 ns more than a direct call, in a loop whose order the predictor can't learn.** That is 7 to 11 times the direct loop, which the compiler inlines to a load and an add (0.5-0.7 ns).
+- **Most of it is the mispredicted jump, not the table.** With the types in two blocks (all `Goblin`s, then all `Slime`s: a scratch variant of `iface_hp.kes`, not kept) the same interface loop takes 2.2 ns, three runs of 2.22-2.25. So the random order costs about 3 ns an item, and the predictable indirect call about 1.5 ns more than the inlined one. A game's list is usually somewhere between the two.
+- **Against Rust's `Box<dyn>`, Kestrel loses by 14-19%** (5.2 against 4.4 and 4.5-4.6). That is a loss, and it is the same in both runs and outside the ranges. The gap is smaller than I expected, since both loops are an indirect call per item with a mispredicted jump about half the time. Reading the IR and machine code (`kernels.exe iface_hp.kes --release --dump bench` and `--dump Slime.hp`), the likely reasons, not separately timed:
+  - Kestrel's method is a whole function with a frame: `pushq %rbp; movq %rsp,%rbp` ... `popq %rbp; ret` around one load (and one add). Rust's is a bare load and return.
+  - The loop reloads the list's data pointer from its header on every item (`movq 0(%rsi),%r8`), because the call might have changed the list, and keeps the running sum in a callee-saved register across the call. Rust's slice is in registers.
+  - Kestrel's items are 16-byte (data, table) pairs, and their boxes are in the arena one after another in the order they were made; Rust's `Box<dyn>` is also 16 bytes and its boxes are separate allocations. This favours Kestrel if anything, so it isn't the cause of the loss.
+- **Against a direct loop in Rust the loss is bigger and is not about interfaces.** Rust turns the `Vec<Goblin>` loop into a vectorised sum or add (0.07 ns); Kestrel's direct loops take 0.5-0.7 ns, the 10 and 7 times in the last column. The same factor shows in `map` above, where Kestrel does one item at a time.
+- **No allocation in the loop:** `iface_memory.rs` has the test (100,000 calls, equal arena reports). The 1,000,000 boxes are made once, before the timed passes.
+
+**A mistake this caught, kept as a warning.** The first version of `iface_hp.kes` gave `Slime.hp` the same body as `Goblin.hp` (`self.size`, a load from offset 0). Rust then ran at 2.8-3.0 ns, not 4.4: LLVM merges identical functions, so both vtable entries pointed at one address and the "random" indirect call was always predicted. Changing Rust's `Slime::hp` to `self.size + 1` moved it to 5.1-5.2 ns. Both languages' kernels now have the `+ 1`, so neither can fold the two methods. Kestrel does not merge them, so its first numbers (5.6-5.7 ns) were right; only the comparison with Rust was wrong. A test of virtual calls whose targets are identical measures the call, not the branch.
+
+**Losses, in short.** Kestrel's interface call is 14-19% slower than Rust's `Box<dyn>` call, and 7-11 times a direct call it can inline (Rust's gap there is larger still, since it also vectorises). Devirtualising (a `CallVirtual` whose `MakeIface` is visible after inlining becoming a direct call) is still undone, and it would remove the call only where the type is known; it does nothing for a mixed list. A cheaper call would need a leaf function without a frame, and the data pointer of the list kept in a register across the call. Neither is done here; this round only measured.

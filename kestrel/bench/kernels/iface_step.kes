@@ -1,0 +1,50 @@
+// 1M calls of `step(var self)` through a `list[Damageable]` of two struct types (order from the
+// ZX81 generator's parity), then the sum of `hp()` after the last pass. `bench(n, iters)` steps
+// `n` items `iters` times and returns a checksum.
+interface Damageable {
+    step(var self)
+    pure hp(self) -> int
+}
+
+struct Goblin: Damageable {
+    health: int
+    step(var self) { self.health += 1 }
+    pure hp(self) -> int { self.health }
+}
+
+struct Slime: Damageable {
+    size: int
+    step(var self) { self.size += 3 }
+    pure hp(self) -> int { self.size }
+}
+
+pub bench(n: int, iters: int) -> float {
+    var total = 0.0
+    arena {
+        var foes: list[Damageable] = []
+        var x = 1
+        for i from 0 to n {
+            x = (x * 75 + 74) % 65537
+            if x % 2 == 0 {
+                foes.add(Goblin(health: x % 100))
+            } else {
+                foes.add(Slime(size: x % 100))
+            }
+        }
+        for k from 0 to iters {
+            for d in foes {
+                d.step()
+            }
+        }
+        var sum = 0
+        for d in foes {
+            sum += d.hp()
+        }
+        total = float(sum)
+    }
+    total
+}
+
+main() {
+    print(bench(1000, 10))
+}

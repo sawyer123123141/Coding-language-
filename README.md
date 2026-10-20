@@ -82,6 +82,39 @@ main() {
 
 Sorting is stable, strings sort by code point, and `sort_by` keys must be `pure`. Methods, built-ins and natives aren't values yet; wrap them in a closure. The details are in the "Closures and function values" section of the same file.
 
+Interfaces name a set of methods that several structs or enums can promise to have, so one list can hold goblins and barrels and a call runs the right method for each (a method table, like a vtable). The compiler checks the promise, where GDScript's duck typing (`has_method`) checks it when the line runs. A struct passed straight to an interface parameter is lent, not copied; storing one makes a copy in the current arena, like a string:
+
+```kestrel
+interface Damageable {
+    take_damage(var self, amount: int)
+    pure hp(self) -> int
+}
+
+struct Goblin: Damageable {
+    health: int = 10
+    take_damage(var self, amount: int) { self.health -= amount }
+    pure hp(self) -> int { self.health }
+}
+
+struct Barrel: Damageable {
+    oil: int
+    take_damage(var self, amount: int) { self.oil -= amount * 2 }
+    pure hp(self) -> int { self.oil }
+}
+
+show(d: Damageable) { print(d.hp()) }       // d is the caller's Goblin, not a copy
+
+main() {
+    var foes: list[Damageable] = [Goblin(), Barrel(oil: 4)]
+    for f in foes { f.take_damage(2) }
+    print(foes.map((f) { f.hp() }))         // [8, 0]
+    print(foes)                             // [Goblin(health: 8), Barrel(oil: 0)]
+    show(Goblin())                          // 10
+}
+```
+
+A struct that owns an `Arena` or a GPU object can be lent to an interface but not stored as one. There is no `is` test to get the struct back out yet. A call through an interface is an indirect call that isn't inlined: about 5 ns where a direct call is under 1, and about 15% behind Rust's `Box<dyn Trait>` (`kestrel/bench/kernels/results.md`). The details are in the "Interfaces" section of the syntax file.
+
 ## Use
 
 Needs Rust (stable) and, on Windows, Visual Studio's C++ build tools (for `link.exe`).
@@ -169,6 +202,6 @@ The core language works: functions, structs with methods, enums and `match`, vec
 
 It also runs inside Godot 4: see [`kestrel/godot`](kestrel/godot/README.md). GDScript calls Kestrel functions, and edits hot-reload.
 
-Also built: closures and function values with the list methods that take them, `map` (the hash map), `par for` (loops that run on every core over `pure` code), global math and random numbers, and the window above with textures, 3D and the voxel viewer. Small structs now stay in registers. Next: a stronger (faster) backend.
+Also built: closures and function values with the list methods that take them, interfaces (checked method sets with dynamic dispatch), `map` (the hash map), `par for` (loops that run on every core over `pure` code), global math and random numbers, and the window above with textures, 3D and the voxel viewer. Small structs now stay in registers. Next: a stronger (faster) backend.
 
 Speed versus Rust is between 1.0x and 1.5x on loops and structs, and about 3x on the voxel heightmap milestone. The particle demo's update step is close now that small structs stay in registers: on one thread it takes 1.07 times Rust's time (1.15 times with the `pow` hoisted out, down from 1.5 and 3.4), but its copy loop is still about 4 times behind, and a whole frame with bulk drawing was only 2-7% behind before that change. The numbers are in `kestrel/bench/*/results.md`.

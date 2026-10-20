@@ -302,6 +302,31 @@ From `docs/superpowers/specs/2026-10-18-closures-design.md` (its "As built" sect
 
 **File sizes** (the 400-line guide): the new files are under 340 lines (`check/src/tables.rs` is 339, `kir/src/lower/sort.rs` 246, `check/src/body/list_fns.rs` 225); `check/src/body/lists.rs` is 295.
 
+## Found while building interfaces (2026-10-19)
+
+From `docs/superpowers/specs/2026-10-19-interfaces-design.md` (its "As built" section), the task reviews and the measurement. None blocks anything. Not fixed:
+
+**Owed from the build:** one full `cargo test --workspace`, the whole `programs` target and the Godot clippy, none run since Task 3 (light mode; Task 4 ran focused targets and workspace clippy).
+
+**From the measurement (ns per item, `--release`, one thread; `kestrel/bench/kernels/results.md`, "Interface calls"):**
+- A call through `list[Damageable]` (two types in a random order) takes 5.2 ns for `hp()` and `step(var self)`, against 0.5-0.7 ns for the inlined direct call over `list[Goblin]` (7-11x), and 14-19% more than Rust's `Vec<Box<dyn Trait>>` (4.4 and 4.5-4.6 ns). With the types in two blocks it takes 2.2 ns, so about 3 ns of the 5.2 is the mispredicted jump and not the call.
+- The likely extra cost against Rust: every method is a full function with a frame (`push rbp` ... `pop rbp`) around one load, and the loop reloads the list's data pointer from its header each item. A frameless leaf function and the header kept in a register would close part of it. Not measured separately.
+- Against Rust's direct loop over a `Vec<Goblin>` the gap is 7-10x (0.07 ns, vectorised); that is the general "one item at a time" gap seen in `map`, not an interface cost.
+- Devirtualising (a `CallVirtual` whose `MakeIface` is visible after inlining becoming a direct call) is not done. It would remove the call only where the type is visible, not in a mixed list.
+
+**Follow-ups to build:**
+- **`array[[Damageable]](n)` is over-refused.** `zero_fill_breaks` refuses an array of arrays holding an interface; an empty inner array holds none. Allow it when the innermost items are optional or lists, or refuse only when the array's own items are (or hold) interface values.
+- **A non-place interface receiver copies on every call.** `(if c { a } else { b }).hit(1)` deep-copies the value through the copy entry each time, so a hot loop grows the arena. Skip the copy when no argument changes anything (the exclusivity check already knows), or copy once per loop.
+- **`q.add(take(var q))` is refused** by the built-in-receiver check although it is safe (`ListAdd` evaluates the value before taking the list's address). Narrow the check to the built-ins that read through a pointer after evaluating their arguments (`has`, `find`, `get`, `join`, ...), or keep it as a deliberate match for the `var self` rule.
+- **`is` tests** (narrowing an interface value to its struct) wait, as the user said. Until then an interface value can't get its struct back, and an interface value doesn't convert to another interface.
+- **Tests not written:** a loop-element promote program (`for g in gs { g.health = 5; show(g) }`, Task 3's review), a copy test for an enum implementor (`iface_copies.kes` has only structs), and a `Brain`-style case in `iface_copies.kes` whose constant or field default is changed after a copy (its `Brain` has no `var self` method, so the copy isn't tested to be independent).
+- **Stale pointers and names:** `kir/src/ir_expr.rs` around line 309 names `table_for` where the copy function is now `iface_copy_fn`; the KIR test at `kir/tests/ifaces.rs` around line 866 is named for an ordering it doesn't assert.
+- **The promote rule for a borrowed place** (a `MakeIface` of the root anywhere in the region makes it non-exclusive) shows in no program's output; only a KIR test holds it.
+- **A call's receiver is read before its arguments** in `call_virtual`: if an argument replaces the receiver place, the old box is still called. Boxes are freed only with their arena, so this reads freed memory only if an argument frees that arena, which the exclusivity rules for receivers refuse as for `var self` calls.
+- **`Stmt::Trap` and `Stmt::Fail` carry no line.** The abstract-method trap and the owning copy error print without one ("on line 0" for the trap).
+- **A `pub` function with an interface in its signature** compiles but isn't callable from Godot.
+- **A stored interface value costs an allocation,** like a string, so `self.foes.add(Goblin())` in a method needs `in self.mem { }`, which `list[Goblin]` doesn't.
+
 ## Maps (built 2026-10-09)
 
 - **Not yet:**

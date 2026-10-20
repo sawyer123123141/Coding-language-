@@ -1,0 +1,30 @@
+// The same loop over a `list[Goblin]`: `hp()` is a direct call that the compiler can inline.
+// Same loop and ZX81 values as `iface_hp.kes`, but every item is a `Goblin`, so the checksum differs.
+struct Goblin {
+    health: int
+    pure hp(self) -> int { self.health }
+}
+
+pub bench(n: int, iters: int) -> float {
+    var total = 0.0
+    arena {
+        var foes: list[Goblin] = []
+        var x = 1
+        for i from 0 to n {
+            x = (x * 75 + 74) % 65537
+            foes.add(Goblin(health: x % 100))
+        }
+        for k from 0 to iters {
+            var sum = 0
+            for d in foes {
+                sum += d.hp()
+            }
+            total += float(sum)
+        }
+    }
+    total
+}
+
+main() {
+    print(bench(1000, 10))
+}

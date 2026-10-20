@@ -5,7 +5,11 @@
 //! `sort_by(|a, b| a.x.total_cmp(&b.x))`). One thread, release build, timed like `kernels` (median
 //! ns per item).
 //!
-//!   rust <step|pow|copy|filter|map|sort_by> [--n N] [--iters K] [--reps R]
+//! The interface kernels (`iface_hp.kes`, `iface_step.kes` and their `_direct` versions) are the
+//! modes `dyn_hp`, `dyn_step` (a `Vec<Box<dyn Trait>>` of two types, in the generator's order) and
+//! `direct_hp`, `direct_step` (a `Vec<Goblin>`).
+//!
+//!   rust <step|pow|copy|filter|map|sort_by|dyn_hp|dyn_step|direct_hp|direct_step> [--n N] [--iters K] [--reps R]
 
 use std::hint::black_box;
 use std::time::Instant;
@@ -129,6 +133,108 @@ fn run_sort_by(src: &[Item]) -> f32 {
     s as f32
 }
 
+trait Damageable {
+    fn hp(&self) -> i32;
+    fn step(&mut self);
+}
+
+struct Goblin {
+    health: i32,
+}
+
+struct Slime {
+    size: i32,
+}
+
+impl Damageable for Goblin {
+    #[inline]
+    fn hp(&self) -> i32 { self.health }
+    #[inline]
+    fn step(&mut self) { self.health += 1; }
+}
+
+impl Damageable for Slime {
+    #[inline]
+    fn hp(&self) -> i32 { self.size + 1 }
+    #[inline]
+    fn step(&mut self) { self.size += 3; }
+}
+
+fn dyn_foes(n: usize) -> Vec<Box<dyn Damageable>> {
+    zx81(n)
+        .into_iter()
+        .map(|x| -> Box<dyn Damageable> { if x % 2 == 0 { Box::new(Goblin { health: x % 100 }) } else { Box::new(Slime { size: x % 100 }) } })
+        .collect()
+}
+
+fn direct_foes(n: usize) -> Vec<Goblin> {
+    zx81(n).into_iter().map(|x| Goblin { health: x % 100 }).collect()
+}
+
+#[inline(never)]
+fn run_dyn_hp(foes: &[Box<dyn Damageable>]) -> f32 {
+    let mut sum = 0;
+    for d in foes {
+        sum += d.hp();
+    }
+    sum as f32
+}
+
+#[inline(never)]
+fn run_dyn_step(foes: &mut [Box<dyn Damageable>]) {
+    for d in foes.iter_mut() {
+        d.step();
+    }
+}
+
+#[inline(never)]
+fn run_direct_hp(foes: &[Goblin]) -> f32 {
+    let mut sum = 0;
+    for d in foes {
+        sum += d.hp();
+    }
+    sum as f32
+}
+
+#[inline(never)]
+fn run_direct_step(foes: &mut [Goblin]) {
+    for d in foes.iter_mut() {
+        d.step();
+    }
+}
+
+/// The interface kernels: the objects are made once per repetition, then `iters` passes are timed
+/// (for the `step` modes the sum of `hp()` after the passes is the checksum).
+fn iface_kernel(mode: &str, n: usize, iters: usize, reps: usize) {
+    let (mut per, mut sum) = (Vec::new(), 0.0f32);
+    for rep in 0..=reps {
+        sum = 0.0;
+        let mut dyns = dyn_foes(n);
+        let mut directs = direct_foes(n);
+        let start = Instant::now();
+        for _ in 0..iters {
+            match mode {
+                "dyn_hp" => sum += run_dyn_hp(black_box(&dyns)),
+                "direct_hp" => sum += run_direct_hp(black_box(&directs)),
+                "dyn_step" => run_dyn_step(black_box(&mut dyns)),
+                _ => run_direct_step(black_box(&mut directs)),
+            }
+        }
+        let t = start.elapsed().as_secs_f64();
+        match mode {
+            "dyn_step" => sum = run_dyn_hp(&dyns),
+            "direct_step" => sum = run_direct_hp(&directs),
+            _ => {}
+        }
+        // The first pass warms up.
+        if rep > 0 {
+            per.push(t / (n * iters) as f64 * 1e9);
+        }
+    }
+    per.sort_by(f64::total_cmp);
+    println!("rust {mode}: {:.2} ns per item (median; {:.2}-{:.2}), n {n}, iters {iters}, reps {reps}, checksum {sum}", per[per.len() / 2], per[0], per[per.len() - 1]);
+}
+
 /// The list kernels: the data is made once per repetition, then `iters` passes are timed.
 fn list_kernel(mode: &str, n: usize, iters: usize, reps: usize) {
     let xs = zx81(n);
@@ -162,6 +268,9 @@ fn main() {
     let (n, iters, reps) = (number("--n", 200_000), number("--iters", 30), number("--reps", 9));
     if matches!(mode.as_str(), "filter" | "map" | "sort_by") {
         return list_kernel(&mode, n, iters, reps);
+    }
+    if matches!(mode.as_str(), "dyn_hp" | "dyn_step" | "direct_hp" | "direct_step") {
+        return iface_kernel(&mode, n, iters, reps);
     }
     let dt = black_box(1.0f32 / 60.0);
     let target = black_box(V2 { x: 640.0, y: 360.0 });

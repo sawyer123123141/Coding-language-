@@ -503,6 +503,58 @@ enemies.sort_by((e) { e.pos.distance_to(player) })
 - `sort` and `sort_by` are refused inside a loop over the same list (or over a map held in it), and a key can't read the list it sorts. `remove_at`, `insert`, `pop` and `clear` are refused inside a loop over a map held in the list as well. So is a call given the list, or what holds it, as `var`.
 - Not built: `reduce`, a comparator sort, `reverse`, `min_by` and `max_by`.
 
+## Interfaces
+
+Design and rulings: `2026-10-19-interfaces-design.md` (its "As built" section lists what differs). An interface is a named list of methods. Any struct or enum that says it implements the interface can stand in for it, so one `list[Damageable]` can hold goblins, slimes and barrels, and the compiler checks the promise. GDScript does this with duck typing (`if body.has_method("take_damage")`), which is unchecked until the line runs.
+
+```
+interface Damageable {
+    take_damage(var self, amount: int)
+    pure hp(self) -> int
+}
+
+struct Goblin: Damageable {
+    health: int = 10
+    take_damage(var self, amount: int) { self.health -= amount }
+    pure hp(self) -> int { self.health }
+}
+
+enum Barrel: Damageable {
+    Full { oil: int }
+    Empty
+    take_damage(var self, amount: int) { ... }
+    pure hp(self) -> int { ... }
+}
+
+hit_all(var foes: list[Damageable]) {
+    for f in foes { f.take_damage(2) }
+}
+
+main() {
+    var foes: list[Damageable] = []
+    foes.add(Goblin())
+    foes.add(Barrel.Full(oil: 5))
+    hit_all(var foes)
+}
+```
+
+**Declaring.** `[pub] interface Name { ... }` holds method signatures with no body, one per line: `[pure] name(self | var self, params) [-> Type]`. There must be at least one, and no fields or default bodies. `interface` is a keyword.
+
+**Implementing.** `struct Name: A, B { ... }` and `enum Name: A { ... }`, where the type is declared. For each method of each listed interface the type needs a method with the same name, the same `self` or `var self`, the same parameter types (and `var`s) and the same result. A `pure` method may implement a method declared without `pure`, not the other way round. Extra methods are fine. Interface names are found like type names (`use { Shape from shapes }`).
+
+**Using one as a type.** An interface works in every type position: parameters, results, `let`/`var`, fields, `list[Damageable]`, `[Damageable]`, map values and `Damageable?`. A struct or enum that implements it goes wherever the interface is expected (an annotated `let`, an argument, `add`, a field, a constructor argument, a `return`, each element of an annotated list literal). The conversion is one level deep: a `list[Goblin]` is not a `list[Damageable]`. An interface value doesn't convert to another interface or back to its struct (there is no type test yet). A list literal that mixes types needs its type written: `var foes: list[Damageable] = [...]`. Calling `d.take_damage(3)` runs the method of whatever `d` holds. A `var self` method needs a changeable place, as for structs. `print` writes the value inside. Interface values can't be compared with `==`, used as map keys, or searched with `has` and `find`.
+
+**Borrowed, boxed, copied.** An interface value is two words: the data and the type's method table.
+- **Borrowed.** A struct passed straight to a parameter of interface type (`show(g)`) is not copied: the callee sees `g` where it is, so `heal(var g)` with `heal(var d: Damageable)` changes `g`. Only a variable, parameter, field or list item can be lent this way. The callee may not replace a `var` interface parameter as a whole (`d = Slime()`), because the caller's place may be a `Goblin`.
+- **Boxed.** Everywhere else (a `let`, a field, a list item, a map value, a `return`) the struct is copied into the current arena and the interface value points at the copy, as for a string. So storing one somewhere longer-lived needs `in x.mem { }`, and the escape check treats it like a string.
+- **Copied.** Copying an interface value copies the struct it holds, so copies change independently, as for every Kestrel value. `foes[0] = Slime()` replaces a whole item.
+
+**The owning rule.** A struct that owns an `Arena` or a GPU object may implement an interface and be lent to it, `var` included, but it can't be stored as one: "`Sprite` owns a GPU object, so it can't be stored as a `Drawable`; keep it in a `list[Sprite]`". Where the compiler can't see the copy coming (a callee that stores its borrowed `Drawable` parameter) it is a run-time error naming the type and the interface.
+
+**`pure` and `par for`.** A `pure` function or a `par for` body may call only methods declared `pure` in the interface.
+
+**Cost.** A call through an interface is an indirect call through the method table, and is not inlined; the kernels in `kestrel/bench/kernels/results.md` measure it. Storing allocates a copy; lending does not.
+
 ## Memory
 
 ```
@@ -540,13 +592,16 @@ let hp = scores["ana"] else { return }
 
 ```
 file      := (use | decl)*
-decl      := 'pub'? (func | struct | enum | 'let' binding | 'var' binding)
+decl      := 'pub'? (func | struct | enum | interface | 'let' binding | 'var' binding)
 func      := 'pure'? 'native'? IDENT '(' params? ')' ('->' type)? block?
 params    := param (',' param)*
 param     := 'var'? (IDENT ':' type | 'self')
-struct    := 'struct' IDENT '{' (field | func)* '}'
+struct    := 'struct' IDENT impls? '{' (field | func)* '}'
 field     := IDENT ':' type ('=' expr)?
-enum      := 'enum' IDENT '{' (variant | func)* '}'
+enum      := 'enum' IDENT impls? '{' (variant | func)* '}'
+impls     := ':' IDENT (',' IDENT)*
+interface := 'interface' IDENT '{' sig+ '}'
+sig       := 'pure'? IDENT '(' params? ')' ('->' type)?
 variant   := IDENT ('{' IDENT ':' type (',' IDENT ':' type)* '}')?
 type      := IDENT ('[' type (',' type)* ']')? '?'? | '[' type ']' '?'?
            | 'pure'? '(' ('var'? type (',' 'var'? type)*)? ')' ('->' type)?
@@ -568,7 +623,7 @@ A `native` function has no block, and every other function has one. `native` is 
 
 ## Out of scope (later specs)
 
-User-defined generic types/functions, interfaces, error types beyond `?`, fixed-size arrays,
+User-defined generic types/functions, `is` type tests on interface values (and default method bodies, fields and inheritance between interfaces), error types beyond `?`, fixed-size arrays,
 C FFI declarations, GPU/shader code. Also not yet: optional function types, methods and
 built-ins as values, `reduce`, `reverse`, a comparator sort.
 

@@ -1,0 +1,46 @@
+// 1M calls of `hp()` through a `list[Damageable]` of two struct types (the type of each item
+// follows the ZX81 generator's parity, so the branch predictor can't learn the order).
+// (`Slime.hp` adds 1 so that the two methods differ; LLVM merges Rust's identical ones, and then
+// the indirect call always goes to one address.) `bench(n, iters)` sums `n` calls `iters` times and
+// returns a checksum.
+interface Damageable {
+    pure hp(self) -> int
+}
+
+struct Goblin: Damageable {
+    health: int
+    pure hp(self) -> int { self.health }
+}
+
+struct Slime: Damageable {
+    size: int
+    pure hp(self) -> int { self.size + 1 }
+}
+
+pub bench(n: int, iters: int) -> float {
+    var total = 0.0
+    arena {
+        var foes: list[Damageable] = []
+        var x = 1
+        for i from 0 to n {
+            x = (x * 75 + 74) % 65537
+            if x % 2 == 0 {
+                foes.add(Goblin(health: x % 100))
+            } else {
+                foes.add(Slime(size: x % 100))
+            }
+        }
+        for k from 0 to iters {
+            var sum = 0
+            for d in foes {
+                sum += d.hp()
+            }
+            total += float(sum)
+        }
+    }
+    total
+}
+
+main() {
+    print(bench(1000, 10))
+}
