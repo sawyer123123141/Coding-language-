@@ -6,7 +6,7 @@ use super::lists::written;
 use super::place::Immutable;
 use super::{is_const_expr, BodyChecker};
 use crate::builtins::Builtin;
-use crate::tables::{LocalId, Res, StructId, Tables, BUILTIN_STRUCTS, VEC2, VEC3};
+use crate::tables::{ListMethod, LocalId, Res, StructId, Tables, BUILTIN_STRUCTS, VEC2, VEC3};
 use crate::ty::Ty;
 
 /// Field defaults are constant expressions of the field's type (see `is_const_expr`), built again
@@ -168,9 +168,10 @@ impl<'a> BodyChecker<'a> {
             None
         };
         if let Some(ty) = builtin {
-            // A collection or a string is passed by pointer, before the arguments are evaluated.
-            let later: Vec<&Expr> = args.iter().map(|a| &a.value).collect();
-            self.check_changed_later(&[receiver], &later);
+            if self.reads_receiver_first(e) {
+                let later: Vec<&Expr> = args.iter().map(|a| &a.value).collect();
+                self.check_changed_later(&[receiver], &later);
+            }
             return ty;
         }
         if let (Some(_), Some(b)) = (self.t.vec_dims(receiver_ty), Builtin::vector_method(name)) {
@@ -231,6 +232,20 @@ impl<'a> BodyChecker<'a> {
             self.check_changed_later(&[receiver], &later);
         }
         ret
+    }
+
+    /// Whether the built-in method call `e` takes its receiver before it evaluates the arguments,
+    /// and reads through it after, so an argument may not change the receiver. A string receiver
+    /// is a value (its pointer and length), and a list method that searches, joins or calls a
+    /// function takes the list's header (or, for `sort_by`, its address). `add`, `insert`,
+    /// `remove_at` and the map methods evaluate their arguments first and find the receiver's place
+    /// after (the methods with no arguments have nothing to check).
+    fn reads_receiver_first(&self, e: &Expr) -> bool {
+        match self.t.res.get(&e.id) {
+            Some(Res::Str(_)) => true,
+            Some(Res::List(m)) => !matches!(m, ListMethod::Insert | ListMethod::RemoveAt),
+            _ => false,
+        }
     }
 
     /// `v.xz`, `v.zyx`: 2 or 3 components of a vector, as a new vector.

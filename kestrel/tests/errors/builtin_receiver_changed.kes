@@ -1,9 +1,15 @@
-// error 31: `vs` is passed here, but a later argument changes it
-// error 35: `xs` is passed here, but a later argument changes it
-// error 36: `xs` is passed here, but a later argument changes it
-// error 40: `m` is passed here, but a later argument changes it
-// A built-in method's receiver (a string, list or map) is read by pointer before the arguments,
-// so an argument may not change it.
+// error 42: `vs` is passed here, but a later argument changes it
+// error 43: `vs` is passed here, but a later argument changes it
+// error 44: `vs` is passed here, but a later argument changes it
+// error 48: `xs` is passed here, but a later argument changes it
+// error 49: `xs` is passed here, but a later argument changes it
+// error 50: `xs` is passed here, but a later argument changes it
+// error 51: `xs` is passed here, but a later argument changes it
+// error 55: `ss` is passed here, but a later argument changes it
+// A built-in method that takes its receiver before the arguments and reads through it after (a
+// string's methods; a list's `has`, `find`, `join`, `filter`, `map`, `any`, `all` and `sort_by`)
+// can't have an argument that changes the receiver. `add`, `insert`, `remove_at` and the map
+// methods evaluate their arguments first, so they can.
 struct V {
     mem: Arena = Arena()
     name: string = ""
@@ -25,29 +31,53 @@ clear(var xs: list[list[int]]) -> int {
     2
 }
 
+pick(var xs: list[list[int]]) -> (list[int]) -> bool {
+    xs.remove_at(0)
+    (x) { x.len > 0 }
+}
+
 strings() {
     var vs: list[V] = [V()]
     vs[0].fill()
     print(vs[0].name.find(drop_first(var vs)))
+    print(vs[0].name.starts_with(drop_first(var vs)))
+    print(vs[0].name.slice(0, clear_v(var vs)))
 }
 
 lists(var xs: list[list[int]]) {
     print(xs[0].has(clear(var xs)))
-    xs[0].add(clear(var xs))
+    print(xs[0].find(clear(var xs)))
+    print(xs.any(pick(var xs)))
+    print(xs.filter(pick(var xs)))
 }
 
-maps(var m: map[string, list[int]], var n: int) {
-    print(m.get("a", [n]), m.get("b", [bump(var m)]))
+joins(var ss: list[list[string]]) {
+    print(ss[0].join(take_s(var ss)))
+}
+
+take_s(var ss: list[list[string]]) -> string {
+    ss.remove_at(0)
+    ","
+}
+
+clear_v(var vs: list[V]) -> int {
+    vs.remove_at(0)
+    1
+}
+
+fine(var xs: list[list[int]], var ys: list[list[int]], var m: map[string, list[int]], var n: int) {
+    // A different variable, an argument that only reads, or a method that evaluates its arguments
+    // before it finds the receiver's place is fine.
+    print(xs[0].has(clear(var ys)), xs[0].has(xs.len))
+    xs[0].add(clear(var xs))
+    xs[0].insert(0, clear(var xs))
+    xs[0].remove_at(clear(var xs))
+    print(m.get("a", [n]), m.get("b", [bump(var m)]), m.has("{bump(var m)}"), m.remove("{bump(var m)}"))
 }
 
 bump(var m: map[string, list[int]]) -> int {
     m.remove("a")
     1
-}
-
-fine(var xs: list[list[int]], var ys: list[list[int]]) {
-    // A different variable, or an argument that only reads, is fine.
-    print(xs[0].has(clear(var ys)), xs[0].has(xs.len))
 }
 
 main() { }

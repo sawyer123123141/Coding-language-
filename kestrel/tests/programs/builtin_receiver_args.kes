@@ -1,0 +1,73 @@
+// expect: [1, 2]
+// expect: [3]
+// expect: [5]
+// expect: [2, 3, 9]
+// expect: [3]
+// expect: [5]
+// expect: 0 false false
+// expect: {"b": 2}
+// `add`, `insert`, `remove_at` and the map methods evaluate their arguments before they find the
+// receiver's place, so an argument may change the receiver (here, the variable it's in). The
+// changes made by the arguments come first.
+struct World {
+    next: int = 0
+    ids: list[int] = []
+
+    alloc(var self) -> int {
+        self.next += 1
+        self.next
+    }
+
+    spawn(var self) {
+        self.ids.add(self.alloc())
+    }
+}
+
+take(var q: list[int]) -> int {
+    let n = q.len
+    q.clear()
+    n
+}
+
+grow(var q: list[int]) -> int {
+    q.add(9)
+    0
+}
+
+shrink(var q: list[int]) -> int {
+    q.remove_at(0)
+    0
+}
+
+forget(var m: map[string, int]) -> string {
+    m.remove("a")
+    "a"
+}
+
+main() {
+    var w = World()
+    w.spawn()
+    w.ids.add(w.alloc())
+    print(w.ids)
+
+    var q: list[int] = [1, 2, 3]
+    q.add(take(var q))
+    print(q)
+    q.insert(0, take(var q) + 4)
+    print(q)
+
+    var r: list[int] = [1, 2, 3]
+    r.insert(0, grow(var r) + 9)
+    r.remove_at(shrink(var r))
+    print(r)
+    r.remove_at(shrink(var r) + 1)
+    print(r)
+
+    var s: list[int] = [7]
+    s.add(take(var s) + 4)
+    print(s)
+
+    var m = {"a": 1, "b": 2}
+    print(m.get(forget(var m), 0), m.has(forget(var m)), m.remove(forget(var m)))
+    print(m)
+}
