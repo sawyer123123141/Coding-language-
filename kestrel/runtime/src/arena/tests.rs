@@ -177,3 +177,68 @@ fn the_live_arena_count_goes_up_on_new_and_down_on_free() {
     drop(unsafe { Box::from_raw(own) });
     assert_eq!(arenas_alive(), before);
 }
+
+#[test]
+fn a_list_grows_by_doubling_up_to_the_item_limit() {
+    assert_eq!(grown_capacity(0), Some(4));
+    assert_eq!(grown_capacity(3), Some(6));
+    assert_eq!(grown_capacity(4), Some(8));
+    assert_eq!(grown_capacity(MAX_ITEMS / 2), Some(MAX_ITEMS - 1));
+    assert_eq!(grown_capacity(MAX_ITEMS / 2 + 1), Some(MAX_ITEMS));
+    assert_eq!(grown_capacity(MAX_ITEMS - 1), Some(MAX_ITEMS));
+    assert_eq!(grown_capacity(MAX_ITEMS), None);
+}
+
+#[test]
+fn lists_and_arrays_fit_up_to_the_item_limit_and_no_further() {
+    assert_eq!(MAX_ITEMS, 2_147_483_647);
+    assert!(items_fit(0));
+    assert!(items_fit(MAX_ITEMS));
+    assert!(!items_fit(MAX_ITEMS + 1));
+    assert!(!items_fit(-1));
+}
+
+/// What the child process of `going_past_the_item_limit_fails` does, named by this variable.
+const LIMIT_CHILD: &str = "KESTREL_LIMIT_CHILD";
+
+/// Child half of `going_past_the_item_limit_fails`; does nothing unless the parent set `LIMIT_CHILD`.
+#[test]
+fn item_limit_child() {
+    let Some(what) = std::env::var_os(LIMIT_CHILD) else { return };
+    let mut full = List { ptr: std::ptr::null_mut(), len: MAX_ITEMS, cap: MAX_ITEMS, arena: std::ptr::null_mut() };
+    // SAFETY: each of these fails before it touches the list's items (there are none to touch).
+    unsafe {
+        match what.to_str().unwrap() {
+            "grow" => kestrel_rt_list_grow(&mut full, 1, 1),
+            "insert" => {
+                crate::list::kestrel_rt_list_insert(&mut full, 0, 1, 1, 5, std::ptr::null());
+            }
+            "alloc" => {
+                kestrel_rt_alloc(MAX_ITEMS + 1, 1, 1, 7, std::ptr::null());
+            }
+            other => panic!("unknown case {other}"),
+        }
+    }
+    panic!("the item limit should have ended the process");
+}
+
+#[test]
+fn going_past_the_item_limit_fails() {
+    for (case, message) in [
+        ("grow", "a list can't hold more than 2,147,483,647 items"),
+        ("insert", "a list can't hold more than 2,147,483,647 items"),
+        (
+            "alloc",
+            "an array can't hold more than 2,147,483,647 items; this one would have 2147483648 on line 7",
+        ),
+    ] {
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["arena::tests::item_limit_child", "--exact", "--nocapture"])
+            .env(LIMIT_CHILD, case)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(101), "{case}: {stderr}");
+        assert!(stderr.contains(message), "{case}: {stderr}");
+    }
+}

@@ -57,6 +57,11 @@ pub enum ExprKind {
     Or(Box<Expr>, Box<Expr>),
     /// Convert the operand to this expression's `ty`.
     Cast(Box<Expr>),
+    /// An integer `Binary(Add | Sub | Mul | Div | Rem | Shl | Shr, ..)`, `Unary(Neg, ..)` or
+    /// narrowing integer `Cast` all of whose checks range analysis proved. For `/` and `%`
+    /// that means the divisor is never 0 and never -1 with the dividend at its type's minimum,
+    /// so codegen emits a plain divide. Only range analysis makes one, as KIR's last step.
+    Proven(Box<Expr>),
     /// A float operation (see `MathOp`); integer `abs`/`min`/`max` lower to `If`.
     Math(MathOp, Vec<Expr>),
     /// A float from 0 up to (not including) 1, of this expression's type.

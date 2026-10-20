@@ -84,7 +84,11 @@ fn run() -> ExitCode {
     let (compiled, diagnostics) = kestrel_driver::compile(&args.path, src, args.style);
     eprint!("{diagnostics}");
     let Some(compiled) = compiled else { return ExitCode::from(1) };
-    let opts = Options { checked_arith: !args.release };
+    let opts = Options {
+        checked_arith: !args.release,
+        verify_proofs: proofs_checked(std::env::var_os("KESTREL_CHECK_PROOFS").as_deref()),
+        ..Options::default()
+    };
     let result = match args.cmd.as_str() {
         "check" => return ExitCode::SUCCESS,
         "run" => {
@@ -108,6 +112,12 @@ fn run() -> ExitCode {
             ExitCode::from(3)
         }
     }
+}
+
+/// Whether `KESTREL_CHECK_PROOFS=1` is set: codegen then keeps every check range analysis proved,
+/// and a failing one stops the program with a message that names the compiler bug.
+fn proofs_checked(value: Option<&std::ffi::OsStr>) -> bool {
+    value.is_some_and(|v| v == "1")
 }
 
 fn internal_error(e: String) -> String {
@@ -146,7 +156,7 @@ fn build(module: &kestrel_kir::Module, opts: Options, args: &Args, lib: Lib) -> 
 mod tests {
     use std::process::Command;
 
-    use super::{output_path, parse_args, without_bom};
+    use super::{output_path, parse_args, proofs_checked, without_bom};
 
     fn args(list: &[&str]) -> Option<super::Args> {
         parse_args(list.iter().map(|s| s.to_string()).collect())
@@ -168,6 +178,14 @@ mod tests {
         assert!(args(&["frob", "x.kes"]).is_none());
         assert!(args(&["build"]).is_none());
         assert!(args(&["build", "x.kes", "extra"]).is_none());
+    }
+
+    #[test]
+    fn the_proof_check_is_on_only_for_one() {
+        assert!(proofs_checked(Some("1".as_ref())));
+        assert!(!proofs_checked(Some("0".as_ref())));
+        assert!(!proofs_checked(Some("".as_ref())));
+        assert!(!proofs_checked(None));
     }
 
     #[test]

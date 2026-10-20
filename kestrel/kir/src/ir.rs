@@ -183,6 +183,20 @@ pub struct Place {
     pub path: Vec<Proj>,
 }
 
+/// Whether an element access is bounds-checked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IndexCheck {
+    /// Checked at run time.
+    Checked,
+    /// Known in bounds by lowering itself (a `for ... in` loop's own index,
+    /// when the body can't move the elements; the built-in helpers).
+    Known,
+    /// Proven in bounds by range analysis. Codegen leaves the check out (or,
+    /// when asked to verify proofs, emits it and stops with a compiler-bug
+    /// message if it fails).
+    Proven,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Proj {
     /// A struct field.
@@ -192,9 +206,8 @@ pub enum Proj {
     /// The value inside an optional (valid while it isn't `none`).
     Payload,
     /// An element of an array or list. The index is any integer type. It is
-    /// bounds-checked unless the compiler proved it in bounds (a `for ... in`
-    /// loop's own index, when the body can't move the elements).
-    Index { at: Expr, checked: bool },
+    /// bounds-checked unless `check` says otherwise.
+    Index { at: Expr, check: IndexCheck },
     /// The key of entry `at` of a map (its index in the entries, not a key).
     MapKey { at: Expr },
     /// The value of entry `at` of a map. Checked, it panics unless the

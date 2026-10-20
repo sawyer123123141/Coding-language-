@@ -133,7 +133,7 @@ impl Kestrel {
             godot_error!("window, draw, draw3d and input can't be used inside Godot");
             return false;
         }
-        match JitProgram::compile(&compiled.module, Options { checked_arith: self.checks }) {
+        match JitProgram::compile(&compiled.module, Options { checked_arith: self.checks, ..Options::default() }) {
             Ok(program) => {
                 if let Err(msg) = self.build_constants(&program) {
                     godot_error!("Kestrel: a constant failed to build: {msg}");

@@ -2,7 +2,7 @@ use cranelift_codegen::ir::{types, InstBuilder, MemFlags, TrapCode, Value};
 use cranelift_module::Module;
 use kestrel_kir::{self as kir, ExprKind, KTy, UnOp};
 
-use super::{cl_type, FuncLowerer};
+use super::{cl_type, Check, FuncLowerer};
 
 impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// Lowers a scalar-valued expression. Struct values go through `lower_into`.
@@ -61,28 +61,14 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 let v = self.expr(inner)?;
                 self.b.ins().bnot(v)
             }
-            ExprKind::Unary(UnOp::Neg, inner) => {
-                let v = self.expr(inner)?;
-                if e.ty.is_float() {
-                    self.b.ins().fneg(v)
-                } else {
-                    let zero = self.iconst(e.ty, 0);
-                    self.int_arith(kir::BinOp::Sub, zero, v, e.ty, e.line)
-                }
-            }
+            ExprKind::Unary(UnOp::Neg, _) | ExprKind::Cast(_) => self.arith_expr(e, Check::Emit)?,
             ExprKind::Binary(op, l, r) if l.ty == KTy::Str => self.str_compare(*op, l, r)?,
-            ExprKind::Binary(op, l, r) => {
-                let a = self.expr(l)?;
-                let b = self.expr(r)?;
-                let const_divisor = if let ExprKind::Int(c) = r.kind { Some(c) } else { None };
-                self.binary(*op, a, b, l.ty, e.line, const_divisor)
-            }
+            ExprKind::Binary(..) => self.arith_expr(e, Check::Emit)?,
+            // Its checks were proven, so they are left out (or, verifying, kept as a compiler-bug check).
+            // The operands carry their own wrappers.
+            ExprKind::Proven(inner) => self.arith_expr(inner, self.proven_check())?,
             ExprKind::And(l, r) => self.short_circuit(l, r, true)?,
             ExprKind::Or(l, r) => self.short_circuit(l, r, false)?,
-            ExprKind::Cast(inner) => {
-                let v = self.expr(inner)?;
-                self.cast(v, inner.ty, e.ty, e.line)
-            }
             ExprKind::Math(op, args) => self.math(*op, args, e.ty)?,
             ExprKind::RandFloat => self.rand_float(e.ty),
             ExprKind::RandInt(lo, hi) => self.rand_int(lo, hi, e.ty)?,
@@ -111,6 +97,34 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 self.b.switch_to_block(merge);
                 result
             }
+        })
+    }
+
+    /// An integer `-x`, binary operation or conversion (or a float one), with its integer
+    /// checks behaving as `check` says. The operands are lowered with `Emit`.
+    fn arith_expr(&mut self, e: &kir::Expr, check: Check) -> Result<Value, String> {
+        Ok(match &e.kind {
+            ExprKind::Unary(UnOp::Neg, inner) => {
+                let v = self.expr(inner)?;
+                if e.ty.is_float() {
+                    self.b.ins().fneg(v)
+                } else {
+                    let zero = self.iconst(e.ty, 0);
+                    self.int_arith(kir::BinOp::Sub, zero, v, e.ty, e.line, check)
+                }
+            }
+            ExprKind::Binary(op, l, r) => {
+                let a = self.expr(l)?;
+                let b = self.expr(r)?;
+                // A literal divisor, even inside `Proven`.
+                let const_divisor = if let ExprKind::Int(c) = r.kind { Some(c) } else { None };
+                self.binary(*op, (a, b), l.ty, e.line, const_divisor, check)
+            }
+            ExprKind::Cast(inner) => {
+                let v = self.expr(inner)?;
+                self.cast(v, inner.ty, e.ty, e.line, check)
+            }
+            _ => unreachable!("only `-`, binary operations and conversions are proven"),
         })
     }
 

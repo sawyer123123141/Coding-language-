@@ -35,7 +35,7 @@ impl<'a> FnLowerer<'a> {
                 let at = self.expr(&args[0].value);
                 let at = if owning(elem, self.t) { self.spill(at, out) } else { at };
                 // The item goes first, so a bad index panics before anything is dropped.
-                let item = with(&list, Proj::Index { at: at.clone(), checked: true });
+                let item = with(&list, Proj::Index { at: at.clone(), check: IndexCheck::Checked });
                 out.extend(self.helpers.drop_stmts(item, elem, self.t));
                 out.push(Stmt::List(ListOp::RemoveAt, list, vec![at]));
             }
@@ -62,7 +62,7 @@ impl<'a> FnLowerer<'a> {
                 let last = binary(BinOp::Sub, load(n, KTy::I64, line), int(1, KTy::I64, line), KTy::I64, line);
                 let mut then_body = Vec::new();
                 if elem.is_aggregate() {
-                    let item = with(&list, Proj::Index { at: last.clone(), checked: true });
+                    let item = with(&list, Proj::Index { at: last.clone(), check: IndexCheck::Checked });
                     let tmp = self.temp(elem);
                     then_body.push(Stmt::Let(tmp, Expr { kind: ExprKind::Move(item), ty: elem, line }));
                     then_body.extend(self.helpers.drop_stmts(Place::local(tmp), elem, self.t));
@@ -128,7 +128,7 @@ impl<'a> FnLowerer<'a> {
         let len = Expr { kind: ExprKind::Len(list.clone()), ty: KTy::I64, line };
         pre.push(Stmt::Let(n, len));
         let last = binary(BinOp::Sub, load(n, KTy::I64, line), int(1, KTy::I64, line), KTy::I64, line);
-        let item = with(&list, Proj::Index { at: last.clone(), checked: true });
+        let item = with(&list, Proj::Index { at: last.clone(), check: IndexCheck::Checked });
         let mut then_body = Vec::new();
         let is_owning = owning(elem, self.t);
         let kind = if !elem.is_aggregate() {

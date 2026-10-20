@@ -85,6 +85,10 @@ pub unsafe extern "C" fn kestrel_rt_str_split(ptr: *const u8, len: i64, sep: *co
     let mut ranges = Vec::new();
     let mut start = 0;
     while let Some(at) = find_bytes(&bytes[start..], sep) {
+        // This piece and the last one after it must fit.
+        if !crate::arena::items_fit(ranges.len() as i64 + 2) {
+            crate::arena::list_too_long();
+        }
         ranges.push(start..start + at);
         start += at + sep.len();
     }

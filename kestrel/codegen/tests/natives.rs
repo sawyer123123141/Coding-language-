@@ -251,7 +251,7 @@ main() {
     }
 }
 ";
-    let release = Options { checked_arith: false };
+    let release = Options { checked_arith: false, ..Options::default() };
     let p = jit_natives_with(src, &[("kestrel_wide", k_wide as *const u8)], release).expect("codegen");
     assert_eq!(run_captured(&p), "69\n70\n255\n0\n");
 }
@@ -269,7 +269,7 @@ main() {
     }
 }
 ";
-    let p = jit_natives_with(src, &[("kestrel_wide", k_wide as *const u8)], Options { checked_arith: false }).expect("codegen");
+    let p = jit_natives_with(src, &[("kestrel_wide", k_wide as *const u8)], Options { checked_arith: false, ..Options::default() }).expect("codegen");
     assert_eq!(run_captured(&p), "1 0\n0 1\n");
 }
 

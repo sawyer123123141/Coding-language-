@@ -28,7 +28,7 @@ impl<'a> FnLowerer<'a> {
             ast::ExprKind::Index { base, .. } if matches!(self.t.ty(base.id), kestrel_check::Ty::Map(..) | kestrel_check::Ty::Str) => None,
             ast::ExprKind::Index { base, index } => {
                 let mut p = self.place(base)?;
-                p.path.push(Proj::Index { at: self.expr(index), checked: true });
+                p.path.push(Proj::Index { at: self.expr(index), check: IndexCheck::Checked });
                 Some(p)
             }
             ast::ExprKind::Field { base, .. } => {

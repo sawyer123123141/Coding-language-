@@ -43,7 +43,7 @@ impl<'a> FnLowerer<'a> {
         }
         let mut pre = Vec::new();
         let mut p = self.place_or_temp(base, &mut pre, false);
-        p.path.push(Proj::Index { at: self.expr(index), checked: true });
+        p.path.push(Proj::Index { at: self.expr(index), check: IndexCheck::Checked });
         Self::with_pre(pre, ExprKind::Load(p), ty, line)
     }
 
@@ -107,7 +107,7 @@ impl<'a> FnLowerer<'a> {
         };
         let at = Expr { kind: ExprKind::Load(Place::local(i)), ty: KTy::I32, line };
         let mut elem = list.clone();
-        elem.path.push(Proj::Index { at: at.clone(), checked: true });
+        elem.path.push(Proj::Index { at: at.clone(), check: IndexCheck::Checked });
         let var = self.t.bind_local[&var.id];
         let ptr = LocalIdx(self.locals.len() as u32);
         let ty = super::kty(self.t.local(var).ty);
@@ -116,7 +116,7 @@ impl<'a> FnLowerer<'a> {
         self.elems.insert(var, Place::local(ptr));
         // `i < xs.len` holds throughout, since the body can't change `xs` itself.
         let mut known = list.clone();
-        known.path.push(Proj::Index { at, checked: false });
+        known.path.push(Proj::Index { at, check: IndexCheck::Known });
         let mut stmts = vec![Stmt::Bind(ptr, known)];
         stmts.extend(self.loop_block(body));
         if self.may_move(&stmts, &list) {

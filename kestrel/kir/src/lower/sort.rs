@@ -323,6 +323,7 @@ fn expr_builds(e: &Expr, calls: &mut Vec<FuncIdx>) -> bool {
         | ExprKind::And(..)
         | ExprKind::Or(..)
         | ExprKind::Cast(_)
+        | ExprKind::Proven(_)
         | ExprKind::Math(..)
         | ExprKind::RandFloat
         | ExprKind::RandInt(..)

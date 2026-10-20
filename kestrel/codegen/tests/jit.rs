@@ -52,7 +52,7 @@ fn if_expression_with_diverging_branch() {
 #[test]
 fn unchecked_arithmetic_wraps() {
     let src = "w() -> int {\n let a = 2147483647\n a + 1\n}\nmain() {}\n";
-    let p = jit_with(src, Options { checked_arith: false });
+    let p = jit_with(src, Options { checked_arith: false, ..Options::default() });
     assert_eq!(call0::<i32>(&p, "w"), i32::MIN);
 }
 
@@ -82,7 +82,7 @@ fn var_parameter_forwarded_to_another_call() {
 #[test]
 fn unchecked_min_div_neg_one_wraps() {
     let src = "d(a: int, b: int) -> int {\n a / b\n}\nr(a: int, b: int) -> int {\n a % b\n}\nmain() {}\n";
-    let p = jit_with(src, Options { checked_arith: false });
+    let p = jit_with(src, Options { checked_arith: false, ..Options::default() });
     assert_eq!(call2(&p, "d", i32::MIN, -1), i32::MIN);
     assert_eq!(call2(&p, "r", i32::MIN, -1), 0);
 }
@@ -134,7 +134,7 @@ fn call_as<A, R>(p: &JitProgram, name: &str, x: A) -> R {
 fn division_by_constant_matches_rust_i32() {
     const DIVISORS: &[i64] = &[1, 2, 4, 8, 32, 1024, 7, 100, -2, -8];
     for checked_arith in [true, false] {
-        let p = jit_with(&div_source("int", DIVISORS), Options { checked_arith });
+        let p = jit_with(&div_source("int", DIVISORS), Options { checked_arith, ..Options::default() });
         for &n in DIVISORS {
             for &x in I32_XS {
                 let n32 = n as i32;
@@ -150,7 +150,7 @@ fn division_by_constant_matches_rust_i32() {
 fn division_by_constant_matches_rust_i64() {
     const DIVISORS: &[i64] = &[2, 64, 3];
     for checked_arith in [true, false] {
-        let p = jit_with(&div_source("i64", DIVISORS), Options { checked_arith });
+        let p = jit_with(&div_source("i64", DIVISORS), Options { checked_arith, ..Options::default() });
         for &n in DIVISORS {
             for &x in I64_XS {
                 let (d, r) = (format!("d_{}", tag(n)), format!("r_{}", tag(n)));
@@ -165,7 +165,7 @@ fn division_by_constant_matches_rust_i64() {
 fn division_by_constant_matches_rust_u8() {
     const DIVISORS: &[i64] = &[1, 2, 16, 3];
     for checked_arith in [true, false] {
-        let p = jit_with(&div_source("u8", DIVISORS), Options { checked_arith });
+        let p = jit_with(&div_source("u8", DIVISORS), Options { checked_arith, ..Options::default() });
         for &n in DIVISORS {
             for &x in U8_XS {
                 let (d, r) = (format!("d_{}", tag(n)), format!("r_{}", tag(n)));

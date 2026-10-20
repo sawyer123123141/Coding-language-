@@ -14,7 +14,7 @@ fn narrowing_keeps_values_that_fit() {
 
 #[test]
 fn unchecked_narrowing_truncates() {
-    let p = jit_with(NARROW, Options { checked_arith: false });
+    let p = jit_with(NARROW, Options { checked_arith: false, ..Options::default() });
     assert_eq!(call1(&p, "to_u8", 300), 44);
     assert_eq!(call1(&p, "to_u8", -1), 255);
     assert_eq!(call1(&p, "to_int", 1000), 3_000_000_000_i64 as i32);

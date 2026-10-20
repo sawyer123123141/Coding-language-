@@ -1,0 +1,7 @@
+main() {
+    let n: i64 = 3000000000
+    let a = array[u8](n)
+    print(a.len)
+}
+// expect-stderr: an array can't hold more than 2,147,483,647 items; this one would have 3000000000 on line 3 of array_too_long.kes
+// expect-exit: 101

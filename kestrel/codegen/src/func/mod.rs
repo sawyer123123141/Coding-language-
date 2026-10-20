@@ -2,6 +2,7 @@ mod aggregate;
 mod arenas;
 mod arith;
 mod call;
+mod check;
 mod collections;
 mod divide;
 mod expr;
@@ -29,6 +30,7 @@ use cranelift_module::{DataId, FuncId, Module};
 use kestrel_kir::{self as kir, KTy, LocalIdx, LocalKind};
 
 use crate::rt::RtFuncs;
+pub(crate) use check::Check;
 use crate::Options;
 
 /// The register type of a scalar. Structs live in memory and have none.

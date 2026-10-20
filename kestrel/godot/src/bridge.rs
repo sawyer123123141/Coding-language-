@@ -4,6 +4,7 @@
 use godot::meta::PackedElement;
 use godot::prelude::*;
 use kestrel_codegen::ExportTy;
+use kestrel_runtime::arena::MAX_ITEMS;
 
 /// The bytes of `items`. Every element type used here (`u8`, `i32`, `i64`,
 /// `f32`, `f64`, `Vector2`, `Vector3`) has the layout Kestrel uses for it:
@@ -74,6 +75,16 @@ fn put(buf: &mut [u8], at: usize, bytes: &[u8]) {
     buf[at..at + bytes.len()].copy_from_slice(bytes);
 }
 
+/// Why a host array of `len` items can't be passed in, or `None` if it can: a list or an array
+/// holds at most `MAX_ITEMS` items (strings aren't limited). `list` says which Kestrel type it is.
+pub fn too_long(len: usize, list: bool) -> Option<String> {
+    if i64::try_from(len).is_ok_and(|n| n <= MAX_ITEMS) {
+        return None;
+    }
+    let what = if list { "a list" } else { "an array" };
+    Some(format!("{what} can't hold more than 2,147,483,647 items"))
+}
+
 /// `{ptr, len}` of a string or array whose bytes live in `keep` until the call ends.
 fn put_seq(buf: &mut [u8], at: usize, bytes: Vec<u8>, len: usize, list: bool, keep: &mut Vec<Vec<u8>>) {
     put(buf, at, &(bytes.as_ptr() as u64).to_le_bytes());
@@ -122,20 +133,25 @@ pub fn write_arg(v: &Variant, ty: &ExportTy, buf: &mut [u8], at: usize, keep: &m
             put_seq(buf, at, s, len, false, keep);
         }
         ExportTy::Seq { list, elem, .. } => {
-            fn take<T: PackedElement + Copy>(a: PackedArray<T>) -> (Vec<u8>, usize) {
-                (raw_bytes(a.as_slice()), a.len())
+            // The length is checked before the elements are copied.
+            let list = *list;
+            fn take<T: PackedElement + Copy>(a: PackedArray<T>, list: bool) -> Result<(Vec<u8>, usize), String> {
+                match too_long(a.len(), list) {
+                    Some(why) => Err(format!("is too long: {why}")),
+                    None => Ok((raw_bytes(a.as_slice()), a.len())),
+                }
             }
             let (bytes, len) = match **elem {
-                ExportTy::U8 => take(v.try_to::<PackedByteArray>().map_err(|_| want("a PackedByteArray"))?),
-                ExportTy::Int => take(v.try_to::<PackedInt32Array>().map_err(|_| want("a PackedInt32Array"))?),
-                ExportTy::I64 => take(v.try_to::<PackedInt64Array>().map_err(|_| want("a PackedInt64Array"))?),
-                ExportTy::Float => take(v.try_to::<PackedFloat32Array>().map_err(|_| want("a PackedFloat32Array"))?),
-                ExportTy::F64 => take(v.try_to::<PackedFloat64Array>().map_err(|_| want("a PackedFloat64Array"))?),
-                ExportTy::Vec2 => take(v.try_to::<PackedVector2Array>().map_err(|_| want("a PackedVector2Array"))?),
-                ExportTy::Vec3 => take(v.try_to::<PackedVector3Array>().map_err(|_| want("a PackedVector3Array"))?),
+                ExportTy::U8 => take(v.try_to::<PackedByteArray>().map_err(|_| want("a PackedByteArray"))?, list)?,
+                ExportTy::Int => take(v.try_to::<PackedInt32Array>().map_err(|_| want("a PackedInt32Array"))?, list)?,
+                ExportTy::I64 => take(v.try_to::<PackedInt64Array>().map_err(|_| want("a PackedInt64Array"))?, list)?,
+                ExportTy::Float => take(v.try_to::<PackedFloat32Array>().map_err(|_| want("a PackedFloat32Array"))?, list)?,
+                ExportTy::F64 => take(v.try_to::<PackedFloat64Array>().map_err(|_| want("a PackedFloat64Array"))?, list)?,
+                ExportTy::Vec2 => take(v.try_to::<PackedVector2Array>().map_err(|_| want("a PackedVector2Array"))?, list)?,
+                ExportTy::Vec3 => take(v.try_to::<PackedVector3Array>().map_err(|_| want("a PackedVector3Array"))?, list)?,
                 _ => unreachable!("checked by `unsupported`"),
             };
-            put_seq(buf, at, bytes, len, *list, keep);
+            put_seq(buf, at, bytes, len, list, keep);
         }
         ExportTy::Other(_) => unreachable!("checked by `unsupported`"),
     }
@@ -178,5 +194,21 @@ pub fn read_ret(ty: &ExportTy, ret: &[u8], heap: &[u8]) -> Variant {
             _ => Variant::nil(),
         },
         ExportTy::Other(_) => Variant::nil(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_host_array_longer_than_the_item_limit_is_refused() {
+        let limit = MAX_ITEMS as usize;
+        assert_eq!(too_long(0, true), None);
+        assert_eq!(too_long(limit, true), None);
+        assert_eq!(too_long(limit, false), None);
+        assert_eq!(too_long(limit + 1, true).as_deref(), Some("a list can't hold more than 2,147,483,647 items"));
+        assert_eq!(too_long(limit + 1, false).as_deref(), Some("an array can't hold more than 2,147,483,647 items"));
+        assert_eq!(too_long(usize::MAX, false).as_deref(), Some("an array can't hold more than 2,147,483,647 items"));
     }
 }

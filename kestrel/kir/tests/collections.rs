@@ -68,7 +68,7 @@ fn for_in_is_a_counted_loop_over_an_element_place() {
     assert!(matches!(&end.kind, ExprKind::Cast(len) if matches!(len.kind, ExprKind::Len(_))));
     // `v` is a pointer to `xs[i]`, found once per iteration.
     let [Stmt::Bind(ptr, elem), Stmt::Assign(place, _)] = &body[..] else { panic!("{body:#?}") };
-    assert!(matches!(elem.path[..], [Proj::Index { checked: false, .. }]));
+    assert!(matches!(elem.path[..], [Proj::Index { check: IndexCheck::Known, .. }]));
     assert_eq!((place.root, place.path.len()), (*ptr, 0));
 }
 
@@ -128,7 +128,7 @@ fn remove_at_drops_an_owning_item_once_before_the_runtime_removes_it() {
     let at = main.body.iter().position(|s| matches!(s, Stmt::List(ListOp::RemoveAt, ..))).expect("a remove");
     // The item's arena is freed (once) just before, through a checked index into the list.
     let Stmt::FreeArena(arena) = &main.body[at - 1] else { panic!("{:#?}", main.body) };
-    assert!(matches!(arena.path[..], [Proj::Index { checked: true, .. }, Proj::Field(0)]), "{arena:?}");
+    assert!(matches!(arena.path[..], [Proj::Index { check: IndexCheck::Checked, .. }, Proj::Field(0)]), "{arena:?}");
     let frees = all_stmts(main).into_iter().filter(|s| matches!(s, Stmt::FreeArena(_))).count();
     // One for the removed item; the list's own drop at the end of `main` is a call to the drop helper.
     assert_eq!(frees, 1, "{:#?}", main.body);
@@ -155,7 +155,7 @@ fn pop_moves_the_item_out_and_drops_nothing_inside_the_list_op() {
         })
         .collect();
     assert_eq!(moves.len(), 1, "{:#?}", main.body);
-    assert!(matches!(&moves[0].kind, ExprKind::Move(p) if matches!(p.path[..], [Proj::Index { checked: true, .. }])), "{moves:?}");
+    assert!(matches!(&moves[0].kind, ExprKind::Move(p) if matches!(p.path[..], [Proj::Index { check: IndexCheck::Checked, .. }])), "{moves:?}");
     // The move zeroes the slot it vacates (`Move` does, for every item that holds an arena), then
     // the length goes down. The move is all that happens to the item: nothing is freed or removed
     // by the runtime there (the `let` drops what it holds at the end of `main`).
@@ -255,7 +255,7 @@ fn remove_of_an_owning_item_drops_it_once() {
     assert_eq!(frees, 1, "{:#?}", main.body);
     // The item is moved out of its slot (zeroing it) before it is dropped.
     let moved = all_stmts(main).into_iter().any(|s| {
-        matches!(s, Stmt::Let(_, Expr { kind: ExprKind::Move(p), .. }) if matches!(p.path[..], [Proj::Index { checked: true, .. }]))
+        matches!(s, Stmt::Let(_, Expr { kind: ExprKind::Move(p), .. }) if matches!(p.path[..], [Proj::Index { check: IndexCheck::Checked, .. }]))
     });
     assert!(moved, "{:#?}", main.body);
 }

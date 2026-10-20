@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 mod common;
+#[path = "programs/release.rs"]
+mod release;
 
 use common::{hermetic, scrub};
 
@@ -88,6 +90,25 @@ fn programs_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/programs")
 }
 
+/// The sentence a failed proof check ends a program with (see `KESTREL_CHECK_PROOFS`).
+const PROOF_FAILED: &str = "range analysis removed";
+
+/// The programs whose file names start with one of the comma-separated `prefixes` (empty
+/// entries and spaces around a prefix are ignored); all of them for `None`.
+pub(crate) fn only_prefixed(files: Vec<PathBuf>, prefixes: Option<&str>) -> Vec<PathBuf> {
+    let Some(prefixes) = prefixes else { return files };
+    let prefixes: Vec<&str> = prefixes.split(',').map(str::trim).filter(|p| !p.is_empty()).collect();
+    files
+        .into_iter()
+        .filter(|f| {
+            let name = f.file_name().unwrap().to_string_lossy();
+            prefixes.iter().any(|p| name.starts_with(p))
+        })
+        .collect()
+}
+
+/// Every program in `tests/programs`, or with `KESTREL_TEST_ONLY=a,b` only those whose names
+/// start with `a` or `b` (to run a few programs while working on one change).
 pub fn programs() -> Vec<PathBuf> {
     let dir = programs_dir();
     let mut files: Vec<PathBuf> = fs::read_dir(&dir)
@@ -97,6 +118,9 @@ pub fn programs() -> Vec<PathBuf> {
         .collect();
     assert!(!files.is_empty(), "no .kes programs in {}", dir.display());
     files.sort();
+    let only = std::env::var("KESTREL_TEST_ONLY").ok();
+    let files = only_prefixed(files, only.as_deref());
+    assert!(!files.is_empty(), "KESTREL_TEST_ONLY={} matches no program in {}", only.unwrap_or_default(), dir.display());
     files
 }
 
@@ -107,7 +131,10 @@ fn kestrel(args: &[&str]) -> Output {
 /// Runs `kestrel <path>`'s program with the variables its `// env:` lines set.
 fn kestrel_run(path: &Path, exp: &Expect) -> Output {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_kestrel"));
-    hermetic(cmd.args(["run", path.to_str().unwrap()])).envs(exp.env.iter().map(|(k, v)| (k, v)));
+    // The proof check is on: the compiler keeps every check it proved, and a failing one fails the run.
+    hermetic(cmd.args(["run", path.to_str().unwrap()]))
+        .envs(exp.env.iter().map(|(k, v)| (k, v)))
+        .env("KESTREL_CHECK_PROOFS", "1");
     cmd.output().expect("run kestrel")
 }
 
@@ -116,10 +143,13 @@ fn compare(name: &str, mode: &str, out: &Output, exp: &Expect) -> Option<String>
     let stdout = String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n");
     let stderr = String::from_utf8_lossy(&out.stderr).replace("\r\n", "\n");
     let code = out.status.code().unwrap_or(-1);
-    let ok = stdout == exp.stdout && code == exp.exit && exp.stderr.iter().all(|s| stderr.contains(s.as_str()));
+    // A run that stopped on a failed proof is a failure whatever else it printed.
+    let proof_failed = stderr.contains(PROOF_FAILED);
+    let ok = !proof_failed && stdout == exp.stdout && code == exp.exit && exp.stderr.iter().all(|s| stderr.contains(s.as_str()));
     (!ok).then(|| {
+        let note = if proof_failed { "a proof failed: " } else { "" };
         format!(
-            "{name} [{mode}]: exit {code} (expected {})\n--- stdout ---\n{stdout}--- expected ---\n{}--- stderr ---\n{stderr}",
+            "{name} [{mode}]: {note}exit {code} (expected {})\n--- stdout ---\n{stdout}--- expected ---\n{}--- stderr ---\n{stderr}",
             exp.exit, exp.stdout
         )
     })
@@ -274,22 +304,34 @@ fn a_variable_set_after_the_scrub_wins() {
 }
 
 fn build(path: &Path, exe: &Path, extra: &[&str]) -> Output {
+    build_with(path, exe, extra, false)
+}
+
+/// `kestrel build`, with `KESTREL_CHECK_PROOFS=1` when `proofs` is set.
+fn build_with(path: &Path, exe: &Path, extra: &[&str], proofs: bool) -> Output {
     let mut args = vec!["build", path.to_str().unwrap(), "-o", exe.to_str().unwrap()];
     args.extend_from_slice(extra);
-    kestrel(&args)
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_kestrel"));
+    hermetic(cmd.args(&args));
+    if proofs {
+        cmd.env("KESTREL_CHECK_PROOFS", "1");
+    }
+    cmd.output().expect("run kestrel")
 }
 
 #[test]
 fn programs_run_as_executables() {
     let out_dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("programs");
     fs::create_dir_all(&out_dir).unwrap();
+    // `KESTREL_TEST_VERIFY_EXE=1` builds the executables with the proof check on too.
+    let proofs = std::env::var_os("KESTREL_TEST_VERIFY_EXE").is_some_and(|v| v == "1");
     let mut failures = Vec::new();
     for path in programs() {
         let src = fs::read_to_string(&path).unwrap();
         let name = path.file_name().unwrap().to_string_lossy().to_string();
         let exp = expectations(&name, &src);
         let exe = out_dir.join(path.file_stem().unwrap()).with_extension(std::env::consts::EXE_EXTENSION);
-        let built = build(&path, &exe, &[]);
+        let built = build_with(&path, &exe, &[], proofs);
         if !built.status.success() {
             failures.push(format!("{name} [build]: {}", String::from_utf8_lossy(&built.stderr)));
             continue;

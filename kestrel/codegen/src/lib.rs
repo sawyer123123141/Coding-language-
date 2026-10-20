@@ -25,11 +25,18 @@ pub use object::emit_object;
 pub struct Options {
     /// Panic on integer overflow (exit 101). Off for `--release`.
     pub checked_arith: bool,
+    /// Leave out the checks range analysis proves can't fail. Off, every check stays (the
+    /// analysis's own tests compare the two). Read from the analysis's task on; a build only
+    /// has proven checks once the analysis marks some.
+    pub remove_checks: bool,
+    /// Keep every proven check, but make its failure stop the program with "range analysis
+    /// removed the ... check ..., but it fails; this is a compiler bug" (`KESTREL_CHECK_PROOFS=1`).
+    pub verify_proofs: bool,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Options { checked_arith: true }
+        Options { checked_arith: true, remove_checks: true, verify_proofs: false }
     }
 }
 

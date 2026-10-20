@@ -59,7 +59,7 @@ impl Helpers {
         ];
         // The loop never changes the list, so `i < xs.len` holds throughout.
         let at = expr(ExprKind::Load(Place::local(i)), KTy::I64);
-        let item_at = with(&xs, Proj::Index { at, checked: false });
+        let item_at = with(&xs, Proj::Index { at, check: IndexCheck::Known });
         let item = expr(ExprKind::Load(item_at.clone()), elem);
         let call = match callee {
             Callee::Code { code, .. } => {

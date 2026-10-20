@@ -20,7 +20,7 @@ impl Helpers {
         let (xs, needle, i) = (Place::local(LocalIdx(0)), Place::local(LocalIdx(1)), LocalIdx(2));
         let at = expr(ExprKind::Load(Place::local(i)), KTy::I64);
         // The loop never changes the list, so `i < xs.len` holds throughout.
-        let item = expr(ExprKind::Load(with(&xs, Proj::Index { at: at.clone(), checked: false })), elem);
+        let item = expr(ExprKind::Load(with(&xs, Proj::Index { at: at.clone(), check: IndexCheck::Known })), elem);
         let same = expr(ExprKind::Binary(BinOp::Eq, Box::new(item), Box::new(expr(ExprKind::Load(needle), elem))), KTy::Bool);
         let found = expr(ExprKind::Cast(Box::new(at)), KTy::I32);
         let hit = Stmt::Return(Some(expr(ExprKind::Some(Box::new(found)), opt)));

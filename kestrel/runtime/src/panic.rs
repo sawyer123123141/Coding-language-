@@ -11,6 +11,9 @@ pub const PANIC_SHIFT: i32 = 5;
 pub const PANIC_MAP_CHANGED: i32 = 6;
 /// A bodiless interface method was called (the compiler never emits such a call).
 pub const PANIC_ABSTRACT: i32 = 7;
+/// An index outside its list or array. Only `kestrel_rt_proof_failed` takes this kind (a bounds
+/// failure reports itself with `kestrel_rt_panic_index`).
+pub const PANIC_BOUNDS: i32 = 8;
 
 static FAILURE_HOOK: std::sync::OnceLock<fn(&str) -> !> = std::sync::OnceLock::new();
 
@@ -98,6 +101,28 @@ pub extern "C" fn kestrel_rt_panic(kind: i32, line: i32, file: *const FileName) 
     fail(&format!("{what} on line {line}{}", of_file(file)));
 }
 
+/// The message for a check range analysis removed (`KESTREL_CHECK_PROOFS=1` puts it back) that fails.
+/// `kind` is a `PANIC_*` kind; no `file` (empty) leaves out " of {file}".
+pub fn proof_failed_message(kind: i32, line: i32, file: &str) -> String {
+    let what = match kind {
+        PANIC_OVERFLOW => "overflow",
+        PANIC_SHIFT => "shift",
+        PANIC_DIV_ZERO => "division",
+        PANIC_NARROW_INT | PANIC_NARROW_U8 => "narrowing",
+        PANIC_BOUNDS => "bounds",
+        _ => "runtime",
+    };
+    let of = if file.is_empty() { String::new() } else { format!(" of {file}") };
+    format!("range analysis removed the {what} check on line {line}{of}, but it fails; this is a compiler bug")
+}
+
+/// A check range analysis proved can't fail, and kept for `KESTREL_CHECK_PROOFS=1`, failed.
+#[no_mangle]
+pub extern "C" fn kestrel_rt_proof_failed(kind: i32, line: i32, file: *const FileName) -> ! {
+    let name = of_file(file);
+    fail(&proof_failed_message(kind, line, name.strip_prefix(" of ").unwrap_or("")));
+}
+
 /// Fails with the message in the `len` bytes at `msg`: a compiled error message with no line (the
 /// copy function of an owning type's method table).
 ///
@@ -123,6 +148,22 @@ pub extern "C" fn kestrel_rt_fmod_f64(a: f64, b: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failed_proof_names_its_check_line_and_file() {
+        assert_eq!(
+            proof_failed_message(PANIC_BOUNDS, 12, "world.kes"),
+            "range analysis removed the bounds check on line 12 of world.kes, but it fails; this is a compiler bug"
+        );
+        assert_eq!(
+            proof_failed_message(PANIC_NARROW_U8, 3, ""),
+            "range analysis removed the narrowing check on line 3, but it fails; this is a compiler bug"
+        );
+        let kinds = [(PANIC_OVERFLOW, "overflow"), (PANIC_SHIFT, "shift"), (PANIC_DIV_ZERO, "division"), (PANIC_NARROW_INT, "narrowing")];
+        for (kind, word) in kinds {
+            assert!(proof_failed_message(kind, 1, "a.kes").contains(&format!("removed the {word} check")));
+        }
+    }
 
     #[test]
     fn fmod_matches_rust_remainder() {

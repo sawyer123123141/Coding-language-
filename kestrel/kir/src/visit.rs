@@ -142,7 +142,7 @@ pub fn walk_expr<'a>(e: &'a Expr, f: &mut impl FnMut(Node<'a>)) {
         }
         ExprKind::Format(parts) => print_args(parts, f),
         ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::FnEnv(p) => place(p, false, f),
-        ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) | ExprKind::EnvDup(x) | ExprKind::BlockDup { src: x, .. } => {
+        ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::Proven(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) | ExprKind::EnvDup(x) | ExprKind::BlockDup { src: x, .. } => {
             walk_expr(x, f)
         }
         ExprKind::MakeFn { env: EnvKind::Heap(env) | EnvKind::Stack(env), .. } => {

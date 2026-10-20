@@ -63,7 +63,7 @@ impl<'a> FnLowerer<'a> {
             None => self.temp(KTy::I32),
         };
         let mut slot = list.clone();
-        slot.path.push(Proj::Index { at: load(i, KTy::I32, line), checked: true });
+        slot.path.push(Proj::Index { at: load(i, KTy::I32, line), check: IndexCheck::Checked });
         let item = self.t.bind_local[&var.id];
         self.elems.insert(item, slot.clone());
         let ty = super::kty(self.t.local(item).ty);
@@ -108,7 +108,7 @@ impl<'a> FnLowerer<'a> {
 fn keep_step(list: &Place, slot: &Place, ty: KTy, [i, kept, next, removed]: [LocalIdx; 4], line: u32) -> Vec<Stmt> {
     let at = Expr { kind: ExprKind::Cast(Box::new(load(i, KTy::I32, line))), ty: KTy::I64, line };
     let mut dest = list.clone();
-    dest.path.push(Proj::Index { at: load(kept, KTy::I64, line), checked: true });
+    dest.path.push(Proj::Index { at: load(kept, KTy::I64, line), check: IndexCheck::Checked });
     let moved = if ty.is_aggregate() {
         vec![Stmt::Assign(dest, Expr { kind: ExprKind::Move(slot.clone()), ty, line })]
     } else {

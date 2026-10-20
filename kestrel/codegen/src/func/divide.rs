@@ -4,7 +4,7 @@ use cranelift_module::Module;
 use kestrel_kir::{BinOp, KTy};
 use kestrel_runtime::{PANIC_DIV_ZERO, PANIC_OVERFLOW};
 
-use super::FuncLowerer;
+use super::{Check, FuncLowerer};
 
 /// A literal divisor as the value `iconst` will actually produce at type `t`.
 fn wrap_literal(t: KTy, c: i64) -> i64 {
@@ -21,18 +21,18 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     pub(super) fn int_div(
         &mut self,
         op: BinOp,
-        a: Value,
-        b: Value,
+        (a, b): (Value, Value),
         t: KTy,
         line: u32,
         const_divisor: Option<i64>,
+        check: Check,
     ) -> Value {
         if let Some(c) = const_divisor {
             if let Some(v) = self.div_by_const(op, a, t, wrap_literal(t, c)) {
                 return v;
             }
         }
-        self.div_checked(op, a, b, t, line)
+        self.div_checked(op, a, b, t, line, check)
     }
 
     /// `a op c` for a literal `c`, or `None` when `c` is 0 or (signed) -1 and
@@ -88,12 +88,17 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         self.b.ins().isub(a, back)
     }
 
-    /// Divisor unknown at compile time: zero check, then (signed) `MIN / -1`.
-    fn div_checked(&mut self, op: BinOp, a: Value, b: Value, t: KTy, line: u32) -> Value {
+    /// Divisor unknown at compile time: zero check, then (signed) `MIN / -1`. A `Skip` check
+    /// (the divisor is proven never 0, and never -1 with the dividend at the minimum) divides
+    /// plainly; `Verify` keeps both checks but fails as a compiler bug.
+    fn div_checked(&mut self, op: BinOp, a: Value, b: Value, t: KTy, line: u32, check: Check) -> Value {
+        if check == Check::Skip {
+            return self.plain_div(op, a, b, t);
+        }
         let is_zero = self.b.ins().icmp_imm(IntCC::Equal, b, 0);
-        self.panic_if(is_zero, PANIC_DIV_ZERO, line);
+        self.fail_if(is_zero, PANIC_DIV_ZERO, line, check);
         if !t.is_signed() {
-            return if op == BinOp::Div { self.b.ins().udiv(a, b) } else { self.b.ins().urem(a, b) };
+            return self.plain_div(op, a, b, t);
         }
         // MIN / -1 overflows (and traps in hardware).
         let min = if t == KTy::I32 { i32::MIN as i64 } else { i64::MIN };
@@ -102,18 +107,24 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let a_is_min = self.b.ins().icmp(IntCC::Equal, a, min_v);
         let b_is_neg1 = self.b.ins().icmp(IntCC::Equal, b, neg_one);
         let both = self.b.ins().band(a_is_min, b_is_neg1);
-        let divisor = if self.shared.opts.checked_arith {
-            self.panic_if(both, PANIC_OVERFLOW, line);
+        let divisor = if check == Check::Verify || self.shared.opts.checked_arith {
+            self.fail_if(both, PANIC_OVERFLOW, line, check);
             b
         } else {
             // Wrapping: MIN / 1 == MIN and MIN % 1 == 0, matching wrapping semantics.
             let one = self.iconst(t, 1);
             self.b.ins().select(both, one, b)
         };
-        if op == BinOp::Div {
-            self.b.ins().sdiv(a, divisor)
-        } else {
-            self.b.ins().srem(a, divisor)
+        self.plain_div(op, a, divisor, t)
+    }
+
+    /// `a / b` or `a % b` with no check at all.
+    fn plain_div(&mut self, op: BinOp, a: Value, b: Value, t: KTy) -> Value {
+        match (t.is_signed(), op == BinOp::Div) {
+            (true, true) => self.b.ins().sdiv(a, b),
+            (true, false) => self.b.ins().srem(a, b),
+            (false, true) => self.b.ins().udiv(a, b),
+            (false, false) => self.b.ins().urem(a, b),
         }
     }
 }

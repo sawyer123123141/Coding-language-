@@ -1,9 +1,10 @@
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::{types, InstBuilder, MemFlags, TrapCode, Value};
 use cranelift_module::Module;
-use kestrel_kir::{self as kir, KTy, Place, Proj};
+use kestrel_kir::{self as kir, IndexCheck, KTy, Place, Proj};
+use kestrel_runtime::PANIC_BOUNDS;
 
-use super::{cl_type, FuncLowerer, Slot};
+use super::{cl_type, Check, FuncLowerer, Slot};
 
 impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// The type of the value stored at a place.
@@ -45,10 +46,10 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                     ty = kir.elem(el);
                     continue;
                 }
-                (Proj::Index { at, checked }, KTy::Array(el) | KTy::List(el)) => {
+                (Proj::Index { at, check }, KTy::Array(el) | KTy::List(el)) => {
                     let header = self.offset(addr, offset);
                     ty = kir.elem(el);
-                    addr = self.element_addr(header, at, *checked, ty)?;
+                    addr = self.element_addr(header, at, *check, ty)?;
                     offset = 0;
                     continue;
                 }
@@ -81,11 +82,18 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     }
 
     /// The address of element `index` of the array or list whose header is at `header`.
-    fn element_addr(&mut self, header: Value, index: &kir::Expr, checked: bool, elem: KTy) -> Result<Value, String> {
+    fn element_addr(&mut self, header: Value, index: &kir::Expr, check: IndexCheck, elem: KTy) -> Result<Value, String> {
         let i = self.expr(index)?;
         let i = self.widen_i64(i, index.ty);
-        if checked {
-            self.bounds_check(header, i, index.line);
+        match check {
+            IndexCheck::Checked => self.bounds_check(header, i, index.line, Check::Emit),
+            IndexCheck::Known => {}
+            IndexCheck::Proven => {
+                let mode = self.proven_check();
+                if mode != Check::Skip {
+                    self.bounds_check(header, i, index.line, mode);
+                }
+            }
         }
         let ptr = self.b.ins().load(self.ptr, MemFlags::trusted(), header, 0);
         let (size, _) = self.shared.kir.size_align(elem);
@@ -93,8 +101,9 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         Ok(self.b.ins().iadd(ptr, at))
     }
 
-    /// Panics unless `0 <= i < len` for the collection whose header is at `header`.
-    fn bounds_check(&mut self, header: Value, i: Value, line: u32) {
+    /// Panics unless `0 <= i < len` for the collection whose header is at `header`; with
+    /// `Verify`, fails as a compiler bug instead.
+    fn bounds_check(&mut self, header: Value, i: Value, line: u32, check: Check) {
         let len = self.b.ins().load(types::I64, MemFlags::trusted(), header, 8);
         // Unsigned: a negative index looks huge, so one compare checks both ends.
         let bad = self.b.ins().icmp(IntCC::UnsignedGreaterThanOrEqual, i, len);
@@ -102,8 +111,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         self.b.ins().brif(bad, fail, &[], ok, &[]);
         self.b.switch_to_block(fail);
         self.b.set_cold_block(fail);
-        let (l, f) = self.loc_args(line);
-        self.call_id(self.shared.rt.panic_index, &[i, len, l, f]);
+        self.call_failure(check, PANIC_BOUNDS, line, Some((i, len)));
         self.b.ins().trap(TrapCode::unwrap_user(2));
         self.b.switch_to_block(ok);
     }

@@ -107,6 +107,29 @@ impl Drop for Arena {
     }
 }
 
+/// The most items a list or an array holds: `i32::MAX`, so that every `xs.len` fits an `int`.
+/// Strings aren't limited.
+pub const MAX_ITEMS: i64 = i32::MAX as i64;
+
+/// The capacity a full list of capacity `cap` grows to: double (at least 4), at most `MAX_ITEMS`.
+/// `None` when `cap` is already `MAX_ITEMS`: the list can't grow.
+pub fn grown_capacity(cap: i64) -> Option<i64> {
+    if cap >= MAX_ITEMS {
+        return None;
+    }
+    Some(cap.saturating_mul(2).clamp(4, MAX_ITEMS))
+}
+
+/// Whether a list or an array can hold `n` items (`0 <= n <= MAX_ITEMS`).
+pub fn items_fit(n: i64) -> bool {
+    (0..=MAX_ITEMS).contains(&n)
+}
+
+/// The failure for a list that would hold more than `MAX_ITEMS` items.
+pub fn list_too_long() -> ! {
+    crate::panic::fail("a list can't hold more than 2,147,483,647 items");
+}
+
 fn too_large() -> ! {
     crate::panic::fail("out of memory: allocation is too large");
 }
@@ -203,9 +226,21 @@ pub extern "C" fn kestrel_rt_arena_pop() -> *mut Arena {
     STACK.with_borrow_mut(|s| s.pushed.pop().expect("pops match pushes"))
 }
 
-/// Room for `count` zeroed elements of `elem_size` bytes in the current arena.
+/// Room for `count` zeroed elements of `elem_size` bytes in the current arena. An array holds at
+/// most `MAX_ITEMS` elements.
 #[no_mangle]
 pub extern "C" fn kestrel_rt_alloc(count: i64, elem_size: i64, align: i64, line: i32, file: *const crate::panic::FileName) -> *mut u8 {
+    if count > MAX_ITEMS {
+        crate::panic::fail(&format!(
+            "an array can't hold more than 2,147,483,647 items; this one would have {count} on line {line}{}",
+            crate::panic::of_file(file)
+        ));
+    }
+    alloc_unlimited(count, elem_size, align, line, file)
+}
+
+/// As `kestrel_rt_alloc`, without the limit on the count: for a string's bytes, which aren't limited.
+pub(crate) fn alloc_unlimited(count: i64, elem_size: i64, align: i64, line: i32, file: *const crate::panic::FileName) -> *mut u8 {
     if count < 0 {
         crate::panic::fail(&format!("negative array length {count} on line {line}{}", crate::panic::of_file(file)));
     }
@@ -243,7 +278,7 @@ pub struct List {
     pub arena: *mut Arena,
 }
 
-/// Doubles a full list's capacity (at least 4), moving its elements into
+/// Doubles a full list's capacity (at least 4, at most `MAX_ITEMS`), moving its elements into
 /// new memory from the list's own arena.
 ///
 /// # Safety
@@ -255,7 +290,7 @@ pub unsafe extern "C" fn kestrel_rt_list_grow(list: *mut List, elem_size: i64, a
     if l.arena.is_null() {
         l.arena = program_arena();
     }
-    let cap = (l.cap * 2).max(4);
+    let Some(cap) = grown_capacity(l.cap) else { list_too_long() };
     let size = cap.checked_mul(elem_size).and_then(|s| usize::try_from(s).ok()).unwrap_or_else(|| too_large());
     // SAFETY: a list's arena outlives the list. Spare capacity is never read
     // before it's written, so it needn't be zeroed. Inside a `par for`, other

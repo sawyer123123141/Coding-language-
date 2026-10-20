@@ -21,7 +21,7 @@ fn main() {
     let flag = |name: &str| args.iter().position(|a| a == name).map(|i| args[i + 1].clone());
     let number = |name: &str, default: i64| flag(name).map_or(default, |v| v.parse().expect("a number"));
     let (n, iters, reps) = (number("--n", 200_000), number("--iters", 30), number("--reps", 9) as usize);
-    let opts = Options { checked_arith: !args.iter().any(|a| a == "--release") };
+    let opts = Options { checked_arith: !args.iter().any(|a| a == "--release"), ..Options::default() };
 
     let src = std::fs::read_to_string(&path).expect("read the program");
     let (compiled, diagnostics) = kestrel_driver::compile(&path, &src, DiagStyle::Short);

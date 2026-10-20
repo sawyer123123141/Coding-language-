@@ -1,10 +1,10 @@
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
-use cranelift_codegen::ir::{types, InstBuilder, TrapCode, Value};
+use cranelift_codegen::ir::{types, InstBuilder, Value};
 use cranelift_module::Module;
 use kestrel_kir::{BinOp, KTy};
 use kestrel_runtime::{PANIC_NARROW_INT, PANIC_NARROW_U8, PANIC_OVERFLOW, PANIC_SHIFT};
 
-use super::{cl_type, FuncLowerer};
+use super::{cl_type, Check, FuncLowerer};
 
 fn bits(t: KTy) -> u32 {
     match t {
@@ -28,16 +28,17 @@ fn bits(t: KTy) -> u32 {
 }
 
 impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
-    /// `a op b` where both operands have type `t`. `const_divisor` is `b`'s
-    /// value when it is an integer literal (used only by `/` and `%`).
+    /// `a op b` (`operands`) where both operands have type `t`. `const_divisor` is `b`'s
+    /// value when it is an integer literal (used only by `/` and `%`). `check` says what
+    /// the integer checks do (see `Check`).
     pub(crate) fn binary(
         &mut self,
         op: BinOp,
-        a: Value,
-        b: Value,
+        (a, b): (Value, Value),
         t: KTy,
         line: u32,
         const_divisor: Option<i64>,
+        check: Check,
     ) -> Value {
         if op.is_comparison() {
             return self.compare(op, a, b, t);
@@ -56,12 +57,12 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             };
         }
         match op {
-            BinOp::Add | BinOp::Sub | BinOp::Mul => self.int_arith(op, a, b, t, line),
-            BinOp::Div | BinOp::Rem => self.int_div(op, a, b, t, line, const_divisor),
+            BinOp::Add | BinOp::Sub | BinOp::Mul => self.int_arith(op, a, b, t, line, check),
+            BinOp::Div | BinOp::Rem => self.int_div(op, (a, b), t, line, const_divisor, check),
             BinOp::BitAnd => self.b.ins().band(a, b),
             BinOp::BitOr => self.b.ins().bor(a, b),
             BinOp::BitXor => self.b.ins().bxor(a, b),
-            BinOp::Shl | BinOp::Shr => self.shift(op, a, b, t, line),
+            BinOp::Shl | BinOp::Shr => self.shift(op, a, b, t, line, check),
             _ => unreachable!("comparisons handled above"),
         }
     }
@@ -69,11 +70,11 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// `a << b` / `a >> b` (arithmetic for signed types). With checks on, an
     /// amount that's negative or at least the width panics; otherwise the
     /// machine masks it.
-    fn shift(&mut self, op: BinOp, a: Value, b: Value, t: KTy, line: u32) -> Value {
-        if self.shared.opts.checked_arith {
+    fn shift(&mut self, op: BinOp, a: Value, b: Value, t: KTy, line: u32, check: Check) -> Value {
+        if check.arith(self.shared.opts.checked_arith) {
             // Unsigned compare: a negative amount looks huge.
             let bad = self.b.ins().icmp_imm(IntCC::UnsignedGreaterThanOrEqual, b, bits(t) as i64);
-            self.panic_if(bad, PANIC_SHIFT, line);
+            self.fail_if(bad, PANIC_SHIFT, line, check);
         }
         match (op, t.is_signed()) {
             (BinOp::Shl, _) => self.b.ins().ishl(a, b),
@@ -83,13 +84,13 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     }
 
     /// Integer `+ - *`, overflow-checked when `checked_arith` is on.
-    pub(crate) fn int_arith(&mut self, op: BinOp, a: Value, b: Value, t: KTy, line: u32) -> Value {
+    pub(crate) fn int_arith(&mut self, op: BinOp, a: Value, b: Value, t: KTy, line: u32, check: Check) -> Value {
         let plain = |fl: &mut Self, x: Value, y: Value| match op {
             BinOp::Add => fl.b.ins().iadd(x, y),
             BinOp::Sub => fl.b.ins().isub(x, y),
             _ => fl.b.ins().imul(x, y),
         };
-        if !self.shared.opts.checked_arith {
+        if !check.arith(self.shared.opts.checked_arith) {
             return plain(self, a, b);
         }
         if t == KTy::U8 {
@@ -99,7 +100,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             let y = self.b.ins().uextend(types::I32, b);
             let r = plain(self, x, y);
             let bad = self.b.ins().icmp_imm(IntCC::UnsignedGreaterThan, r, 255);
-            self.panic_if(bad, PANIC_OVERFLOW, line);
+            self.fail_if(bad, PANIC_OVERFLOW, line, check);
             return self.b.ins().ireduce(types::I8, r);
         }
         let (r, overflowed) = match op {
@@ -107,21 +108,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             BinOp::Sub => self.b.ins().ssub_overflow(a, b),
             _ => self.b.ins().smul_overflow(a, b),
         };
-        self.panic_if(overflowed, PANIC_OVERFLOW, line);
+        self.fail_if(overflowed, PANIC_OVERFLOW, line, check);
         r
-    }
-
-    /// Calls the runtime panic (which doesn't return) when `cond` is true.
-    pub(super) fn panic_if(&mut self, cond: Value, kind: i32, line: u32) {
-        let (fail, ok) = (self.b.create_block(), self.b.create_block());
-        self.b.ins().brif(cond, fail, &[], ok, &[]);
-        self.b.switch_to_block(fail);
-        self.b.set_cold_block(fail);
-        let k = self.b.ins().iconst(types::I32, kind as i64);
-        let (l, f) = self.loc_args(line);
-        self.call_id(self.shared.rt.panic, &[k, l, f]);
-        self.b.ins().trap(TrapCode::unwrap_user(2));
-        self.b.switch_to_block(ok);
     }
 
     fn compare(&mut self, op: BinOp, a: Value, b: Value, t: KTy) -> Value {
@@ -155,7 +143,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// Converts `v` from `from` to `to`: int widening/narrowing (narrowing
     /// panics on a value that doesn't fit when `checked_arith` is on, and
     /// truncates otherwise), int<->float, float->int saturating (NaN -> 0).
-    pub(crate) fn cast(&mut self, v: Value, from: KTy, to: KTy, line: u32) -> Value {
+    pub(crate) fn cast(&mut self, v: Value, from: KTy, to: KTy, line: u32, check: Check) -> Value {
         if from == to {
             return v;
         }
@@ -171,7 +159,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                     }
                 } else if tb < fb {
                     let r = self.b.ins().ireduce(to_ty, v);
-                    if self.shared.opts.checked_arith {
+                    if check.arith(self.shared.opts.checked_arith) {
                         // It fit if widening it back gives the original value.
                         let back = if to.is_signed() {
                             self.b.ins().sextend(cl_type(from), r)
@@ -180,7 +168,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                         };
                         let bad = self.b.ins().icmp(IntCC::NotEqual, back, v);
                         let kind = if to == KTy::U8 { PANIC_NARROW_U8 } else { PANIC_NARROW_INT };
-                        self.panic_if(bad, kind, line);
+                        self.fail_if(bad, kind, line, check);
                     }
                     r
                 } else {
