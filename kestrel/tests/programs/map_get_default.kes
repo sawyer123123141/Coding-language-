@@ -1,0 +1,35 @@
+// expect: [4, 5, 6]
+// A map `get`'s default is copied in its turn, so a later argument may free the memory it came from
+// (here `ws[1]` and its arena). The value found in the map is not copied, so a later argument may not
+// change the map (see `tests/errors/changed_later_tails.kes`).
+struct W {
+    mem: Arena = Arena()
+    m: map[string, list[int]] = {}
+    l: list[int] = []
+    fill(var self) {
+        in self.mem {
+            self.m["a"] = [7, 8, 9]
+            self.l = [4, 5, 6]
+        }
+    }
+}
+drop_second(var ws: list[W]) -> int {
+    ws.remove_at(1)
+    var t = W()
+    in t.mem {
+        for i from 0 to 50 {
+            t.m["k{i}"] = [1000 + i, 5, 5, 5]
+        }
+    }
+    0
+}
+show(xs: list[int], n: int) { print(xs) }
+main() {
+    var ws: list[W] = []
+    ws.add(W())
+    ws.add(W())
+    ws[0].fill()
+    ws[1].fill()
+    var m0: map[string, list[int]] = {}
+    show(m0.get("zz", ws[1].l), drop_second(var ws))
+}

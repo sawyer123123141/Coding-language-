@@ -1,19 +1,23 @@
-// error 65: `ws` is passed here, but a later argument changes it
-// error 66: `ws` is passed here, but a later argument changes it
-// error 67: `ws` is passed here, but a later argument changes it
-// error 68: `ws` is passed here, but a later argument changes it
 // error 69: `ws` is passed here, but a later argument changes it
 // error 70: `ws` is passed here, but a later argument changes it
-// error 75: `vs` is passed here, but a later argument changes it
-// error 76: `vs` is passed here, but a later argument changes it
-// error 77: `vs` is passed here, but a later argument changes it
-// error 78: `vs` is passed here, but a later argument changes it
-// error 79: `vs` is read here, but a later part of this expression changes it
-// error 80: `vs` is read here, but a later part of this expression changes it
-// error 81: `vs` is read here, but a later part of this expression changes it
-// error 120: `bs` is passed here, but a later argument changes it
-// error 121: `bs` is passed here, but a later argument changes it
-// error 122: `bs` is passed here, but a later argument changes it
+// error 71: `ws` is passed here, but a later argument changes it
+// error 72: `ws` is passed here, but a later argument changes it
+// error 73: `ws` is passed here, but a later argument changes it
+// error 74: `ws` is passed here, but a later argument changes it
+// error 79: `vs` is passed here, but a later argument changes it
+// error 80: `vs` is passed here, but a later argument changes it
+// error 81: `vs` is passed here, but a later argument changes it
+// error 82: `vs` is passed here, but a later argument changes it
+// error 83: `vs` is read here, but a later part of this expression changes it
+// error 84: `vs` is read here, but a later part of this expression changes it
+// error 85: `vs` is read here, but a later part of this expression changes it
+// error 124: `bs` is passed here, but a later argument changes it
+// error 125: `bs` is passed here, but a later argument changes it
+// error 126: `bs` is passed here, but a later argument changes it
+// error 143: `ms` is passed here, but a later argument changes it
+// error 144: `ms` is passed here, but a later argument changes it
+// error 145: `ms` is passed here, but a later argument changes it
+// error 146: `ms` is read here, but a later part of this expression changes it
 // An argument or receiver that is an `if` or `match` of places still points into those places'
 // memory (only its header is kept), so a later argument may not change them, as for the place itself.
 // `print`'s arguments, `+` and the parts of an interpolated string are read the same way.
@@ -121,4 +125,26 @@ fields(var bs: list[B], bag: Bag, c: bool) {
     print(use2((if c { bs[0].bag } else { bag }).ds[0], drop_b(var bs)))
     print(use_s((if c { bs[0].bag } else { bag }).s, drop_b(var bs)))
     print(use_s((if c { bs[0].bag } else { bag }).s[0], drop_b(var bs)))
+}
+
+// A map `get` reads the entry shallowly, so its value points into the map's memory.
+struct M {
+    mem: Arena = Arena()
+    m: map[string, D] = {}
+    s: map[string, string] = {}
+}
+
+drop_m(var ms: list[M]) -> int {
+    ms.remove_at(0)
+    0
+}
+
+maps(var ms: list[M], h: D) {
+    print(ms[0].m.get("a", h).plus(drop_m(var ms)))
+    print(use2(ms[0].m.get("a", h), drop_m(var ms)))
+    print(ms[0].s.get("a", "b"), drop_m(var ms))
+    print(ms[0].s.get("a", "b") + "{drop_m(var ms)}")
+    // A `get` of a value with no heap memory is a copy, and a later argument that only reads is fine.
+    print(ms[0].s.has("a"), drop_m(var ms))
+    print(ms[0].m.get("zz", h).plus(ms.len))
 }

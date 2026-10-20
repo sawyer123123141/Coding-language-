@@ -72,7 +72,8 @@ fine(var xs: list[list[int]], var ys: list[list[int]], var m: map[string, list[i
     xs[0].add(clear(var xs))
     xs[0].insert(0, clear(var xs))
     xs[0].remove_at(clear(var xs))
-    print(m.get("a", [n]), m.get("b", [bump(var m)]), m.has("{bump(var m)}"), m.remove("{bump(var m)}"))
+    print(m.get("b", [bump(var m)]), n)
+    print(m.has("{bump(var m)}"), m.remove("{bump(var m)}"))
 }
 
 bump(var m: map[string, list[int]]) -> int {

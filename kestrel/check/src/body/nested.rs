@@ -194,9 +194,9 @@ impl<'a> BodyChecker<'a> {
     }
 
     /// The places `e`'s value still points into once it is evaluated: `e` itself when it is a
-    /// place; else, for an `if` or a `match` whose value holds heap memory, the places its arms give
-    /// (that value is kept shallowly, so it points at the arm's place's memory). Other values are
-    /// made new, or hold no heap memory.
+    /// place; else, when its value holds heap memory, the places an `if`'s or a `match`'s arms give
+    /// (that value is kept shallowly, so it points at the arm's place's memory), and the map a
+    /// `get` reads from. Other values are made new, or hold no heap memory.
     fn read_places<'e>(&self, e: &'e Expr, out: &mut Vec<&'e Expr>) {
         if self.place_root(e).is_some() {
             out.push(e);
@@ -222,6 +222,12 @@ impl<'a> BodyChecker<'a> {
             // the same memory. (A string's character is a new string.)
             ExprKind::Field { base, .. } => self.read_places(base, out),
             ExprKind::Index { base, .. } if self.t.ty(base.id) != Ty::Str => self.read_places(base, out),
+            // `m.get(k, d)` reads the entry shallowly, so its value points into the map's memory.
+            // (The default is copied in its turn. From a borrowed map the value is copied too,
+            // which this doesn't tell apart: such a call is refused although it is safe.)
+            ExprKind::MethodCall { receiver, name, .. } if name == "get" && self.t.res.get(&e.id) == Some(&Res::MapRead) => {
+                self.read_places(receiver, out)
+            }
             _ => {}
         }
     }
