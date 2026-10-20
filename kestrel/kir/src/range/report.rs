@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use super::events::{self, Event};
 use super::items;
-use super::sites::{Arith, CheckKind};
+use super::sites::CheckKind;
 use super::summary::{self, Summary};
 use super::Analysis;
 use crate::ir::*;
@@ -179,6 +179,9 @@ pub fn callee_name(m: &Module, g: FuncIdx) -> String {
     if m.par_bodies.contains(&g) {
         return "the `par for` body".to_string();
     }
+    if f.name.starts_with("__kestrel_compare_") {
+        return "the comparison for `sort`".to_string();
+    }
     match builtin_name(&f.name) {
         Some(name) => format!("`{name}`"),
         None => format!("`{}`", display_name(m, g)),
@@ -215,26 +218,29 @@ impl Owners {
 
 /// Builds the report of module `m`, which `remove_checks` has just analysed (`a`) in the build
 /// mode `arith`.
-pub fn build(m: &Module, a: &Analysis, _arith: Arith) -> Report {
+pub fn build(m: &Module, a: &Analysis) -> Report {
     let classes = classes(m);
     let events: Vec<Vec<Event>> = m.funcs.iter().map(|f| if f.native.is_some() { Vec::new() } else { events::events(m, f) }).collect();
-    let own_checks: Vec<u32> = a.funcs.iter().map(|c| c.left.len() as u32).collect();
+    let own_checks: Vec<Vec<u64>> = a.funcs.iter().zip(&classes).map(|(c, class)| check_ids(c, *class == Class::Generated)).collect();
     let summaries = summary::summarize(m, &events, &own_checks);
     let mut cx = items::Cx::new(m, a, &classes, &events, &summaries);
     let called = called(m);
+    let made = made_closures(m);
     let owners = Owners::new(m);
     // The closures inside each user function.
     let mut closures: HashMap<usize, Vec<usize>> = HashMap::new();
     let mut loose: Vec<usize> = Vec::new();
     for (j, class) in classes.iter().enumerate() {
-        if *class == Class::Closure {
+        // (A closure whose literal is gone, inlined into its loop, is dead code: its live copy is
+        // in the function that holds the loop.)
+        if *class == Class::Closure && made[j] {
             match owners.of(m.funcs[j].lines.0) {
                 Some(o) => closures.entry(o.0 as usize).or_default().push(j),
                 None => loose.push(j),
             }
         }
     }
-    let inlined = inlined_into_others(m, &classes, &called);
+    let inlined = inlined_into_others(m, &classes, &called, &made);
     let mut funcs = Vec::new();
     for (i, class) in classes.iter().enumerate() {
         if *class != Class::User {
@@ -324,7 +330,7 @@ fn called(m: &Module) -> Vec<bool> {
 
 /// The user functions, not called, that code in some other function came from: those whose lines
 /// appear in another function's body.
-fn inlined_into_others(m: &Module, classes: &[Class], called: &[bool]) -> std::collections::HashSet<usize> {
+fn inlined_into_others(m: &Module, classes: &[Class], called: &[bool], made: &[bool]) -> std::collections::HashSet<usize> {
     let mut spans: Vec<(u32, u32, usize)> = (0..m.funcs.len())
         .filter(|&i| classes[i] == Class::User && !called[i])
         .map(|i| (m.funcs[i].lines.0, m.funcs[i].lines.1, i))
@@ -335,6 +341,16 @@ fn inlined_into_others(m: &Module, classes: &[Class], called: &[bool]) -> std::c
         return found;
     }
     for (g, f) in m.funcs.iter().enumerate() {
+        // Only code the report lists or follows counts: not a compiler-made function (a sort's
+        // comparison), whose copy of a function is listed nowhere.
+        let listed = match classes[g] {
+            Class::User | Class::ParBody => true,
+            Class::Closure => made[g],
+            Class::Generated | Class::Native => false,
+        };
+        if !listed {
+            continue;
+        }
         walk(&f.body, &mut |n| {
             if let Node::Expr(e) = n {
                 if e.line == 0 {
@@ -352,3 +368,40 @@ fn inlined_into_others(m: &Module, classes: &[Class], called: &[bool]) -> std::c
     found
 }
 
+
+/// A number for each check left in a function, the same for the copies inlining makes of it in
+/// another function: its line, its kind and which of that kind it is on its line. (A compiler-made
+/// function, like a sort's comparison, holds several copies of the same key: they are all one.)
+fn check_ids(c: &super::FuncChecks, collapse: bool) -> Vec<u64> {
+    use std::hash::{Hash, Hasher};
+    let mut seen: HashMap<(u32, u8), u32> = HashMap::new();
+    c.left
+        .iter()
+        .map(|k| {
+            let n = seen.entry((k.line, k.kind as u8)).or_default();
+            let ordinal = if collapse { 0 } else { *n };
+            *n += 1;
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            (k.line, k.kind as u8, ordinal).hash(&mut h);
+            h.finish()
+        })
+        .collect()
+}
+
+/// For each function, whether a closure literal (`MakeFn`) in some function names it as its code and
+/// something can call it. Inlining a literal into the loop that calls it leaves the code behind,
+/// unused: its live copy is in the function that holds the loop.
+fn made_closures(m: &Module) -> Vec<bool> {
+    let mut made = vec![false; m.funcs.len()];
+    for f in &m.funcs {
+        let unused = events::unused_makes(f);
+        walk(&f.body, &mut |n| {
+            if let Node::Expr(e @ Expr { kind: ExprKind::MakeFn { code, .. }, .. }) = n {
+                if !unused.contains(&(e as *const Expr as usize)) {
+                    made[code.0 as usize] = true;
+                }
+            }
+        });
+    }
+    made
+}

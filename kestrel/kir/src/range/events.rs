@@ -6,7 +6,7 @@
 mod reasons;
 
 use reasons::{elem_text, limit, place_ty};
-use super::show::place_text;
+use super::show::{expr_text, place_text};
 use super::summary::Reason;
 use crate::ir::*;
 
@@ -29,6 +29,10 @@ pub enum What {
     Call(FuncIdx),
     /// A `par for` that runs this body.
     Body(FuncIdx),
+    /// A closure literal is made here: its code may run wherever the function value goes, so it
+    /// counts as called (an edge for summaries only; its own items are listed with the function
+    /// it is written in).
+    Closure(FuncIdx),
 }
 
 /// How deep the walk goes: past this the code is left unlisted (the analysis gave up on it long
@@ -37,7 +41,7 @@ const MAX_DEPTH: u32 = 4096;
 
 /// The events of function `f`, in the order the code runs them.
 pub fn events(m: &Module, f: &Func) -> Vec<Event> {
-    let mut w = Walk { m, f, out: Vec::new(), loops: Vec::new(), cur: f.lines.0, depth: 0 };
+    let mut w = Walk { m, f, out: Vec::new(), loops: Vec::new(), cur: f.lines.0, depth: 0, unused: unused_makes(f) };
     w.stmts(&f.body);
     w.out
 }
@@ -50,6 +54,25 @@ struct Walk<'a> {
     /// The packed line of the latest expression: the line of code that has none.
     cur: u32,
     depth: u32,
+    /// Closure literals nothing can call (see `unused_makes`), by address.
+    unused: std::collections::HashSet<usize>,
+}
+
+/// The closure literals in `f` that nothing can call: `let g = <literal>` where `g` is only ever
+/// read for its environment word (`FnEnv`). That is what is left of a literal passed to a built-in
+/// that was inlined: the loop calls the code inlined, and the value stays behind, unused. By the
+/// address of the literal's expression.
+pub(super) fn unused_makes(f: &Func) -> std::collections::HashSet<usize> {
+    use std::collections::HashMap;
+    let mut lets: Vec<(LocalIdx, usize)> = Vec::new();
+    let (mut places, mut envs): (HashMap<LocalIdx, u32>, HashMap<LocalIdx, u32>) = (HashMap::new(), HashMap::new());
+    crate::visit::walk(&f.body, &mut |n| match n {
+        crate::visit::Node::Stmt(Stmt::Let(l, e)) if matches!(e.kind, ExprKind::MakeFn { .. }) => lets.push((*l, e as *const Expr as usize)),
+        crate::visit::Node::Place(p, _) => *places.entry(p.root).or_default() += 1,
+        crate::visit::Node::Expr(Expr { kind: ExprKind::FnEnv(p), .. }) if p.path.is_empty() => *envs.entry(p.root).or_default() += 1,
+        _ => {}
+    });
+    lets.into_iter().filter(|(l, _)| places.get(l) == envs.get(l)).map(|(_, at)| at).collect()
 }
 
 
@@ -91,7 +114,13 @@ impl Walk<'_> {
     /// `p` for a sentence: in backticks, or "the list" for code the compiler made or a value it
     /// holds in a temporary.
     fn place(&self, p: &Place) -> String {
-        let text = place_text(self.m, self.f, p, p.path.len());
+        let mut text = place_text(self.m, self.f, p, p.path.len());
+        if text.starts_with("(...)") && p.path.is_empty() {
+            // A value the compiler held in a temporary: what was put in it, if that is known.
+            if let Some(def) = self.definition(p.root) {
+                text = expr_text(self.m, self.f, def);
+            }
+        }
         if self.f.lines == (0, 0) || text.starts_with("(...)") {
             return match place_ty(self.m, self.f, p) {
                 KTy::List(_) => "the list".to_string(),
@@ -102,6 +131,28 @@ impl Walk<'_> {
             };
         }
         format!("`{text}`")
+    }
+
+    /// What the temporary `l` is set to, when it is set once.
+    fn definition(&self, l: LocalIdx) -> Option<&Expr> {
+        let mut found: Vec<&Expr> = Vec::new();
+        crate::visit::walk(&self.f.body, &mut |n| {
+            if let crate::visit::Node::Stmt(Stmt::Let(m, e)) = n {
+                if *m == l {
+                    found.push(e);
+                }
+            }
+        });
+        (found.len() == 1).then(|| found[0])
+    }
+
+    /// `x` for a sentence: its text, or what its temporary was set to.
+    pub(super) fn expr_name(&self, x: &Expr) -> String {
+        let text = expr_text(self.m, self.f, x);
+        match &x.kind {
+            ExprKind::Load(p) if text == "(...)" && p.path.is_empty() => self.definition(p.root).map_or(text, |d| expr_text(self.m, self.f, d)),
+            _ => text,
+        }
     }
 
     fn stmts(&mut self, stmts: &[Stmt]) {
@@ -277,8 +328,8 @@ impl Walk<'_> {
             | ExprKind::MapNew
             | ExprKind::NoneLit
             | ExprKind::FnRef(_)
-            | ExprKind::MakeFn { env: EnvKind::None, .. }
             | ExprKind::RandFloat => {}
+            ExprKind::MakeFn { code, env: EnvKind::None } => self.closure(e, *code),
             ExprKind::StaticArena => self.alloc(line, Some("makes the arena the constants live in".to_string()), "makes the arena the constants live in".to_string(), ""),
             ExprKind::NewArena => self.alloc(line, Some("`Arena()` makes a new arena".to_string()), "makes a new arena".to_string(), ""),
             ExprKind::Format(parts) => {
@@ -333,16 +384,18 @@ impl Walk<'_> {
                     self.expr(x);
                 }
             }
-            ExprKind::MakeFn { env: EnvKind::Heap(env), .. } => {
+            ExprKind::MakeFn { code, env: EnvKind::Heap(env) } => {
                 for v in &env.values {
                     self.expr(v);
                 }
+                self.closure(e, *code);
                 self.alloc(line, Some("a closure that holds captured values makes an environment for them".to_string()), "makes a closure that holds captured values".to_string(), "");
             }
-            ExprKind::MakeFn { env: EnvKind::Stack(env), .. } => {
+            ExprKind::MakeFn { code, env: EnvKind::Stack(env) } => {
                 for v in &env.values {
                     self.expr(v);
                 }
+                self.closure(e, *code);
             }
             ExprKind::Call(g, args) => {
                 self.args(args);

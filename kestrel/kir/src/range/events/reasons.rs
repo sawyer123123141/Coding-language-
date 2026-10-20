@@ -13,6 +13,13 @@ pub(super) fn limit() -> String {
 }
 
 impl Walk<'_> {
+    /// A closure literal is made: its code counts as called, unless nothing can call it.
+    pub(super) fn closure(&mut self, e: &Expr, code: FuncIdx) {
+        if !self.unused.contains(&(e as *const Expr as usize)) {
+            self.push(e.line, What::Closure(code));
+        }
+    }
+
     /// The events of a statement that copies, makes an arena, frees one or sets a map key.
     pub(super) fn memory_stmt(&mut self, s: &Stmt) {
         match s {
@@ -53,8 +60,8 @@ impl Walk<'_> {
                 self.place_walk(p);
                 let at = self.place(p);
                 self.alloc(key.line, Some(format!("setting a key of {at} may grow the map")), format!("sets a key of {at}"), " and may grow the map");
-                let direct = format!("setting a key of {at} fails while looping over the map, or if it would hold more than 2,147,483,647 keys");
-                self.fail(key.line, Some(direct), format!("sets a key of {at}"), " and fails while looping over it, or if it would hold more than 2,147,483,647 keys");
+                let direct = format!("setting a key of {at} fails if it adds a new key while looping over the map, or if the map would hold more than 2,147,483,647 keys");
+                self.fail(key.line, Some(direct), format!("sets a key of {at}"), " and fails if it adds a new key while looping over it, or if the map would hold more than 2,147,483,647 keys");
             }
             Stmt::Trap => {
                 self.fail(0, Some("calling an interface method with no body stops the program".to_string()), "calls an interface method with no body".to_string(), "");
@@ -79,7 +86,8 @@ impl Walk<'_> {
     }
 
     pub(super) fn indirect(&mut self, callee: &Place, line: u32) {
-        let via = format!("calls the function value `{}`", place_text(self.m, self.f, callee, callee.path.len()));
+        let name = place_text(self.m, self.f, callee, callee.path.len());
+        let via = if name.starts_with("(...)") { "calls a function value".to_string() } else { format!("calls the function value `{name}`") };
         self.alloc(line, None, via.clone(), "; its body isn't known here");
         self.fail(line, None, via, "; its body isn't known here");
     }
@@ -121,6 +129,10 @@ impl Walk<'_> {
             ListOp::Sort => {
                 let name = if xs.len() > 1 { "sort_by" } else { "sort" };
                 self.alloc(line, Some(format!("`{name}` makes a buffer to sort {list} in")), format!("sorts {list} with `{name}`"), " and makes a buffer to sort in");
+                // The comparison runs the key function, which may allocate and fail.
+                if let Some(Expr { kind: ExprKind::FnRef(compare), .. }) = xs.first() {
+                    self.push(line, What::Call(*compare));
+                }
             }
             ListOp::Clear | ListOp::Compact => {}
         }
@@ -128,7 +140,8 @@ impl Walk<'_> {
 
     /// The events of a string operation.
     pub(super) fn str_op(&mut self, op: StrOp, xs: &[Expr], line: u32) {
-        let text = |i: usize| xs.get(i).map_or(String::new(), |x| expr_text(self.m, self.f, x));
+        let names: Vec<String> = xs.iter().map(|x| self.expr_name(x)).collect();
+        let text = |i: usize| names.get(i).cloned().unwrap_or_default();
         let makes = |what: &str| (format!("`{what}` makes a new string"), format!("makes a new string with `{what}`"));
         let (direct, via) = match op {
             StrOp::At => (format!("`{}[{}]` makes a new string", text(0), text(1)), "indexes a string into a new string".to_string()),

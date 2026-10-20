@@ -140,7 +140,7 @@ fn print_report(mut compiled: kestrel_driver::Compiled, checked: bool) {
     use kestrel_kir::range::{remove_checks, render::render, report::build, Arith};
     let arith = Arith::of(checked);
     let analysis = remove_checks(&mut compiled.module, arith);
-    let report = build(&compiled.module, &analysis, arith);
+    let report = build(&compiled.module, &analysis);
     let files = &compiled.files;
     let text = render(&report, &compiled.module, &|i| files.get(i as usize).is_none_or(|f| !f.is_builtin()));
     print!("{text}");

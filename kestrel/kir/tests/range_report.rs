@@ -239,9 +239,11 @@ fn remove_at_and_slice_can_fail() {
 fn an_item_in_a_closure_names_the_closures_function() {
     let src = "helper(xs: list[int]) -> list[int] {\n xs.map((n) { n * 1000 })\n}\npub use_it(xs: list[int]) -> list[int] {\n helper(xs)\n}";
     let (m, r) = reported(src, Checked);
-    // The closure's code is part of `helper`; its check is listed there, with no "(in ...)".
-    let h = func_report(&r, "helper");
-    assert!(h.items.iter().any(|i| matches!(i.kind, ItemKind::Check(CheckKind::Overflow)) && line(i.line) == 2));
+    // The closure's code is part of `helper` (its loop is inlined in it, so the literal's own code is
+    // dead): `helper` is inlined everywhere, and its check is listed where it is inlined.
+    assert!(func_report(&r, "helper").never_called);
+    let u = func_report(&r, "use_it");
+    assert!(u.items.iter().any(|i| matches!(i.kind, ItemKind::Check(CheckKind::Overflow)) && line(i.line) == 2), "{:?}", u.items);
     // Inlined into `use_it`, it names `helper`.
     let text = render(&r, &m, &|_| true);
     assert!(text.contains("    line 2 (in `helper`): overflow check: `n * 1000` may exceed `int`"), "{text}");
@@ -377,4 +379,100 @@ fn a_chain_takes_the_nearest_reason() {
     let allocs = items_of(f, Allocation);
     assert_eq!(allocs.len(), 2, "one for each call: {allocs:?}");
     assert_eq!(allocs[1].1, "calls `near` (line 11), which adds to `ps` (line 3) and may grow the list");
+}
+
+#[test]
+fn a_closures_checks_are_part_of_its_functions_count() {
+    // `any`'s loop is inlined, leaving its closure's code behind unused: the check is listed once,
+    // in the function the closure is written in, and a caller counts it once.
+    let src = "h_any(d: int, xs: list[int], tbl: list[int]) -> bool {\n if d > 0 { return h_any(d - 1, xs, tbl) }\n xs.any((x) { tbl[x] > 0 })\n}\npub run(xs: list[int], tbl: list[int]) -> bool {\n h_any(1, xs, tbl)\n}";
+    let (_, r) = reported(src, Checked);
+    let h = func_report(&r, "h_any");
+    let bounds: Vec<_> = h.items.iter().filter(|i| matches!(i.kind, ItemKind::Check(CheckKind::Bounds))).collect();
+    assert_eq!(bounds.len(), 1, "{:?}", h.items);
+    assert_eq!(h.checks_left(), 1);
+    let calls = items_of(func_report(&r, "run"), Call);
+    assert_eq!(calls, [(6, "`h_any` isn't inlined: it calls itself (it and what it calls have 1 check left)".to_string())]);
+}
+
+#[test]
+fn a_dead_closure_is_not_listed_beside_its_inlined_copy() {
+    let src = "h(d: int) -> int {\n if d > 0 { return h(d - 1) }\n let k = 3\n let xs = [1, 2]\n let ys = xs.map((x) { k * 2 })\n ys.len\n}\npub top() -> int {\n h(1)\n}";
+    let (_, r) = reported(src, Checked);
+    let h = func_report(&r, "h");
+    let overflows: Vec<_> = items_of(h, ItemKind::Check(CheckKind::Overflow));
+    assert_eq!(overflows.len(), 1, "{:?}", h.items);
+    assert_eq!(h.checks_left(), 1);
+    assert_eq!(r.left, 1);
+    let calls = items_of(func_report(&r, "top"), Call);
+    assert_eq!(calls, [(9, "`h` isn't inlined: it calls itself (it and what it calls have 1 check left)".to_string())]);
+}
+
+#[test]
+fn a_closure_that_can_fail_is_part_of_the_chain() {
+    // `mk` makes a closure that slices a string: wherever the closure goes it can fail, so `mk`
+    // and its callers say so.
+    let src = "mk(d: int) -> (int) -> int {\n if d > 0 { return mk(d - 1) }\n (n: int) -> int { \"abc\".slice(0, n).len }\n}\npub top(d: int) -> (int) -> int {\n mk(d)\n}";
+    let (m, r) = reported(src, Checked);
+    assert!(r.summaries[idx(&m, "mk")].fails.is_some());
+    let want = "calls `mk` (line 6), which calls the closure at line 3 (line 3), which slices a string (line 3) and fails unless the range is inside it";
+    assert_eq!(items_of(func_report(&r, "top"), CanFail), [(6, want.to_string())]);
+}
+
+const ITEM: &str = "struct Item {\n id: int\n}\n";
+
+#[test]
+fn a_failing_sort_by_key_literal_is_followed() {
+    let src = format!("{ITEM}h_lit(d: int) -> int {{\n if d > 0 {{ return h_lit(d - 1) }}\n var xs = list[Item]()\n xs.sort_by((it) {{ \"abc\".slice(0, it.id).len }})\n 0\n}}\npub top() -> int {{\n h_lit(1)\n}}");
+    let (m, r) = reported(&src, Checked);
+    let want = "calls `h_lit` (line 11), which calls the closure at line 7 (line 7), which slices a string (line 7) and fails unless the range is inside it";
+    assert_eq!(items_of(func_report(&r, "top"), CanFail), [(11, want.to_string())]);
+    assert!(r.summaries[idx(&m, "h_lit")].fails.is_some());
+    // The comparison's own copy of the key is part of `h_lit`'s calls too.
+    let own = items_of(func_report(&r, "h_lit"), CanFail);
+    assert!(own.iter().any(|(l, t)| *l == 7 && t.starts_with("calls the comparison for `sort` (line 7)")), "{own:?}");
+}
+
+#[test]
+fn a_failing_named_sort_by_key_is_followed_and_listed() {
+    let src = format!("{ITEM}pure keyfn(it: Item) -> int {{\n \"abc\".slice(0, it.id).len\n}}\nh_named(d: int) -> int {{\n if d > 0 {{ return h_named(d - 1) }}\n var xs = list[Item]()\n xs.sort_by(keyfn)\n 0\n}}\npub top() -> int {{\n h_named(1)\n}}");
+    let (m, r) = reported(&src, Checked);
+    let want = "calls `h_named` (line 14), which calls the comparison for `sort` (line 10), which slices a string (line 5) and fails unless the range is inside it";
+    assert_eq!(items_of(func_report(&r, "top"), CanFail), [(14, want.to_string())]);
+    // The key's code is inlined into the sort's comparison, which the report doesn't list: the key
+    // is listed itself, not said to be "listed where it is inlined".
+    let key = func_report(&r, "keyfn");
+    assert!(!key.never_called);
+    assert_eq!(items_of(key, CanFail).len(), 1);
+    assert!(r.summaries[idx(&m, "h_named")].fails.is_some());
+}
+
+#[test]
+fn a_named_sort_by_key_that_has_a_check_counts_for_its_callers() {
+    let src = format!("{ITEM}pure keyfn(it: Item) -> int {{\n var t = [1, 2, 3]\n t[it.id]\n}}\nh_named(d: int) -> int {{\n if d > 0 {{ return h_named(d - 1) }}\n var xs = list[Item]()\n xs.sort_by(keyfn)\n 0\n}}\npub top() -> int {{\n h_named(1)\n}}");
+    let (_, r) = reported(&src, Checked);
+    let calls = items_of(func_report(&r, "top"), Call);
+    assert_eq!(calls, [(15, "`h_named` isn't inlined: it calls itself (it and what it calls have 1 check left)".to_string())]);
+    assert_eq!(func_report(&r, "keyfn").checks_left(), 1);
+}
+
+#[test]
+fn literals_and_calls_are_named_not_elided() {
+    let src = "pub f(s: string) -> list[string] {\n s.split(\",\")\n}\npub g(var m: map[string, int]) {\n m[\"a\"] = 1\n}";
+    let (_, r) = reported(src, Checked);
+    let f = func_report(&r, "f");
+    assert_eq!(items_of(f, CanFail), [(2, format!("`s.split(\",\")` fails if `\",\"` is empty or the list would hold more than {LIMIT} items"))]);
+    let g = func_report(&r, "g");
+    assert_eq!(
+        items_of(g, CanFail),
+        [(5, format!("setting a key of `m` fails if it adds a new key while looping over the map, or if the map would hold more than {LIMIT} keys"))]
+    );
+}
+
+#[test]
+fn a_par_for_with_nothing_to_list_has_no_header() {
+    let (m, r) = reported("pub fill(var xs: list[int]) {\n par for x in xs {\n  x = 7\n }\n}", Checked);
+    let text = render(&r, &m, &|_| true);
+    assert!(text.contains("a `par for` makes an arena for each thread"), "{text}");
+    assert!(!text.contains("par for at"), "{text}");
 }

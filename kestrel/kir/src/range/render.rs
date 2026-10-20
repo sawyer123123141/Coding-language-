@@ -161,6 +161,7 @@ impl Host<'_> {
                     out.push_str(&format!("{pad}loop at {}\n", self.place(*l)));
                     self.write_nodes(inner, indent + 2, out);
                 }
+                Node::Par(_, body) if body.items.is_empty() && body.par_bodies.is_empty() && !body.gave_up => {}
                 Node::Par(l, body) => {
                     out.push_str(&format!("{pad}par for at {}\n", self.place(*l)));
                     if body.gave_up {

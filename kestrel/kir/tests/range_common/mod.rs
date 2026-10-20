@@ -89,7 +89,7 @@ pub fn line(packed: u32) -> u32 {
 pub fn reported(src: &str, arith: Arith) -> (Module, kestrel_kir::range::report::Report) {
     let (mut m, a) = analysed(src, arith);
     m.files = vec!["t.kes".to_string()];
-    let r = kestrel_kir::range::report::build(&m, &a, arith);
+    let r = kestrel_kir::range::report::build(&m, &a);
     (m, r)
 }
 

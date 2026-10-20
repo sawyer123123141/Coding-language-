@@ -53,7 +53,7 @@ enum Want {
 
 /// The summary of every function in `m`, from each function's events and the number of checks
 /// left in each.
-pub fn summarize(m: &Module, events: &[Vec<Event>], own_checks: &[u32]) -> Vec<Summary> {
+pub fn summarize(m: &Module, events: &[Vec<Event>], own_checks: &[Vec<u64>]) -> Vec<Summary> {
     let allocs = chains(events, Want::Alloc);
     let fails = chains(events, Want::Fail);
     let reach = reachable_checks(m, events, own_checks);
@@ -68,7 +68,7 @@ pub fn summarize(m: &Module, events: &[Vec<Event>], own_checks: &[u32]) -> Vec<S
 /// The calls a function makes, in the order it makes them (a `par for` body counts as called).
 fn callees(events: &[Event]) -> impl Iterator<Item = (FuncIdx, u32)> + '_ {
     events.iter().filter_map(|e| match e.what {
-        What::Call(g) | What::Body(g) => Some((g, e.line)),
+        What::Call(g) | What::Body(g) | What::Closure(g) => Some((g, e.line)),
         _ => None,
     })
 }
@@ -118,18 +118,20 @@ fn chains(events: &[Vec<Event>], want: Want) -> Vec<Option<Chain>> {
     out
 }
 
-/// For each function, the checks left in it and in every function it calls, each counted once.
-fn reachable_checks(m: &Module, events: &[Vec<Event>], own: &[u32]) -> Vec<u32> {
+/// For each function, the checks left in it and in every function it calls. `own` identifies each
+/// check of a function (its line, kind and text); a check that an inlined copy repeats in another
+/// function is one check.
+fn reachable_checks(m: &Module, events: &[Vec<Event>], own: &[Vec<u64>]) -> Vec<u32> {
     let n = m.funcs.len();
     let mut out = Vec::with_capacity(n);
     let mut seen = vec![u32::MAX; n];
     let mut stack = Vec::new();
     for f in 0..n {
-        let mut total = 0u32;
+        let mut ids: Vec<u64> = Vec::new();
         stack.push(f);
         seen[f] = f as u32;
         while let Some(g) = stack.pop() {
-            total = total.saturating_add(own[g]);
+            ids.extend_from_slice(&own[g]);
             for (c, _) in callees(&events[g]) {
                 let c = c.0 as usize;
                 if seen[c] != f as u32 {
@@ -138,7 +140,9 @@ fn reachable_checks(m: &Module, events: &[Vec<Event>], own: &[u32]) -> Vec<u32> 
                 }
             }
         }
-        out.push(total);
+        ids.sort_unstable();
+        ids.dedup();
+        out.push(ids.len() as u32);
     }
     out
 }
@@ -169,14 +173,29 @@ pub fn reason_text(m: &Module, r: &Reason, home: u32) -> String {
 /// function that has its reason itself is just that reason ("`filter` builds a new list").
 pub fn chain_text(m: &Module, callee: FuncIdx, chain: &Chain, line: u32) -> String {
     let home = unpack_line(line).1;
-    if chain.steps.is_empty() && super::report::is_generated(m, callee) {
-        return reason_text(m, &chain.reason, home);
+    // Code the compiler made has no lines: its calls and reasons are shown at the line before.
+    let mut at = line;
+    let mut reason = chain.reason.clone();
+    if reason.line == 0 {
+        reason.line = line;
+    }
+    if chain.steps.is_empty() && super::report::is_generated(m, callee) && !m.funcs[callee.0 as usize].name.starts_with("__kestrel_compare_") {
+        return reason_text(m, &reason, home);
     }
     let mut s = format!("calls {} ({})", super::report::callee_name(m, callee), line_ref(m, line, home));
     for step in &chain.steps {
-        s.push_str(&format!(", which calls {} ({})", super::report::callee_name(m, step.callee), line_ref(m, step.line, home)));
+        if step.line != 0 {
+            at = step.line;
+        }
+        // (A thunk only passes the call on.)
+        if m.funcs[step.callee.0 as usize].name.starts_with("__kestrel_fn_") {
+            continue;
+        }
+        s.push_str(&format!(", which calls {} ({})", super::report::callee_name(m, step.callee), line_ref(m, at, home)));
     }
-    let r = &chain.reason;
-    s.push_str(&format!(", which {} ({}){}", r.via, line_ref(m, r.line, home), r.tail));
+    if reason.line == line && chain.reason.line == 0 {
+        reason.line = at;
+    }
+    s.push_str(&format!(", which {} ({}){}", reason.via, line_ref(m, reason.line, home), reason.tail));
     s
 }

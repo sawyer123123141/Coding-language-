@@ -185,6 +185,8 @@ fn write_expr(m: &Module, f: &Func, e: &Expr, s: &mut String) {
     match &e.kind {
         ExprKind::Int(n) => s.push_str(&super::sites::wrap_literal(e.ty, *n).to_string()),
         ExprKind::Bool(b) => s.push_str(if *b { "true" } else { "false" }),
+        ExprKind::StrLit(text) => s.push_str(&format!("\"{}\"", text.replace('\n', "\\n"))),
+        ExprKind::Float(x) => s.push_str(&x.to_string()),
         ExprKind::Load(p) | ExprKind::Move(p) => write_place(m, f, p, p.path.len(), s),
         ExprKind::Len(p) => {
             write_place(m, f, p, p.path.len(), s);
