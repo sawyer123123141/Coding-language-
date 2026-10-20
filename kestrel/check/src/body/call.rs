@@ -2,6 +2,7 @@ use kestrel_syntax::ast::{Arg, Expr, ExprKind};
 use kestrel_syntax::Span;
 
 use super::closure::Impure;
+use super::nested::Later;
 use super::BodyChecker;
 use crate::builtins::Builtin;
 use crate::tables::{FnId, Res};
@@ -139,6 +140,9 @@ impl<'a> BodyChecker<'a> {
             }
             self.check_printable(&a.value);
         }
+        // Each value is kept until all of them have been evaluated, then printed.
+        let values: Vec<&Expr> = args.iter().map(|a| &a.value).collect();
+        self.check_kept_parts(&values, Later::Argument);
         Ty::Unit
     }
 

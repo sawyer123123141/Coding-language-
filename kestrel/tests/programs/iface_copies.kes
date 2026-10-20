@@ -5,9 +5,10 @@
 // expect: Goblin(health: 33, tags: [1, 1, 1])
 // expect: 5 10
 // expect: 4 50 3
-// expect: 1 1 2 2
+// expect: 11 1 2 12 2
 // expect: 3 2
 // expect: 11
+// expect: 9
 // Copies of interface values get their own copy of the concrete value, through the method table.
 interface Damageable {
     hit(var self, n: int)
@@ -44,11 +45,13 @@ struct Keep {
 
 interface Brain {
     pure think(self) -> int
+    learn(var self)
 }
 
 struct Dumb: Brain {
     n: int = 1
     pure think(self) -> int { self.n }
+    learn(var self) { self.n += 10 }
 }
 
 // An interface constant and a field default holding an interface value.
@@ -66,8 +69,8 @@ stash(var keep: Keep, d: Damageable) {
     }
 }
 
-// Interface receivers that aren't places (here an `if` of places) are copied before the call, so an
-// argument that frees their memory doesn't matter.
+// An interface receiver that isn't a place (here an `if` of places) is used as it is: the checker
+// refuses a later argument that changes its places, and one that makes and frees other memory is fine.
 interface D {
     pure plus(self, n: int) -> int
 }
@@ -89,8 +92,7 @@ struct W {
     }
 }
 
-drop_first(var ws: list[W]) -> int {
-    ws.remove_at(0)
+churn() -> int {
     var t = W()
     in t.mem {
         for i from 0 to 50 {
@@ -146,10 +148,14 @@ main() {
     }
     print(keep.items[0].hp(), keep.items[1].hp(), g2.hp())
 
-    let b1 = DEFAULT
+    var b1 = DEFAULT
+    b1.learn()
     var m = Mob()
     var m2 = m
-    print(b1.think(), DEFAULT.think(), m.brain.think(), m2.brain.think())
+    m2.brain.learn()
+    var m3 = Mob()
+    m3.brain.learn()
+    print(b1.think(), DEFAULT.think(), m.brain.think(), m2.brain.think(), Mob().brain.think())
 
     var hs: list[Holder] = [Holder(d: Goblin(health: 3))]
     var copy = hs
@@ -161,5 +167,6 @@ main() {
     ws[0].fill()
     let hd: D = G(h: 2)
     let c = true
-    print((if c { ws[0].ds[0] } else { hd }).plus(drop_first(var ws)))
+    print((if c { ws[0].ds[0] } else { hd }).plus(churn()))
+    print(ws[0].ds[0].plus(0))
 }

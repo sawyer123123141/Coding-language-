@@ -1,15 +1,18 @@
 //! What an argument changes while it's evaluated. Earlier arguments that
 //! were passed by pointer would see those changes (or point into memory
-//! the change moved), so such calls are rejected. The same walk gives the
+//! the change moved), so such calls are rejected; so are an `if` or `match`
+//! of places passed that way, and the parts of an expression (`a + f(var a)`)
+//! kept until the last has run (`check_kept_parts`). The same walk gives the
 //! call exclusivity rule (`exclusive`) the places changed and the values
 //! moved inside a call's arguments.
 
 use kestrel_syntax::ast::{Arg, Block, Expr, ExprKind, InterpPart, Stmt};
 
 use super::exclusive::Changes;
-use super::regions::PathKey;
+use super::regions::{tail, PathKey};
 use super::BodyChecker;
 use crate::tables::{LocalId, Res};
+use crate::ty::Ty;
 
 impl<'a> BodyChecker<'a> {
     /// The variables changed by calls and assignments anywhere inside `e`.
@@ -148,20 +151,87 @@ impl<'a> BodyChecker<'a> {
     /// `passed` were passed by pointer (`var`, or a read-only aggregate)
     /// before `later` is evaluated: none of them may be changed by it.
     pub(crate) fn check_changed_later(&mut self, passed: &[&Expr], later: &[&Expr]) {
+        self.refuse_changed_later(passed, later, Later::Argument);
+    }
+
+    /// Each of `parts`, evaluated in order, that holds heap memory is kept as it is (a header that
+    /// still points at its place's memory) until the last part has run: no later part may change it.
+    /// For `print`'s arguments, the sides of an operator and the parts of an interpolated string.
+    pub(crate) fn check_kept_parts(&mut self, parts: &[&Expr], what: Later) {
+        for (i, p) in parts.iter().enumerate() {
+            if self.t.has_heap(self.t.ty(p.id)) {
+                self.refuse_changed_later(&[p], &parts[i + 1..], what);
+            }
+        }
+    }
+
+    fn refuse_changed_later(&mut self, passed: &[&Expr], later: &[&Expr], what: Later) {
         let mut changed = Vec::new();
         for e in later {
             self.changed_inside(e, &mut changed);
         }
+        let mut places = Vec::new();
         for p in passed {
+            self.read_places(p, &mut places);
+        }
+        for p in places {
             let Some(root) = self.place_root(p) else { continue };
             if changed.contains(&root) {
                 let name = self.t.local(root).name.clone();
-                self.error_help(
-                    p.span,
-                    format!("`{name}` is passed here, but a later argument changes it"),
-                    "compute that argument into a variable before the call",
-                );
+                let (msg, help) = match what {
+                    Later::Argument => (
+                        format!("`{name}` is passed here, but a later argument changes it"),
+                        "compute that argument into a variable before the call",
+                    ),
+                    Later::Operand => (
+                        format!("`{name}` is read here, but a later part of this expression changes it"),
+                        "compute that part into a variable first",
+                    ),
+                };
+                self.error_help(p.span, msg, help);
             }
         }
     }
+
+    /// The places `e`'s value still points into once it is evaluated: `e` itself when it is a
+    /// place; else, for an `if` or a `match` whose value holds heap memory, the places its arms give
+    /// (that value is kept shallowly, so it points at the arm's place's memory). Other values are
+    /// made new, or hold no heap memory.
+    fn read_places<'e>(&self, e: &'e Expr, out: &mut Vec<&'e Expr>) {
+        if self.place_root(e).is_some() {
+            out.push(e);
+            return;
+        }
+        if !self.t.has_heap(self.t.ty(e.id)) {
+            return;
+        }
+        match &e.kind {
+            ExprKind::If { then_block, else_block, .. } => {
+                for b in std::iter::once(then_block).chain(else_block) {
+                    if let Some(t) = tail(b) {
+                        self.read_places(t, out);
+                    }
+                }
+            }
+            ExprKind::Match { arms, .. } => {
+                for t in arms.iter().filter_map(|a| tail(&a.body)) {
+                    self.read_places(t, out);
+                }
+            }
+            // A field or an item of such a value (`(if c { a } else { b }).items[0]`) points into
+            // the same memory. (A string's character is a new string.)
+            ExprKind::Field { base, .. } => self.read_places(base, out),
+            ExprKind::Index { base, .. } if self.t.ty(base.id) != Ty::Str => self.read_places(base, out),
+            _ => {}
+        }
+    }
+}
+
+/// What `check_changed_later` and `check_kept_parts` call the values a later one may not change.
+#[derive(Clone, Copy)]
+pub(crate) enum Later {
+    /// A call's argument or receiver.
+    Argument,
+    /// A side of an operator, or a part of an interpolated string.
+    Operand,
 }

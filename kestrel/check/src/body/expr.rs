@@ -1,6 +1,7 @@
 use kestrel_syntax::ast::{Expr, ExprKind, InterpPart};
 use kestrel_syntax::{Diagnostic, Span};
 
+use super::nested::Later;
 use super::{BodyChecker, Expect};
 use super::fnvalue::builtin_wrapper;
 use crate::builtins::Builtin;
@@ -46,16 +47,20 @@ impl<'a> BodyChecker<'a> {
             ExprKind::Str(_) => Ty::Str,
             // Built in the current arena, from parts that print the way `print` shows them.
             ExprKind::Interp(parts) => {
-                for part in parts {
-                    if let InterpPart::Expr(x) = part {
-                        self.check_printable(x);
-                    }
+                let exprs: Vec<&Expr> = parts.iter().filter_map(|p| if let InterpPart::Expr(x) = p { Some(x) } else { None }).collect();
+                for x in &exprs {
+                    self.check_printable(x);
                 }
+                self.check_kept_parts(&exprs, Later::Operand);
                 Ty::Str
             }
             ExprKind::Ident(name) => self.ident(e, name, want),
             ExprKind::Unary { op, expr } => self.unary(*op, expr, want),
-            ExprKind::Binary { op, lhs, rhs } => self.binary(e, *op, lhs, rhs, want),
+            ExprKind::Binary { op, lhs, rhs } => {
+                let ty = self.binary(e, *op, lhs, rhs, want);
+                self.check_kept_parts(&[lhs, rhs], Later::Operand);
+                ty
+            }
             ExprKind::Call { .. } => self.check_call(e, want),
             ExprKind::CallValue { .. } => self.check_call_value(e),
             ExprKind::Closure(lit) => self.check_closure(e, lit, want),

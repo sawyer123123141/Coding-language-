@@ -107,19 +107,6 @@ impl FnLowerer<'_> {
         self.spill_held(v, pre)
     }
 
-    /// The receiver `v` (lowered from `r`) of a method call, with its own copy of its concrete
-    /// value when it is an interface value read from something that isn't a place (an `if` or a
-    /// `match` yielding places): the checker's rule about a receiver changed by a later argument
-    /// only sees places, so a shallow copy could point at memory an argument frees. A place, or a
-    /// fresh value (a call's result, which is the call's own), is left as it is. The copy is made
-    /// in the receiver's turn, before the arguments.
-    pub(crate) fn own_iface_receiver(&mut self, r: &ast::Expr, v: Expr) -> Expr {
-        if !matches!(self.t.ty(r.id), Ty::Iface(_)) || matches!(v.kind, ExprKind::Load(_)) {
-            return v;
-        }
-        self.owned(v, false)
-    }
-
     /// The parts of the call `e` of slot `slot` of interface `iface` on its receiver: the
     /// statements to run first, the place of the interface value, the arguments and the signature.
     fn iface_call_parts(&mut self, e: &ast::Expr, iface: IfaceId, slot: u32) -> (Vec<Stmt>, Place, Vec<Arg>, KSig) {
@@ -130,7 +117,8 @@ impl FnLowerer<'_> {
         let (mut pre, _, mut lowered) = self.call_parts(e, f, args, Some(receiver));
         let recv = match lowered.remove(0) {
             Arg::Ref(p) | Arg::Value(Expr { kind: ExprKind::Load(p), .. }) => p,
-            // A value that isn't a place (a call's result, or a copy made by `own_iface_receiver`):
+            // A value that isn't a place (a call's result, or an `if` or `match` of places, which the
+            // checker keeps later arguments from changing; see `check_changed_later`):
             // held in a temporary for the call.
             Arg::Value(v) => self.temp_place(v, &mut pre),
         };

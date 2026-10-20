@@ -167,7 +167,7 @@ main() {
 }
 
 #[test]
-fn a_receiver_that_isnt_a_place_is_copied_before_the_arguments() {
+fn a_receiver_that_isnt_a_place_is_used_as_it_is_without_a_copy() {
     let m = lowered(
         "interface Named {
     pure plus(self, n: int) -> int
@@ -176,27 +176,24 @@ struct Pack: Named {
     n: int = 1
     pure plus(self, k: int) -> int { self.n + k }
 }
-bump(var n: int) -> int {
-    n += 1
-    n
-}
 main() {
     let a: Named = Pack()
     let b: Named = Pack(n: 2)
     var n = 0
     let c = n == 0
-    print((if c { a } else { b }).plus(bump(var n)), a.plus(bump(var n)))
+    print((if c { a } else { b }).plus(n + 1), a.plus(n))
 }
 ",
     );
-    // One copy for each branch of the `if`, none for the place `a`.
+    // The checker refuses a later argument that changes `a` or `b` (see `check_changed_later`), so
+    // neither the `if` nor the place `a` is copied.
     let mut copies = 0;
     visit::walk(&func(&m, "main").body, &mut |n| {
         if let visit::Node::Stmt(Stmt::CopyIface(_)) = n {
             copies += 1;
         }
     });
-    assert_eq!(copies, 2, "{:#?}", func(&m, "main").body);
+    assert_eq!(copies, 0, "{:#?}", func(&m, "main").body);
 }
 
 #[test]
