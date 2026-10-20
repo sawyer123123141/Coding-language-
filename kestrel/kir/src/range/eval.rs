@@ -29,6 +29,13 @@ impl Cx<'_> {
         }
         let mut v = self.eval_kind(st, e, sure);
         self.leave();
+        if !self.volatile.is_empty() {
+            // Another read of a volatile node may be another value (see `within`).
+            let ok = |l: &Lin| !self.volatile(l.node);
+            v.lin = v.lin.filter(ok);
+            v.between = v.between.filter(|(a, b)| ok(a) && ok(b));
+            v.len = v.len.filter(ok);
+        }
         if v.lin.is_none() && v.r.lo == v.r.hi && e.ty.is_int() {
             v.lin = Some(Lin { node: ZERO, c: v.r.lo });
         }
@@ -160,8 +167,9 @@ impl Cx<'_> {
             self.unreachable_expr(v);
             return Val::range(Interval::of_type(v.ty));
         }
-        self.forget(&mut after, &writes::of_expr(v));
-        let val = self.eval_v(&after, v, false);
+        let w = writes::of_expr(v);
+        self.forget(&mut after, &w);
+        let val = self.within(&w, |cx| cx.eval_v(&after, v, false));
         self.rebase(&after, stmts, val)
     }
 
@@ -231,8 +239,9 @@ impl Cx<'_> {
             self.unreachable_expr(val);
             return None;
         }
-        self.forget(&mut after, &writes::of_expr(val));
-        Some(self.eval(&after, val, false))
+        let w = writes::of_expr(val);
+        self.forget(&mut after, &w);
+        Some(self.within(&w, |cx| cx.eval(&after, val, false)))
     }
 
     /// An expression no state reaches: in a deciding pass its checks are listed as kept.

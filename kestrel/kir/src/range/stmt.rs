@@ -1,8 +1,11 @@
 //! Statements. A simple statement goes through the spec's four steps ("One statement at a time"):
 //! forget what its expressions may write; analyse each operand from that state; decide its checks;
 //! then add the facts from checks that passed on every path, forget the writes again, and apply
-//! the statement's own effect (see `effect`). So a fact never outlives the value it is about, and
-//! the analysis never depends on the order codegen evaluates operands in.
+//! the statement's own effect (see `effect`). While the operands are analysed, what they write is
+//! volatile (`Cx::within`): two reads of a written term may be two values, so no linear form or
+//! learned fact names it. So a fact never outlives the value it is about, no two reads around a
+//! write are taken for one value, and the analysis never depends on the order codegen evaluates
+//! operands in.
 
 use super::bounds::{Lin, Val};
 use super::facts::ZERO;
@@ -75,10 +78,11 @@ impl Cx<'_> {
     fn simple(&mut self, st: State, s: &Stmt) -> State {
         let mut st = st;
         // 1. Forget what the expressions may write.
-        self.forget(&mut st, &writes::of_operands(s));
-        // 2 and 3. Each operand from that state, deciding its checks.
+        let w = writes::of_operands(s);
+        self.forget(&mut st, &w);
+        // 2 and 3. Each operand from that state, deciding its checks; what they write is volatile.
         let mark = self.learned.len();
-        let value = self.operands(&st, s);
+        let value = self.within(&w, |cx| cx.operands(&st, s));
         // 4. Facts from checks that passed, then the writes again, then the statement's effect.
         self.apply_learned(&mut st, mark);
         let effect = writes::effect(s);

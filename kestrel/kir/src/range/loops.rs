@@ -33,8 +33,7 @@ impl Cx<'_> {
         w.extend(writes::of_expr(end));
         self.forget(&mut st, &w);
         let mark = self.learned.len();
-        let first = self.eval_v(&st, start, true);
-        let last = self.eval_v(&st, end, true);
+        let (first, last) = self.within(&w, |cx| (cx.eval_v(&st, start, true), cx.eval_v(&st, end, true)));
         self.apply_learned(&mut st, mark);
         self.forget(&mut st, &w);
         let hidden = self.hidden.get(&(s as *const Stmt as usize)).and_then(|&i| self.t.hidden(i));

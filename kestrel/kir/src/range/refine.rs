@@ -72,7 +72,7 @@ impl Cx<'_> {
                 let w = writes::of_expr(e);
                 let mut st = st;
                 self.forget(&mut st, &w);
-                self.eval(&st, e, sure);
+                self.within(&w, |cx| cx.eval(&st, e, sure));
                 self.forget(&mut st, &w);
                 (st.clone(), st)
             }
@@ -87,7 +87,7 @@ impl Cx<'_> {
         let w = writes::of_expr(e);
         let mut st = st;
         self.forget(&mut st, &w);
-        let (a, b) = (self.eval_v(&st, l, sure), self.eval_v(&st, r, sure));
+        let (a, b) = self.within(&w, |cx| (cx.eval_v(&st, l, sure), cx.eval_v(&st, r, sure)));
         let mut t = st.clone();
         let mut f = st;
         self.holds(&mut t, op, (l, a), (r, b));

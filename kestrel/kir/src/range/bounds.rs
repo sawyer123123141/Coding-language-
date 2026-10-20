@@ -7,6 +7,7 @@ use super::facts::ZERO;
 use super::interval::Interval;
 use super::sites::{self, CheckKind};
 use super::state::State;
+use super::terms::Term;
 use super::{index_key, terms, writes, Cx, Learn, MAX_ITEMS};
 use crate::ir::*;
 
@@ -89,12 +90,16 @@ impl Cx<'_> {
         // 0 <= node + c, that is 0 - node <= c.
         let low = v.r.lo >= 0 || all(&|l| st.implies(&self.t, ZERO, l.node, l.c));
         // node + c < len, that is node - len <= -1 - c.
-        let high = v.r.hi < st.node_range(&self.t, len).lo || all(&|l| st.implies(&self.t, l.node, len, -1 - l.c));
+        // A volatile length (the expression may change it) is used by its range only.
+        let by_facts = !self.volatile(len) && all(&|l| st.implies(&self.t, l.node, len, -1 - l.c));
+        let high = v.r.hi < st.node_range(&self.t, len).lo || by_facts;
         low && high
     }
 
     /// After the check on `at` passed: `0 <= at < len`.
     fn learn_bounds(&mut self, at: &Expr, v: &Val, len: Option<usize>) {
+        // The length the check read may not be the one a volatile node stands for (see `within`).
+        let len = len.filter(|&n| !self.volatile(n));
         match v.lin {
             Some(l) => {
                 self.learned.push(Learn::Diff(ZERO, l.node, l.c));
@@ -109,7 +114,7 @@ impl Cx<'_> {
                 }
             }
         }
-        if let Some(l) = self.local_of(at) {
+        if let Some(l) = self.local_of(at).filter(|&l| !self.t.node(l).is_some_and(|n| self.volatile(n))) {
             self.learned.push(Learn::Range(l, Interval::new(0, MAX_ITEMS - 1)));
         }
     }
@@ -130,7 +135,8 @@ impl Cx<'_> {
             }
             // An untouched node `u` with `node == u + k`.
             (0..self.t.nodes()).find_map(|u| {
-                if u == l.node || touched[u] {
+                // Not a loop's end: a `ForRange` in the statements may set it again.
+                if u == l.node || touched[u] || matches!(self.t.term(u), Some(Term::Hidden(_))) {
                     return None;
                 }
                 let k = after.equal_offset(&self.t, l.node, u)?;

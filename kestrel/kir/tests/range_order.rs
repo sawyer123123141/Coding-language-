@@ -4,8 +4,8 @@
 
 mod range_common;
 
-use kestrel_kir::range::Arith::Checked;
-use kestrel_kir::range::CheckKind::{Narrowing, Overflow};
+use kestrel_kir::range::Arith::{Checked, Wrapping};
+use kestrel_kir::range::CheckKind::{Bounds, Narrowing, Overflow};
 use range_common::*;
 
 /// `bump(var x, 1)`: triples `x` and returns 1; recursive with an early `return`, so it is never
@@ -188,4 +188,61 @@ fn a_write_inside_a_comparison_wins() {
     let left = left_of(&m, &a, "f", Overflow);
     assert!(left.iter().any(|c| line(c.line) == 11 && c.text.starts_with("`x * 10000000`")), "{left:#?}");
     assert_eq!(proven_of(&m, "f", Overflow), 0);
+}
+
+/// `drop0(var xs)` pops and returns 0, `grow0(var xs)` adds and returns 0, `lenof(xs)` is
+/// `xs.len` through a local: all small, so inlined, each a `Seq` in the expression.
+const CALLS: &str = "drop0(var xs: list[int]) -> int {
+    xs.pop()
+    0
+}
+grow0(var xs: list[int]) -> int {
+    xs.add(5)
+    0
+}
+lenof(xs: list[int]) -> int {
+    let n = xs.len
+    n
+}";
+
+#[test]
+fn two_reads_of_a_length_around_a_pop_are_two_values() {
+    // `xs.len` read before the inlined pop, the index checked after it: not `xs.len - 1 < xs.len`.
+    let src = format!("{CALLS}\nf(var xs: list[int]) -> int {{\n xs[int(u8(xs.len - 1)) + drop0(var xs)]\n}}");
+    let (m, a) = analysed(&src, Checked);
+    assert_eq!(left_of(&m, &a, "f", Bounds).len(), 1);
+    assert_eq!(proven_of(&m, "f", Bounds), 0);
+}
+
+#[test]
+fn a_comparison_of_two_reads_around_a_pop_can_hold() {
+    // `xs.len + 0 > xs.len` holds when the right read comes after the pop: the arm runs.
+    for left in ["xs.len", "lenof(xs)"] {
+        let src = format!(
+            "{CALLS}\nf(var xs: list[int]) -> int {{\n let ys: list[int] = [7, 8, 9]\n var k = 0\n if {left} + drop0(var xs) > xs.len {{\n  k = 100000\n }}\n ys[k]\n}}"
+        );
+        for arith in [Checked, Wrapping] {
+            let mut m = optimized(&src);
+            let a = kestrel_kir::range::remove_checks(&mut m, arith);
+            let lines: Vec<u32> = left_of(&m, &a, "f", Bounds).iter().map(|c| line(c.line)).collect();
+            assert!(lines.contains(&19), "{left} {arith:?}: {lines:?}");
+            assert_eq!(proven_of(&m, "f", Bounds), 0, "{left} {arith:?}");
+        }
+    }
+}
+
+#[test]
+fn a_passed_check_over_two_reads_teaches_nothing_wrong() {
+    // `xs[xs.len + grow0(var xs)]` passes (the length grew in between); it must not make the rest
+    // of the arm unreachable.
+    let src = format!(
+        "{CALLS}\nf(var xs: list[int], c: bool) -> int {{\n let ys: list[int] = [7, 8, 9]\n var k = 0\n if c {{\n  k = xs[xs.len + grow0(var xs)]\n  k = 100000\n }}\n ys[k]\n}}"
+    );
+    for arith in [Checked, Wrapping] {
+        let mut m = optimized(&src);
+        let a = kestrel_kir::range::remove_checks(&mut m, arith);
+        let lines: Vec<u32> = left_of(&m, &a, "f", Bounds).iter().map(|c| line(c.line)).collect();
+        assert!(lines.contains(&20), "{arith:?}: {lines:?}");
+        assert_eq!(proven_of(&m, "f", Bounds), 0, "{arith:?}");
+    }
 }

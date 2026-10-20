@@ -1,0 +1,16 @@
+// expect-exit: 101
+// expect-stderr: index 100000 out of bounds for length 3 on line 15
+// The two `xs.len` reads are before and after the pop: the condition can hold.
+drop0(var xs: list[int]) -> int {
+    xs.pop()
+    0
+}
+main() {
+    var xs: list[int] = [1, 2, 3]
+    let ys: list[int] = [7, 8, 9]
+    var k = 0
+    if xs.len + drop0(var xs) > xs.len {
+        k = 100000
+    }
+    print(ys[k])
+}

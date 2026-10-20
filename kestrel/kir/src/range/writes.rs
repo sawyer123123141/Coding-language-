@@ -271,6 +271,24 @@ impl super::Cx<'_> {
         }
     }
 
+    /// Runs `f` (which evaluates the operands of one statement, one condition part, a `for` loop's
+    /// start and end, or a `Seq`'s or arm's value) with the nodes `writes` (what those may write)
+    /// volatile, then puts the outer ones back. A volatile node was forgotten in the state they are
+    /// evaluated from; its reads may come before or after the write, in an order the analysis
+    /// doesn't depend on, so no linear form, and no fact from a passed check, names it.
+    pub(super) fn within<R>(&mut self, writes: &[Write], f: impl FnOnce(&mut Self) -> R) -> R {
+        let set = if writes.is_empty() { Vec::new() } else { self.touched_nodes(writes) };
+        let outer = std::mem::replace(&mut self.volatile, set);
+        let out = f(self);
+        self.volatile = outer;
+        out
+    }
+
+    /// Whether node `n` is volatile in the expression being evaluated (see `within`).
+    pub(super) fn volatile(&self, n: usize) -> bool {
+        self.volatile.get(n).copied().unwrap_or(false)
+    }
+
     /// For each node, whether one of `writes` may change its value.
     pub(super) fn touched_nodes(&self, writes: &[Write]) -> Vec<bool> {
         let mut out = vec![false; self.t.nodes()];
