@@ -133,7 +133,7 @@ impl<'a> BodyChecker<'a> {
     /// Whether KIR's `place()` (`kir/src/lower/call.rs`) takes `e` for a place, so a `MakeIface`
     /// can point at it. This mirrors that function, and must change with it: a local or
     /// parameter (a capture read inside a closure included), a constant KIR reads in place
-    /// (`kir::lower::consts::hoisted`: not owning and holding a collection), a field of a place
+    /// (`Tables::const_read_in_place`, which `kir::lower::consts::hoisted` asks too), a field of a place
     /// (a swizzle, `.len` or an enum variant has no `field_index`), and an element of a place
     /// that is an array or list. A map lookup `m[k]` and a string index `s[i]` build a value, so
     /// they are not places.
@@ -141,10 +141,7 @@ impl<'a> BodyChecker<'a> {
         match &e.kind {
             ExprKind::Ident(_) => match self.t.res.get(&e.id) {
                 Some(Res::Local(_)) => true,
-                Some(&Res::Const(c)) => {
-                    let ty = self.t.consts[c.0 as usize].ty;
-                    !self.t.is_owning(ty) && self.t.holds_collection(ty)
-                }
+                Some(&Res::Const(c)) => self.t.const_read_in_place(self.t.consts[c.0 as usize].ty),
                 _ => false,
             },
             ExprKind::Index { base, .. } => !matches!(self.t.ty(base.id), Ty::Map(..) | Ty::Str) && self.is_kir_place(base),

@@ -1,0 +1,90 @@
+// expect: 12
+// expect: 200
+// expect: 12 12 12 1 13 23 105 12 105
+// expect: 1 2 1 5 1 5 3
+// expect: Dumb(n: 1, tags: []) {"a": Dumb(n: 1, tags: [])} Dumb(n: 1, tags: []) Holder(d: Dumb(n: 2, tags: []))
+// expect: [6, 6, 6]
+// expect: 3000
+// Constants holding interface values are built once, before `main`, and read in place. Every copy
+// of one (a variable, a returned value, a list item, a field, a `var` argument) is its own: changing
+// it leaves the constant alone.
+interface Brain {
+    pure think(self) -> int
+    learn(var self)
+}
+struct Dumb: Brain {
+    n: int = 1
+    tags: list[int] = []
+    pure think(self) -> int { self.n + self.tags.len }
+    learn(var self) {
+        self.n += 10
+        self.tags.add(1)
+    }
+}
+enum Mood: Brain {
+    Calm { k: int }
+    Wild
+    pure think(self) -> int {
+        match self {
+            Calm c { c.k }
+            else { -1 }
+        }
+    }
+    learn(var self) {
+        match self {
+            Calm c { c.k += 100 }
+            else { }
+        }
+    }
+}
+struct Holder {
+    d: Brain
+}
+let DEFAULT: Brain = Dumb()
+let MOOD: Brain = Mood.Calm(k: 5)
+let H: Holder = Holder(d: Dumb(n: 2))
+let H2: Holder = Holder(d: DEFAULT)
+let ALL: list[Brain] = [DEFAULT, MOOD]
+get() -> Brain { DEFAULT }
+pure seen() -> int { DEFAULT.think() + H.d.think() }
+bump(var b: Brain) { b.learn() }
+churn() -> int {
+    var xs: list[int] = []
+    for i from 0 to 200 { xs.add(99999) }
+    xs.len
+}
+main() {
+    var b1 = DEFAULT
+    b1.learn()
+    var b2 = get()
+    b2.learn()
+    var xs: list[Brain] = [DEFAULT, DEFAULT]
+    xs[0].learn()
+    var h = H
+    h.d.learn()
+    var h2 = H2
+    h2.d.learn()
+    bump(var h2.d)
+    var m = MOOD
+    m.learn()
+    var all = ALL
+    all[1].learn()
+    all[0].learn()
+    arena {
+        var x = DEFAULT
+        x.learn()
+        print(x.think())
+    }
+    arena { print(churn()) }
+    let o: Brain? = DEFAULT
+    let mp = {"a": DEFAULT}
+    print(b1.think(), b2.think(), xs[0].think(), xs[1].think(), h.d.think(), h2.d.think(), m.think(), all[0].think(), all[1].think())
+    print(DEFAULT.think(), H.d.think(), H2.d.think(), MOOD.think(), ALL[0].think(), ALL[1].think(), seen())
+    print(o, mp, DEFAULT, H)
+    var t = 0
+    var ns: list[int] = [0, 0, 0]
+    par for n in ns { n = DEFAULT.think() + H.d.think() + seen() }
+    print(ns)
+    for i from 0 to 1000 { t += DEFAULT.think() + ALL.len }
+    print(t)
+}

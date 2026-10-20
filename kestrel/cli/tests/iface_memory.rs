@@ -1,6 +1,7 @@
 //! A struct passed straight to an interface parameter is borrowed: the interface value points at
 //! the caller's variable, so the call allocates nothing. Calling `show(g)` 100,000 times leaves the
-//! program arena the size 10 calls leave it.
+//! program arena the size 10 calls leave it. An interface constant is built once, so calling its
+//! methods allocates nothing either.
 //!
 //! Memory is measured with the runtime's own report (`KESTREL_ARENA_REPORT=1`: the size of the
 //! program arena's blocks when `main` returns).
@@ -50,4 +51,18 @@ fn passing_a_struct_to_an_interface_parameter_allocates_nothing() {
     let few = arena_bytes(&build("show_10", &passes(10)), "30");
     let many = arena_bytes(&build("show_100000", &passes(100_000)), "30");
     assert_eq!(few, many, "100,000 calls with a borrowed interface value should take no more memory than 10");
+}
+
+/// A program that calls a method of an interface constant `n` times.
+fn constant_calls(n: u32) -> String {
+    format!(
+        "interface Brain {{\n    pure think(self) -> int\n}}\n\nstruct Dumb: Brain {{\n    n: int = 1\n    pure think(self) -> int {{ self.n }}\n}}\n\nlet DEFAULT: Brain = Dumb()\n\nmain() {{\n    var t = 0\n    for i from 0 to {n} {{\n        t += DEFAULT.think()\n    }}\n    print(t / {n})\n}}\n"
+    )
+}
+
+#[test]
+fn an_interface_constant_is_built_once_and_read_in_place() {
+    let few = arena_bytes(&build("const_10", &constant_calls(10)), "1");
+    let many = arena_bytes(&build("const_100000", &constant_calls(100_000)), "1");
+    assert_eq!(few, many, "100,000 calls on an interface constant should take no more memory than 10");
 }

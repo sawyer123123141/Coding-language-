@@ -99,10 +99,13 @@ impl Tables {
         }
     }
 
-    /// Whether `ty` is, or holds in a field, a payload, an element or an optional, an array, list
-    /// or map. (KIR reads a constant of such a type in place; see `kir::lower::consts::hoisted`.)
-    pub fn holds_collection(&self, ty: Ty) -> bool {
-        self.holds_where(ty, &mut Vec::new(), &|t| matches!(t, Ty::Array(_) | Ty::List(_) | Ty::Map(..)))
+    /// Whether a constant of type `ty` is built once, before `main`, and read in place
+    /// (`kir::lower::consts::hoisted`): it holds an array, list, map or interface value, so
+    /// building it again at each use would allocate each time, and it isn't owning (an
+    /// `Arena()` constant makes a new arena at each use). The checker's `is_kir_place` asks this
+    /// too, so the two agree on which constants are places.
+    pub fn const_read_in_place(&self, ty: Ty) -> bool {
+        !self.is_owning(ty) && self.holds_where(ty, &mut Vec::new(), &|t| matches!(t, Ty::Array(_) | Ty::List(_) | Ty::Map(..) | Ty::Iface(_)))
     }
 
     /// Whether `ty` holds an `Arena` or a `GpuHandle` (in fields, payloads or elements):

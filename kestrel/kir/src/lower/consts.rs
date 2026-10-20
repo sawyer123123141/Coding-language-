@@ -1,6 +1,6 @@
-//! Heap constants. A constant whose type holds an array, list or map is built once, before
-//! `main`, into a global, and every use reads that one value in place. (A constant of numbers,
-//! strings, vectors or plain structs allocates nothing, so each use still writes it out.)
+//! Heap constants. A constant whose type holds an array, list, map or interface value is built
+//! once, before `main`, into a global, and every use reads that one value in place. (A constant of
+//! numbers, strings, vectors or plain structs allocates nothing, so each use still writes it out.)
 //!
 //! A function that uses a heap constant gets a reference local for it, pointed at the global
 //! by a `BindGlobal` at the start of the body. A use is then a read of that local, which every
@@ -57,11 +57,10 @@ impl ConstGlobals {
     }
 }
 
-/// Whether constant `c` is built once and read in place: its type holds an array, list or map
-/// somewhere inside, and isn't owning (an `Arena()` constant makes a new arena at each use).
+/// Whether constant `c` is built once and read in place (`Tables::const_read_in_place`): its type
+/// holds an array, list, map or interface value somewhere inside, and isn't owning.
 pub(crate) fn hoisted(t: &Tables, c: ConstId) -> bool {
-    let ty = t.consts[c.0 as usize].ty;
-    !t.is_owning(ty) && t.holds_collection(ty)
+    t.const_read_in_place(t.consts[c.0 as usize].ty)
 }
 
 /// The declaration of constant `c`.
