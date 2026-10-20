@@ -8,6 +8,7 @@ mod lower;
 mod native;
 mod ops;
 pub mod promote;
+pub mod range;
 mod rename;
 pub mod scalarize;
 mod split;

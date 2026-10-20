@@ -1,0 +1,13 @@
+// expect-exit: 101
+// expect-stderr: shift amount out of range on line 12
+// A shift by a computed 40.
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+main() {
+    let n = id(40, 1)
+    print(1 << n)
+}

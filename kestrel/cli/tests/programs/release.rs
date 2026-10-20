@@ -2,7 +2,7 @@
 //! proof check on, and the tests of the harness pieces that go with it.
 
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
@@ -55,17 +55,20 @@ fn kestrel_run_release(path: &Path, exp: &Expect) -> Option<Output> {
 /// The release pass: every program under `kestrel run --release` with the proof check on. The
 /// checked expectations don't hold there (an overflow wraps instead of stopping), so it fails only
 /// when a run's standard error has the failed-proof sentence. A run that takes over 30 seconds is
-/// killed and reported on standard error (a program that stops on an overflow when checked may
-/// loop when it wraps); it doesn't fail the test.
+/// killed (a program that stops on an overflow when checked may loop when it wraps); it doesn't
+/// fail the test, but it is listed (see `timeouts_note`).
 #[test]
 fn programs_verify_release() {
     let mut failures = Vec::new();
+    let mut timeouts = Vec::new();
+    let mut ran = 0;
     for path in programs() {
         let src = fs::read_to_string(&path).unwrap();
         let name = path.file_name().unwrap().to_string_lossy().to_string();
         let exp = expectations(&name, &src);
+        ran += 1;
         match kestrel_run_release(&path, &exp) {
-            None => eprintln!("note: {name} [release] took over {} seconds and was stopped", RELEASE_TIMEOUT.as_secs()),
+            None => timeouts.push(name),
             Some(out) => {
                 let stderr = String::from_utf8_lossy(&out.stderr).replace("\r\n", "\n");
                 if stderr.contains(PROOF_FAILED) {
@@ -74,7 +77,28 @@ fn programs_verify_release() {
             }
         }
     }
-    assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+    let note = timeouts_note(ran, &timeouts);
+    // Written to the real standard error: libtest captures `eprintln!` from a test that passes, so
+    // a timeout would otherwise never be seen.
+    let _ = writeln!(std::io::stderr(), "{note}");
+    assert!(failures.is_empty(), "\n{}\n{note}", failures.join("\n"));
+}
+
+/// The release pass's summary line: how many programs ran, and which were stopped after
+/// `RELEASE_TIMEOUT` (their proofs were checked only as far as they got).
+fn timeouts_note(ran: usize, timeouts: &[String]) -> String {
+    let secs = RELEASE_TIMEOUT.as_secs();
+    match timeouts {
+        [] => format!("release pass: {ran} programs, none stopped after {secs} seconds"),
+        _ => format!("release pass: {ran} programs; stopped after {secs} seconds: {}", timeouts.join(", ")),
+    }
+}
+
+#[test]
+fn the_release_summary_names_the_programs_that_timed_out() {
+    assert_eq!(timeouts_note(3, &[]), "release pass: 3 programs, none stopped after 30 seconds");
+    let names = ["a.kes".to_string(), "b.kes".to_string()];
+    assert_eq!(timeouts_note(3, &names), "release pass: 3 programs; stopped after 30 seconds: a.kes, b.kes");
 }
 
 /// A finished run with these streams and exit code, without running anything.

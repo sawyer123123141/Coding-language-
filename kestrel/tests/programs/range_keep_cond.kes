@@ -1,0 +1,22 @@
+// expect-exit: 101
+// expect-stderr: integer overflow on line 20
+// `x < 100` holds when compared; `bump` then triples `x` before the arm runs.
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+bump(var x: int, d: int) -> int {
+    if d == 0 {
+        x = x * 3
+        return 1
+    }
+    bump(var x, d - 1)
+}
+main() {
+    var x = id(99, 1)
+    if x >= 0 and x < 100 and bump(var x, 1) > 0 {
+        print(x * 10000000)
+    }
+}

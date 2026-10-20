@@ -1,0 +1,13 @@
+// expect-exit: 101
+// expect-stderr: value doesn't fit in int on line 12
+// `int(x)` of an `i64` at 3,000,000,000.
+id64(x: i64, d: int) -> i64 {
+    if d == 0 {
+        return x
+    }
+    id64(x, d - 1)
+}
+main() {
+    let x = id64(3000000000, 1)
+    print(int(x))
+}

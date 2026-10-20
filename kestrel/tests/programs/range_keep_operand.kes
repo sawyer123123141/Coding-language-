@@ -1,0 +1,22 @@
+// expect-exit: 101
+// expect-stderr: value doesn't fit in int on line 21
+// `int(x)` on line 20 teaches that `x` fits an `int`; on line 21 `bump(var x, 1)` runs first and
+// triples `x`, so its sibling `int(x)` keeps its check.
+id64(x: i64, d: int) -> i64 {
+    if d == 0 {
+        return x
+    }
+    id64(x, d - 1)
+}
+bump(var x: i64, d: int) -> i64 {
+    if d == 0 {
+        x = x * 3
+        return 1
+    }
+    bump(var x, d - 1)
+}
+main() {
+    var x = id64(1000000000, 1)
+    let a = int(x)
+    print(int(bump(var x, 1)) + int(x) + a)
+}

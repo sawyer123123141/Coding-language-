@@ -1,0 +1,14 @@
+// expect-exit: 101
+// expect-stderr: value doesn't fit in int on line 13
+// The first `int(x)` passing says the old `x` fits; the assignment then doubles `x`.
+id64(x: i64, d: int) -> i64 {
+    if d == 0 {
+        return x
+    }
+    id64(x, d - 1)
+}
+main() {
+    var x = id64(2000000000, 1)
+    x = i64(int(x)) + x
+    print(int(x))
+}

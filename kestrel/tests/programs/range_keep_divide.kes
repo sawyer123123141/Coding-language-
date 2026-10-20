@@ -1,0 +1,14 @@
+// expect-exit: 101
+// expect-stderr: division by zero on line 13
+// A divisor that is 0 by arithmetic.
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+main() {
+    let n = id(7, 1)
+    let a = id(10, 1)
+    print(a / (n - n))
+}

@@ -146,3 +146,15 @@ fn verify_mode_keeps_the_proven_checks_in_the_code() {
         assert!(left >= kept, "{func}: {left} checks left when verifying");
     }
 }
+
+#[test]
+fn define_module_removes_proven_checks() {
+    // `(x & 255) * 1000` is at most 255,000: range analysis proves the multiply, and codegen's
+    // entry runs it by default.
+    let m = optimized("pure h(x: int) -> int { (x & 255) * 1000 }\nmain() {}\n");
+    let traps = |opts: Options| dump(&m, opts, "h").unwrap().matches("trap user2").count();
+    assert_eq!(traps(Options::default()), 0);
+    assert_eq!(traps(Options { remove_checks: false, ..Options::default() }), 1);
+    // The module itself is left as it was: the analysis marks a copy.
+    assert!(!format!("{:?}", m.funcs).contains("Proven"));
+}

@@ -1,0 +1,27 @@
+// expect-exit: 101
+// expect-stderr: division by zero on line 21
+// A `continue` in a `for` goes through the step: the loop can end without the `break`, with
+// `j` still 0.
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+pick(n: int, k: int) -> int {
+    var j = 0
+    if n > 0 {
+        for i from 0 to n {
+            if i == k {
+                j = 1
+                break
+            }
+            continue
+        }
+        return 100 / j
+    }
+    0
+}
+main() {
+    print(pick(id(3, 1), id(99, 1)))
+}

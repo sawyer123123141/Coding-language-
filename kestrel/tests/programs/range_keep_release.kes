@@ -1,0 +1,19 @@
+// expect-exit: 101
+// expect-stderr: shift amount out of range on line 16
+// With checks on, the shift stops the program. Under `--release` no shift check runs, so the shift
+// teaches nothing about `n`: `32 - n` can be 0, and the division keeps its zero check (the
+// release pass runs this with the proof check on).
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+main() {
+    let n = id(32, 1)
+    let z = id(7, 1)
+    if n >= 0 {
+        let y = 1 << n
+        print(z / (32 - n) + y)
+    }
+}

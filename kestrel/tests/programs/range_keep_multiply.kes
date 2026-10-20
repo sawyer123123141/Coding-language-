@@ -1,0 +1,17 @@
+// expect-exit: 101
+// expect-stderr: integer overflow on line 14
+// An accumulating multiply: no bound on `acc` is known, so its check stays.
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+main() {
+    var acc = id(1, 1)
+    let n = id(30, 1)
+    for k from 0 to n {
+        acc *= 3
+    }
+    print(acc)
+}

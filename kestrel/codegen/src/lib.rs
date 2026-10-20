@@ -25,9 +25,9 @@ pub use object::emit_object;
 pub struct Options {
     /// Panic on integer overflow (exit 101). Off for `--release`.
     pub checked_arith: bool,
-    /// Leave out the checks range analysis proves can't fail. Off, every check stays (the
-    /// analysis's own tests compare the two). Read from the analysis's task on; a build only
-    /// has proven checks once the analysis marks some.
+    /// Run range analysis (`kestrel_kir::range`) on a copy of the module and leave out the checks
+    /// it proves can't fail. Off, every check stays (the analysis's own tests compare the two),
+    /// apart from any a caller marked proven itself.
     pub remove_checks: bool,
     /// Keep every proven check, but make its failure stop the program with "range analysis
     /// removed the ... check ..., but it fails; this is a compiler bug" (`KESTREL_CHECK_PROOFS=1`).
@@ -55,6 +55,17 @@ pub(crate) fn define_module<M: Module>(
     opts: Options,
     mut dump: Option<&mut dump::Dump>,
 ) -> Result<Vec<FuncId>, String> {
+    // Range analysis runs here, on a copy, with this build's arithmetic: so every way of compiling
+    // gets it, and the proofs always assume the mode of the code emitted.
+    let analysed;
+    let m = if opts.remove_checks {
+        let mut copy = m.clone();
+        kir::range::remove_checks(&mut copy, kir::range::Arith::of(opts.checked_arith));
+        analysed = copy;
+        &analysed
+    } else {
+        m
+    };
     let cc = module.isa().default_call_conv();
     let ptr = module.target_config().pointer_type();
     let rt = rt::RtFuncs::declare(module)?;
