@@ -103,7 +103,12 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             self.fail_if(bad, PANIC_OVERFLOW, line, check);
             return self.b.ins().ireduce(types::I8, r);
         }
-        let (r, overflowed) = match op {
+        // The value comes from the plain operation, not from the `_overflow` instruction: that one
+        // has two results, so Cranelift's e-graph treats it as a side effect and leaves it where it
+        // is, and a value taken from it couldn't be hoisted out of a loop with everything made
+        // from it. Only the check stays in the loop.
+        let r = plain(self, a, b);
+        let (_, overflowed) = match op {
             BinOp::Add => self.b.ins().sadd_overflow(a, b),
             BinOp::Sub => self.b.ins().ssub_overflow(a, b),
             _ => self.b.ins().smul_overflow(a, b),
