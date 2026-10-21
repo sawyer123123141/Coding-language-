@@ -251,7 +251,9 @@ use {
   implicit. Float -> integer and wider -> narrower require an explicit
   call: `int(x)`, `u8(n)`.
 - **Overflow:** debug builds trap on integer overflow; release builds
-  wrap.
+  wrap. A check the compiler proves can't fail is left out (see "Checks
+  the compiler leaves out"), so the trap is the same wherever it could
+  fire.
 
 ## Expressions
 
@@ -383,7 +385,7 @@ Design and rulings: `2026-10-17-lists-strings-design.md`. Names follow GDScript 
 
 `filter`, `map`, `any`, `all`, `sort` and `sort_by` are under "Closures and function values".
 
-An index outside `0..xs.len` panics. `remove_at`, `pop`, `insert` and `clear` are refused inside a `for` loop over the same list, because the loop read the length once. `add` is allowed there; the loop doesn't see the new items.
+An index outside `0..xs.len` panics. **A list or an array holds at most 2,147,483,647 items** (`i32::MAX`, like C# arrays), so `xs.len` always fits an `int`: growing past it (`add`, `insert`, a built-in that builds a list, `array[T](n)`, or a Godot array passed in) is a run-time error, "a list can't hold more than 2,147,483,647 items" ("an array can't hold ..." for an array). Strings have no limit. `remove_at`, `pop`, `insert` and `clear` are refused inside a `for` loop over the same list, because the loop read the length once. `add` is allowed there; the loop doesn't see the new items.
 
 **`remove b`** removes the current item of a `for b in xs` loop over a list. The loop compacts the list in one pass, so items keep their order and none is skipped (in GDScript, `xs.erase(b)` inside `for b in xs` skips the next item).
 
@@ -620,6 +622,15 @@ pattern   := IDENT IDENT? | 'else'
 ```
 
 A `native` function has no block, and every other function has one. `native` is only allowed at the top level of a built-in module.
+
+## Checks the compiler leaves out, and `kestrel check --report`
+
+Design: `2026-10-19-range-analysis-design.md` (with "As built"). Built 2026-10-20.
+
+- **Every integer `+ - *`, every `xs[i]`, `/`, `%`, shift and narrowing conversion (`int(x)` of an `i64`) is checked** in a normal build, and the compiler **leaves out each check it proves can't fail** from the ranges of the values and from what earlier checks, loop bounds and conditions showed: `for i from 0 to xs.len` proves `xs[i]`, `h & 0x7FFFFFFF` times a 31-bit constant proves no overflow, a divisor guarded `> 0` proves the division. Nothing a program does changes: the same output, and the same error on the same line wherever a check could fire. When the compiler isn't sure, the check stays.
+- **`--release`** turns off the arithmetic checks as before (they wrap), and keeps the bounds and division-by-zero checks; the analysis proves those too.
+- **What it doesn't prove yet:** `xs[y * w + x]` from `y < h`, `x < w` and `xs.len == w * h` (a product), a length a function returns, an integer field read from memory, and a check inside a loop that doesn't depend on the loop. A later round's `@assume` (`2026-10-18-at-annotations-design.md`) covers the first two.
+- **`kestrel check --report file.kes`** (and `--report --release`) prints, to standard output, every check, allocation, other way to fail (a list index in `remove_at`, `insert` or `s[i]`, a list growing past its limit, a native function, a call through a function value) and call that wasn't inlined, grouped by file, function and loop, with its line and why it stayed ("overflow check: `total + xs[i]` may exceed `int` (`total` can be any `int`)"), and a total. A call to a function that allocates or can fail is an item of its caller, with the chain to the reason. `--report` goes only with `check`, and a program with errors gets no report. `KESTREL_CHECK_PROOFS=1` in the environment of `kestrel run` or `build` keeps every removed check as an internal-error check (for testing the compiler).
 
 ## Out of scope (later specs)
 

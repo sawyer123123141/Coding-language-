@@ -94,3 +94,10 @@ $env:DOTNET_TieredCompilation = "0"; .\cs\bin\out\Voxels3dBench.exe 8 par
 ```
 
 The `[AggressiveInlining]` row is a local copy of `cs/` with `[MethodImpl(MethodImplOptions.AggressiveInlining)]` added to those six methods; it isn't checked in.
+
+## Range analysis (not yet measured)
+
+The range analysis (`docs/superpowers/specs/2026-10-19-range-analysis-design.md`) leaves out each check it proves can't fail, in the checked build as well as `--release`. **Not measured yet** (the user's machine was under load, so the measurement was stopped). To do on a quiet machine, with the old compiler (commit b7166fe, from a `git worktree`) and the new one built and timed in turns, 7 runs each, medians and ranges as above:
+- The checked build against `--release`: the spec's target is at most 1.2x (it was 2.4x: 1,182-1,232 against 481-505 ms), and `--release` not slower than 481-505 ms.
+- `kestrel check --report` for `main.kes`, checked and `--release`: the totals, and whether any check is left in the inlined `hash`, `lattice` and `octave` code. The design expects about a dozen checks per sample to remain (the chunk offsets `cx * 32 + x - 1`, `seed + 1`, `i += 1`, `out[i]`) against about 250 before, because loop-invariant checks are not hoisted yet; if the target is missed, say by how much and why.
+- `kestrel build` time for this world, old against new (the analysis should add under 10%).

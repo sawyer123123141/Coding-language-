@@ -1,12 +1,18 @@
 """Runs every kernel, Kestrel and Rust, for a few interleaved rounds and prints the median of the
 rounds' medians, with their range, in ns per item.
 
-    py measure.py [--rounds 3] [--threads 1] [--only TEXT]
+    py measure.py [--rounds 3] [--threads 1] [--only TEXT] [--keep-checks] [--old DIR]
 
 Run from kestrel/bench/kernels after `cargo build --release` there. `--threads` sets
 KESTREL_THREADS for the Kestrel kernels (their `par for`); the Rust kernels are one thread.
 `--only TEXT` runs just the kernels whose label contains TEXT (case-insensitive), e.g. `--only iface`
 for the interface kernels, Kestrel and Rust.
+
+`--keep-checks` and `--old` add columns, run in turns with the first within each round:
+`--keep-checks` is the same compiler with `remove_checks: false` (every check the range analysis
+removes stays); `--old DIR` is a `bench/kernels` build made with an older compiler (its
+`target/release`, e.g. one built in a `git worktree` of the commit before the analysis). The Rust
+kernels are run once per round, whatever the columns.
 """
 import argparse, os, re, statistics, subprocess
 
@@ -16,6 +22,7 @@ BIN = os.path.join(HERE, "target", "release")
 # (label, command, iterations): more iterations for the cheap kernels.
 KERNELS = [
     ("step.kes (the demo's step, pow hoisted)", ["kernels", "step.kes", "--release"], 30),
+    ("step_index.kes (step in a for i loop over parts[i])", ["kernels", "step_index.kes", "--release"], 30),
     ("step_scalar.kes (written with float locals)", ["kernels", "step_scalar.kes", "--release"], 30),
     ("step_pow.kes (pow per particle, the demo)", ["kernels", "step_pow.kes", "--release"], 15),
     ("copy.kes (the draw copy)", ["kernels", "copy.kes", "--release"], 100),
@@ -47,21 +54,39 @@ def main():
     ap.add_argument("--rounds", type=int, default=3)
     ap.add_argument("--threads", type=int, default=1)
     ap.add_argument("--only", default="")
+    ap.add_argument("--keep-checks", action="store_true", help="also run with every proven check kept")
+    ap.add_argument("--old", default="", help="also run the kernels built in DIR (an older compiler's target/release)")
     a = ap.parse_args()
     env = dict(os.environ, KESTREL_THREADS=str(a.threads))
+    # (column, directory of the binaries, extra flags for the Kestrel kernels)
+    columns = [("new", BIN, [])]
+    if a.keep_checks:
+        columns.append(("new --keep-checks", BIN, ["--keep-checks"]))
+    if a.old:
+        columns.append(("old", os.path.abspath(a.old), []))
     kernels = [k for k in KERNELS if a.only.lower() in k[0].lower()]
-    results = {label: [] for label, _, _ in kernels}
+    results = {(label, c[0]): [] for label, _, _ in kernels for c in columns}
     for _ in range(a.rounds):
         for label, cmd, iters in kernels:
-            exe = os.path.join(BIN, cmd[0] + (".exe" if os.name == "nt" else ""))
-            out = subprocess.run([exe, *cmd[1:], "--iters", str(iters)], cwd=HERE, env=env, capture_output=True, text=True)
-            m = re.search(r"([\d.]+) ns per item", out.stdout)
-            if not m:
-                raise SystemExit(f"{label} failed:\n{out.stdout}{out.stderr}")
-            results[label].append(float(m.group(1)))
+            for name, directory, extra in columns:
+                is_rust = cmd[0] == "rust"
+                if is_rust and name != "new":
+                    continue
+                exe = os.path.join(directory, cmd[0] + (".exe" if os.name == "nt" else ""))
+                args = [exe, *cmd[1:], *([] if is_rust else extra), "--iters", str(iters)]
+                out = subprocess.run(args, cwd=HERE, env=env, capture_output=True, text=True)
+                m = re.search(r"([\d.]+) ns per item", out.stdout)
+                if not m:
+                    raise SystemExit(f"{label} ({name}) failed:\n{out.stdout}{out.stderr}")
+                results[(label, name)].append(float(m.group(1)))
     print(f"{a.threads} thread(s) for Kestrel, {a.rounds} rounds")
-    for label, vals in results.items():
-        print(f"{label:56s} {statistics.median(vals):6.2f} ns  ({min(vals):.2f}-{max(vals):.2f})")
+    for label, _, _ in kernels:
+        cells = []
+        for name, _, _ in columns:
+            vals = results[(label, name)]
+            if vals:
+                cells.append(f"{name} {statistics.median(vals):6.2f} ns ({min(vals):.2f}-{max(vals):.2f})")
+        print(f"{label:56s} " + "   ".join(cells))
 
 
 if __name__ == "__main__":

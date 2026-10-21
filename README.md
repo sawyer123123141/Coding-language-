@@ -126,9 +126,24 @@ cargo build --release
 target/release/kestrel run program.kes        # compile in memory and run
 target/release/kestrel build program.kes -o program.exe
 target/release/kestrel check program.kes      # errors only
+target/release/kestrel check --report program.kes   # what is left in each function and loop
 ```
 
 `kestrel build --release` turns off overflow and narrowing checks (they wrap instead). `kestrel run --release` does the same.
+
+**The compiler leaves out each check it can prove won't fail.** `for i from 0 to xs.len { total += xs[i] }` has no bounds check on `xs[i]`, and `h & 0x7FFFFFFF` times a 31-bit constant has no overflow check, in every build. `kestrel check --report` shows what stayed, per function and loop, with the line and the reason, and the allocations and other ways to fail (`--report --release` for a `--release` build):
+
+```
+sum.kes
+  function `sum_all` (line 1): its own copy is never called; its checks are listed where it is inlined
+  function `main` (line 9): 1 check left (2 removed), 1 allocation
+    loop at line 3 (in `sum_all`)
+      line 4 (in `sum_all`): overflow check: `total + xs[i]` may exceed `int` (`total` can be any `int`; `xs[i]` can be any `int`)
+    line 10: allocation: `[...]` makes a new list
+total: 3 checks, 2 removed, 1 left; 1 allocation; no other ways to fail
+```
+
+A list or an array holds at most 2,147,483,647 items.
 
 ## A window
 
@@ -203,6 +218,6 @@ The core language works: functions, structs with methods, enums and `match`, vec
 
 It also runs inside Godot 4: see [`kestrel/godot`](kestrel/godot/README.md). GDScript calls Kestrel functions, and edits hot-reload.
 
-Also built: closures and function values with the list methods that take them, interfaces (checked method sets with dynamic dispatch), `map` (the hash map), `par for` (loops that run on every core over `pure` code), global math and random numbers, and the window above with textures, 3D and the voxel viewer. Small structs now stay in registers. Next: a stronger (faster) backend.
+Also built: closures and function values with the list methods that take them, interfaces (checked method sets with dynamic dispatch), `map` (the hash map), `par for` (loops that run on every core over `pure` code), range analysis (checks the compiler proves can't fail are left out, and `kestrel check --report` lists the rest; its timing is not measured yet), global math and random numbers, and the window above with textures, 3D and the voxel viewer. Small structs now stay in registers. Next: a stronger (faster) backend.
 
 Speed versus Rust is between 1.0x and 1.5x on loops and structs, and about 3x on the voxel heightmap milestone. The particle demo's update step is close now that small structs stay in registers: on one thread it takes 1.07 times Rust's time (1.15 times with the `pow` hoisted out, down from 1.5 and 3.4), but its copy loop is still about 4 times behind, and a whole frame with bulk drawing was only 2-7% behind before that change. The numbers are in `kestrel/bench/*/results.md`.

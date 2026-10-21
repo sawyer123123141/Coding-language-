@@ -2,7 +2,10 @@
 //! exported `pub bench(n: int, iters: int) -> float` through the JIT, once with `iters` and once
 //! with 0 (to take out the set-up), and prints the median time per item over `reps` pairs.
 //!
-//!   kernels <file.kes> [--release] [--n N] [--iters K] [--reps R] [--dump NAME]
+//!   kernels <file.kes> [--release] [--keep-checks] [--n N] [--iters K] [--reps R] [--dump NAME]
+//!
+//! `--keep-checks` compiles with `remove_checks: false`, so the checks the range analysis proves
+//! can't fail stay in the code (the old compiler's output), to time what the analysis gains.
 //!
 //! `--dump NAME` prints a function's optimised Cranelift IR and machine code instead (`par` for
 //! every `par for` body). `KESTREL_THREADS` sets the `par for` thread count as usual.
@@ -15,13 +18,17 @@ use kestrel_driver::DiagStyle;
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let Some(path) = args.first().cloned() else {
-        eprintln!("usage: kernels <file.kes> [--release] [--n N] [--iters K] [--reps R] [--dump NAME]");
+        eprintln!("usage: kernels <file.kes> [--release] [--keep-checks] [--n N] [--iters K] [--reps R] [--dump NAME]");
         std::process::exit(2);
     };
     let flag = |name: &str| args.iter().position(|a| a == name).map(|i| args[i + 1].clone());
     let number = |name: &str, default: i64| flag(name).map_or(default, |v| v.parse().expect("a number"));
     let (n, iters, reps) = (number("--n", 200_000), number("--iters", 30), number("--reps", 9) as usize);
-    let opts = Options { checked_arith: !args.iter().any(|a| a == "--release"), ..Options::default() };
+    let opts = Options {
+        checked_arith: !args.iter().any(|a| a == "--release"),
+        remove_checks: !args.iter().any(|a| a == "--keep-checks"),
+        ..Options::default()
+    };
 
     let src = std::fs::read_to_string(&path).expect("read the program");
     let (compiled, diagnostics) = kestrel_driver::compile(&path, &src, DiagStyle::Short);

@@ -1,6 +1,6 @@
 # `@` annotations: performance contracts
 
-Status: designed 2026-10-18, alongside closures (`2026-10-18-closures-design.md`). **Not built yet:** it is built with range analysis (the handoff's Next, item 3), because `no_checks` means nothing until an analysis can remove checks. The user took the proposal's pick (`docs/superpowers/plans/2026-10-18-closures-interfaces-proposal.md`, section 4). This spec fixes the syntax and the meaning so closures and interfaces are built in a way contracts can use.
+Status: designed 2026-10-18, alongside closures (`2026-10-18-closures-design.md`). **Partly built (2026-10-20):** the range analysis and `kestrel check --report` are built (Round A, `2026-10-19-range-analysis-design.md` with its "As built"), so `no_checks` now has an analysis behind it. `@prove` and `@assume` themselves are not built; they are Round B, on top of that analysis, and the analysis has the hooks they need (`refine` for `@assume`, and the report's data for the four contracts). One question is open for Round B: this spec says an assumption holds "until any variable in it changes ... or its block ends", but the analysis keeps facts past the end of a block, which is sound for an assumption that was checked where it was written and whose variables haven't changed. Round B either adds forgetting at the block's end (less precise, never unsound) or drops "or its block ends" from the rule; the user should pick when `@assume` is built. The user took the proposal's pick (`docs/superpowers/plans/2026-10-18-closures-interfaces-proposal.md`, section 4). This spec fixes the syntax and the meaning so closures and interfaces are built in a way contracts can use.
 
 ## Why
 
@@ -61,7 +61,7 @@ Each contract is decided by Kestrel's own KIR analyses after inlining and the ex
 
 ## `kestrel check --report`
 
-Built first, before contracts fail anything: it lists every check and allocation left in each function and loop, with its line and why it stayed ("overflow check on line 12: `a * b` may exceed `int`"; "allocation on line 30: `filter` builds a new list"). Contracts are then the same analysis as a build failure.
+Built first, before contracts fail anything (done 2026-10-20; the format is in `2026-10-19-range-analysis-design.md`, "The report"): it lists every check and allocation left in each function and loop, with its line and why it stayed ("overflow check on line 12: `a * b` may exceed `int`"; "allocation on line 30: `filter` builds a new list"). Contracts are then the same analysis as a build failure.
 
 ## Closures, function values and interfaces
 
