@@ -60,7 +60,8 @@ pub(crate) fn define_module<M: Module>(
     let analysed;
     let m = if opts.remove_checks {
         let mut copy = m.clone();
-        kir::range::remove_checks(&mut copy, kir::range::Arith::of(opts.checked_arith));
+        // What is left isn't needed here: `kestrel check --report` describes it.
+        kir::range::mark_proven(&mut copy, kir::range::Arith::of(opts.checked_arith));
         analysed = copy;
         &analysed
     } else {

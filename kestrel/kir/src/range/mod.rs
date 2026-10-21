@@ -79,8 +79,19 @@ pub struct CheckLeft {
     pub text: String,
 }
 
-/// Analyses every function with a body, marks the checks it proves, and returns what is left.
+/// Analyses every function with a body, marks the checks it proves, and returns what is left,
+/// each check with the text that says why (for `kestrel check --report`).
 pub fn remove_checks(m: &mut Module, arith: Arith) -> Analysis {
+    run(m, arith, true)
+}
+
+/// Marks the checks the analysis proves, as `remove_checks` does, without describing the ones
+/// left: what a build needs. Their `text`s are empty and their `loops` aren't listed.
+pub fn mark_proven(m: &mut Module, arith: Arith) -> Analysis {
+    run(m, arith, false)
+}
+
+fn run(m: &mut Module, arith: Arith, texts: bool) -> Analysis {
     let mut funcs = Vec::with_capacity(m.funcs.len());
     let lists = par::lists(m);
     for i in 0..m.funcs.len() {
@@ -88,7 +99,7 @@ pub fn remove_checks(m: &mut Module, arith: Arith) -> Analysis {
             funcs.push(FuncChecks::default());
             continue;
         }
-        let (checks, proven) = analyse(m, &m.funcs[i], arith, lists.get(&i));
+        let (checks, proven) = analyse(m, &m.funcs[i], arith, lists.get(&i), texts);
         if !proven.is_empty() {
             Marker { proven: &proven }.visit_stmts(&mut m.funcs[i].body);
         }
@@ -122,15 +133,16 @@ fn index_key(p: &Proj) -> Key {
 }
 
 /// One function's checks, and the sites it proved.
-fn analyse(m: &Module, f: &Func, arith: Arith, par_list: Option<&Place>) -> (FuncChecks, HashMap<Key, ()>) {
+fn analyse(m: &Module, f: &Func, arith: Arith, par_list: Option<&Place>, texts: bool) -> (FuncChecks, HashMap<Key, ()>) {
     let mut cx = Cx::new(m, f, arith, par_list);
+    cx.texts = texts;
     let mut start = cx.top.clone();
     if let Some(list) = par_list {
         cx.par_entry(&mut start, list);
     }
     let _ = cx.stmts(start, &f.body);
     if cx.gave_up {
-        let left = every_site(m, f, arith);
+        let left = sites_of(f, arith).into_iter().map(|(_, s)| s.left(m, f, texts)).collect();
         return (FuncChecks { left, removed: 0, gave_up: true, deep: cx.deep }, HashMap::new());
     }
     let mut proven = HashMap::new();
@@ -147,7 +159,7 @@ fn analyse(m: &Module, f: &Func, arith: Arith, par_list: Option<&Place>) -> (Fun
     // walk) keeps its check and is listed at the end. Its text is only made then.
     for (key, site) in sites_of(f, arith) {
         if !cx.decisions.contains_key(&key) {
-            let c = site.left(m, f);
+            let c = site.left(m, f, texts);
             debug_assert!(false, "range analysis never decided a {:?} check in `{}`: {}", c.kind, f.name, c.text);
             left.push(c);
         }
@@ -163,13 +175,17 @@ enum Site<'a> {
 }
 
 impl Site<'_> {
-    /// The site as a check left, with the text of a check nothing is known about.
-    fn left(&self, m: &Module, f: &Func) -> CheckLeft {
+    /// The site as a check left, with the text of a check nothing is known about (with `texts`).
+    fn left(&self, m: &Module, f: &Func, texts: bool) -> CheckLeft {
         match *self {
-            Site::Expr(kind, e) => CheckLeft { kind, line: e.line, loops: Vec::new(), text: show::check_text(m, f, kind, e, &[]) },
+            Site::Expr(kind, e) => {
+                let text = if texts { show::check_text(m, f, kind, e, &[]) } else { String::new() };
+                CheckLeft { kind, line: e.line, loops: Vec::new(), text }
+            }
             Site::Bounds(p, i) => {
                 let line = p.path[i].at().map_or(0, |at| at.line);
-                CheckLeft { kind: CheckKind::Bounds, line, loops: Vec::new(), text: show::bounds_text(m, f, p, i, None) }
+                let text = if texts { show::bounds_text(m, f, p, i, None) } else { String::new() };
+                CheckLeft { kind: CheckKind::Bounds, line, loops: Vec::new(), text }
             }
         }
     }
@@ -203,11 +219,6 @@ fn sites_of(f: &Func, arith: Arith) -> Vec<(Key, Site<'_>)> {
         Node::Stmt(_) => {}
     });
     out
-}
-
-/// Every check site in `f`, kept: what a function the analysis gave up on reports.
-fn every_site(m: &Module, f: &Func, arith: Arith) -> Vec<CheckLeft> {
-    sites_of(f, arith).into_iter().map(|(_, s)| s.left(m, f)).collect()
 }
 
 /// Wraps every proven arithmetic node in `Proven`, and marks every proven index.
@@ -270,6 +281,8 @@ struct Cx<'a> {
     /// Whether every loop around the current point is in its deciding pass (checks are decided
     /// only then).
     deciding: bool,
+    /// Whether a check left gets its text and loops (`remove_checks`), or not (`mark_proven`).
+    texts: bool,
     /// More than 0 inside code the analysis found can't run: its checks stay, and nothing flows
     /// out of it.
     keep: u32,
@@ -320,6 +333,7 @@ impl<'a> Cx<'a> {
             volatile: Vec::new(),
             arith,
             deciding: true,
+            texts: true,
             keep: 0,
             visits: 0,
             budget: budget(f),
@@ -357,14 +371,17 @@ impl<'a> Cx<'a> {
     }
 
     /// Records the decision about a check site, in a deciding pass: proven when `safe` (outside
-    /// unreachable code), otherwise left with `text()`. A site decided twice is proven only if
-    /// both decisions prove it.
+    /// unreachable code), otherwise left with `text()` (made only when the texts are wanted). A
+    /// site decided twice is proven only if both decisions prove it.
     fn decide(&mut self, key: Key, kind: CheckKind, line: u32, safe: bool, text: impl FnOnce(&Self) -> String) {
         if !self.deciding {
             return;
         }
         let proven = safe && self.keep == 0;
-        let left = (!proven).then(|| CheckLeft { kind, line, loops: self.loop_lines.clone(), text: text(self) });
+        let left = (!proven).then(|| match self.texts {
+            true => CheckLeft { kind, line, loops: self.loop_lines.clone(), text: text(self) },
+            false => CheckLeft { kind, line, loops: Vec::new(), text: String::new() },
+        });
         match self.decisions.get(&key) {
             Some(&i) => {
                 if self.order[i].left.is_none() {
