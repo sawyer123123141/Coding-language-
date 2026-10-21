@@ -1,0 +1,15 @@
+// Built with `--release`: a bounds check rests on the assumption, so it stays evaluated and stops
+// the program before any read outside the array.
+id(x: int, d: int) -> int {
+    if d == 0 { return x }
+    id(x, d - 1)
+}
+
+main() {
+    let xs = [1, 2, 3]
+    let i = id(7, 1)
+    @assume(i >= 0 and i < xs.len)
+    print(xs[i])
+}
+// expect-exit: 101
+// expect-stderr: assumption `i >= 0 and i < xs.len` is false on line 11

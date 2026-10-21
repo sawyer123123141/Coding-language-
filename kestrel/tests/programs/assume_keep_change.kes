@@ -1,0 +1,15 @@
+// A change to `i` after the assumption ends what it says about `i`: the index keeps its check.
+id(x: int, d: int) -> int {
+    if d == 0 { return x }
+    id(x, d - 1)
+}
+
+main() {
+    let xs = [1, 2, 3]
+    var i = id(2, 1)
+    @assume(i >= 0 and i < xs.len)
+    i = id(3, 1)
+    print(xs[i])
+}
+// expect-exit: 101
+// expect-stderr: index 3 out of bounds for length 3 on line 12

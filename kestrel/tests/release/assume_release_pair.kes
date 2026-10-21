@@ -1,0 +1,17 @@
+// Built with `--release`: two assumptions that each prove the index. The outer one stays
+// evaluated (without both, the index has no proof); the inner one is trusted.
+id(x: int, d: int) -> int {
+    if d == 0 { return x }
+    id(x, d - 1)
+}
+
+main() {
+    let xs = [1, 2, 3]
+    let i = id(7, 1)
+    @assume(i >= 0 and i < xs.len)
+    let t = 0
+    @assume(i >= 0 and i < xs.len)
+    print(xs[i] + t)
+}
+// expect-exit: 101
+// expect-stderr: assumption `i >= 0 and i < xs.len` is false on line 11

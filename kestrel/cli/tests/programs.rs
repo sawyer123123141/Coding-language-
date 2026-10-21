@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 mod common;
+#[path = "programs/directives.rs"]
+mod directives;
 #[path = "programs/release.rs"]
 mod release;
 
@@ -19,6 +21,27 @@ struct Expect {
     /// `// asset: <file>` lines: files in `tests/programs` the program reads by a relative path.
     /// The JIT run finds them in place; the exe run gets a copy next to the exe.
     assets: Vec<String>,
+    /// `// expect-exit-proofs:` and `// expect-stderr-proofs:`: what a `tests/release` program's
+    /// run with the proof check expects instead (a trusted assumption is evaluated there). Its
+    /// standard output must be the same in both runs.
+    exit_proofs: Option<i32>,
+    stderr_proofs: Vec<String>,
+}
+
+impl Expect {
+    /// What the run with the proof check expects.
+    fn with_proofs(&self) -> Expect {
+        let stderr = if self.stderr_proofs.is_empty() { self.stderr.clone() } else { self.stderr_proofs.clone() };
+        Expect {
+            stdout: self.stdout.clone(),
+            exit: self.exit_proofs.unwrap_or(self.exit),
+            stderr,
+            env: self.env.clone(),
+            assets: self.assets.clone(),
+            exit_proofs: None,
+            stderr_proofs: Vec::new(),
+        }
+    }
 }
 
 /// Reads the directives of program `name`. Panics on a malformed or unknown
@@ -29,6 +52,7 @@ fn expectations(name: &str, src: &str) -> Expect {
     let mut stderr = Vec::new();
     let mut env = Vec::new();
     let mut assets = Vec::new();
+    let (mut exit_proofs, mut stderr_proofs) = (None, Vec::new());
     for line in src.lines() {
         let line = line.trim();
         if let Some(rest) = line.strip_prefix("// asset:") {
@@ -40,6 +64,10 @@ fn expectations(name: &str, src: &str) -> Expect {
                 .filter(|(key, _)| !key.is_empty())
                 .unwrap_or_else(|| panic!("{name}: bad env directive (expected KEY=VALUE): {line}"));
             env.push((key.to_string(), value.to_string()));
+        } else if let Some(rest) = line.strip_prefix("// expect-exit-proofs:") {
+            exit_proofs = Some(rest.trim().parse().unwrap_or_else(|_| panic!("{name}: bad expect-exit-proofs number: {line}")));
+        } else if let Some(rest) = line.strip_prefix("// expect-stderr-proofs:") {
+            stderr_proofs.push(rest.trim().to_string());
         } else if let Some(rest) = line.strip_prefix("// expect-exit:") {
             exit = rest.trim().parse().unwrap_or_else(|_| panic!("{name}: bad expect-exit number: {line}"));
         } else if let Some(rest) = line.strip_prefix("// expect-stderr:") {
@@ -56,7 +84,7 @@ fn expectations(name: &str, src: &str) -> Expect {
         "{name}: opens a window but has no `// env: KESTREL_HEADLESS=<frames>` line, so the test would open a real window and hang the suite"
     );
     let stdout = lines.iter().map(|l| format!("{l}\n")).collect();
-    Expect { stdout, exit, stderr, env, assets }
+    Expect { stdout, exit, stderr, env, assets, exit_proofs, stderr_proofs }
 }
 
 /// The file an `// asset:` line names: a path inside `tests/programs`, so not absolute and not
@@ -179,51 +207,6 @@ fn check_command_reports_success() {
     let out = kestrel(&["check", path.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(0));
     assert!(out.stdout.is_empty());
-}
-
-#[test]
-#[should_panic(expected = "typo.kes: unknown expect directive: // expect-stderr missing colon")]
-fn unknown_expect_directive_panics() {
-    expectations("typo.kes", "// expect-stderr missing colon\nmain() {}\n");
-}
-
-#[test]
-#[should_panic(expected = "typo.kes: bad expect-exit number: // expect-exit: one")]
-fn bad_expect_exit_number_panics() {
-    expectations("typo.kes", "// expect-exit: one\nmain() {}\n");
-}
-
-#[test]
-fn env_directives_are_collected() {
-    let exp = expectations("env.kes", "// env: A=1\n// env:  B = two words \n// env: C=\nmain() {}\n");
-    let expected = [("A", "1"), ("B", "two words"), ("C", "")];
-    assert_eq!(exp.env, expected.map(|(k, v)| (k.to_string(), v.to_string())));
-}
-
-#[test]
-fn asset_directives_are_collected() {
-    let exp = expectations("asset.kes", "// asset: a.png\n// asset:  sub/b.bin \n// expect: ok\nmain() {}\n");
-    assert_eq!(exp.assets, ["a.png", "sub/b.bin"]);
-    assert_eq!(exp.stdout, "ok\n", "and the other directives still count");
-    assert!(expectations("none.kes", "main() {}\n").assets.is_empty());
-}
-
-#[test]
-#[should_panic(expected = "typo.kes: bad asset directive (expected a file inside tests/programs): // asset:")]
-fn an_asset_directive_without_a_file_panics() {
-    expectations("typo.kes", "// asset:\nmain() {}\n");
-}
-
-#[test]
-#[should_panic(expected = "typo.kes: bad asset directive (expected a file inside tests/programs): // asset: ../outside.png")]
-fn an_asset_outside_the_programs_folder_panics() {
-    expectations("typo.kes", "// asset: ../outside.png\nmain() {}\n");
-}
-
-#[test]
-#[should_panic(expected = "typo.kes: unknown expect directive: // expect-asset: a.png")]
-fn an_unknown_directive_still_panics() {
-    expectations("typo.kes", "// expect-asset: a.png\nmain() {}\n");
 }
 
 #[test]

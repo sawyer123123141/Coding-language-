@@ -173,7 +173,14 @@ fn release_programs_run_as_executables() {
                 continue;
             }
             let out = hermetic(&mut Command::new(&exe)).envs(exp.env.iter().map(|(k, v)| (k, v))).output().expect("run built exe");
-            failures.extend(compare(&name, mode, &out, &exp));
+            let proofs_exp;
+            let exp = if proofs {
+                proofs_exp = exp.with_proofs();
+                &proofs_exp
+            } else {
+                &exp
+            };
+            failures.extend(compare(&name, mode, &out, exp));
         }
     }
     assert!(failures.is_empty(), "\n{}", failures.join("\n"));

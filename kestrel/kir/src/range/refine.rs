@@ -18,10 +18,9 @@ impl Cx<'_> {
     /// Refines `st` with `cond` having the value `truth`: the parts of the condition in their
     /// order, each forgetting what it writes once it has been refined with. Its checks are decided
     /// as anywhere else; facts from its passed checks are dropped (the callers that want them,
-    /// `condition`, add them themselves). This is the hook Round B's `@assume` calls; `If`, `While`
-    /// and a value `if` go through `stmt.rs`'s `condition`, which wraps the same parts in the
-    /// spec's condition rule.
-    #[allow(dead_code)]
+    /// `condition`, add them themselves). `@assume` under `--release` calls it (`assume.rs`);
+    /// `If`, `While` and a value `if` go through `stmt.rs`'s `condition`, which wraps the same
+    /// parts in the spec's condition rule.
     pub(crate) fn refine(&mut self, st: &mut State, cond: &Expr, truth: bool) {
         let mark = self.learned.len();
         let (t, f) = self.cond_parts(std::mem::replace(st, State::dead()), cond, true);

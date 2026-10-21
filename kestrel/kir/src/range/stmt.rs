@@ -52,10 +52,7 @@ impl Cx<'_> {
                 let b = self.stmts(f, else_body);
                 a.join(&self.t, &b)
             }
-            Stmt::Assume { conds, body, .. } => {
-                let st = self.assume_conds(st, conds);
-                self.stmts(st, body)
-            }
+            Stmt::Assume { conds, body, .. } => self.assume(st, s, conds, body),
             Stmt::While { cond, body } => self.while_loop(st, cond, body),
             Stmt::ForRange { var, start, end, body } => self.for_range(st, s, *var, (start, end), body),
             Stmt::Break | Stmt::Continue => {

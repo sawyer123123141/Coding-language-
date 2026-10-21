@@ -177,3 +177,18 @@ fn an_assumption_is_a_way_to_fail() {
     let text = stdout(&out);
     assert!(text.contains("line 1: can fail: the assumption `n > 0` is checked here\n"), "{text}");
 }
+
+#[test]
+fn a_trusted_assumption_is_no_way_to_fail_under_release() {
+    // `--release` trusts `b > 0` (it removes only the division's check), so it isn't evaluated;
+    // a checked build evaluates it.
+    let src = "pure d(a: int, b: int) -> int {\n    @assume(b > 0)\n    a / b\n}\n\nmain() {}\n";
+    let dir = project("assume_trusted", &[("trusted.kes", src)]);
+    let item = "line 2: can fail: the assumption `b > 0` is checked here";
+    let out = kestrel(&["check", "--report"], &dir.join("trusted.kes"));
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(stdout(&out).contains(item), "{}", stdout(&out));
+    let out = kestrel(&["check", "--report", "--release"], &dir.join("trusted.kes"));
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(!stdout(&out).contains("assumption"), "{}", stdout(&out));
+}

@@ -1,0 +1,18 @@
+// Built with `--release`: the trusted assumption removes the first division's zero check; the
+// second division is proven by what that division's own check would teach (`b` isn't 0 after it,
+// as a plain divide traps on 0). KIR twin: `the_plain_run_keeps_a_division_fact`.
+id(x: int, d: int) -> int {
+    if d == 0 { return x }
+    id(x, d - 1)
+}
+
+main() {
+    let b = id(5, 1) & 255
+    var r = 0
+    arena {
+        @assume(b > 0)
+        r = 7 / b
+    }
+    print(r + 100 / b)
+}
+// expect: 21

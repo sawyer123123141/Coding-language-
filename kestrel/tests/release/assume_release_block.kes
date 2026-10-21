@@ -1,0 +1,22 @@
+// Built with `--release`: the trusted assumption removes the inner division's check (that division
+// never runs), and the division after its block keeps its own. With the proof check, the
+// assumption is evaluated and is the error.
+id(x: int, d: int) -> int {
+    if d == 0 { return x }
+    id(x, d - 1)
+}
+
+main() {
+    let b = id(0, 1)
+    var r = 0
+    if id(1, 1) == 1 {
+        @assume(b > 0)
+        if id(0, 1) == 1 {
+            r = 10 / b
+        }
+    }
+    print(r + 100 / b)
+}
+// expect-exit: 101
+// expect-stderr: division by zero on line 18
+// expect-stderr-proofs: assumption `b > 0` is false on line 13

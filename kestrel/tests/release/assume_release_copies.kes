@@ -1,0 +1,23 @@
+// Built with `--release`: `get` is inlined twice. In the loop its index is proven without the
+// assumption, which is trusted there; with `j` from `id` the assumption stays evaluated.
+id(x: int, d: int) -> int {
+    if d == 0 { return x }
+    id(x, d - 1)
+}
+
+pure get(xs: [int], i: int) -> int {
+    @assume(i >= 0 and i < xs.len)
+    xs[i]
+}
+
+main() {
+    let xs = [1, 2, 3]
+    var s = 0
+    for k from 0 to xs.len {
+        s += get(xs, k)
+    }
+    let j = id(7, 1)
+    print(s + get(xs, j))
+}
+// expect-exit: 101
+// expect-stderr: assumption `i >= 0 and i < xs.len` is false on line 9

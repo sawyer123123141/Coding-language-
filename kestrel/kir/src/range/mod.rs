@@ -14,6 +14,7 @@ pub mod facts;
 pub mod interval;
 mod items;
 mod loops;
+mod mark;
 mod par;
 mod refine;
 pub mod render;
@@ -31,9 +32,14 @@ use std::collections::HashMap;
 
 use crate::ir::*;
 use crate::visit::{walk, Node};
-use crate::visit_mut::{walk_expr, walk_place, VisitMut};
+use crate::visit_mut::VisitMut;
+pub use assume::AssumeUse;
+use assume::{Folded, RunLog};
 use interval::Interval;
+pub use mark::mark_assumptions;
+use mark::Marker;
 pub use sites::{Arith, CheckKind};
+use sites::sites_of;
 use state::State;
 use tracked::Tracked;
 
@@ -52,6 +58,8 @@ const FACT_WORK: u64 = 64;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Analysis {
     pub funcs: Vec<FuncChecks>,
+    /// Each `@assume` statement analysed (see `AssumeUse`), function by function.
+    pub assumptions: Vec<AssumeUse>,
 }
 
 /// The checks left in one function, in the order the code runs them, and how many were removed.
@@ -93,32 +101,54 @@ pub fn mark_proven(m: &mut Module, arith: Arith) -> Analysis {
 }
 
 fn run(m: &mut Module, arith: Arith, texts: bool) -> Analysis {
-    let mut funcs = Vec::with_capacity(m.funcs.len());
+    let mut a = Analysis { funcs: Vec::with_capacity(m.funcs.len()), assumptions: Vec::new() };
     let lists = par::lists(m);
     for i in 0..m.funcs.len() {
         if m.funcs[i].native.is_some() {
-            funcs.push(FuncChecks::default());
+            a.funcs.push(FuncChecks::default());
             continue;
         }
-        let (checks, proven) = analyse(m, &m.funcs[i], arith, lists.get(&i), texts);
-        if !proven.is_empty() {
-            Marker { proven: &proven }.visit_stmts(&mut m.funcs[i].body);
+        let (checks, proven, uses, has_assume) = analyse(m, &m.funcs[i], arith, lists.get(&i), texts);
+        a.assumptions.extend(uses.into_iter().map(|u| u.into_use(FuncIdx(i as u32))));
+        if !proven.is_empty() || has_assume {
+            let trusted = mark::trusted(&a, i, arith);
+            Marker { proven: &proven, trusted: &trusted }.visit_stmts(&mut m.funcs[i].body);
         }
-        funcs.push(checks);
+        a.funcs.push(checks);
     }
-    Analysis { funcs }
+    a
 }
 
 /// The statement visits a function may take over all passes: 200,000, or 100 per statement when
-/// that is more.
-fn budget(f: &Func) -> u32 {
-    let mut statements: u32 = 0;
+/// that is more; and whether it has an assumption. Each statement counts once more for every
+/// `Assume` around it (its block runs once more in a deciding pass), and the budget grows in
+/// proportion, so adding an assumption can't push a function past it (I4). A function without
+/// one gets exactly the budget it had before assumptions existed.
+fn budget(f: &Func) -> (u32, bool) {
+    let mut statements: u64 = 0;
+    let mut blocks: Vec<&[Stmt]> = Vec::new();
     walk(&f.body, &mut |n| {
-        if let Node::Stmt(_) = n {
-            statements = statements.saturating_add(1);
+        if let Node::Stmt(s) = n {
+            statements += 1;
+            if let Stmt::Assume { body, .. } = s {
+                blocks.push(body);
+            }
         }
     });
-    statements.saturating_mul(100).max(200_000)
+    let base = statements.saturating_mul(100).max(200_000);
+    if blocks.is_empty() {
+        return (base.min(u64::from(u32::MAX)) as u32, false);
+    }
+    let mut again: u64 = 0;
+    for b in blocks {
+        walk(b, &mut |n| {
+            if let Node::Stmt(_) = n {
+                again += 1;
+            }
+        });
+    }
+    let scaled = base.saturating_mul(statements + again) / statements.max(1);
+    (scaled.min(u64::from(u32::MAX)) as u32, true)
 }
 
 /// A check site: an arithmetic node, or an index projection (`bounds`), by address. The two kinds
@@ -133,8 +163,12 @@ fn index_key(p: &Proj) -> Key {
     (p as *const Proj as usize, true)
 }
 
+/// One function's checks, the sites it proved, its assumption statements' uses, and whether it
+/// has an assumption.
+type Analysed = (FuncChecks, HashMap<Key, ()>, Vec<Folded>, bool);
+
 /// One function's checks, and the sites it proved.
-fn analyse(m: &Module, f: &Func, arith: Arith, par_list: Option<&Place>, texts: bool) -> (FuncChecks, HashMap<Key, ()>) {
+fn analyse(m: &Module, f: &Func, arith: Arith, par_list: Option<&Place>, texts: bool) -> Analysed {
     let mut cx = Cx::new(m, f, arith, par_list);
     cx.texts = texts;
     let mut start = cx.top.clone();
@@ -144,7 +178,7 @@ fn analyse(m: &Module, f: &Func, arith: Arith, par_list: Option<&Place>, texts: 
     let _ = cx.stmts(start, &f.body);
     if cx.gave_up {
         let left = sites_of(f, arith).into_iter().map(|(_, s)| s.left(m, f, texts)).collect();
-        return (FuncChecks { left, removed: 0, gave_up: true, deep: cx.deep }, HashMap::new());
+        return (FuncChecks { left, removed: 0, gave_up: true, deep: cx.deep }, HashMap::new(), Vec::new(), cx.has_assume);
     }
     let mut proven = HashMap::new();
     let mut left = Vec::new();
@@ -166,88 +200,8 @@ fn analyse(m: &Module, f: &Func, arith: Arith, par_list: Option<&Place>, texts: 
         }
     }
     let removed = proven.len() as u32;
-    (FuncChecks { left, removed, gave_up: false, deep: false }, proven)
-}
-
-/// A check site found by walking a function: an arithmetic node's check, or step `i` of a place.
-enum Site<'a> {
-    Expr(CheckKind, &'a Expr),
-    Bounds(&'a Place, usize),
-}
-
-impl Site<'_> {
-    /// The site as a check left, with the text of a check nothing is known about (with `texts`).
-    fn left(&self, m: &Module, f: &Func, texts: bool) -> CheckLeft {
-        match *self {
-            Site::Expr(kind, e) => {
-                let text = if texts { show::check_text(m, f, kind, e, &[]) } else { String::new() };
-                CheckLeft { kind, line: e.line, loops: Vec::new(), text }
-            }
-            Site::Bounds(p, i) => {
-                let line = p.path[i].at().map_or(0, |at| at.line);
-                let text = if texts { show::bounds_text(m, f, p, i, None) } else { String::new() };
-                CheckLeft { kind: CheckKind::Bounds, line, loops: Vec::new(), text }
-            }
-        }
-    }
-}
-
-/// Every check site in `f`, in walk order. The node inside a `Proven` (a module analysed before)
-/// has no checks left, so it is no site.
-fn sites_of(f: &Func, arith: Arith) -> Vec<(Key, Site<'_>)> {
-    let mut out = Vec::new();
-    let mut inside_proven: Option<*const Expr> = None;
-    walk(&f.body, &mut |n| match n {
-        Node::Expr(e) => {
-            if let ExprKind::Proven(inner) = &e.kind {
-                inside_proven = Some(&**inner as *const Expr);
-            }
-            if inside_proven == Some(e as *const Expr) {
-                inside_proven = None;
-                return;
-            }
-            for kind in sites::checks_of(e, arith) {
-                out.push((expr_key(e), Site::Expr(kind, e)));
-            }
-        }
-        Node::Place(p, _) => {
-            for (i, proj) in p.path.iter().enumerate() {
-                if sites::is_bounds_site(proj) {
-                    out.push((index_key(proj), Site::Bounds(p, i)));
-                }
-            }
-        }
-        Node::Stmt(_) => {}
-    });
-    out
-}
-
-/// Wraps every proven arithmetic node in `Proven`, and marks every proven index.
-struct Marker<'a> {
-    proven: &'a HashMap<Key, ()>,
-}
-
-impl VisitMut for Marker<'_> {
-    fn visit_expr(&mut self, e: &mut Expr) {
-        let key = expr_key(e);
-        walk_expr(self, e);
-        if self.proven.contains_key(&key) {
-            let (ty, line) = (e.ty, e.line);
-            let inner = std::mem::replace(e, Expr { kind: ExprKind::Bool(false), ty, line });
-            *e = Expr { kind: ExprKind::Proven(Box::new(inner)), ty, line };
-        }
-    }
-
-    fn visit_place(&mut self, p: &mut Place) {
-        for proj in &mut p.path {
-            if self.proven.contains_key(&index_key(proj)) {
-                if let Proj::Index { check, .. } = proj {
-                    *check = IndexCheck::Proven;
-                }
-            }
-        }
-        walk_place(self, p);
-    }
+    let uses = std::mem::take(&mut cx.uses);
+    (FuncChecks { left, removed, gave_up: false, deep: false }, proven, uses, cx.has_assume)
 }
 
 /// What happened to one check site in the deciding passes.
@@ -313,12 +267,21 @@ struct Cx<'a> {
     volatile: Vec<bool>,
     decisions: HashMap<Key, usize>,
     order: Vec<Decision>,
+    /// Whether the function has an `@assume` statement.
+    has_assume: bool,
+    /// The decisions of the assumption runs under way, innermost last (see `assume.rs`).
+    logs: Vec<RunLog>,
+    /// More than 0 inside a plain run: decisions go only to its log, not to the function's table.
+    plain: u32,
+    /// The uses of the assumption statements analysed so far, in the order first recorded.
+    uses: Vec<Folded>,
 }
 
 impl<'a> Cx<'a> {
     fn new(m: &'a Module, f: &'a Func, arith: Arith, par_list: Option<&Place>) -> Self {
         let (picked, hidden_tys, hidden) = par::terms(m, f, par_list);
-        let t = Tracked::of(f, &picked, &hidden_tys, u64::from(budget(f)) * FACT_WORK);
+        let (budget, has_assume) = budget(f);
+        let t = Tracked::of(f, &picked, &hidden_tys, u64::from(budget) * FACT_WORK);
         let par_body = m.par_bodies.iter().any(|b| std::ptr::eq(&m.funcs[b.0 as usize], f));
         let homes = terms::Homes::of(f, par_body);
         let len_full = t.lens.iter().map(|(k, _)| homes.key_full(k)).collect();
@@ -337,7 +300,7 @@ impl<'a> Cx<'a> {
             texts: true,
             keep: 0,
             visits: 0,
-            budget: budget(f),
+            budget,
             depth: 0,
             gave_up: false,
             deep: false,
@@ -346,6 +309,10 @@ impl<'a> Cx<'a> {
             learned: Vec::new(),
             decisions: HashMap::new(),
             order: Vec::new(),
+            has_assume,
+            logs: Vec::new(),
+            plain: 0,
+            uses: Vec::new(),
         }
     }
 
@@ -373,12 +340,19 @@ impl<'a> Cx<'a> {
 
     /// Records the decision about a check site, in a deciding pass: proven when `safe` (outside
     /// unreachable code), otherwise left with `text()` (made only when the texts are wanted). A
-    /// site decided twice is proven only if both decisions prove it.
+    /// site decided twice is proven only if both decisions prove it. Inside an assumption's run
+    /// it also goes to that run's log; inside a plain run only there.
     fn decide(&mut self, key: Key, kind: CheckKind, line: u32, safe: bool, text: impl FnOnce(&Self) -> String) {
         if !self.deciding {
             return;
         }
         let proven = safe && self.keep == 0;
+        if let Some(log) = self.logs.last_mut() {
+            assume::note(log, key, proven);
+        }
+        if self.plain > 0 {
+            return;
+        }
         let left = (!proven).then(|| match self.texts {
             true => CheckLeft { kind, line, loops: self.loop_lines.clone(), text: text(self) },
             false => CheckLeft { kind, line, loops: Vec::new(), text: String::new() },

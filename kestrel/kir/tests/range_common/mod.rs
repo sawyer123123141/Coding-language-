@@ -102,3 +102,20 @@ pub fn func_report<'a>(r: &'a kestrel_kir::range::report::Report, name: &str) ->
 pub fn items_of(f: &kestrel_kir::range::report::FuncReport, kind: kestrel_kir::range::report::ItemKind) -> Vec<(u32, String)> {
     f.items.iter().filter(|i| i.kind == kind).map(|i| (line(i.line), i.text.clone())).collect()
 }
+
+/// The uses the analysis recorded for the assumption statements in `name`, in the order recorded.
+pub fn uses<'a>(m: &Module, a: &'a Analysis, name: &str) -> Vec<&'a kestrel_kir::range::AssumeUse> {
+    let i = idx(m, name) as u32;
+    a.assumptions.iter().filter(|u| u.func.0 == i).collect()
+}
+
+/// The check of every assumption statement in `name`, in walk order (outermost first).
+pub fn assume_checks(m: &Module, name: &str) -> Vec<AssumeCheck> {
+    let mut out = Vec::new();
+    visit::walk(&m.funcs[idx(m, name)].body, &mut |n| {
+        if let visit::Node::Stmt(Stmt::Assume { check, .. }) = n {
+            out.push(*check);
+        }
+    });
+    out
+}
