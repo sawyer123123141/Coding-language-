@@ -136,7 +136,8 @@ fn test_only_keeps_the_programs_whose_names_start_with_a_prefix() {
     assert_eq!(names(only_prefixed(files.clone(), Some("hello, range_keep"))), ["hello.kes", "range_keep_a.kes"]);
     assert_eq!(names(only_prefixed(files.clone(), Some("hello,,"))), ["hello.kes"], "empty entries are ignored");
     assert!(only_prefixed(files.clone(), Some("ello")).is_empty(), "a prefix, not a substring");
-    assert!(only_prefixed(files, Some("")).is_empty(), "no prefixes keep nothing");
+    assert_eq!(names(only_prefixed(files.clone(), Some(""))).len(), 4, "set but empty keeps all");
+    assert_eq!(names(only_prefixed(files, Some(" , "))).len(), 4, "no prefix at all keeps all");
 }
 
 /// The programs in `tests/release`, which only fail as they should when built with `--release`

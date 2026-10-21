@@ -94,10 +94,15 @@ fn programs_dir() -> PathBuf {
 const PROOF_FAILED: &str = "range analysis removed";
 
 /// The programs whose file names start with one of the comma-separated `prefixes` (empty
-/// entries and spaces around a prefix are ignored); all of them for `None`.
+/// entries and spaces around a prefix are ignored); all of them for `None`, or when no prefix is
+/// left (`KESTREL_TEST_ONLY=` set but empty).
 pub(crate) fn only_prefixed(files: Vec<PathBuf>, prefixes: Option<&str>) -> Vec<PathBuf> {
     let Some(prefixes) = prefixes else { return files };
     let prefixes: Vec<&str> = prefixes.split(',').map(str::trim).filter(|p| !p.is_empty()).collect();
+    // Set but empty (`KESTREL_TEST_ONLY=`) is every program, as when it isn't set.
+    if prefixes.is_empty() {
+        return files;
+    }
     files
         .into_iter()
         .filter(|f| {
