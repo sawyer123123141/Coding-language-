@@ -109,29 +109,50 @@ fn a_proven_operation_inside_another_keeps_the_outer_checks_it_has() {
 
 const CHILD_ENV: &str = "KESTREL_PROVEN_CHILD";
 
-/// Child half of `verify_mode_still_checks_a_proof`; does nothing unless the parent set `CHILD_ENV`.
+const DIV: &str = "pure d(a: int, b: int) -> int { a / b }
+main() {}
+";
+
+/// Child half of `verify_mode_still_checks_a_proof`; does nothing unless the parent set `CHILD_ENV`
+/// to the case it runs: a proven add that overflows, or a proven division by zero or of the
+/// minimum by -1.
 #[test]
 fn proof_failure_child() {
-    if std::env::var_os(CHILD_ENV).is_some() {
+    let case = std::env::var(CHILD_ENV).unwrap_or_default();
+    if case == "add" {
         let m = proven_module(ADD, "f");
         let p = jit_proven(&m, true);
         assert_eq!(call1(&p, "f", 2), 3, "a proof that holds passes");
         call1(&p, "f", 2147483647);
         panic!("the failed proof should have ended the process");
     }
+    if let Some((a, b)) = match case.as_str() {
+        "divide_zero" => Some((1, 0)),
+        "divide_min" => Some((i32::MIN, -1)),
+        _ => None,
+    } {
+        let m = proven_module(DIV, "d");
+        let p = jit_proven(&m, true);
+        let d: extern "C" fn(i32, i32) -> i32 = unsafe { std::mem::transmute(p.fn_ptr("d").unwrap()) };
+        assert_eq!(d(7, 2), 3, "a proof that holds passes");
+        d(a, b);
+        panic!("the failed proof should have ended the process");
+    }
 }
 
 #[test]
 fn verify_mode_still_checks_a_proof() {
-    let out = Command::new(std::env::current_exe().unwrap())
-        .args(["proof_failure_child", "--exact", "--nocapture"])
-        .env(CHILD_ENV, "1")
-        .output()
-        .unwrap();
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert_eq!(out.status.code(), Some(101), "{stderr}");
-    assert!(stderr.contains("range analysis removed the overflow check on line 1"), "{stderr}");
-    assert!(stderr.contains("but it fails; this is a compiler bug"), "{stderr}");
+    for (case, what) in [("add", "overflow"), ("divide_zero", "division"), ("divide_min", "overflow")] {
+        let out = Command::new(std::env::current_exe().unwrap())
+            .args(["proof_failure_child", "--exact", "--nocapture"])
+            .env(CHILD_ENV, case)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(101), "{case}: {stderr}");
+        assert!(stderr.contains(&format!("range analysis removed the {what} check on line 1")), "{case}: {stderr}");
+        assert!(stderr.contains("but it fails; this is a compiler bug"), "{case}: {stderr}");
+    }
 }
 
 #[test]
