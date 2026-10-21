@@ -4,6 +4,7 @@ These are small loops from the particles demo, timed alone so that a change to t
 
 - `step.kes`: the demo's `Particle.step` (pull towards a target, damping, move, bounce off the edges), in a `par for` over a `list[Particle]`. `pow(KEEP, dt)` is worked out once and passed in.
 - `step_scalar.kes`: the same step written by hand with `float` locals: the four fields are read once, the maths uses no `vec2` values, and the fields are written once. This is the speed the compiler should reach on `step.kes` by itself.
+- `step_index.kes`: `step.kes` with a plain `for i from 0 to parts.len { parts[i].step(...) }` in place of the `par for` (see "Range analysis" at the end).
 - `step_pow.kes`: the step exactly as the demo writes it, with `pow(KEEP, dt)` for every particle.
 - `copy.kes`: the demo's draw copy, every particle's position into a `list[vec2]`.
 - `src/bin/rust.rs`: the same three kernels in Rust (`step`, `pow` and `copy`), one thread, same arithmetic.
@@ -20,7 +21,7 @@ py measure.py --rounds 3 --threads 1
 py measure.py --rounds 3 --threads 16
 ```
 
-`measure.py` runs every kernel for a few rounds, one after the other so they share the machine's conditions, and prints the median of the rounds' medians with their range. `--threads` sets `KESTREL_THREADS` for the Kestrel kernels, which is the thread count of their `par for`; the Rust kernels always use one thread. `py measure.py --rounds 9 --only iface` runs just the kernels whose label contains the text (here the interface ones, Kestrel and Rust). A single kernel can be run with `target/release/kernels.exe step.kes --release`, and takes `--n`, `--iters`, `--reps` and, without `--release`, checks integer overflow as `kestrel run` does.
+`measure.py` runs every kernel for a few rounds, one after the other so they share the machine's conditions, and prints the median of the rounds' medians with their range. `--threads` sets `KESTREL_THREADS` for the Kestrel kernels, which is the thread count of their `par for`; the Rust kernels always use one thread. `py measure.py --rounds 9 --only iface` runs just the kernels whose label contains the text (here the interface ones, Kestrel and Rust). `py measure.py --rounds 7 --keep-checks --old DIR` adds a column with the range analysis off and one for an older build (`DIR` is its `target/release`); `kernels.exe` takes `--keep-checks` too. A single kernel can be run with `target/release/kernels.exe step.kes --release`, and takes `--n`, `--iters`, `--reps` and, without `--release`, checks integer overflow as `kestrel run` does.
 
 To see what the compiler made of a loop, `target/release/kernels.exe step.kes --release --dump par` prints the optimised Cranelift IR and then the machine code of every `par for` body. `--dump NAME` does the same for the function with that name. The `explicit_slot` lines at the top of the IR are stack slots. Before scalar replacement `step.kes` had 8 of them, each holding a `vec2` temporary of the step (the vector to the target, its direction, the pull, and so on) that was stored to the stack and loaded back; now it has none.
 
@@ -300,15 +301,86 @@ Kestrel and Rust give the same checksum for each pair (checked at `--n 1000000 -
 
 **Losses, in short.** Kestrel's interface call is 14-19% slower than Rust's `Box<dyn>` call, and 7-11 times a direct call it can inline (Rust's gap there is larger still, since it also vectorises). Devirtualising (a `CallVirtual` whose `MakeIface` is visible after inlining becoming a direct call) is still undone, and it would remove the call only where the type is known; it does nothing for a mixed list. A cheaper call would need a leaf function without a frame, and the data pointer of the list kept in a register across the call. Neither is done here; this round only measured.
 
-## Range analysis (not yet measured)
+## Range analysis
 
-The range analysis (2026-10-19 and 2026-10-20, `docs/superpowers/specs/2026-10-19-range-analysis-design.md`) leaves out each overflow, shift, division, narrowing and bounds check it proves can't fail. **No timing has been taken yet** (the user's machine was under load, so the measurement was stopped); this section lists what to measure and what is already known. What is known without timing: across the 183 test programs the analysis removes 1,608 of 5,370 checks in a checked build (3,762 left), 456 of 630 under `--release` (174 left), and 431 of 596 bounds checks (165 left). `kernels.exe copy.kes --dump bench` and `kernels.exe step_index.kes --dump bench` show no `trap user2` (no check left) in the new compiler, checked and `--release`.
+The range analysis (2026-10-19 and 2026-10-20, `docs/superpowers/specs/2026-10-19-range-analysis-design.md`) leaves out each overflow, shift, division, narrowing and bounds check it proves can't fail. Measured on 2026-10-20 (evening), the old compiler at commit b7166fe (the commit before the round, built in a `git worktree` with a short `CARGO_TARGET_DIR`) against the new one at dc78375 (the later commits only change docs), on the same machine as above (Ryzen 7 5800X, Windows 11), one thread, `--release`. The user had said the machine was free: no game was running, but the desktop had its usual background (Roblox's launcher open and idle, OneDrive sync, Defender), and the system sat at 25-40% CPU before the run started. No idle-priority watcher during timings. `py measure.py --rounds 7 --threads 1 --keep-checks --old DIR` ran the three compilers in turn within each round; the Rust kernels once per round. `--keep-checks` is the new compiler with `remove_checks: false`: every check stays, so it is the old compiler's code plus the new item limit. New: `step_index.kes`, a copy of `step.kes` whose loop is `for i from 0 to parts.len { parts[i].step(dt, target, keep) }` (one thread, no `par for`), the case the analysis was built for: 8 bounds checks per particle before.
 
-**To measure, on a quiet machine, old compiler (commit b7166fe) against new, taking turns:**
-- `step_index.kes` (new): `step.kes`'s step in `for i from 0 to parts.len { parts[i].step(dt, target, keep) }`, not a `par for`. Before the analysis it has 8 bounds checks per particle. Record the gain against `--keep-checks` and against the old compiler, and its distance from `step.kes` (`--threads 1`).
-- `copy.kes`: no bounds check left in the loop; expected faster, still well behind Rust (the data pointer is reloaded after each store).
-- Every other kernel: not slower beyond noise. Re-check any difference under 10% with an unused function added, as above.
-- `bench/2a`, `bench/heightmap`, and `bench/voxels3d/results.md` (checked against `--release`, target at most 1.2x; `--release` not slower).
-- Compile time of `kestrel build` for the voxel world and the particles demo (target: the analysis adds under 10%), and `kestrel check --report` totals.
+**`--dump bench` (`trap user2` is one check):**
 
-**How:** `cargo build --release` in this folder, then `py measure.py --rounds 7 --threads 1 --keep-checks --old DIR`, where `DIR` is the `target/release` of a build made from a `git worktree` of b7166fe (set `CARGO_TARGET_DIR` to a short path; the long path breaks the build). `--keep-checks` is the new compiler with `remove_checks: false` (every check stays); `kernels.exe` takes the same flag.
+| Kernel | Old, `--release` / checked | New, `--release` / checked |
+|---|---:|---:|
+| `step_index.kes` | 29 / 31 | 0 / 0 |
+| `copy.kes` | 1 / 5 | 0 / 0 |
+| `step.kes` | 0 / 1 | 0 / 0 |
+
+`--keep-checks` gives the old counts again. So `copy.kes` has no bounds check in its loop and `step_index.kes` has none anywhere in `bench` (which includes the spawn loop).
+
+**The kernels you were asked about** (ns per item, median of 7 rounds, range in brackets):
+
+| Kernel | New | New `--keep-checks` | Old | New over old |
+|---|---:|---:|---:|---:|
+| `step_index.kes` | **8.28** (8.15-8.48) | 11.03 (10.86-11.32) | 11.13 (11.05-11.30) | **0.74** |
+| `step.kes` (`par for`, one thread) | 5.80 (5.61-6.00) | 5.82 | 5.80 (5.59-6.17) | 1.00 |
+| `copy.kes` | 0.92 (0.91-0.98) | 1.21 (1.18-1.30) | 0.98 (0.94-1.04) | 0.94 |
+| Rust `step` / `copy` | 5.08 (4.94-5.19) / 0.27 (0.26-0.28) | | | |
+
+- **`step_index.kes` is 26% faster, 8.3 ns against 11.1** (both `--keep-checks` and the old compiler: 11.0 and 11.1), the same in three code layouts (7.9-8.1 against 10.6-11.0 with one or two unused functions added). It is still **1.43 times `step.kes`** (5.80, was 1.92 times) and 1.63 times Rust's step (was 2.2). The 2.5 ns that remains is, most likely (I did not take it apart), the loop reading the list's data pointer from the header for each `parts[i]`, and `parts[i].step()` working on the element in memory, not on promoted fields: the header reload and promoting an indexed place are the two things the design left out.
+- **`copy.kes` has no bounds check in its loop, and is 0.94 times the old time: not a clear win.** In three layouts (as written, and with one or two unused functions added, which only move the code) it takes 0.93, 0.91 and 0.92 ns now; the old compiler took 0.95, 1.17 and 1.20 and `--keep-checks` 1.19, 1.20 and 0.92. So with the check gone the loop is steady, and the old loop was 0-24% slower depending on where the compiler put it. The ranges of the as-written cells overlap (0.87-1.13 against 0.87-1.36); the gain is real in two of the three layouts and absent in the third. It is **3.4 times Rust's 0.27 ns** (3.6 before): the check was never most of the gap. The design's expected reason is the data pointer reloaded after every store (Cranelift can't prove the store didn't change the header); I did not confirm it in the machine code.
+- **`step.kes` is unchanged** (it indexes nothing; the one check the old checked build had is gone, which this timing doesn't show).
+
+**Every other kernel** (ns per item; new / `--keep-checks` / old; median of 7, ranges 1-5% unless noted):
+
+| Kernel | New | `--keep-checks` | Old | New over old |
+|---|---:|---:|---:|---:|
+| `step_scalar.kes` | 5.88 | 5.82 | 5.89 | 1.00 |
+| `step_pow.kes` | 23.40 (23.02-26.50) | 23.06 | 23.26 | 1.01 |
+| `filter.kes` | 6.48 | 6.42 | 6.36 | 1.02 |
+| `filter_loop.kes` | 5.70 | 5.69 | 5.38 | **1.06** |
+| `map.kes` | 2.07 | 2.05 | 2.09 | 0.99 |
+| `map_loop.kes` | 2.07 | 2.09 | 2.03 | 1.02 |
+| `sort_by.kes` | 192.45 | 193.04 | 194.27 | 0.99 |
+| `sort_by_loop.kes` | 126.81 | 131.73 | 130.78 | 0.97 |
+| `iface_hp.kes` | 5.61 | 5.65 | 5.92 | 0.95 |
+| `iface_hp_direct.kes` | 0.58 | 0.58 | 0.88 | **0.66** |
+| `iface_step.kes` | 6.04 | 5.96 | 5.98 | 1.01 |
+| `iface_step_direct.kes` | 0.87 | 0.86 | 0.59 | **1.47** |
+
+Three differences are over 5%, and all three are code layout, not the analysis: the second column (`--keep-checks`) matches the new compiler to the digit on each of them (0.86 against 0.87, 5.69 against 5.70), so the analysis did not change them. With one or two unused functions added to the program (7 rounds each, new / old, ns):
+
+| Kernel | As written | + 1 unused function | + 2 unused functions |
+|---|---:|---:|---:|
+| `iface_step_direct.kes` | 0.82 / 0.56 | 0.84 / 0.84 | 0.81 / 0.83 |
+| `iface_hp_direct.kes` | 0.54 / 0.82 | 0.55 / 0.54 | 0.54 / 0.55 |
+| `filter_loop.kes` | 5.47 / 5.13 | 5.35 / 5.45 | 5.10 / 5.31 |
+
+The old compiler's `iface_step_direct.kes` loop is faster as written (0.56) and equal when padded; the new one is the same in all three. So **no kernel is slower beyond the layout noise**, and nothing in the table is a loss from the analysis. This is the same effect as in the 6-30% note in the follow-ups file: a 0.5 ns loop moves by 0.3 ns when code moves.
+
+**Check counts** (`kestrel check --report`, the last line; checked / `--release`; totals count an inlined body in each function that holds it, so they are upper bounds on distinct checks):
+
+| Program | Checks | Removed | Left |
+|---|---:|---:|---:|
+| `step.kes`, `step_scalar.kes`, `step_pow.kes` | 6 / 0 | 6 / 0 | 0 / 0 |
+| `step_index.kes` | 62 / 58 | 62 / 58 | 0 / 0 |
+| `copy.kes` | 10 / 2 | 10 / 2 | 0 / 0 |
+| `filter.kes`, `map.kes` | 12, 14 / 2, 4 | 6, 6 / 0, 0 | 6, 8 / 2, 4 |
+| `sort_by.kes` | 12 / 0 | 4 / 0 | 8 / 0 |
+| `iface_hp.kes`, `iface_step.kes` | 9, 12 / 0 | 2, 4 / 0 | 7, 8 / 0 |
+
+**What the numbers say.** The analysis does what the design said for the loop it was built for (`step_index.kes`: no check left, 26% faster), removes the draw copy's bounds check (a gain of 0-24% that depends on where the compiler puts the loop), and costs the other kernels nothing. The kernels with checks left (`filter`, `map`, `sort_by`, the interface ones) keep some checks (`kestrel check --report` lists them); I did not look at why. No check is left in `step_index.kes` or `copy.kes`, so their remaining distance to Rust is not checks; the list-header reload is the open candidate.
+
+**`bench/2a` and `bench/heightmap`** (whole-process wall time in ms, including about 15 ms of process start; exes built by each compiler, run in turns, `Measure-Command` from PowerShell; median of 7 runs, 9 for the heightmap, range in brackets; checked / `--release`; same evening and conditions; each pair's outputs agree):
+
+| Workload | Old checked | New checked | Old `--release` | New `--release` |
+|---|---:|---:|---:|---:|
+| fib | 281 (278-387) | 272 (269-376) | 271 (265-365) | 268 (267-373) |
+| loop | 755 (740-848) | 754 (741-845) | 752 (738-846) | 747 (741-853) |
+| collatz | 348 (340-463) | 346 (339-452) | 281 (275-377) | 283 (275-375) |
+| mandelbrot | 499 (481-594) | 485 (475-584) | 479 (478-584) | 483 (482-586) |
+| particles | 169 (167-275) | 173 (168-269) | 212 (210-323) | 213 (209-314) |
+| sieve | 901 (855-1,008) | 878 (860-1,005) | 883 (852-969) | 896 (852-989) |
+| swarm | 200 (193-303) | 201 (193-310) | 201 (195-298) | 201 (189-306) |
+| heightmap | 82 (78-186) | **61 (60-166)** | 61 (58-159) | 58 (56-157) |
+
+- **Nothing is slower beyond noise** (the largest difference among the 2a rows is 3%, with the ranges overlapping); the high ends of the ranges are single slow runs, on both compilers alike.
+- **The checked heightmap is 26% faster, 82 ms to 61**, and now equals the old `--release` build (61); its `--release` build is unchanged (61 to 58). `kestrel check --report` says 114 of its 127 checks are removed, and 7 of 7 under `--release`.
+- The analysis proves few of the 2a programs' checks, as the report shows: fib 2 of 3 removed, loop 1 of 2, collatz 0 of 3, mandelbrot 1 of 3, sieve 4 of 5, swarm 2 of 2. None of that moved their time.

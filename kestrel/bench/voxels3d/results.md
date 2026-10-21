@@ -95,9 +95,38 @@ $env:DOTNET_TieredCompilation = "0"; .\cs\bin\out\Voxels3dBench.exe 8 par
 
 The `[AggressiveInlining]` row is a local copy of `cs/` with `[MethodImpl(MethodImplOptions.AggressiveInlining)]` added to those six methods; it isn't checked in.
 
-## Range analysis (not yet measured)
+## Range analysis
 
-The range analysis (`docs/superpowers/specs/2026-10-19-range-analysis-design.md`) leaves out each check it proves can't fail, in the checked build as well as `--release`. **Not measured yet** (the user's machine was under load, so the measurement was stopped). To do on a quiet machine, with the old compiler (commit b7166fe, from a `git worktree`) and the new one built and timed in turns, 7 runs each, medians and ranges as above:
-- The checked build against `--release`: the spec's target is at most 1.2x (it was 2.4x: 1,182-1,232 against 481-505 ms), and `--release` not slower than 481-505 ms.
-- `kestrel check --report` for `main.kes`, checked and `--release`: the totals, and whether any check is left in the inlined `hash`, `lattice` and `octave` code. The design expects about a dozen checks per sample to remain (the chunk offsets `cx * 32 + x - 1`, `seed + 1`, `i += 1`, `out[i]`) against about 250 before, because loop-invariant checks are not hoisted yet; if the target is missed, say by how much and why.
-- `kestrel build` time for this world, old against new (the analysis should add under 10%).
+The range analysis (`docs/superpowers/specs/2026-10-19-range-analysis-design.md`) leaves out each check it proves can't fail, in the checked build as well as `--release`. Measured on 2026-10-20 (evening), the old compiler at commit b7166fe (the commit before the round) against the new one at dc78375 (the later commits change only docs), same machine as above (Ryzen 7 5800X, Windows 11). The user had said the machine was free: no game was running, but the usual background was (Roblox's launcher idle, OneDrive, Defender; 25-40% CPU before the run). No idle-priority watcher during timings. Four exes (old and new, checked and `--release`) built from `main.kes`, then timed in turns, one of each per round, with `Measure-Command` as in `run.ps1`; the startup of an empty world (12 ms) is taken out. All four print 463,749 faces.
+
+**World build, one thread** (median of 9 runs, range in brackets):
+
+| World build | Old | New | New over old |
+|---|---:|---:|---:|
+| Kestrel exe (checks on) | 1,415 ms (1,392-1,503) | **643 ms** (609-720) | 0.45 |
+| Kestrel exe (`--release`) | 594 ms (578-685) | 592 ms (568-734) | 1.00 |
+| **Checked over `--release`** | **2.38x** | **1.09x** | |
+
+- **The target is met: checked over `--release` is 1.09x against the target of at most 1.2x** (it was 2.4x). The checked build is 2.2 times faster, 1,415 ms to 643, and now takes about the time the `--release` build did before the round; `--release` is not slower (594 and 592, ranges overlapping).
+- The old rows are higher than the "v3" column above (1,182-1,232 and 481-505 ms) for the same compiler: the machine was slower this evening. Compare the rows of this table with each other, not with the older ones.
+- With `par for` on one thread (`KESTREL_THREADS=1`, 5 runs): checked 1,410 (1,378-1,529) to **628** (604-793), `--release` 603 (571-728) to 589 (580-695): checked over `--release` 1.07x (was 2.34x).
+- With `par for` on all threads (5 runs, whole run including about 10 ms of startup): checked 242 ms (234-283) to **107** (102-113), `--release` 102 (100-110) to 102 (100-109). Checked over `--release` 1.05x.
+
+**What is left** (`kestrel check --report main.kes`): checked 339 checks, 318 removed, 21 left; `--release` 8 checks, 7 removed, 1 left (`mesh`'s bounds check). Totals count an inlined body in each function that holds it. `hash`, `lattice`, `smooth`, `mix`, `octave` and `density` are never called any more (inlined everywhere), and **no check is left in the inlined `hash`, `lattice`, `smooth`, `mix` and `octave` code**. The checks left are the ones the design predicted, about a dozen per sample, none of them in the noise lookups:
+- **Per sample, 14 checks** (lines 62-65 of `voxels3d.kes`, in `solids`): the chunk offsets `cx * 32`, `(cx * 32) + x` and `((cx * 32) + x) - 1`, and the same for `y` and `z` (9 checks, because `cx`, `cy` and `cz` are parameters that can be any `int`); `seed + 1`, `seed + 2` and `y - ((4 * 32) / 2)` in `density`; `out[i]`; and `i + 1`. The last two stay because `i` is a separate counter bumped once per iteration of three nested loops, so nothing shows that it stays below `out.len` (34 cubed): a product in a fact.
+- **Per block of the meshing pass, 6 checks** (line 98): the chunk offsets `cx * 32 + x` for `x`, `y` and `z` again, and one `faces + ...` in `bench`. The report lists no `solid[i + k]` bounds check of the mesher, which the design expected to stay: `solids` is inlined into `chunk_faces`, so the array's length (34 cubed) is known there, and the index is a bounded expression of three loop variables (I read this off the report and the source; I did not confirm it another way).
+
+The chunk offsets don't depend on the loop they are in, and `out[i]` needs a product in a fact; hoisting loop-invariant checks and `@assume` are the next steps. Under `--release` only `mesh`'s bounds check is left. The old compiler has no report, so the "about 250 before" is the design's estimate (five checked multiplies, adds, shift checks, a narrowing check and bounds checks in each of the 482M lookups), not a count.
+
+**Compile time** (`kestrel build` of the whole program, to an exe, with the MSVC link; median of 9 runs alternating old and new, range in brackets):
+
+| Program | Old checked | New checked | Old `--release` | New `--release` |
+|---|---:|---:|---:|---:|
+| `voxels3d/main.kes` | 139 ms (132-207) | 181 ms (172-195) | 112 ms (107-114) | 160 ms (153-211) |
+| `demos/particles/particles.kes` | 141 (131-220) | 144 (139-150) | 135 (131-146) | 138 (135-146) |
+| `demos/voxels/voxels.kes` | 199 (192-248) | 263 (258-290) | 162 (156-166) | 234 (224-239) |
+
+- **The target (the analysis adds under 10%) is missed on the voxel programs and met on the particles demo.** The voxel world builds 30% slower checked and 43% slower with `--release` (+42 and +48 ms); the voxel viewer 32% and 44% (+64 and +72 ms); the particles demo 2%.
+- **The cost is the analysis itself, about 45 ms on the voxel world.** Compiling `main.kes` to object code with `kernels.exe --dump main` takes 58 ms with `--keep-checks` and 102 ms with the analysis (checked), 32 and 80 ms with `--release`: +44 and +48 ms, the same as the build's difference. It is the same in both builds because the analysis tracks everything either way; and it shows more in `--release` because that build otherwise compiles less.
+- **Why the voxel programs and not the demo:** the voxel world inlines `octave`, `lattice` and `hash` into one big sampling loop with many tracked values (the report: one function, `mesh`, holds 337 of the 339 checks), so the fixed-point passes over the loops, the facts between terms (up to 64) and the budget of statement visits do a lot of work; the particles demo's functions are small. I did not profile the analysis; the knobs the design names are `MAX_TERMS` and the fact-work budget. `kestrel check` (front end only) is not affected: 21 ms; `check --report` on the voxel world takes 90 ms.
+- A build is 110-260 ms either way, so the absolute cost is 40-70 ms per build of a large program. It is a miss against the target, not against any budget I know of.
