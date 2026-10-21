@@ -15,12 +15,27 @@
 //! given the value's data pointer where the method expects `self`. The arguments are lowered as
 //! for a direct call to the interface's abstract method, whose signature they follow.
 
-use kestrel_check::{IfaceId, Ty};
+use kestrel_check::{FnId, IfaceId, Tables, Ty};
 use kestrel_syntax::ast;
 
 use super::{kty, FnLowerer};
 use crate::ir::*;
 use crate::stack_envs::is_stack_fn;
+
+/// The methods that implement interface method `method` (named `name`): the method of that name of
+/// every struct and enum that lists its interface, from the checker's tables, whether or not a
+/// value of the type is ever made an interface value.
+pub(crate) fn implementations(t: &Tables, method: FnId, name: &str) -> Vec<FnId> {
+    let Some(iface) = t.ifaces.iter().position(|i| i.methods.contains(&method)) else { return Vec::new() };
+    let iface = IfaceId(iface as u32);
+    let structs = t.structs.iter().map(|s| (&s.ifaces, &s.methods));
+    let enums = t.enums.iter().map(|e| (&e.ifaces, &e.methods));
+    structs
+        .chain(enums)
+        .filter(|(ifaces, _)| ifaces.contains(&iface))
+        .map(|(_, methods)| *methods.get(name).unwrap_or_else(|| panic!("conformance guarantees a method `{name}`")))
+        .collect()
+}
 
 impl FnLowerer<'_> {
     /// `e` converted to the type `to` when that conversion makes an interface value from a struct

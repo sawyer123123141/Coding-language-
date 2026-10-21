@@ -179,3 +179,52 @@ fn define_module_removes_proven_checks() {
     // The module itself is left as it was: the analysis marks a copy.
     assert!(!format!("{:?}", m.funcs).contains("Proven"));
 }
+
+/// `(x & 255) * 1000` proven, `+ x` not: one check left in a checked build.
+const MUL: &str = "pure h(x: int) -> int { (x & 255) * 1000 + x }\nmain() {}\n";
+
+/// `MUL` analysed in place, as the driver does for an annotated program.
+fn analysed_in_place(arith: kestrel_kir::range::Arith) -> Module {
+    let mut m = optimized(MUL);
+    kestrel_kir::range::remove_checks(&mut m, arith);
+    assert_eq!(m.analysed, Some(arith));
+    m
+}
+
+#[test]
+fn an_analysed_module_is_compiled_as_it_is() {
+    let traps = |m: &Module| dump(m, Options::default(), "h").unwrap().matches("trap user2").count();
+    let mut m = analysed_in_place(kestrel_kir::range::Arith::Checked);
+    // The same code as codegen's own analysis of a copy gives.
+    assert_eq!(traps(&m), traps(&optimized(MUL)));
+    assert_eq!(traps(&m), 1);
+    // Not analysed again: a proof taken back by hand stays taken back.
+    struct Unprove;
+    impl VisitMut for Unprove {
+        fn visit_expr(&mut self, e: &mut Expr) {
+            walk_expr(self, e);
+            if let ExprKind::Proven(inner) = &mut e.kind {
+                *e = std::mem::replace(&mut **inner, Expr { kind: ExprKind::Bool(false), ty: KTy::Bool, line: 0 });
+            }
+        }
+    }
+    let h = m.funcs.iter_mut().find(|f| f.name == "h").unwrap();
+    Unprove.visit_stmts(&mut h.body);
+    assert_eq!(traps(&m), 2);
+}
+
+#[test]
+fn a_module_analysed_for_the_other_build_is_refused() {
+    let m = analysed_in_place(kestrel_kir::range::Arith::Wrapping);
+    let err = JitProgram::compile(&m, Options::default()).err().expect("refused");
+    assert_eq!(err, "the module was analysed for the other build");
+    // Its own build takes it.
+    JitProgram::compile(&m, Options { checked_arith: false, ..Options::default() }).expect("codegen");
+}
+
+#[test]
+fn an_analysed_module_with_every_check_kept_is_refused() {
+    let m = analysed_in_place(kestrel_kir::range::Arith::Checked);
+    let err = JitProgram::compile(&m, Options { remove_checks: false, ..Options::default() }).err().expect("refused");
+    assert_eq!(err, "the module was analysed, so it can't be compiled with every check kept");
+}

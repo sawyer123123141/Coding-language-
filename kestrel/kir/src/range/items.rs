@@ -107,7 +107,7 @@ impl<'a> Cx<'a> {
             match &e.what {
                 What::Alloc(r) => item(ItemKind::Allocation, reason_text(self.m, r, home)),
                 What::Fail(r) => item(ItemKind::CanFail, reason_text(self.m, r, home)),
-                What::Body(_) | What::Closure(_) => {}
+                What::Body(_) | What::Closure(_) | What::Cut => {}
                 What::Call(callee) => {
                     let c = callee.0 as usize;
                     let summary = &self.summaries[c];

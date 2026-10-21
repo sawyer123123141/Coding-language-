@@ -76,6 +76,7 @@ fn stmt<'a>(s: &'a Stmt, f: &mut impl FnMut(Node<'a>)) {
             }
             walk(body, f);
         }
+        Stmt::Prove { body, .. } => walk(body, f),
         Stmt::ForRange { start, end, body, .. } => {
             walk_expr(start, f);
             walk_expr(end, f);

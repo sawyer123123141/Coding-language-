@@ -27,7 +27,9 @@ pub struct Options {
     pub checked_arith: bool,
     /// Run range analysis (`kestrel_kir::range`) on a copy of the module and leave out the checks
     /// it proves can't fail. Off, every check stays (the analysis's own tests compare the two),
-    /// apart from any a caller marked proven itself.
+    /// apart from any a caller marked proven itself. A module analysed already (`Module::analysed`,
+    /// set by the driver for an annotated program) is compiled as it is: it must have been
+    /// analysed for this build, and this must be on.
     pub remove_checks: bool,
     /// Keep every proven check, but make its failure stop the program with "range analysis
     /// removed the ... check ..., but it fails; this is a compiler bug" (`KESTREL_CHECK_PROOFS=1`).
@@ -56,16 +58,21 @@ pub(crate) fn define_module<M: Module>(
     mut dump: Option<&mut dump::Dump>,
 ) -> Result<Vec<FuncId>, String> {
     // Range analysis runs here, on a copy, with this build's arithmetic: so every way of compiling
-    // gets it, and the proofs always assume the mode of the code emitted.
+    // gets it, and the proofs always assume the mode of the code emitted. A module the driver
+    // analysed already (an annotated program) is compiled as it is, for its own build only.
+    let mode = kir::range::Arith::of(opts.checked_arith);
     let analysed;
-    let m = if opts.remove_checks {
-        let mut copy = m.clone();
-        // What is left isn't needed here: `kestrel check --report` describes it.
-        kir::range::mark_proven(&mut copy, kir::range::Arith::of(opts.checked_arith));
-        analysed = copy;
-        &analysed
-    } else {
-        m
+    let m = match (m.analysed, opts.remove_checks) {
+        (Some(_), false) => return Err("the module was analysed, so it can't be compiled with every check kept".to_string()),
+        (Some(built), true) if built != mode => return Err("the module was analysed for the other build".to_string()),
+        (Some(_), true) | (None, false) => m,
+        (None, true) => {
+            let mut copy = m.clone();
+            // What is left isn't needed here: `kestrel check --report` describes it.
+            kir::range::mark_proven(&mut copy, mode);
+            analysed = copy;
+            &analysed
+        }
     };
     let cc = module.isa().default_call_conv();
     let ptr = module.target_config().pointer_type();

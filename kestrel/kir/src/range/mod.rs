@@ -72,6 +72,8 @@ pub struct FuncChecks {
     pub gave_up: bool,
     /// With `gave_up`: because the code nests too deeply (otherwise it took too many steps).
     pub deep: bool,
+    /// A check site was never decided (a gap in the analysis's walk): it is kept and listed last.
+    pub undecided: bool,
 }
 
 /// A check the analysis couldn't prove.
@@ -83,19 +85,24 @@ pub struct CheckLeft {
     /// The packed lines of the loops around it, outermost first: a `ForRange`'s `start.line`, a
     /// `While`'s `cond.line`.
     pub loops: Vec<u32>,
+    /// The ids of the `Stmt::Prove` blocks around it, outermost first (recorded with or without
+    /// the texts, for contracts).
+    pub regions: Vec<u32>,
     /// Why it may fail, worded for the report after the kind: "`a * b` may exceed `int` (`a` can be
     /// any `int`; `b` can be any `int`)".
     pub text: String,
 }
 
 /// Analyses every function with a body, marks the checks it proves, and returns what is left,
-/// each check with the text that says why (for `kestrel check --report`).
+/// each check with the text that says why (for `kestrel check --report`). Records the build in
+/// `Module::analysed`.
 pub fn remove_checks(m: &mut Module, arith: Arith) -> Analysis {
     run(m, arith, true)
 }
 
 /// Marks the checks the analysis proves, as `remove_checks` does, without describing the ones
-/// left: what a build needs. Their `text`s are empty and their `loops` aren't listed.
+/// left: what a build needs. Their `text`s are empty and their `loops` aren't listed (their
+/// `regions` are).
 pub fn mark_proven(m: &mut Module, arith: Arith) -> Analysis {
     run(m, arith, false)
 }
@@ -116,6 +123,7 @@ fn run(m: &mut Module, arith: Arith, texts: bool) -> Analysis {
         }
         a.funcs.push(checks);
     }
+    m.analysed = Some(arith);
     a
 }
 
@@ -177,11 +185,12 @@ fn analyse(m: &Module, f: &Func, arith: Arith, par_list: Option<&Place>, texts: 
     }
     let _ = cx.stmts(start, &f.body);
     if cx.gave_up {
-        let left = sites_of(f, arith).into_iter().map(|(_, s)| s.left(m, f, texts)).collect();
-        return (FuncChecks { left, removed: 0, gave_up: true, deep: cx.deep }, HashMap::new(), Vec::new(), cx.has_assume);
+        let left = sites_of(f, arith).into_iter().map(|(_, s, regions)| s.left(m, f, texts, regions)).collect();
+        let checks = FuncChecks { left, removed: 0, gave_up: true, deep: cx.deep, undecided: false };
+        return (checks, HashMap::new(), Vec::new(), cx.has_assume);
     }
     let mut proven = HashMap::new();
-    let mut left = Vec::new();
+    let (mut left, mut undecided) = (Vec::new(), false);
     for d in std::mem::take(&mut cx.order) {
         match d.left {
             None => {
@@ -192,16 +201,17 @@ fn analyse(m: &Module, f: &Func, arith: Arith, par_list: Option<&Place>, texts: 
     }
     // Every site is decided in some deciding pass; one that wasn't (a gap in the interpreter's
     // walk) keeps its check and is listed at the end. Its text is only made then.
-    for (key, site) in sites_of(f, arith) {
+    for (key, site, regions) in sites_of(f, arith) {
         if !cx.decisions.contains_key(&key) {
-            let c = site.left(m, f, texts);
+            let c = site.left(m, f, texts, regions);
             debug_assert!(false, "range analysis never decided a {:?} check in `{}`: {}", c.kind, f.name, c.text);
             left.push(c);
+            undecided = true;
         }
     }
     let removed = proven.len() as u32;
     let uses = std::mem::take(&mut cx.uses);
-    (FuncChecks { left, removed, gave_up: false, deep: false }, proven, uses, cx.has_assume)
+    (FuncChecks { left, removed, gave_up: false, deep: false, undecided }, proven, uses, cx.has_assume)
 }
 
 /// What happened to one check site in the deciding passes.
@@ -251,6 +261,8 @@ struct Cx<'a> {
     frames: Vec<Frame>,
     /// The packed lines of their headers.
     loop_lines: Vec<u32>,
+    /// The `Prove` blocks around the current point, outermost first.
+    regions: Vec<u32>,
     /// Facts from checks that passed on every path of the statements being analysed: each local's
     /// value is also in the range. A statement takes the ones its operands added (step 4).
     learned: Vec<Learn>,
@@ -306,6 +318,7 @@ impl<'a> Cx<'a> {
             deep: false,
             frames: Vec::new(),
             loop_lines: Vec::new(),
+            regions: Vec::new(),
             learned: Vec::new(),
             decisions: HashMap::new(),
             order: Vec::new(),
@@ -353,9 +366,12 @@ impl<'a> Cx<'a> {
         if self.plain > 0 {
             return;
         }
-        let left = (!proven).then(|| match self.texts {
-            true => CheckLeft { kind, line, loops: self.loop_lines.clone(), text: text(self) },
-            false => CheckLeft { kind, line, loops: Vec::new(), text: String::new() },
+        let left = (!proven).then(|| {
+            let regions = self.regions.clone();
+            match self.texts {
+                true => CheckLeft { kind, line, loops: self.loop_lines.clone(), regions, text: text(self) },
+                false => CheckLeft { kind, line, loops: Vec::new(), regions, text: String::new() },
+            }
         });
         match self.decisions.get(&key) {
             Some(&i) => {

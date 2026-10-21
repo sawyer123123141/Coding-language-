@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 
+pub use crate::contract::*;
 use crate::layout::{EnumLayout, StructLayout};
 pub use crate::ir_expr::*;
 pub use crate::ir_stmt::*;
@@ -177,6 +178,11 @@ pub struct Module {
     pub not_inlined: Vec<NotInlined>,
     /// Each `@assume` condition, by the id its `Stmt::Assume` gives it.
     pub assumptions: Vec<AssumeInfo>,
+    /// Each function, method or loop with a `@prove`, by the id its `Stmt::Prove` blocks give it.
+    pub contracts: Vec<ContractSite>,
+    /// The build range analysis marked the module for, in place (`range::remove_checks` or
+    /// `mark_proven`); `None` until then. Codegen compiles an analysed module as it is.
+    pub analysed: Option<crate::range::Arith>,
 }
 
 /// An `@assume` condition as written: for its run-time error and the report.

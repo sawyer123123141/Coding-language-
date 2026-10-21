@@ -13,7 +13,7 @@ impl Walk<'_> {
 
     pub(super) fn stmt(&mut self, s: &Stmt) {
         if self.depth >= MAX_DEPTH {
-            return;
+            return self.cut();
         }
         self.depth += 1;
         self.stmt_inner(s);
@@ -40,6 +40,11 @@ impl Walk<'_> {
                     }
                 }
                 self.stmts(body);
+            }
+            Stmt::Prove { id, body, .. } => {
+                self.regions.push(*id);
+                self.stmts(body);
+                self.regions.pop();
             }
             Stmt::While { cond, body } => {
                 let looped = cond.line != 0;

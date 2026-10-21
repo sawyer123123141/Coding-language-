@@ -3,6 +3,7 @@
 //! add-on.
 
 mod builtin;
+mod prove;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -11,6 +12,8 @@ use std::time::SystemTime;
 use kestrel_syntax::ast::Item;
 use kestrel_syntax::link::{link, Module};
 use kestrel_syntax::{parse_at, render, render_short, Diagnostic, LineIndex, Span};
+
+pub use prove::{prove, Proved};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum DiagStyle {
@@ -63,6 +66,9 @@ pub struct Compiled {
     /// The built-in modules (`window`, `draw`, `input`) the program uses, in
     /// the order they were loaded. They need the window library to run.
     pub builtins: Vec<&'static str>,
+    /// Every file's path, text and place in the shared span space, to render diagnostics found
+    /// after compiling (see `prove`).
+    sources: Vec<File>,
 }
 
 /// One source file of the program, laid out at `base` in a shared span space.
@@ -120,8 +126,9 @@ pub fn compile_unoptimized(path: &str, src: &str, style: DiagStyle, needs_main: 
     let mut module = kestrel_kir::lower(&program, &tables, &LineIndex::for_files(&parts));
     // Runtime errors name the file by its base name only: a built program mustn't carry the folders.
     module.files = files.iter().map(|f| base_name(&f.path)).collect();
-    let files = files.iter().map(|f| SourceFile::new(Path::new(&f.path))).collect();
-    (Some(Compiled { module, files, builtins }), text)
+    let sources = files;
+    let files = sources.iter().map(|f| SourceFile::new(Path::new(&f.path))).collect();
+    (Some(Compiled { module, files, builtins, sources }), text)
 }
 
 /// Reads `path` and compiles it (as a library when `needs_main` is false).

@@ -19,6 +19,8 @@ pub struct Event {
     /// The packed lines of the loops around it, outermost first (generated loops have no line and
     /// are left out).
     pub loops: Vec<u32>,
+    /// The ids of the `Stmt::Prove` blocks around it, outermost first (see `ContractSite`).
+    pub regions: Vec<u32>,
     pub what: What,
 }
 
@@ -34,15 +36,18 @@ pub enum What {
     /// counts as called (an edge for summaries only; its own items are listed with the function
     /// it is written in).
     Closure(FuncIdx),
+    /// The walk stopped here: the code nests more than `MAX_DEPTH` deep, and what is inside isn't
+    /// listed (the analysis gave the function up long before).
+    Cut,
 }
 
-/// How deep the walk goes: past this the code is left unlisted (the analysis gave up on it long
-/// before).
+/// How deep the walk goes: past this the code is left unlisted, with a `What::Cut` where it stops
+/// (the analysis gave up on it long before).
 const MAX_DEPTH: u32 = 4096;
 
 /// The events of function `f`, in the order the code runs them.
 pub fn events(m: &Module, f: &Func) -> Vec<Event> {
-    let mut w = Walk { m, f, out: Vec::new(), loops: Vec::new(), cur: f.lines.0, depth: 0, unused: unused_makes(f) };
+    let mut w = Walk { m, f, out: Vec::new(), loops: Vec::new(), regions: Vec::new(), cur: f.lines.0, depth: 0, unused: unused_makes(f) };
     w.stmts(&f.body);
     w.out
 }
@@ -52,6 +57,8 @@ struct Walk<'a> {
     f: &'a Func,
     out: Vec<Event>,
     loops: Vec<u32>,
+    /// The `Prove` blocks around the current point, outermost first.
+    regions: Vec<u32>,
     /// The packed line of the latest expression: the line of code that has none.
     cur: u32,
     depth: u32,
@@ -93,7 +100,15 @@ impl Walk<'_> {
 
     fn push(&mut self, line: u32, what: What) {
         let line = self.here(line);
-        self.out.push(Event { line, loops: self.loops.clone(), what });
+        self.out.push(Event { line, loops: self.loops.clone(), regions: self.regions.clone(), what });
+    }
+
+    /// The walk stops here (`MAX_DEPTH`): a `What::Cut`, once for a run of cut code in one region.
+    fn cut(&mut self) {
+        let again = self.out.last().is_some_and(|e| e.what == What::Cut && e.regions == self.regions);
+        if !again {
+            self.push(0, What::Cut);
+        }
     }
 
     fn reason(&self, line: u32, direct: Option<String>, via: String, tail: &str) -> Reason {
@@ -168,7 +183,7 @@ impl Walk<'_> {
 
     fn expr(&mut self, e: &Expr) {
         if self.depth >= MAX_DEPTH {
-            return;
+            return self.cut();
         }
         self.depth += 1;
         if e.line != 0 {

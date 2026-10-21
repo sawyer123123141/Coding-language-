@@ -146,6 +146,7 @@ pub fn operands(s: &Stmt) -> Vec<&Expr> {
         | Stmt::PushArena(Some(p), _) => index_exprs(p, &mut out),
         Stmt::If { .. }
         | Stmt::Assume { .. }
+        | Stmt::Prove { .. }
         | Stmt::While { .. }
         | Stmt::ForRange { .. }
         | Stmt::Break

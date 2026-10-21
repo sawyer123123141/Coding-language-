@@ -261,6 +261,7 @@ fn stmt_builds(s: &Stmt, calls: &mut Vec<FuncIdx>) -> bool {
         | Stmt::Assign(..)
         | Stmt::If { .. }
         | Stmt::Assume { .. }
+        | Stmt::Prove { .. }
         | Stmt::While { .. }
         | Stmt::ForRange { .. }
         | Stmt::Break

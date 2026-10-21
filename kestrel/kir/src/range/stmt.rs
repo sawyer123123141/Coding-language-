@@ -53,6 +53,7 @@ impl Cx<'_> {
                 a.join(&self.t, &b)
             }
             Stmt::Assume { conds, body, .. } => self.assume(st, s, conds, body),
+            Stmt::Prove { id, body, .. } => self.region(st, *id, body),
             Stmt::While { cond, body } => self.while_loop(st, cond, body),
             Stmt::ForRange { var, start, end, body } => self.for_range(st, s, *var, (start, end), body),
             Stmt::Break | Stmt::Continue => {
@@ -160,6 +161,7 @@ impl Cx<'_> {
             | Stmt::PushArena(Some(p), _) => self.place(st, p, true),
             Stmt::If { .. }
             | Stmt::Assume { .. }
+            | Stmt::Prove { .. }
             | Stmt::While { .. }
             | Stmt::ForRange { .. }
             | Stmt::Break

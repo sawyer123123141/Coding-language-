@@ -1,13 +1,17 @@
 //! Inlines calls to small functions, the way `block_at(y, h).weight()`
 //! wants: the callee's body is copied into the caller with its locals
 //! renamed and its by-pointer parameters replaced by the argument places.
+//! A callee with a contract (see `ContractSite`) has its copy marked: its body and its value's
+//! temporary go in a `Stmt::Prove` for each of its sites; the arguments, the caller's code, stay
+//! outside.
 
 mod descend;
+
+use std::collections::HashMap;
 
 use crate::ir::*;
 use crate::rename::{rename_expr, rename_stmts, Subst};
 use crate::visit::{walk, Node};
-
 
 /// Callees larger than this many KIR nodes stay calls. Big enough for a
 /// noise octave (8 lattice lookups), whose constant arguments then fold.
@@ -25,9 +29,17 @@ pub fn inline_small(m: &mut Module) {
     let originals = m.funcs.clone();
     let sizes: Vec<Result<usize, Why>> = originals.iter().enumerate().map(|(i, f)| inlinable(FuncIdx(i as u32), f)).collect();
     let mut log = Vec::new();
+    // Each contracted function's sites, in the order listed.
+    let mut sites: HashMap<u32, Vec<u32>> = HashMap::new();
+    for (id, site) in m.contracts.iter().enumerate() {
+        if let ProveTarget::Func(f) = site.target {
+            sites.entry(f.0).or_default().push(id as u32);
+        }
+    }
     for (i, f) in m.funcs.iter_mut().enumerate() {
         let locals = std::mem::take(&mut f.locals);
-        let mut cx = Inliner { originals: &originals, sizes: &sizes, locals, budget: GROWTH_BUDGET, caller: FuncIdx(i as u32), line: f.lines.0, log: &mut log };
+        let caller = FuncIdx(i as u32);
+        let mut cx = Inliner { originals: &originals, sizes: &sizes, sites: &sites, locals, budget: GROWTH_BUDGET, caller, line: f.lines.0, log: &mut log };
         cx.stmts(&mut f.body, 0);
         f.locals = cx.locals;
     }
@@ -100,6 +112,8 @@ struct Inliner<'a> {
     originals: &'a [Func],
     /// Each function's size when it can be inlined, or why not.
     sizes: &'a [Result<usize, Why>],
+    /// The contract sites of each function that has one (see `ProveTarget::Func`).
+    sites: &'a HashMap<u32, Vec<u32>>,
     /// The caller's locals; inlined callees add theirs.
     locals: Vec<Local>,
     /// Nodes the caller may still grow by.
@@ -144,7 +158,7 @@ impl Inliner<'_> {
                 let line = if *call != 0 { *call } else { crate::visit::args_line(args) };
                 if self.take(*fi, depth, line) {
                     let (fi, args) = (*fi, std::mem::take(args));
-                    let (mut body, value) = self.expand(fi, args, depth);
+                    let (mut body, value) = self.expand(fi, args, depth, line);
                     if let Some(v) = value {
                         // A discarded result still has to be computed (for its effects).
                         let tmp = self.temp("discard".into(), v.ty, local_kind(v.ty));
@@ -161,8 +175,10 @@ impl Inliner<'_> {
     }
 
     /// The callee's body, renamed into the caller, and its returned value.
-    /// Arguments are evaluated first, in order.
-    fn expand(&mut self, fi: FuncIdx, args: Vec<Arg>, depth: u32) -> (Vec<Stmt>, Option<Expr>) {
+    /// Arguments are evaluated first, in order. `line` is the call's packed line.
+    fn expand(&mut self, fi: FuncIdx, args: Vec<Arg>, depth: u32, line: u32) -> (Vec<Stmt>, Option<Expr>) {
+        // As `take` notes a call with no line of its own.
+        let at = if line == 0 { self.line } else { line };
         let callee = &self.originals[fi.0 as usize];
         let mut pre = Vec::new();
         let mut subst: Vec<Option<Subst>> = vec![None; callee.locals.len()];
@@ -217,8 +233,29 @@ impl Inliner<'_> {
         if let Some(v) = &mut value {
             self.expr(v, depth + 1);
         }
+        // (A program without contracts has no sites: nothing to look up.)
+        let sites = if self.sites.is_empty() { None } else { self.sites.get(&fi.0) };
+        if let Some(ids) = sites {
+            let (marked, v) = self.marked(ids, at, body, value);
+            (body, value) = (marked, v);
+        }
         pre.extend(body);
         (pre, value)
+    }
+
+    /// A contracted callee's expanded `body` and `value` as its sites' `Prove` blocks, the first
+    /// site outermost: the value is computed into a temporary inside them, and read after.
+    fn marked(&mut self, ids: &[u32], at: u32, mut body: Vec<Stmt>, value: Option<Expr>) -> (Vec<Stmt>, Option<Expr>) {
+        let value = value.map(|v| {
+            let (ty, line) = (v.ty, v.line);
+            let tmp = self.temp("result".into(), ty, local_kind(ty));
+            body.push(Stmt::Let(tmp, v));
+            Expr { kind: ExprKind::Load(Place::local(tmp)), ty, line }
+        });
+        for &id in ids.iter().rev() {
+            body = vec![Stmt::Prove { id, at, body }];
+        }
+        (body, value)
     }
 
     /// `place` with its index expressions evaluated once, now, so the

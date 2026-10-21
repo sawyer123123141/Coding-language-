@@ -54,6 +54,7 @@ pub fn walk_stmt<V: VisitMut + ?Sized>(v: &mut V, s: &mut Stmt) {
             }
             v.visit_stmts(body);
         }
+        Stmt::Prove { body, .. } => v.visit_stmts(body),
         Stmt::ForRange { start, end, body, .. } => {
             v.visit_expr(start);
             v.visit_expr(end);

@@ -28,6 +28,8 @@ impl Helpers {
         let idx = self.reserve();
         self.closures.insert(id, idx);
         let mut func = lower(self);
+        // An annotated loop in the literal's body is in this function, not the one around it.
+        self.repoint(&func.body, idx);
         func.name = format!("__kestrel_closure_{}", idx.0);
         self.funcs[(idx.0 - self.base) as usize] = func;
         idx

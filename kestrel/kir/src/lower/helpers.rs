@@ -78,6 +78,8 @@ pub(crate) struct Helpers {
     pub(crate) ifaces: super::tables::IfaceTables,
     /// Each `@assume` condition lowered so far, by its id (see `assume`).
     pub(crate) assumptions: Vec<AssumeInfo>,
+    /// The program's `@prove`s and the contract sites made so far (see `prove`).
+    pub(crate) proves: super::prove::Proves,
 }
 
 impl Helpers {
@@ -106,12 +108,15 @@ impl Helpers {
             consts,
             ifaces: Default::default(),
             assumptions: Vec::new(),
+            proves: Default::default(),
         }
     }
 
     /// Adds an outlined `par for` body, named for its index.
     pub(crate) fn add_par_body(&mut self, mut f: Func) -> FuncIdx {
         let idx = FuncIdx(self.base + self.funcs.len() as u32);
+        // The body's statements moved here, with any annotated loop in them.
+        self.repoint(&f.body, idx);
         f.name = format!("__kestrel_par_{}", idx.0);
         self.funcs.push(f);
         self.par_bodies.push(idx);

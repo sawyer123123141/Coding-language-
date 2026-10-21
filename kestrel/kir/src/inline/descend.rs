@@ -32,6 +32,7 @@ impl Inliner<'_> {
                 }
                 self.stmts(body, depth);
             }
+            Stmt::Prove { body, .. } => self.stmts(body, depth),
             Stmt::ForRange { start, end, body, .. } => {
                 self.expr(start, depth);
                 self.expr(end, depth);
@@ -100,7 +101,7 @@ impl Inliner<'_> {
         match &mut e.kind {
             ExprKind::Call(fi, args) if self.take(*fi, depth, e.line) => {
                 let (fi, args) = (*fi, std::mem::take(args));
-                let (body, value) = self.expand(fi, args, depth);
+                let (body, value) = self.expand(fi, args, depth, e.line);
                 let value = value.expect("a value call's callee ends in `return value`");
                 e.kind = if body.is_empty() { value.kind } else { ExprKind::Seq(body, Box::new(value)) };
             }

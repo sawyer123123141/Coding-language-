@@ -92,19 +92,27 @@ fn run() -> ExitCode {
     }
     let (compiled, diagnostics) = kestrel_driver::compile(&args.path, src, args.style);
     eprint!("{diagnostics}");
-    let Some(compiled) = compiled else { return ExitCode::from(1) };
+    let Some(mut compiled) = compiled else { return ExitCode::from(1) };
+    // An annotated program is analysed here, once, for this build; only `check` warns.
+    let checking = args.cmd == "check";
+    let proved = kestrel_driver::prove(&mut compiled, !args.release, checking, args.style);
+    eprint!("{}", proved.text);
+    if checking {
+        // The report still prints when a contract fails: it is how to see why.
+        if args.report {
+            print_report(compiled, !args.release, proved.analysis);
+        }
+        return if proved.ok { ExitCode::SUCCESS } else { ExitCode::from(1) };
+    }
+    if !proved.ok {
+        return ExitCode::from(1);
+    }
     let opts = Options {
         checked_arith: !args.release,
         verify_proofs: proofs_checked(std::env::var_os("KESTREL_CHECK_PROOFS").as_deref()),
         ..Options::default()
     };
     let result = match args.cmd.as_str() {
-        "check" => {
-            if args.report {
-                print_report(compiled, !args.release);
-            }
-            return ExitCode::SUCCESS;
-        }
         "run" => {
             // The program's relative paths (`window.screenshot`, textures) are read from its own folder.
             kestrel_window::set_program_dir(Path::new(&args.path).parent().unwrap_or(Path::new("")));
@@ -135,11 +143,11 @@ fn proofs_checked(value: Option<&std::ffi::OsStr>) -> bool {
 }
 
 /// Prints what range analysis leaves in the program for `kestrel check --report`, in the checks
-/// of a checked build or of a `--release` build (`checked`).
-fn print_report(mut compiled: kestrel_driver::Compiled, checked: bool) {
+/// of a checked build or of a `--release` build (`checked`). `analysis` is the driver's, of the
+/// module as it is now, when it analysed it already (for that build).
+fn print_report(mut compiled: kestrel_driver::Compiled, checked: bool, analysis: Option<kestrel_kir::range::Analysis>) {
     use kestrel_kir::range::{remove_checks, render::render, report::build, Arith};
-    let arith = Arith::of(checked);
-    let analysis = remove_checks(&mut compiled.module, arith);
+    let analysis = analysis.unwrap_or_else(|| remove_checks(&mut compiled.module, Arith::of(checked)));
     let report = build(&compiled.module, &analysis);
     let files = &compiled.files;
     let text = render(&report, &compiled.module, &|i| files.get(i as usize).is_none_or(|f| !f.is_builtin()));

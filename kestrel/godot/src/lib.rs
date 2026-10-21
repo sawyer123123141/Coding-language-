@@ -121,12 +121,21 @@ impl Kestrel {
     fn compile(&mut self) -> bool {
         let Some(path) = self.path.clone() else { return false };
         let (compiled, diagnostics) = kestrel_driver::compile_file(&path, DiagStyle::Full, false);
-        let Some(compiled) = compiled else {
+        let Some(mut compiled) = compiled else {
             godot_error!("{diagnostics}");
             return false;
         };
         if !diagnostics.is_empty() {
             godot_warn!("{diagnostics}");
+        }
+        // An annotated program is analysed for the checks setting it is compiled with.
+        let proved = kestrel_driver::prove(&mut compiled, self.checks, false, DiagStyle::Full);
+        if !proved.ok {
+            godot_error!("{}", proved.text);
+            return false;
+        }
+        if !proved.text.is_empty() {
+            godot_warn!("{}", proved.text);
         }
         // Those modules need Kestrel's own window, which Godot already has.
         if !compiled.builtins.is_empty() {

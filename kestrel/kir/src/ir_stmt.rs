@@ -92,6 +92,11 @@ pub enum Stmt {
     /// order when `check` is `Check` (a false one stops the program); its body is a plain block,
     /// treated like an `If` arm by every walker.
     Assume { conds: Vec<(u32, Expr)>, check: AssumeCheck, body: Vec<Stmt> },
+    /// Code a contract covers (see `ContractSite`): an annotated loop's statements (`at` 0), or a
+    /// contracted callee's body the inliner expanded, with its value's temporary (`at` the call's
+    /// packed line). `id` is the site's index in `Module::contracts`. A plain block, treated like
+    /// an `If` arm by every walker.
+    Prove { id: u32, at: u32, body: Vec<Stmt> },
 }
 
 /// Whether an assumption's conditions are evaluated.

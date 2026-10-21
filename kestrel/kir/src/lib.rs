@@ -1,3 +1,4 @@
+mod contract;
 pub mod inline;
 pub mod ir;
 mod ir_expr;

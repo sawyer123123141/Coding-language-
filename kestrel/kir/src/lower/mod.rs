@@ -21,6 +21,7 @@ mod map_helpers;
 mod maps;
 mod matching;
 mod par;
+mod prove;
 mod remove;
 mod scopes;
 mod sort;
@@ -44,6 +45,7 @@ use helpers::Helpers;
 pub fn lower(program: &Program, t: &Tables, lines: &LineIndex) -> Module {
     let (structs, enums) = layout::layouts(t);
     let mut helpers = Helpers::new(t.fns.len() as u32);
+    helpers.proves = prove::Proves::new(program, t);
     let mut funcs: Vec<Func> =
         (0..t.fns.len()).map(|i| FnLowerer::new(program, t, lines, Some(FnId(i as u32)), &mut helpers).lower()).collect();
     let init = consts::lower_init(program, t, lines, &mut helpers);
@@ -57,6 +59,7 @@ pub fn lower(program: &Program, t: &Tables, lines: &LineIndex) -> Module {
     let globals = helpers.consts.into_globals();
     let tables = helpers.ifaces.tables;
     let assumptions = helpers.assumptions;
+    let contracts = helpers.proves.sites;
     let m = Module {
         funcs,
         structs,
@@ -71,12 +74,15 @@ pub fn lower(program: &Program, t: &Tables, lines: &LineIndex) -> Module {
         tables,
         not_inlined: Vec::new(),
         assumptions,
+        contracts,
+        analysed: None,
     };
     // Stack environments live only as long as the call they are passed to.
     if cfg!(debug_assertions) {
         if let Err(e) = crate::check_stack_envs(&m) {
             panic!("{e}");
         }
+        prove::check_homes(&m);
     }
     m
 }

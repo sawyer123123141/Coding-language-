@@ -7,7 +7,15 @@ use super::{binop, helpers, kty, shift_amount, strings, FnLowerer};
 use crate::ir::*;
 
 impl<'a> FnLowerer<'a> {
+    /// Lowers `s` into `out`; a loop with a `@prove` goes into one `Stmt::Prove` (see `prove`).
     pub(crate) fn stmt(&mut self, s: &ast::Stmt, out: &mut Vec<Stmt>) {
+        if !self.annotated_loop(s, out) {
+            self.plain_stmt(s, out);
+        }
+    }
+
+    /// Lowers `s` into `out`, whatever annotation it has.
+    pub(crate) fn plain_stmt(&mut self, s: &ast::Stmt, out: &mut Vec<Stmt>) {
         let lowered = match s {
             ast::Stmt::Let { bind, value, else_block: Some(otherwise), .. } => {
                 return self.let_else(bind, value, otherwise, out);

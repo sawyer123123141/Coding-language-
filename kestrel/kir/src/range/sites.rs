@@ -101,48 +101,85 @@ pub(super) enum Site<'a> {
 }
 
 impl Site<'_> {
-    /// The site as a check left, with the text of a check nothing is known about (with `texts`).
-    pub(super) fn left(&self, m: &Module, f: &Func, texts: bool) -> CheckLeft {
+    /// The site as a check left, inside the `Prove` blocks `regions`, with the text of a check
+    /// nothing is known about (with `texts`).
+    pub(super) fn left(&self, m: &Module, f: &Func, texts: bool, regions: Vec<u32>) -> CheckLeft {
         match *self {
             Site::Expr(kind, e) => {
                 let text = if texts { show::check_text(m, f, kind, e, &[]) } else { String::new() };
-                CheckLeft { kind, line: e.line, loops: Vec::new(), text }
+                CheckLeft { kind, line: e.line, loops: Vec::new(), regions, text }
             }
             Site::Bounds(p, i) => {
                 let line = p.path[i].at().map_or(0, |at| at.line);
                 let text = if texts { show::bounds_text(m, f, p, i, None) } else { String::new() };
-                CheckLeft { kind: CheckKind::Bounds, line, loops: Vec::new(), text }
+                CheckLeft { kind: CheckKind::Bounds, line, loops: Vec::new(), regions, text }
             }
         }
     }
 }
 
-/// Every check site in `f`, in walk order. The node inside a `Proven` (a module analysed before)
-/// has no checks left, so it is no site.
-pub(super) fn sites_of(f: &Func, arith: Arith) -> Vec<(Key, Site<'_>)> {
+/// Every check site in `f`, in walk order, with the ids of the `Prove` blocks around it. The node
+/// inside a `Proven` (a module analysed before) has no checks left, so it is no site.
+pub(super) fn sites_of(f: &Func, arith: Arith) -> Vec<(Key, Site<'_>, Vec<u32>)> {
     let mut out = Vec::new();
     let mut inside_proven: Option<*const Expr> = None;
-    walk(&f.body, &mut |n| match n {
-        Node::Expr(e) => {
-            if let ExprKind::Proven(inner) = &e.kind {
-                inside_proven = Some(&**inner as *const Expr);
-            }
-            if inside_proven == Some(e as *const Expr) {
-                inside_proven = None;
-                return;
-            }
-            for kind in checks_of(e, arith) {
-                out.push((expr_key(e), Site::Expr(kind, e)));
-            }
-        }
-        Node::Place(p, _) => {
-            for (i, proj) in p.path.iter().enumerate() {
-                if is_bounds_site(proj) {
-                    out.push((index_key(proj), Site::Bounds(p, i)));
+    let mut open = Regions::default();
+    walk(&f.body, &mut |n| {
+        let regions = open.ids();
+        open.step(&n);
+        match n {
+            Node::Expr(e) => {
+                if let ExprKind::Proven(inner) = &e.kind {
+                    inside_proven = Some(&**inner as *const Expr);
+                }
+                if inside_proven == Some(e as *const Expr) {
+                    inside_proven = None;
+                    return;
+                }
+                for kind in checks_of(e, arith) {
+                    out.push((expr_key(e), Site::Expr(kind, e), regions.clone()));
                 }
             }
+            Node::Place(p, _) => {
+                for (i, proj) in p.path.iter().enumerate() {
+                    if is_bounds_site(proj) {
+                        out.push((index_key(proj), Site::Bounds(p, i), regions.clone()));
+                    }
+                }
+            }
+            Node::Stmt(_) => {}
         }
-        Node::Stmt(_) => {}
     });
     out
+}
+
+/// The `Prove` blocks open at each node of a `visit::walk`, which reports a block's statement
+/// before everything in it and has no end marker: each open block counts down the nodes left in
+/// it, and closes when none are.
+#[derive(Default)]
+struct Regions {
+    open: Vec<(u32, usize)>,
+}
+
+impl Regions {
+    fn ids(&self) -> Vec<u32> {
+        self.open.iter().map(|&(id, _)| id).collect()
+    }
+
+    /// Steps past node `n`, which was inside every block open before it.
+    fn step(&mut self, n: &Node) {
+        for (_, left) in &mut self.open {
+            *left -= 1;
+        }
+        while self.open.last().is_some_and(|&(_, left)| left == 0) {
+            self.open.pop();
+        }
+        if let Node::Stmt(Stmt::Prove { id, body, .. }) = n {
+            let mut inside = 0;
+            walk(body, &mut |_| inside += 1);
+            if inside > 0 {
+                self.open.push((*id, inside));
+            }
+        }
+    }
 }

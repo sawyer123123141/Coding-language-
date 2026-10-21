@@ -154,6 +154,7 @@ pub(super) fn lower_init(program: &Program, t: &Tables, lines: &LineIndex, helpe
     };
     // Lowering the values added helpers (copies), so the init comes after them.
     let idx = FuncIdx(helpers.base + helpers.funcs.len() as u32);
+    helpers.repoint(&func.body, idx);
     helpers.funcs.push(func);
     Some(idx)
 }

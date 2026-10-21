@@ -83,6 +83,8 @@ fn module() -> Module {
         tables: Vec::new(),
         not_inlined: Vec::new(),
         assumptions: Vec::new(),
+        contracts: Vec::new(),
+        analysed: None,
     }
 }
 

@@ -2,7 +2,7 @@
 //! fixed point, widening the ranges that still grow and dropping the facts that got weaker; then
 //! one more pass, with that state, decides the checks. A check is decided only in the final pass
 //! of every loop around it, so an inner loop skips its deciding pass unless every loop around it
-//! is deciding.
+//! is deciding. Also the `Prove` block an annotated loop is lowered into (`region`).
 
 use super::interval::Interval;
 use super::state::State;
@@ -14,6 +14,14 @@ use crate::ir::*;
 const SETTLE_ROUNDS: u32 = 8;
 
 impl Cx<'_> {
+    /// A `Prove` block: a plain block, whose checks left carry its id (see `CheckLeft::regions`).
+    pub(super) fn region(&mut self, st: State, id: u32, body: &[Stmt]) -> State {
+        self.regions.push(id);
+        let end = self.stmts(st, body);
+        self.regions.pop();
+        end
+    }
+
     pub(super) fn while_loop(&mut self, entry: State, cond: &Expr, body: &[Stmt]) -> State {
         self.repeat(entry, cond.line, |cx, top| {
             let (t, f) = cx.condition(top.clone(), cond);
