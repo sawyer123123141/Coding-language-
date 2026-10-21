@@ -249,8 +249,14 @@ impl Cx<'_> {
     /// it or inside it; a linear form over a term nothing else in the statement wrote (and that
     /// isn't such a length) relates `l` to that term, and `x = x + c` moves `x`'s facts by `c`
     /// instead.
+    ///
+    /// An untracked `l` (a list, array or struct, or a reference local: a loop element, a match
+    /// view, an inlined `var` parameter) gets its new value in the memory it points at, so that is
+    /// written as a place: every length in that memory goes, reached through `l` or not
+    /// (`homes.meets`: `grid[k].len` and another element `b.len` when `l` is `for k, l in grid`).
+    /// A tracked integer local is only its own value.
     pub(super) fn assign(&self, st: &mut State, l: LocalIdx, value: Option<Val>, rest: &[Write]) {
-        let own = Write::Local(l);
+        let own = if self.t.is_tracked(l) { Write::Local(l) } else { Write::Place(Place::local(l), WriteKind::Whole) };
         let placed = self.placed(&own);
         for (i, (_, node)) in self.t.lens.iter().enumerate() {
             if self.hits_len(&placed, i) {

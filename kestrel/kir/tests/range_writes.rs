@@ -288,3 +288,57 @@ fn an_inlined_get_and_a_pop_in_one_expression() {
     let left = left_of(&m, &a, "f", Bounds);
     assert!(left.iter().any(|c| line(c.line) == 11 && c.text.starts_with("`xs[i]`")), "inside it: {left:#?}");
 }
+
+/// A loop element given a whole new value, then a read through its list. Lines: the guard is on
+/// 5, `{write}` on 6, the read on 7.
+fn elem_assign(guard: &str, write: &str, read: &str) -> String {
+    format!(
+        "f(n: int) -> int {{\n var grid: list[list[int]] = [[n, n, n], [n, n, n]]\n var s = 0\n for k, row in grid {{\n  if {guard} {{\n   {write}\n   s += {read}\n  }}\n }}\n s\n}}"
+    )
+}
+
+#[test]
+fn assigning_a_loop_element_forgets_the_lengths_its_list_reaches() {
+    // `row = []` writes `grid[k]`, and may write any other element of `grid`.
+    for write in ["row = []", "row = [n]"] {
+        assert_eq!(bounds(&elem_assign("grid[k].len > 2", write, "grid[k][2]")).0, vec![7], "{write}");
+    }
+    let src = "f(n: int) -> int {
+    var grid: list[list[int]] = [[n, n, n], [n, n, n]]
+    var s = 0
+    for a in grid {
+        for b in grid {
+            if b.len > 2 {
+                a = []
+                s += b[2]
+            }
+        }
+    }
+    s
+}";
+    assert_eq!(bounds(src).0, vec![8]);
+    // A field inside the element.
+    let src = "struct Part {
+    items: list[int]
+}
+f(n: int) -> int {
+    var parts = [Part(items: [n, n, n]), Part(items: [n])]
+    var s = 0
+    for k, p in parts {
+        if parts[k].items.len > 2 {
+            p = Part(items: [])
+            s += parts[k].items[2]
+        }
+    }
+    s
+}";
+    assert_eq!(bounds(src).0, vec![10]);
+}
+
+#[test]
+fn assigning_a_loop_element_still_knows_its_new_length() {
+    // The near misses: without the write the guard proves the read, and the element's own new
+    // length is known.
+    assert_eq!(bounds(&elem_assign("grid[k].len > 2", "s += 1", "grid[k][2]")).0, vec![]);
+    assert_eq!(bounds(&elem_assign("n > 0", "row = [n, n]", "row[1]")).0, vec![]);
+}
