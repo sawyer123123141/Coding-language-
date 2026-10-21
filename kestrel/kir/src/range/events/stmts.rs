@@ -41,8 +41,10 @@ impl Walk<'_> {
                 }
                 self.stmts(body);
             }
-            Stmt::Prove { id, body, .. } => {
-                self.regions.push(*id);
+            Stmt::Prove { id, at, body } => {
+                let f = self.f;
+                let copy = self.copies.get_or_insert_with(|| crate::contract::prove_copies(&f.body))[&(s as *const Stmt as usize)];
+                self.regions.push(Region { id: *id, at: *at, copy });
                 self.stmts(body);
                 self.regions.pop();
             }

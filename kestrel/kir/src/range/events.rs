@@ -19,8 +19,8 @@ pub struct Event {
     /// The packed lines of the loops around it, outermost first (generated loops have no line and
     /// are left out).
     pub loops: Vec<u32>,
-    /// The ids of the `Stmt::Prove` blocks around it, outermost first (see `ContractSite`).
-    pub regions: Vec<u32>,
+    /// The `Stmt::Prove` blocks around it, outermost first (see `ContractSite`).
+    pub regions: Vec<Region>,
     pub what: What,
 }
 
@@ -47,7 +47,7 @@ const MAX_DEPTH: u32 = 4096;
 
 /// The events of function `f`, in the order the code runs them.
 pub fn events(m: &Module, f: &Func) -> Vec<Event> {
-    let mut w = Walk { m, f, out: Vec::new(), loops: Vec::new(), regions: Vec::new(), cur: f.lines.0, depth: 0, unused: unused_makes(f) };
+    let mut w = Walk { m, f, out: Vec::new(), loops: Vec::new(), regions: Vec::new(), copies: None, cur: f.lines.0, depth: 0, unused: unused_makes(f) };
     w.stmts(&f.body);
     w.out
 }
@@ -57,8 +57,10 @@ struct Walk<'a> {
     f: &'a Func,
     out: Vec<Event>,
     loops: Vec<u32>,
-    /// The `Prove` blocks around the current point, outermost first.
-    regions: Vec<u32>,
+    /// The `Prove` blocks around the current point, outermost first, and each block's number
+    /// (made at the first one: see `prove_copies`).
+    regions: Vec<Region>,
+    copies: Option<std::collections::HashMap<usize, u32>>,
     /// The packed line of the latest expression: the line of code that has none.
     cur: u32,
     depth: u32,

@@ -8,15 +8,18 @@ use super::interval::Interval;
 use super::state::State;
 use super::tracked::Tracked;
 use super::{writes, Cx};
+use crate::contract::prove_copies;
 use crate::ir::*;
 
 /// After this many rounds, a loop's top keeps only each term's bounds, so its repeats end.
 const SETTLE_ROUNDS: u32 = 8;
 
 impl Cx<'_> {
-    /// A `Prove` block: a plain block, whose checks left carry its id (see `CheckLeft::regions`).
-    pub(super) fn region(&mut self, st: State, id: u32, body: &[Stmt]) -> State {
-        self.regions.push(id);
+    /// A `Prove` block `s`: a plain block, whose checks left carry it (see `CheckLeft::regions`).
+    pub(super) fn region(&mut self, st: State, s: &Stmt, (id, at): (u32, u32), body: &[Stmt]) -> State {
+        let f = self.f;
+        let copy = self.copies.get_or_insert_with(|| prove_copies(&f.body))[&(s as *const Stmt as usize)];
+        self.regions.push(Region { id, at, copy });
         let end = self.stmts(st, body);
         self.regions.pop();
         end

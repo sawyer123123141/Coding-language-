@@ -5,10 +5,13 @@
 //! wraps each expanded copy of a contracted callee the same way (`id` is the site's index).
 //! Range analysis tags each check and event with the `Prove` blocks around it (its regions).
 
+use std::collections::HashMap;
+
 use kestrel_syntax::ast::Contract;
 use kestrel_syntax::Span;
 
-use crate::ir::FuncIdx;
+use crate::ir::{FuncIdx, Stmt};
+use crate::visit::{walk, Node};
 
 /// A set of contracts, one bit each.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -66,4 +69,29 @@ pub struct ContractSite {
     pub contracts: Vec<(Contract, Span)>,
     /// For a site made from an interface method's `@prove`: that method, as "`Shape.area`".
     pub required_by: Option<String>,
+}
+
+/// One `Stmt::Prove` block around a check or an event: which copy of which site. Two inlined
+/// copies of one callee in one function have the same `id` (and may have the same `at`); `copy`
+/// tells them apart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Region {
+    /// The site's index in `Module::contracts`.
+    pub id: u32,
+    /// The block's `at`: the packed line of the call an inlined copy was expanded at; 0 for a loop.
+    pub at: u32,
+    /// The block's number among the function's `Prove` blocks, in `visit::walk` order (0 first).
+    pub copy: u32,
+}
+
+/// The number of each `Prove` block in `stmts` (see `Region::copy`), by the block's address.
+pub fn prove_copies(stmts: &[Stmt]) -> HashMap<usize, u32> {
+    let mut out = HashMap::new();
+    walk(stmts, &mut |n| {
+        if let Node::Stmt(s @ Stmt::Prove { .. }) = n {
+            let copy = out.len() as u32;
+            out.insert(s as *const Stmt as usize, copy);
+        }
+    });
+    out
 }

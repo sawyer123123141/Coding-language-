@@ -85,9 +85,9 @@ pub struct CheckLeft {
     /// The packed lines of the loops around it, outermost first: a `ForRange`'s `start.line`, a
     /// `While`'s `cond.line`.
     pub loops: Vec<u32>,
-    /// The ids of the `Stmt::Prove` blocks around it, outermost first (recorded with or without
-    /// the texts, for contracts).
-    pub regions: Vec<u32>,
+    /// The `Stmt::Prove` blocks around it, outermost first (recorded with or without the texts,
+    /// for contracts).
+    pub regions: Vec<Region>,
     /// Why it may fail, worded for the report after the kind: "`a * b` may exceed `int` (`a` can be
     /// any `int`; `b` can be any `int`)".
     pub text: String,
@@ -261,8 +261,10 @@ struct Cx<'a> {
     frames: Vec<Frame>,
     /// The packed lines of their headers.
     loop_lines: Vec<u32>,
-    /// The `Prove` blocks around the current point, outermost first.
-    regions: Vec<u32>,
+    /// The `Prove` blocks around the current point, outermost first, and each block's number
+    /// (made at the first one: see `prove_copies`).
+    regions: Vec<Region>,
+    copies: Option<HashMap<usize, u32>>,
     /// Facts from checks that passed on every path of the statements being analysed: each local's
     /// value is also in the range. A statement takes the ones its operands added (step 4).
     learned: Vec<Learn>,
@@ -319,6 +321,7 @@ impl<'a> Cx<'a> {
             frames: Vec::new(),
             loop_lines: Vec::new(),
             regions: Vec::new(),
+            copies: None,
             learned: Vec::new(),
             decisions: HashMap::new(),
             order: Vec::new(),

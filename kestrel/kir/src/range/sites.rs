@@ -103,7 +103,7 @@ pub(super) enum Site<'a> {
 impl Site<'_> {
     /// The site as a check left, inside the `Prove` blocks `regions`, with the text of a check
     /// nothing is known about (with `texts`).
-    pub(super) fn left(&self, m: &Module, f: &Func, texts: bool, regions: Vec<u32>) -> CheckLeft {
+    pub(super) fn left(&self, m: &Module, f: &Func, texts: bool, regions: Vec<Region>) -> CheckLeft {
         match *self {
             Site::Expr(kind, e) => {
                 let text = if texts { show::check_text(m, f, kind, e, &[]) } else { String::new() };
@@ -120,12 +120,12 @@ impl Site<'_> {
 
 /// Every check site in `f`, in walk order, with the ids of the `Prove` blocks around it. The node
 /// inside a `Proven` (a module analysed before) has no checks left, so it is no site.
-pub(super) fn sites_of(f: &Func, arith: Arith) -> Vec<(Key, Site<'_>, Vec<u32>)> {
+pub(super) fn sites_of(f: &Func, arith: Arith) -> Vec<(Key, Site<'_>, Vec<Region>)> {
     let mut out = Vec::new();
     let mut inside_proven: Option<*const Expr> = None;
     let mut open = Regions::default();
     walk(&f.body, &mut |n| {
-        let regions = open.ids();
+        let regions = open.now();
         open.step(&n);
         match n {
             Node::Expr(e) => {
@@ -155,15 +155,16 @@ pub(super) fn sites_of(f: &Func, arith: Arith) -> Vec<(Key, Site<'_>, Vec<u32>)>
 
 /// The `Prove` blocks open at each node of a `visit::walk`, which reports a block's statement
 /// before everything in it and has no end marker: each open block counts down the nodes left in
-/// it, and closes when none are.
+/// it, and closes when none are. Blocks are numbered in the walk's order (`Region::copy`).
 #[derive(Default)]
 struct Regions {
-    open: Vec<(u32, usize)>,
+    open: Vec<(Region, usize)>,
+    seen: u32,
 }
 
 impl Regions {
-    fn ids(&self) -> Vec<u32> {
-        self.open.iter().map(|&(id, _)| id).collect()
+    fn now(&self) -> Vec<Region> {
+        self.open.iter().map(|&(r, _)| r).collect()
     }
 
     /// Steps past node `n`, which was inside every block open before it.
@@ -174,11 +175,13 @@ impl Regions {
         while self.open.last().is_some_and(|&(_, left)| left == 0) {
             self.open.pop();
         }
-        if let Node::Stmt(Stmt::Prove { id, body, .. }) = n {
+        if let Node::Stmt(Stmt::Prove { id, at, body }) = n {
+            let region = Region { id: *id, at: *at, copy: self.seen };
+            self.seen += 1;
             let mut inside = 0;
             walk(body, &mut |_| inside += 1);
             if inside > 0 {
-                self.open.push((*id, inside));
+                self.open.push((region, inside));
             }
         }
     }
