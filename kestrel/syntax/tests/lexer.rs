@@ -25,6 +25,16 @@ fn keywords_and_identifiers() {
 }
 
 #[test]
+fn at_is_a_token() {
+    let (t, d) = lex("@prove");
+    assert!(d.is_empty());
+    assert_eq!(t.iter().map(|t| t.tok.clone()).collect::<Vec<_>>(), vec![Tok::At, id("prove"), Tok::Eof]);
+    // The name starts where the `@` ends.
+    assert_eq!((t[0].span.start, t[0].span.end), (0, 1));
+    assert_eq!((t[1].span.start, t[1].span.end), (1, 6));
+}
+
+#[test]
 fn numbers() {
     assert_eq!(
         toks("42 1_000 0xFF 2.5 5"),
@@ -105,7 +115,7 @@ fn helpful_errors() {
     assert_eq!(errors("\"hp {x\""), vec!["unterminated `{` in a string"]);
     assert_eq!(errors("\"a {\"b\"}\""), vec!["unterminated `{` in a string"]);
     assert_eq!(errors("\"abc"), vec!["unterminated string"]);
-    assert_eq!(errors("a @ b"), vec!["unexpected character `@`"]);
+    assert_eq!(errors("a # b"), vec!["unexpected character `#`"]);
     assert_eq!(errors("99999999999999999999"), vec!["number is too large"]);
 }
 

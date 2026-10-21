@@ -29,8 +29,10 @@ impl Parser {
         while !self.at(&Tok::RBrace) && !self.at(&Tok::Eof) {
             match self.stmt() {
                 Ok(s) => {
+                    // `@assume(a) @assume(b)`: an assumption may be followed by another annotation.
+                    let more_annots = matches!(s, Stmt::Assume { .. }) && self.at(&Tok::At);
                     stmts.push(s);
-                    let ended = self.at(&Tok::RBrace) || self.eat(&Tok::Newline) || self.eat(&Tok::Semi);
+                    let ended = more_annots || self.at(&Tok::RBrace) || self.eat(&Tok::Newline) || self.eat(&Tok::Semi);
                     if !ended {
                         let found = self.peek().describe();
                         self.error_here(format!("expected end of line, found {found}"));
@@ -45,9 +47,10 @@ impl Parser {
         Ok(Block { stmts, span: start.to(end) })
     }
 
-    fn stmt(&mut self) -> PResult<Stmt> {
+    pub(super) fn stmt(&mut self) -> PResult<Stmt> {
         let start = self.span();
         match self.peek() {
+            Tok::At => self.annotated_stmt(),
             Tok::Let | Tok::Var => self.let_stmt(),
             Tok::For => self.for_stmt(false),
             Tok::While => {

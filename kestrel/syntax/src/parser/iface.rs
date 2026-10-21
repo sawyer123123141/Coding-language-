@@ -46,8 +46,16 @@ impl Parser {
         Ok(Item::Interface(InterfaceDecl { is_pub, name, name_span, methods, span: start.to(end) }))
     }
 
-    /// One method signature, which has no body: its `FnDecl` body is empty, at the signature's end.
+    /// One method signature, after any annotations.
     fn iface_method(&mut self, owner: &str) -> PResult<FnDecl> {
+        let pending = self.annots_before_item()?;
+        let method = self.iface_method_after_annots(owner)?;
+        self.attach_to_fn(pending, &method);
+        Ok(method)
+    }
+
+    /// A method signature, which has no body: its `FnDecl` body is empty, at the signature's end.
+    fn iface_method_after_annots(&mut self, owner: &str) -> PResult<FnDecl> {
         let start = self.span();
         let is_pure = self.eat(&Tok::Pure);
         if self.at(&Tok::Native) {

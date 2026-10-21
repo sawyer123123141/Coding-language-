@@ -142,6 +142,7 @@ impl Rewriter<'_> {
                 self.block(body);
             }
             Stmt::Return { value: Some(v), .. } | Stmt::Expr(v) => self.expr(v),
+            Stmt::Assume { cond, .. } => self.expr(cond),
             Stmt::Return { value: None, .. } | Stmt::Break(_) | Stmt::Continue(_) | Stmt::Remove { .. } => {}
         }
     }

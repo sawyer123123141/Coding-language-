@@ -1,0 +1,29 @@
+@assume(1 < 2)
+
+struct S {
+    @assume(1 < 2)
+    x: int
+}
+
+enum E {
+    A
+    @assume(1 < 2)
+    B
+}
+
+interface I {
+    @assume(1 < 2)
+    f(self)
+}
+
+main() {
+    @assume
+    @assume()
+}
+
+// error 1: `@assume` goes inside a function, as a statement of its own
+// error 4: `@assume` goes inside a function, as a statement of its own
+// error 10: `@assume` goes inside a function, as a statement of its own
+// error 15: `@assume` goes inside a function, as a statement of its own
+// error 20: `@assume` needs a condition, like `@assume(i < xs.len)`
+// error 21: `@assume` needs a condition, like `@assume(i < xs.len)`

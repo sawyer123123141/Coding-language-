@@ -1,3 +1,4 @@
+mod annot;
 mod branch;
 mod closure;
 mod depth;
@@ -10,7 +11,7 @@ mod stmt;
 
 use std::collections::HashMap;
 
-use crate::ast::{BindId, Binding, Expr, ExprId, ExprKind, Program, TypeExpr, TypeKind};
+use crate::ast::{BindId, Binding, Expr, ExprId, ExprKind, Program, ProveAnnot, TypeExpr, TypeKind};
 use crate::diag::Diagnostic;
 use crate::span::Span;
 use crate::token::{Tok, Token};
@@ -40,6 +41,13 @@ pub struct Parser {
     /// For each open bracket token (by index), the index of its closing one; found by scanning
     /// for a closure and kept (see `closure`).
     closes: HashMap<usize, usize>,
+    /// The file's source text and where its bytes start in the program (see `parse_at`): the
+    /// text of an `@assume`'s condition, and the line breaks after an annotation, come from it.
+    /// Empty (from `new` and `with_ids`) when the caller has none: both then fall back to empty.
+    src: String,
+    base: u32,
+    /// The `@prove`s read so far, one per target (see `annot`).
+    proves: Vec<ProveAnnot>,
 }
 
 impl Parser {
@@ -65,12 +73,23 @@ impl Parser {
             too_deep_at: None,
             no_closure_head: false,
             closes: HashMap::new(),
+            src: String::new(),
+            base: 0,
+            proves: Vec::new(),
         }
+    }
+
+    /// Gives the parser the text of the file its tokens come from, whose bytes start at `base`.
+    pub fn with_source(mut self, src: &str, base: u32) -> Self {
+        self.src = src.to_string();
+        self.base = base;
+        self
     }
 
     pub fn parse_program(mut self) -> (Program, Vec<Diagnostic>) {
         let items = self.items();
-        let program = Program { items, expr_count: self.next_expr, bind_count: self.next_bind, builtin_ranges: Vec::new() };
+        let proves = std::mem::take(&mut self.proves);
+        let program = Program { items, expr_count: self.next_expr, bind_count: self.next_bind, builtin_ranges: Vec::new(), proves };
         (program, self.finish_diags())
     }
 

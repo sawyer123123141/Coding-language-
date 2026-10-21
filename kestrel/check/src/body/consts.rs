@@ -193,6 +193,7 @@ fn names_in_block(b: &Block, out: &mut Vec<(String, Span)>) {
                 names_in_block(body, out);
             }
             Stmt::Return { value: Some(v), .. } | Stmt::Expr(v) => names_used(v, out),
+            Stmt::Assume { cond, .. } => names_used(cond, out),
             Stmt::Return { value: None, .. } | Stmt::Break(_) | Stmt::Continue(_) | Stmt::Remove { .. } => {}
         }
     }

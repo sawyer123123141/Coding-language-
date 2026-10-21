@@ -38,6 +38,7 @@ impl Stmt {
             Stmt::Return { value: None, .. } => "return".into(),
             Stmt::Return { value: Some(v), .. } => format!("(return {})", v.to_sexpr()),
             Stmt::Remove { name, .. } => format!("(remove {name})"),
+            Stmt::Assume { cond, .. } => format!("(assume {})", cond.to_sexpr()),
             Stmt::Expr(e) => e.to_sexpr(),
         }
     }

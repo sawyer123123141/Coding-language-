@@ -105,6 +105,7 @@ impl Parser {
                 self.bump();
                 return Ok(self.expr_node(ExprKind::Ident("self".to_string()), span));
             }
+            Tok::At => return self.annot_in_expr(),
             Tok::If => return self.if_expr(),
             Tok::Match => return self.match_expr(),
             other => {

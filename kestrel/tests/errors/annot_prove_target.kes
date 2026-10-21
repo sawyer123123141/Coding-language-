@@ -1,0 +1,35 @@
+@prove(no_alloc)
+struct S { x: int }
+
+@prove(no_alloc)
+let LIMIT = 3
+
+struct T {
+    @prove(inline)
+    y: int
+}
+
+main() {
+    @prove(no_alloc)
+    let a = 1
+    @prove(no_alloc)
+    if a > 0 { print(a) }
+    @prove(no_alloc)
+    match s { A { } else { } }
+    let f = @prove(no_alloc) (x: int) -> int { x }
+    @prove(no_alloc)
+    let g = (x: int) -> int { x }
+    @prove(no_alloc)
+    @assume(a > 0)
+    for i from 0 to 3 { }
+}
+
+// error 1: `@prove` goes before a function, a method or a loop (`for`, `par for` or `while`)
+// error 4: `@prove` goes before a function, a method or a loop (`for`, `par for` or `while`)
+// error 8: `@prove` goes before a function, a method or a loop (`for`, `par for` or `while`)
+// error 13: `@prove` goes before a function, a method or a loop (`for`, `par for` or `while`)
+// error 15: `@prove` goes before a function, a method or a loop (`for`, `par for` or `while`)
+// error 17: `@prove` goes before a function, a method or a loop (`for`, `par for` or `while`)
+// error 19: `@prove` goes before a function, a method or a loop (`for`, `par for` or `while`)
+// error 20: `@prove` goes before a function, a method or a loop (`for`, `par for` or `while`)
+// error 22: `@prove` goes before a function, a method or a loop (`for`, `par for` or `while`)

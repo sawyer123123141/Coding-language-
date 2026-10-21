@@ -136,6 +136,7 @@ impl<'a> BodyChecker<'a> {
                     self.changes_in(arena, out);
                     self.changes_in_block(body, out);
                 }
+                Stmt::Assume { cond, .. } => self.changes_in(cond, out),
                 Stmt::Break(_) | Stmt::Continue(_) | Stmt::Return { value: None, .. } => {}
                 // Removing the loop's item changes its list: all of the list's variable, since the
                 // loop it belongs to has been left.

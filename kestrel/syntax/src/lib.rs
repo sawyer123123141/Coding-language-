@@ -40,7 +40,7 @@ pub fn parse_at(src: &str, base: u32, next_expr: u32, next_bind: u32) -> (ast::P
             shift(&mut d.span);
         }
     }
-    let (program, parse_diags) = parser::Parser::with_ids(toks, next_expr, next_bind).parse_program();
+    let (program, parse_diags) = parser::Parser::with_ids(toks, next_expr, next_bind).with_source(src, base).parse_program();
     diags.extend(parse_diags);
     (program, diags)
 }

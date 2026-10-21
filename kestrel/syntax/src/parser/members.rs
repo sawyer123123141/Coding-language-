@@ -15,6 +15,14 @@ impl Parser {
         Ok(())
     }
 
+    /// The annotations before a member, now parsed: `method` is the method it came to, if any.
+    fn attach_to_method(&mut self, pending: Option<super::annot::Pending>, method: Option<&FnDecl>) {
+        match method {
+            Some(f) => self.attach_to_fn(pending, f),
+            None => self.attach_to_nothing(pending),
+        }
+    }
+
     pub(super) fn struct_decl(&mut self, is_pub: bool, start: Span) -> PResult<Item> {
         self.bump();
         let (name, name_span) = self.expect_ident("a struct name")?;
@@ -65,8 +73,16 @@ impl Parser {
         Ok(Item::Enum(EnumDecl { is_pub, name, name_span, ifaces, variants, methods, span: start.to(end) }))
     }
 
-    /// One variant (`Name` or `Name { field: Type, ... }`) or one method.
+    /// One variant (`Name` or `Name { field: Type, ... }`) or one method, after any annotations.
     fn enum_member(&mut self, owner: &str, variants: &mut Vec<VariantDecl>, methods: &mut Vec<FnDecl>) -> PResult<()> {
+        let pending = self.annots_before_item()?;
+        let before = methods.len();
+        self.enum_member_after_annots(owner, variants, methods)?;
+        self.attach_to_method(pending, methods.get(before));
+        Ok(())
+    }
+
+    fn enum_member_after_annots(&mut self, owner: &str, variants: &mut Vec<VariantDecl>, methods: &mut Vec<FnDecl>) -> PResult<()> {
         let start = self.span();
         let is_method = matches!(self.peek(), Tok::Pub | Tok::Pure | Tok::Native) || self.peek_at(1) == &Tok::LParen;
         if is_method {
@@ -116,8 +132,16 @@ impl Parser {
         }
     }
 
-    /// One `field: Type [= default]` or one method inside a struct body.
+    /// One `field: Type [= default]` or one method inside a struct body, after any annotations.
     fn struct_member(&mut self, owner: &str, fields: &mut Vec<FieldDecl>, methods: &mut Vec<FnDecl>) -> PResult<()> {
+        let pending = self.annots_before_item()?;
+        let before = methods.len();
+        self.struct_member_after_annots(owner, fields, methods)?;
+        self.attach_to_method(pending, methods.get(before));
+        Ok(())
+    }
+
+    fn struct_member_after_annots(&mut self, owner: &str, fields: &mut Vec<FieldDecl>, methods: &mut Vec<FnDecl>) -> PResult<()> {
         let start = self.span();
         let is_pub = self.eat(&Tok::Pub);
         let is_pure = self.eat(&Tok::Pure);

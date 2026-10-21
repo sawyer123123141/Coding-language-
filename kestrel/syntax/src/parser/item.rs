@@ -26,6 +26,13 @@ impl Parser {
     }
 
     fn item(&mut self) -> PResult<Item> {
+        let pending = self.annots_before_item()?;
+        let item = self.item_after_annots()?;
+        self.attach_to_item(pending, &item);
+        Ok(item)
+    }
+
+    fn item_after_annots(&mut self) -> PResult<Item> {
         let start = self.span();
         let is_pub = self.eat(&Tok::Pub);
         match self.peek().clone() {

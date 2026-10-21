@@ -268,6 +268,7 @@ fn stmt_removes(s: &Stmt, name: &str) -> bool {
         Stmt::Arena { body, .. } => b(body),
         Stmt::In { arena, body, .. } => e(arena) || b(body),
         Stmt::Return { value: Some(v), .. } | Stmt::Expr(v) => e(v),
+        Stmt::Assume { cond, .. } => e(cond),
         Stmt::Return { value: None, .. } | Stmt::Break(_) | Stmt::Continue(_) => false,
     }
 }

@@ -74,6 +74,8 @@ impl<'a> FnLowerer<'a> {
             ast::Stmt::Continue(_) => return self.jump(Stmt::Continue, out),
             ast::Stmt::Return { value, .. } => return self.return_stmt(value.as_ref(), out),
             ast::Stmt::Remove { span, .. } => return self.remove_stmt(*span, out),
+            // Task 1b lowers an assumption (and checks it at run time); until then it has no effect.
+            ast::Stmt::Assume { .. } => return,
             ast::Stmt::Expr(e) => return self.expr_stmt(e, out),
         };
         out.push(lowered);

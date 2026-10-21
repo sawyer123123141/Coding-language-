@@ -18,6 +18,44 @@ pub struct Program {
     /// that user code can't, like `GpuHandle`). Empty from the parser and `link`; the
     /// driver, which knows which files are built in, fills it after linking.
     pub builtin_ranges: Vec<std::ops::Range<u32>>,
+    /// The `@prove` annotations, kept beside the tree and keyed by the span of the function,
+    /// method or loop each is on, so no node changes shape. Spans are unique, so a target has one.
+    pub proves: Vec<ProveAnnot>,
+}
+
+/// What a `@prove` promises (see `2026-10-18-at-annotations-design.md`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Contract {
+    NoAlloc,
+    NoChecks,
+    NoPanic,
+    Inline,
+}
+
+impl Contract {
+    pub fn name(self) -> &'static str {
+        match self {
+            Contract::NoAlloc => "no_alloc",
+            Contract::NoChecks => "no_checks",
+            Contract::NoPanic => "no_panic",
+            Contract::Inline => "inline",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Contract> {
+        [Contract::NoAlloc, Contract::NoChecks, Contract::NoPanic, Contract::Inline].into_iter().find(|c| c.name() == name)
+    }
+}
+
+/// The `@prove` annotations on one function, method or loop, merged: each contract once, in the
+/// order written, with where it is written.
+#[derive(Clone, Debug)]
+pub struct ProveAnnot {
+    /// The span of the `FnDecl` or loop statement it is on.
+    pub target: Span,
+    pub contracts: Vec<(Contract, Span)>,
+    /// From the first `@` to the last `)`.
+    pub span: Span,
 }
 
 #[derive(Clone, Debug)]
@@ -187,6 +225,9 @@ pub enum Stmt {
     Return { value: Option<Expr>, span: Span },
     /// `remove b`: removes the current item `b` of a `for b in xs` loop over a list.
     Remove { name: String, name_span: Span, span: Span },
+    /// `@assume(cond)`: a fact the analysis may use for the rest of the block. `text` is the
+    /// condition as written, with each run of white space one space.
+    Assume { cond: Expr, text: String, span: Span },
     Expr(Expr),
 }
 
@@ -287,7 +328,8 @@ impl Stmt {
             | Stmt::Arena { span, .. }
             | Stmt::In { span, .. }
             | Stmt::Return { span, .. }
-            | Stmt::Remove { span, .. } => *span,
+            | Stmt::Remove { span, .. }
+            | Stmt::Assume { span, .. } => *span,
             Stmt::Break(span) | Stmt::Continue(span) => *span,
             Stmt::Expr(e) => e.span,
         }

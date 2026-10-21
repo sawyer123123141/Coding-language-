@@ -13,7 +13,7 @@ pub enum Tok {
     Return, Break, Continue, And, Or, Not, True, False, NoneKw, Use, Pub, SelfKw, Native,
     // punctuation
     LParen, RParen, LBrace, RBrace, LBracket, RBracket, Comma, Colon, Dot, Arrow, Question,
-    Semi, Newline,
+    Semi, Newline, At,
     // operators
     Plus, Minus, Star, Slash, Percent, Assign, EqEq, NotEq, Lt, Gt, Le, Ge,
     PlusEq, MinusEq, StarEq, SlashEq, PercentEq,
@@ -107,7 +107,7 @@ impl Tok {
             Use => "use", Pub => "pub", SelfKw => "self", Native => "native",
             LParen => "(", RParen => ")", LBrace => "{", RBrace => "}", LBracket => "[",
             RBracket => "]", Comma => ",", Colon => ":", Dot => ".", Arrow => "->",
-            Question => "?", Semi => ";", Plus => "+", Minus => "-", Star => "*",
+            Question => "?", Semi => ";", At => "@", Plus => "+", Minus => "-", Star => "*",
             Slash => "/", Percent => "%", Assign => "=", EqEq => "==", NotEq => "!=",
             Lt => "<", Gt => ">", Le => "<=", Ge => ">=", PlusEq => "+=", MinusEq => "-=",
             StarEq => "*=", SlashEq => "/=", PercentEq => "%=",

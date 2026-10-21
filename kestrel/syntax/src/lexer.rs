@@ -254,6 +254,7 @@ impl<'a> Lexer<'a> {
             '.' => Tok::Dot,
             '?' => Tok::Question,
             ';' => Tok::Semi,
+            '@' => Tok::At,
             '+' => Tok::Plus,
             '-' => Tok::Minus,
             '*' => Tok::Star,

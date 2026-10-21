@@ -155,6 +155,10 @@ impl<'a> BodyChecker<'a> {
                 self.check_remove(name, *name_span, *span);
                 Ty::Unit
             }
+            Stmt::Assume { cond, .. } => {
+                self.check_assume(cond);
+                Ty::Unit
+            }
             Stmt::Expr(e) => self.check_discarded(e),
         }
     }

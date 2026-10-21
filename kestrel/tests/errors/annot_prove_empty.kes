@@ -1,0 +1,10 @@
+@prove
+f1() {}
+
+@prove()
+f2() {}
+
+main() {}
+
+// error 1: `@prove` needs at least one contract, like `@prove(no_alloc)`
+// error 4: `@prove` needs at least one contract, like `@prove(no_alloc)`
