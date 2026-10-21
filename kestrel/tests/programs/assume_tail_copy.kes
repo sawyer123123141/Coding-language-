@@ -1,0 +1,14 @@
+pure keep(xs: list[int]) -> list[int] {
+    @assume(xs.len > 0)
+    xs
+}
+
+main() {
+    let a: list[int] = [1, 2, 3]
+    var b = keep(a)
+    b[0] = 9
+    print(a[0])
+    print(b[0])
+}
+// expect: 1
+// expect: 9

@@ -48,6 +48,12 @@ pub fn walk_stmt<V: VisitMut + ?Sized>(v: &mut V, s: &mut Stmt) {
             v.visit_expr(cond);
             v.visit_stmts(body);
         }
+        Stmt::Assume { conds, body, .. } => {
+            for (_, c) in conds {
+                v.visit_expr(c);
+            }
+            v.visit_stmts(body);
+        }
         Stmt::ForRange { start, end, body, .. } => {
             v.visit_expr(start);
             v.visit_expr(end);

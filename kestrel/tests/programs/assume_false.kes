@@ -1,0 +1,13 @@
+id(x: int, d: int) -> int {
+    if d == 0 { return x }
+    id(x, d - 1)
+}
+
+main() {
+    let xs = [1, 2, 3]
+    let n = id(5, 1)
+    @assume(n <= xs.len)
+    print(n)
+}
+// expect-stderr: assumption `n <= xs.len` is false on line 9 of assume_false.kes
+// expect-exit: 101

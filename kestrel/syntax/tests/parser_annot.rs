@@ -95,6 +95,13 @@ fn assume_is_a_statement() {
 }
 
 #[test]
+fn assume_text_leaves_out_comments() {
+    let p = ok("f(n: int, xs: [int]) {\n @assume(n <= // why\n xs.len and n>=0)\n}\n");
+    let Stmt::Assume { text, .. } = &fn_decl(&p, 0).body.stmts[0] else { panic!() };
+    assert_eq!(text, "n <= xs.len and n>=0");
+}
+
+#[test]
 fn two_assumes_share_a_line() {
     assert_eq!(body("@assume(a > 0) @assume(b > 0)"), "{(assume (> a 0)); (assume (> b 0))}");
     assert_eq!(body("@assume(a > 0) @prove(no_checks) while a < 3 { }"), "{(assume (> a 0)); (while (< a 3) {})}");

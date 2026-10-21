@@ -1,6 +1,7 @@
 mod aggregate;
 mod arenas;
 mod arith;
+mod assume;
 mod call;
 mod check;
 mod collections;

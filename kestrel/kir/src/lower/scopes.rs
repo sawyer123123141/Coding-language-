@@ -3,6 +3,7 @@
 
 use kestrel_syntax::ast;
 
+use super::assume::Ending;
 use super::helpers::{has_heap, owning};
 use super::FnLowerer;
 use crate::ir::*;
@@ -77,49 +78,51 @@ impl<'a> FnLowerer<'a> {
         out
     }
 
-    fn scoped_block(&mut self, block: &ast::Block, scope: Scope) -> Vec<Stmt> {
+    /// Whether leaving the innermost scope does anything (see `cleanup`).
+    pub(super) fn scope_has_cleanup(&self) -> bool {
+        let s = self.scopes.last().expect("inside a scope");
+        !s.owning.is_empty() || s.arena.is_some() || s.unlock.is_some() || !s.finish.is_empty()
+    }
+
+    fn scoped_block(&mut self, block: &ast::Block, scope: Scope, ending: Ending) -> Vec<Stmt> {
         self.scopes.push(scope);
         let mut out = Vec::new();
-        for s in &block.stmts {
-            self.stmt(s, &mut out);
-        }
+        self.block_rest(&block.stmts, ending, &mut out);
         let s = self.scopes.pop().expect("scopes balance");
         out.extend(self.cleanup(&s));
         out
     }
 
     pub(crate) fn block_stmts(&mut self, block: &ast::Block) -> Vec<Stmt> {
-        self.scoped_block(block, Scope::default())
+        self.scoped_block(block, Scope::default(), Ending::Stmts)
     }
 
     pub(crate) fn loop_block(&mut self, block: &ast::Block) -> Vec<Stmt> {
-        self.scoped_block(block, Scope { is_loop: true, ..Scope::default() })
+        self.scoped_block(block, Scope { is_loop: true, ..Scope::default() }, Ending::Stmts)
     }
 
     /// A loop body that runs `finish` on every way out of each pass: its end, `continue`, `break`
     /// and `return`.
     pub(crate) fn loop_block_finishing(&mut self, block: &ast::Block, finish: Vec<Stmt>) -> Vec<Stmt> {
-        self.scoped_block(block, Scope { is_loop: true, finish, ..Scope::default() })
+        self.scoped_block(block, Scope { is_loop: true, finish, ..Scope::default() }, Ending::Stmts)
     }
 
     /// A block used as a value: its statements and its tail value, which is
     /// `None` when the block can't finish normally.
     pub(crate) fn block_value(&mut self, block: &ast::Block) -> (Vec<Stmt>, Option<Expr>) {
+        self.value_block(block, Ending::Value)
+    }
+
+    /// `block_value` for an arm (`Ending::Value`) or a function's body (`Ending::Body`).
+    pub(crate) fn value_block(&mut self, block: &ast::Block, ending: Ending) -> (Vec<Stmt>, Option<Expr>) {
         self.scopes.push(Scope::default());
         let mut stmts = Vec::new();
-        let mut value = None;
-        if let Some((last, init)) = block.stmts.split_last() {
-            for s in init {
-                self.stmt(s, &mut stmts);
-            }
-            match last {
-                ast::Stmt::Expr(e) if !self.leaves_early(e) => value = Some(self.expr(e)),
-                other => self.stmt(other, &mut stmts),
-            }
-        }
+        // A value computed inside an assumption is already a temporary of its own.
+        let (value, settled) = self.block_rest(&block.stmts, ending, &mut stmts);
         let s = self.scopes.pop().expect("scopes balance");
         let cleanup = self.cleanup(&s);
-        if cleanup.is_empty() {
+        if cleanup.is_empty() || settled {
+            stmts.extend(cleanup);
             return (stmts, value);
         }
         // The value may read what's about to be dropped, so compute it first:
@@ -151,7 +154,7 @@ impl<'a> FnLowerer<'a> {
         let place = arena.map(|a| self.place_or_temp(a, out, true));
         let free = place.is_none();
         out.push(Stmt::PushArena(place, self.line(body.span)));
-        let inner = self.scoped_block(body, Scope { arena: Some(free), ..Scope::default() });
+        let inner = self.scoped_block(body, Scope { arena: Some(free), ..Scope::default() }, Ending::Stmts);
         out.extend(inner);
     }
 

@@ -58,6 +58,12 @@ pub(crate) fn rename_stmts(stmts: &mut [Stmt], subst: &[Subst]) {
                 rename_expr(cond, subst);
                 rename_stmts(body, subst);
             }
+            Stmt::Assume { conds, body, .. } => {
+                for (_, c) in conds {
+                    rename_expr(c, subst);
+                }
+                rename_stmts(body, subst);
+            }
             Stmt::ForRange { var, start, end, body } => {
                 rename_local(var, subst);
                 rename_expr(start, subst);

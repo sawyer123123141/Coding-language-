@@ -1,0 +1,16 @@
+id(x: int, d: int) -> int {
+    if d == 0 { return x }
+    id(x, d - 1)
+}
+
+pure at(xs: [int], i: int) -> int {
+    @assume(i < xs.len)
+    xs[i]
+}
+
+main() {
+    let xs = [1, 2, 3]
+    print(at(xs, id(7, 1)))
+}
+// expect-stderr: assumption `i < xs.len` is false on line 7 of assume_inlined_false.kes
+// expect-exit: 101

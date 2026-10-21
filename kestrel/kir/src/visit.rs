@@ -70,6 +70,12 @@ fn stmt<'a>(s: &'a Stmt, f: &mut impl FnMut(Node<'a>)) {
             walk_expr(cond, f);
             walk(body, f);
         }
+        Stmt::Assume { conds, body, .. } => {
+            for (_, c) in conds {
+                walk_expr(c, f);
+            }
+            walk(body, f);
+        }
         Stmt::ForRange { start, end, body, .. } => {
             walk_expr(start, f);
             walk_expr(end, f);

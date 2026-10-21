@@ -145,6 +145,7 @@ pub fn operands(s: &Stmt) -> Vec<&Expr> {
         | Stmt::DropGpu(p)
         | Stmt::PushArena(Some(p), _) => index_exprs(p, &mut out),
         Stmt::If { .. }
+        | Stmt::Assume { .. }
         | Stmt::While { .. }
         | Stmt::ForRange { .. }
         | Stmt::Break

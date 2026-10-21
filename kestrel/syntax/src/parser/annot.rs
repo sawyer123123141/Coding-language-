@@ -101,19 +101,32 @@ impl Parser {
             self.error(head, ASSUME_EMPTY);
             return Err(());
         }
-        let open = self.bump().span;
+        self.bump();
+        let first = self.pos;
         let cond = self.nested(|p| p.inside_brackets(Self::expr))?;
+        let last = self.pos;
         let close = self.expect(&Tok::RParen, "`)`")?;
-        let text = self.source_text(open.end, close.start);
+        let text = self.tokens_text(first, last);
         Ok(Annot::Assume { cond, text, span: head.to(close) })
     }
 
-    /// The source between two offsets (program offsets) with each run of white space one space;
-    /// empty when the parser has no source.
-    fn source_text(&self, from: u32, to: u32) -> String {
+    /// The source of tokens `from..to` as written, with one space wherever white space or a
+    /// comment separates two of them; empty when the parser has no source.
+    fn tokens_text(&self, from: usize, to: usize) -> String {
+        if self.src.is_empty() {
+            return String::new();
+        }
         let at = |o: u32| o.saturating_sub(self.base) as usize;
-        let text = self.src.get(at(from)..at(to)).unwrap_or_default();
-        text.split_whitespace().collect::<Vec<_>>().join(" ")
+        let mut text = String::new();
+        let mut end = None;
+        for t in self.toks[from..to].iter().filter(|t| t.tok != Tok::Newline) {
+            if end.is_some_and(|e| e != t.span.start) {
+                text.push(' ');
+            }
+            text.push_str(self.src.get(at(t.span.start)..at(t.span.end)).unwrap_or_default());
+            end = Some(t.span.end);
+        }
+        text
     }
 
     fn line_breaks_between(&self, from: u32, to: u32) -> usize {

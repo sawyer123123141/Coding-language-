@@ -6,6 +6,7 @@
 //! (`refine`), loops repeated to a fixed point (`loops`). See the range-analysis design spec.
 
 mod arith;
+mod assume;
 mod bounds;
 mod eval;
 pub mod events;

@@ -1,0 +1,31 @@
+@prove(no_alloc)
+pure mix(a: int, b: int) -> int {
+    (a ^ b) & (a | b)
+}
+
+interface Shape {
+    @prove(inline)
+    pure area(self) -> int
+}
+
+struct Square: Shape {
+    side: int
+
+    @prove(inline)
+    pure perimeter(self) -> int { self.side * 4 }
+
+    pure area(self) -> int { self.side * self.side }
+}
+
+main() {
+    let xs = [1, 2, 3, 4]
+    var s = 0
+    @prove(no_alloc, no_panic)
+    for i from 0 to xs.len {
+        s = s ^ xs[i]
+    }
+    let q = Square(3)
+    let sh: Shape = q
+    print(mix(s, 6) + q.perimeter() + sh.area())
+}
+// expect: 23

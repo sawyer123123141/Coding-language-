@@ -76,6 +76,8 @@ pub(crate) struct Helpers {
     pub(super) consts: ConstGlobals,
     /// The method tables of interface values (see `tables`).
     pub(crate) ifaces: super::tables::IfaceTables,
+    /// Each `@assume` condition lowered so far, by its id (see `assume`).
+    pub(crate) assumptions: Vec<AssumeInfo>,
 }
 
 impl Helpers {
@@ -103,6 +105,7 @@ impl Helpers {
             par_bodies,
             consts,
             ifaces: Default::default(),
+            assumptions: Vec::new(),
         }
     }
 

@@ -86,6 +86,7 @@ fn module() -> Module {
         files: Vec::new(),
         tables: vec![MethodTable { type_id: 7, copy: FuncIdx(3), print: FuncIdx(4), methods: vec![FuncIdx(0)] }],
         not_inlined: Vec::new(),
+        assumptions: Vec::new(),
     }
 }
 

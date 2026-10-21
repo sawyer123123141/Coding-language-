@@ -87,6 +87,21 @@ pub enum Stmt {
     /// Stops the program with this run-time error message (no line: the copy function of an
     /// owning type's method table, which no line of the program calls directly).
     Fail(String),
+    /// `@assume`: the conditions (each with its id, an index into `Module::assumptions`), then
+    /// `body`, the rest of the block the assumption is written in. Each condition is evaluated in
+    /// order when `check` is `Check` (a false one stops the program); its body is a plain block,
+    /// treated like an `If` arm by every walker.
+    Assume { conds: Vec<(u32, Expr)>, check: AssumeCheck, body: Vec<Stmt> },
+}
+
+/// Whether an assumption's conditions are evaluated.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AssumeCheck {
+    /// Evaluated where the assumption is written; a false one stops the program.
+    Check,
+    /// Not evaluated (a `--release` build that doesn't need it; `KESTREL_CHECK_PROOFS=1` still
+    /// evaluates it).
+    Trust,
 }
 
 #[derive(Clone, Debug, PartialEq)]

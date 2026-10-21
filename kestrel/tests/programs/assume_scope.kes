@@ -1,0 +1,36 @@
+pure pick(xs: [int], i: int) -> int {
+    if i >= 0 {
+        @assume(i < xs.len)
+        return xs[i]
+    }
+    0
+}
+
+pure tail(xs: [int], i: int) -> int {
+    @assume(i >= 0 and i < xs.len)
+    xs[i] * 2
+}
+
+main() {
+    let xs = [4, 5, 6]
+    var s = 0
+    var k = 0
+    while true {
+        @assume(k >= 0)
+        if k == 3 {
+            break
+        }
+        s += pick(xs, k) + tail(xs, k)
+        k += 1
+    }
+    let v = if s > 0 {
+        @assume(s > 0)
+        s + 1
+    } else {
+        0
+    }
+    print(s)
+    print(v)
+}
+// expect: 45
+// expect: 46

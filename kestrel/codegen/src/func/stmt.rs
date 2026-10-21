@@ -31,6 +31,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             }
             kir::Stmt::Assign(p, e) => self.assign(p, e)?,
             kir::Stmt::If { cond, then_body, else_body } => return self.if_stmt(cond, then_body, else_body),
+            kir::Stmt::Assume { conds, check, body } => return self.assume(conds, *check, body),
             kir::Stmt::While { cond, body } => self.while_loop(cond, body)?,
             kir::Stmt::ForRange { var, start, end, body } => self.for_range(*var, start, end, body)?,
             kir::Stmt::Break => {

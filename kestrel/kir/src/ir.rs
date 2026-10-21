@@ -175,6 +175,19 @@ pub struct Module {
     pub tables: Vec<MethodTable>,
     /// Each call `inline_small` left in place and why, in the order it decided.
     pub not_inlined: Vec<NotInlined>,
+    /// Each `@assume` condition, by the id its `Stmt::Assume` gives it.
+    pub assumptions: Vec<AssumeInfo>,
+}
+
+/// An `@assume` condition as written: for its run-time error and the report.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AssumeInfo {
+    /// The condition's text ("n <= xs.len").
+    pub text: String,
+    /// The `@assume`'s span in the program's source.
+    pub span: kestrel_syntax::Span,
+    /// The packed line of the `@assume` (see `pack_line`).
+    pub line: u32,
 }
 
 /// A memory location: a local, or a path of fields and elements inside one.

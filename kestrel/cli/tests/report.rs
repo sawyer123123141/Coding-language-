@@ -165,3 +165,15 @@ fn built_in_modules_are_left_out() {
     assert!(text.contains("calls the native function `window.open` (line 4); its body isn't known here"), "{text}");
     assert!(!text.contains("<builtin>") && !text.contains("window.kes"), "{text}");
 }
+
+#[test]
+fn an_assumption_is_a_way_to_fail() {
+    // (From Task 3 `kestrel check` also warns that this assumption removes no check, so stderr may
+    // hold a warning.)
+    let src = "pure g(n: int) -> int { @assume(n > 0)\n    n * 2\n}\n\nmain() {}\n";
+    let dir = project("assume", &[("assume.kes", src)]);
+    let out = kestrel(&["check", "--report"], &dir.join("assume.kes"));
+    assert!(out.status.success(), "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(text.contains("line 1: can fail: the assumption `n > 0` is checked here\n"), "{text}");
+}

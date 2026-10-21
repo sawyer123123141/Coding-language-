@@ -26,6 +26,12 @@ impl Inliner<'_> {
                 self.expr(cond, depth);
                 self.stmts(body, depth);
             }
+            Stmt::Assume { conds, body, .. } => {
+                for (_, c) in conds {
+                    self.expr(c, depth);
+                }
+                self.stmts(body, depth);
+            }
             Stmt::ForRange { start, end, body, .. } => {
                 self.expr(start, depth);
                 self.expr(end, depth);

@@ -1,3 +1,4 @@
+mod assume;
 mod builtins;
 mod call;
 mod closure;
@@ -55,7 +56,22 @@ pub fn lower(program: &Program, t: &Tables, lines: &LineIndex) -> Module {
     }
     let globals = helpers.consts.into_globals();
     let tables = helpers.ifaces.tables;
-    let m = Module { funcs, structs, enums, elems, print_fns: helpers.print, par_bodies: helpers.par_bodies, globals, init, main, files: Vec::new(), tables, not_inlined: Vec::new() };
+    let assumptions = helpers.assumptions;
+    let m = Module {
+        funcs,
+        structs,
+        enums,
+        elems,
+        print_fns: helpers.print,
+        par_bodies: helpers.par_bodies,
+        globals,
+        init,
+        main,
+        files: Vec::new(),
+        tables,
+        not_inlined: Vec::new(),
+        assumptions,
+    };
     // Stack environments live only as long as the call they are passed to.
     if cfg!(debug_assertions) {
         if let Err(e) = crate::check_stack_envs(&m) {
@@ -234,7 +250,7 @@ impl<'a> FnLowerer<'a> {
     /// (if any) and starts by binding the heap constants it uses.
     pub(crate) fn lower_body(&mut self, block: &ast::Block, ret: Option<KTy>) -> Vec<Stmt> {
         let mut body = if ret.is_some() {
-            let (mut stmts, tail) = self.block_value(block);
+            let (mut stmts, tail) = self.value_block(block, assume::Ending::Body);
             if let Some(v) = tail {
                 let v = self.owned(v, true);
                 stmts.push(Stmt::Return(Some(v)));

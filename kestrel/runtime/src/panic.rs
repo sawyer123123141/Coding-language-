@@ -135,6 +135,26 @@ pub unsafe extern "C" fn kestrel_rt_fail(msg: *const u8, len: i64) -> ! {
     fail(&String::from_utf8_lossy(bytes));
 }
 
+/// The message for an `@assume` condition that is false: "assumption `n <= xs.len` is false on
+/// line 9 of f.kes". No `file` (empty) leaves out " of {file}".
+pub fn assume_failed_message(text: &str, line: i32, file: &str) -> String {
+    let of = if file.is_empty() { String::new() } else { format!(" of {file}") };
+    format!("assumption `{text}` is false on line {line}{of}")
+}
+
+/// An `@assume` condition, whose text is the `len` bytes at `text`, is false.
+///
+/// # Safety
+/// `text` points at `len` bytes of UTF-8 that stay valid (compiled code passes static data), and
+/// `file` is null or points at a static `FileName`.
+#[no_mangle]
+pub unsafe extern "C" fn kestrel_rt_assume_failed(text: *const u8, len: i64, line: i32, file: *const FileName) -> ! {
+    // SAFETY: the caller passes `len` readable bytes at `text`.
+    let bytes = unsafe { std::slice::from_raw_parts(text, len as usize) };
+    let name = of_file(file);
+    fail(&assume_failed_message(&String::from_utf8_lossy(bytes), line, name.strip_prefix(" of ").unwrap_or("")));
+}
+
 #[no_mangle]
 pub extern "C" fn kestrel_rt_fmod_f32(a: f32, b: f32) -> f32 {
     a % b
@@ -163,6 +183,12 @@ mod tests {
         for (kind, word) in kinds {
             assert!(proof_failed_message(kind, 1, "a.kes").contains(&format!("removed the {word} check")));
         }
+    }
+
+    #[test]
+    fn a_false_assumption_names_its_text_line_and_file() {
+        assert_eq!(assume_failed_message("n <= xs.len", 9, "f.kes"), "assumption `n <= xs.len` is false on line 9 of f.kes");
+        assert_eq!(assume_failed_message("i >= 0", 3, ""), "assumption `i >= 0` is false on line 3");
     }
 
     #[test]
