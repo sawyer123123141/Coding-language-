@@ -87,7 +87,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     }
 
     /// `xs.add(v)`. `v` is evaluated first (it may read `xs`), then the
-    /// list grows if it's full.
+    /// list grows if it's full. Range analysis relies on `v` running before
+    /// the place is found (`kir::range` `change_len`): keep that order.
     pub(crate) fn list_add(&mut self, list: &Place, value: &kir::Expr) -> Result<(), String> {
         let ty = self.place_ty(list);
         let (size, align) = self.elem_size_align(ty);

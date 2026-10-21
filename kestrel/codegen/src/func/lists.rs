@@ -12,7 +12,8 @@ use super::FuncLowerer;
 impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// `xs.remove_at(i)`, `xs.insert(i, v)`, `xs.clear()`, and the compaction that ends a loop that
     /// removes items. The arguments are evaluated first (`v` may read `xs`, and `i` may be any
-    /// integer type), then the runtime moves the items.
+    /// integer type), then the runtime moves the items. Range analysis relies on the arguments
+    /// running before the place is found (`kir::range` `change_len`): keep that order.
     pub(crate) fn list_op(&mut self, op: kir::ListOp, list: &Place, args: &[kir::Expr]) -> Result<(), String> {
         let ty = self.place_ty(list);
         let (size, align) = self.elem_size_align(ty);
@@ -87,7 +88,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         Ok(())
     }
 
-    /// Sets the length of the list at `list`.
+    /// Sets the length of the list at `list`: the new length first, then the place (range
+    /// analysis relies on that order, see `kir::range` `change_len`).
     pub(crate) fn set_len(&mut self, list: &Place, len: &kir::Expr) -> Result<(), String> {
         let n = self.expr(len)?;
         let header = self.place_addr(list)?;

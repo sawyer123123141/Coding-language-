@@ -294,7 +294,8 @@ impl Cx<'_> {
     }
 
     /// Length node `n` is now `len`, when that is over a term none of `writes` (the statement's,
-    /// its effect included) changed.
+    /// its effect included) changed. Like `change_len`, it relies on codegen finding the place
+    /// after the statement's operands (`codegen/src/func/lists.rs` `set_len`).
     fn set_len(&self, st: &mut State, n: usize, len: Option<Lin>, writes: &[Write]) {
         st.forget_node(&self.t, n);
         if let Some(x) = len.filter(|x| x.node != n && !self.touched(writes, x.node)) {
@@ -305,6 +306,13 @@ impl Cx<'_> {
     /// The length of the list at `p` changes by `change`: it moves only for the term that must be
     /// `p`'s length; every other length that may be inside `p` is forgotten. `rest` are the
     /// statement's other writes, `all` the same with this one.
+    ///
+    /// The one place the analysis depends on codegen's order: the key is `p` as named after the
+    /// operands ran, so `grid[i].add(next(var i))` shifts the length of `grid[i]` for the new `i`
+    /// (`rest` forgot it, and the shift keeps "at least 1"). That holds because codegen evaluates
+    /// a list statement's operands before it finds the place (`codegen/src/func/collections.rs`
+    /// `list_add`, `lists.rs` `list_op` and `set_len`). `range_order_list_place.kes` fails if
+    /// that order changes.
     fn change_len(&self, st: &mut State, p: &Place, change: &LenChange, value: Option<Val>, (rest, all): (&[Write], &[Write])) {
         let key = terms::key_of(self.f, p, p.path.len());
         let set = match change {

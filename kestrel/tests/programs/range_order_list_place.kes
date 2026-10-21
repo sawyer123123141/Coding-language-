@@ -1,0 +1,14 @@
+// expect: 0 1 5
+// Codegen evaluates a list statement's operands before its place: `next` sets `i` to 1 first,
+// so `grid[1]` grows. Range analysis relies on that order (`change_len`): it proves `grid[i][0]`
+// from the shifted length of `grid[i]` as named after the operands.
+next(var i: int) -> int {
+    i = 1
+    5
+}
+main() {
+    var grid: list[list[int]] = [[], []]
+    var i = 0
+    grid[i].add(next(var i))
+    print("{grid[0].len} {grid[1].len} {grid[i][0]}")
+}
