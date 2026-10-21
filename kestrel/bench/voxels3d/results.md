@@ -130,3 +130,66 @@ The chunk offsets don't depend on the loop they are in, and `out[i]` needs a pro
 - **The cost is the analysis itself, about 45 ms on the voxel world.** Compiling `main.kes` to object code with `kernels.exe --dump main` takes 58 ms with `--keep-checks` and 102 ms with the analysis (checked), 32 and 80 ms with `--release`: +44 and +48 ms, the same as the build's difference. It is the same in both builds because the analysis tracks everything either way; and it shows more in `--release` because that build otherwise compiles less.
 - **Why the voxel programs and not the demo:** the voxel world inlines `octave`, `lattice` and `hash` into one big sampling loop with many tracked values (the report: one function, `mesh`, holds 337 of the 339 checks), so the fixed-point passes over the loops, the facts between terms (up to 64) and the budget of statement visits do a lot of work; the particles demo's functions are small. I did not profile the analysis; the knobs the design names are `MAX_TERMS` and the fact-work budget. `kestrel check` (front end only) is not affected: 21 ms; `check --report` on the voxel world takes 90 ms.
 - A build is 110-260 ms either way, so the absolute cost is 40-70 ms per build of a large program. It is a miss against the target, not against any budget I know of.
+
+## Tuned copy (2026-10-20)
+
+`voxels3d_tuned.kes` is `voxels3d.kes` tuned by hand, as fast as Kestrel makes it today with source changes only; `voxels3d.kes` stays the benchmark, unchanged. It builds the same world block for block: every one of the 24 lattice hashes per sample is still finished and divided by 65535, every float operation of the noise is done in the original's order, and the mesher makes the same faces in the same order. A comparison program (not checked in) built both modules' `solids` and `mesh` for all 256 chunks and found every solid flag, vertex, normal and index equal, checked and `--release`; it reports 30 million differences when one constant is changed by 0.00001. What moved is work the original repeats: the parts of a hash and of an octave that depend only on y and z are taken once per row of 34 samples, the parts that depend only on x once per chunk. It builds on its own (`kestrel build voxels3d_tuned.kes`, which prints 463,749); `run.ps1 -Tuned` adds it to the standard run.
+
+**Compiler:** a copy of `kestrel.exe` (with `kestrel_runtime.lib` next to it) taken at commit 8105e9e, whose last compiler change is 0ad0280; `cargo build --release` at 8105e9e compiled nothing new, so the copy matches it. Round B was being built on `main` at the same time, so every build and run used the copy, from `C:\kt\voxtuned`.
+
+**Rust:** there was no Rust version of this benchmark, so a straight port was written for this measurement, the way the Kestrel and C# versions are written, with no hand tuning (`voxels3d.rs`, kept outside the repository at `C:\kt\voxtuned\rust\`; rustc 1.97.0, `-C opt-level=3`, the checked row with `-C overflow-checks=on`). It prints 463,749.
+
+**World build, one thread** (Ryzen 7 5800X, Windows 11). Two sessions, each taking turns (frozen, tuned, Rust, C#, the empty worlds, then again), 9 and 7 runs; medians, with the range of the whole runs in brackets, and the world column with the startup taken out (Session 2 uses Kestrel's startup for Rust). The machine was busier than in the "Range analysis" section (Roblox was running; the frozen `--release` build took 488 ms on a quiet stretch earlier the same evening and 529-546 here), so compare rows within a session:
+
+| | Session 1: whole run | world | Session 2: whole run | world |
+|---|---:|---:|---:|---:|
+| Kestrel frozen, checks on | 602 ms (586-618) | 587 ms | 574 ms (572-598) | 560 ms |
+| **Kestrel tuned, checks on** | 429 ms (415-466) | **414 ms** | 423 ms (410-434) | **409 ms** |
+| Kestrel frozen, `--release` | 561 ms (546-581) | 546 ms | 543 ms (525-555) | 529 ms |
+| **Kestrel tuned, `--release`** | 429 ms (410-452) | **414 ms** | 418 ms (416-430) | **404 ms** |
+| Rust, overflow checks on | 451 ms (440-517) | 437 ms | 433 ms (427-445) | 419 ms |
+| Rust, release | 441 ms (433-480) | 427 ms | 435 ms (418-449) | 421 ms |
+| C# .NET 9 (as written) | 1,661 ms (1,636-2,864) | 1,573 ms | 1,615 ms (1,589-1,658) | 1,527 ms |
+| Startup: Kestrel (empty world) | 15 ms (14-62) | | 14 ms (14-20) | |
+| Startup: Rust, .NET (width 0) | 14 ms (13-17), 88 ms (85-97) | | -, 88 ms (84-111) | |
+
+- **The tuned copy is about 25% faster than the frozen one** (tuned over frozen: `--release` 0.76 in both sessions, checked 0.71 and 0.73), and **its checked build costs nothing over `--release`** (1.00 and 1.01; the frozen one 1.08 and 1.06).
+- **The tuned copy is level with a straight Rust port** (0.96-0.97x Rust `--release`; the frozen copy is 1.26-1.28x). The Rust port needs none of the hand changes below, because LLVM hoists loop-invariant code and reassociates on its own: most of what follows is what the Rust compiler already does.
+- C# as written is about 3.8x the tuned copy.
+- The inner sampling loop went from 703 instructions per sample to 465 (`--release`, read from the disassembly). About 420 of the 465 are the 24 hashes and the 21 mixes, so the scalar loop is close to its floor: what is left is about 85 cycles a sample (estimated from the time, at about 4.7 GHz), so about 5 instructions a cycle, near the core's dispatch width. Going further needs SIMD (see the last gap).
+- **What `kestrel check --report` shows:** checked, 16 checks are left and none of them is per sample (the frozen copy has 14 per sample): 8 per chunk (`cx * 32 - 1` and the like, `seed + 1`, `seed + 2`), `bx + x` once per column of the x table, `by + y` and `y - 64` once per layer, `bz + z` once per row, 3 chunk offsets per mesh and `faces + ...` per chunk. `--release`: none (the frozen copy keeps `out[i]`).
+
+**Each hand change, as a compiler gap.** Measured in two more sessions (5 runs each, checked and `--release` timed separately, whole runs: frozen 609 and 559 ms), adding one change at a time, in this order: step 1's plain locals, then its workaround 1 together with step 2, steps 3 and 4, step 5, step 1's workaround 2, step 7. The copies for the steps are not checked in. Except where it says otherwise, a change makes the same world.
+
+1. **A compiler gap: the compiler should hoist loop-invariant work out of loops, and must not sink work written before a loop into it.** In every loop I looked at, Kestrel's code has no loop-invariant code motion: Cranelift's e-graph pass places every pure value at its use and, on Kestrel's loops, never hoists it back out. A small program shows it: `k`, written before the loop, is computed again on every iteration (`imul ...,0x60000005` inside the loop in the `--release` exe's disassembly; the same with `for`):
+
+   ```
+   pure f(seed: int, n: int) -> int {
+       var acc: i64 = 0
+       let k = i64(seed) * 1610612741
+       var i = 0
+       while i < n {
+           acc = acc ^ (i64(i) * 3 ^ k)
+           i += 1
+       }
+       int(acc & 0xFFFF)
+   }
+   ```
+
+   The e-graph pass does run (`i64(i) * 8` becomes a shift), and Cranelift's elaborator has LICM, so something in the loops Kestrel emits stops it; I did not find what. Next step: dump that program's CLIF (`kernels.exe --dump`) and Cranelift's `elaborate_licm_hoist` statistic. In the frozen copy every sample recomputes the chunk offsets, `seed * 1610612741`, `y * 19349663`, `z * 83492791` and the y and z cell fractions of all three octaves. Effects:
+   - **Moving the y, z and seed parts to the row as plain locals did nothing** (`--release` 565 ms against 559: the code generator moved them back into the x loop), except in the checked build (609 to 584 ms, -4%), because checks are not pure and stay where they are written. That 4% is the existing gap "hoisting loop-invariant checks" (follow-ups, range analysis).
+   - **Workaround 1, the row's values in a small array** written once per row and read in the x loop (a load can't be sunk): 565 to 494 ms `--release` (-13%), 584 to 505 checked (-14%), from the plain locals above; 559 and 609 to 494 and 505 from the frozen copy. Kept for the 7 float values (`rf`).
+   - **Workaround 2, the row's 12 hash parts as values the loop carries** (`var p0 = ...` before the x loop and a no-op `p0 |= 0` at its end, so each is a loop variable the code generator keeps rather than recomputes): 454 to 427 ms `--release` (-6%), 472 to 449 checked (-5%), measured last but one, after step 5, against keeping them in the array. It also drops the 12 masks per sample of step 4, since the analysis knows a loop variable's range.
+2. **A compiler gap: the compiler should reassociate xor (and add) chains so that the loop-invariant operands are combined outside the loop.** `x * A ^ y * B ^ z * C ^ seed * D` is written as the x part xored with a row part made once per row. Measured together with workaround 1 above (the row parts are the values in the array).
+3. **A compiler gap: the compiler should drop a mask whose cleared bits nothing reads (demanded bits), and move a mask through xor onto operands it can hoist.** The hash's second `& 0x7FFFFFFF` is redundant (only the low 16 bits of `p ^ (p >> 15)` are kept, and they come from bits 0..30), and the first one distributes over the xor, so each x part and row part is masked where it is made: 494 to 458 ms `--release` (-7%), 505 to 484 checked (-4%). Done naively it made the checked build 13% slower (573 ms), which is the next gap.
+4. **A compiler gap: the range analysis should know a range for an array's elements (or Round B's `@assume` should say it).** With the masks moved into the rows, the hash's multiply keeps its overflow check, 24 per sample, because a value read from the array has the whole `i64` range. Masking again where it is read (12 `and`s per sample in both builds; 6 in the final copy, for the x table) takes the checks back out: 573 to 484 ms checked; `--release` pays about 2% (449 to 458, within the noise).
+   - Related: storing the masked x parts as `int` (they fit) would let the load sign-extend for free, but the analysis's xor rule only bounds operands it knows are not negative, so the 24 checks came back (an earlier session: checked 396 to 515 ms, +30%; `--release` 404 to 396, noise). **A compiler gap: the xor, or and and rules should bound signed operands too** (`|a|` and `|b|` below 2^31 give `|a ^ b|` below 2^31).
+5. **Work that depends only on x, once per chunk** (the x parts of the hashes and the x fractions, a 34-entry table each): 458 to 454 ms `--release` (-1%), 484 to 472 checked (-2.5%). This is loop-invariant code motion out of the outer loops into a table, which compilers rarely do; it is listed for completeness and is small. Not a gap worth building on its own.
+6. **A compiler gap (small): the compiler should turn a float division by a power-of-two constant into a multiply** (exact): `float(x & mask) / scale` is written `* 0.03125` and so on. Not measured alone: once the fractions moved to the rows and the table, none is left per sample.
+7. **A compiler gap, already listed ("facts across calls"): a function's returned array length should reach its caller.** `solids` is now too big to inline into `mesh` (822 nodes, limit 256), so its 39,304-item length is unknown there and the mesher's six neighbour reads keep their bounds checks, in `--release` too. A never-taken `if solid.len != PAD * PAD * PAD { return m }` tells the analysis the length; with the block's position as `base + vec3(x, y, z)` (exact) instead of `vec3(ox + x, ...)`, no check is left per block in either build. Effect: none measurable (427 to 432 ms `--release`, 449 to 446 checked).
+8. **A language gap (small): a constant can't use a conversion.** `let INV = f64(1.0) / f64(65535.0)` is refused ("constants can only use literals, operators, ..."); `let INV: f64 = 1.0 / 65535.0` works.
+9. **A compiler gap: SIMD.** What is left is 24 independent hash chains and 21 mixes per sample in scalar code, near the core's dispatch width. Doing four corners at once needs vector types (`vec4` and `ivec4` are in the language design but not built) or a compiler that combines independent scalar chains (SLP vectorisation). Not measured.
+
+**Tried, no effect (not used):**
+- **Multiplying by the reciprocal of 65535 in `f64`** instead of dividing in `float`: `float(f64(v) * (1.0 / 65535.0))` equals `float(v) / 65535.0` for every `v` from 0 to 65535 (checked one by one; the same multiply in `float` differs for 512 of them). It takes the 24 divisions per sample off the divider: 432 against 432 ms `--release` (450 against 446 checked); on the frozen copy's code, 3 runs, 467 to 491 `--release` and 509 to 494 checked (noise). The divider isn't the limit.
+- **Unrolling `quad`'s `for k from 0 to 4 { normals.add(n) }`:** 430 against 432 ms `--release`, 435 against 446 checked (noise). Meshing is about 10% of the world build (about 40-45 ms in both copies, measured by building only the solid flags).

@@ -1,0 +1,243 @@
+// voxels3d.kes tuned by hand (voxels3d.kes stays the benchmark). The same
+// world, block for block: every one of the 24 lattice hashes per sample is
+// still finished and divided, and every float operation of the noise is
+// done in the original's order, so each solid flag, vertex and index is
+// identical. What moved is work the original repeats: the parts of a hash
+// and of an octave that depend only on y and z are taken once per row, the
+// parts that depend only on x once per chunk. Each change is something the
+// compiler should do on its own; results.md ("Tuned copy") lists them with
+// their measured effect.
+let SIZE = 32
+let PAD = SIZE + 2
+pub let LAYERS = 4
+let HEIGHT = LAYERS * SIZE
+
+// The hash's multipliers. The original's hash xors x * HX, y * HY, z * HZ
+// and seed * HS, then keeps the low 31 bits. Xor is associative and the
+// mask distributes over it, so each part is masked where it is made and
+// the parts are xored per lattice corner.
+let HX: i64 = 73856093
+let HY: i64 = 19349663
+let HZ: i64 = 83492791
+let HS: i64 = 1610612741
+let M31: i64 = 0x7FFFFFFF
+
+// The rest of the original's `hash` and `lattice`, given the masked xor of
+// the four products. Its second `& 0x7FFFFFFF` is left out: only the low
+// 16 bits of `p ^ (p >> 15)` are kept, and those come from bits 0..30 of p.
+pure finish(h: i64) -> float {
+    let p = (h ^ (h >> 13)) * 0x5BD1E995
+    float(int((p ^ (p >> 15)) & 0xFFFF)) / 65535.0
+}
+
+pure smooth(t: float) -> float {
+    t * t * (3.0 - 2.0 * t)
+}
+
+pure mix(a: float, b: float, t: float) -> float {
+    a + (b - a) * t
+}
+
+// One octave at one sample, as the original's `octave`: xa0 and xa1 are
+// the x parts of the hash for the cell's two x corners, p00..p11 the y, z
+// and seed parts for its four (y, z) corners, and fx, fy, fz the smoothed
+// position in the cell.
+pure octave(xa0: i64, xa1: i64, fx: float, p00: i64, p10: i64, p01: i64, p11: i64, fy: float, fz: float) -> float {
+    let x00 = mix(finish(xa0 ^ p00), finish(xa1 ^ p00), fx)
+    let x10 = mix(finish(xa0 ^ p10), finish(xa1 ^ p10), fx)
+    let x01 = mix(finish(xa0 ^ p01), finish(xa1 ^ p01), fx)
+    let x11 = mix(finish(xa0 ^ p11), finish(xa1 ^ p11), fx)
+    mix(mix(x00, x10, fy), mix(x01, x11, fy), fz)
+}
+
+// Solid flags (1 or 0) for chunk (cx, cy, cz) plus a one-block border.
+// Density is octaves every 32, 16 and 8 blocks (seed, seed + 1, seed + 2),
+// pulled toward air higher up; a block is solid where it is above zero.
+pure solids(cx: int, cy: int, cz: int, seed: int) -> [u8] {
+    var out = array[u8](PAD * PAD * PAD)
+    // A row's float values live in an array: as plain locals the code
+    // generator would recompute them inside the x loop.
+    var rf = array[float](7)
+    let bx = cx * SIZE - 1
+    let by = cy * SIZE - 1
+    let bz = cz * SIZE - 1
+    let s5 = i64(seed) * HS
+    let s4 = i64(seed + 1) * HS
+    let s3 = i64(seed + 2) * HS
+    // What depends only on x, once per chunk. The x parts are masked again
+    // where they are read, because nothing tells the range analysis that
+    // an array element is below 2^31 (and without that it keeps an overflow
+    // check on every hash's multiply).
+    var xk = array[i64](PAD * 6)
+    var xf = array[float](PAD * 3)
+    for x from 0 to PAD {
+        let wx = bx + x
+        let x5 = wx >> 5
+        let x4 = wx >> 4
+        let x3 = wx >> 3
+        xk[x * 6] = i64(x5) * HX & M31
+        xk[x * 6 + 1] = i64(x5 + 1) * HX & M31
+        xk[x * 6 + 2] = i64(x4) * HX & M31
+        xk[x * 6 + 3] = i64(x4 + 1) * HX & M31
+        xk[x * 6 + 4] = i64(x3) * HX & M31
+        xk[x * 6 + 5] = i64(x3 + 1) * HX & M31
+        xf[x * 3] = smooth(float(wx & 31) * 0.03125)
+        xf[x * 3 + 1] = smooth(float(wx & 15) * 0.0625)
+        xf[x * 3 + 2] = smooth(float(wx & 7) * 0.125)
+    }
+    for y from 0 to PAD {
+        let wy = by + y
+        rf[6] = float(wy - HEIGHT / 2) / float(HEIGHT * 2)
+        let y5 = wy >> 5
+        let y4 = wy >> 4
+        let y3 = wy >> 3
+        let ya5 = i64(y5) * HY
+        let yb5 = i64(y5 + 1) * HY
+        let ya4 = i64(y4) * HY
+        let yb4 = i64(y4 + 1) * HY
+        let ya3 = i64(y3) * HY
+        let yb3 = i64(y3 + 1) * HY
+        rf[0] = smooth(float(wy & 31) * 0.03125)
+        rf[2] = smooth(float(wy & 15) * 0.0625)
+        rf[4] = smooth(float(wy & 7) * 0.125)
+        for z from 0 to PAD {
+            let wz = bz + z
+            let z5 = wz >> 5
+            let z4 = wz >> 4
+            let z3 = wz >> 3
+            let za5 = i64(z5) * HZ ^ s5
+            let zb5 = i64(z5 + 1) * HZ ^ s5
+            let za4 = i64(z4) * HZ ^ s4
+            let zb4 = i64(z4 + 1) * HZ ^ s4
+            let za3 = i64(z3) * HZ ^ s3
+            let zb3 = i64(z3 + 1) * HZ ^ s3
+            var p0 = (ya5 ^ za5) & M31
+            var p1 = (yb5 ^ za5) & M31
+            var p2 = (ya5 ^ zb5) & M31
+            var p3 = (yb5 ^ zb5) & M31
+            var p4 = (ya4 ^ za4) & M31
+            var p5 = (yb4 ^ za4) & M31
+            var p6 = (ya4 ^ zb4) & M31
+            var p7 = (yb4 ^ zb4) & M31
+            var p8 = (ya3 ^ za3) & M31
+            var p9 = (yb3 ^ za3) & M31
+            var p10 = (ya3 ^ zb3) & M31
+            var p11 = (yb3 ^ zb3) & M31
+            rf[1] = smooth(float(wz & 31) * 0.03125)
+            rf[3] = smooth(float(wz & 15) * 0.0625)
+            rf[5] = smooth(float(wz & 7) * 0.125)
+            let row = (y * PAD + z) * PAD
+            for x from 0 to PAD {
+                let k = x * 6
+                let f = x * 3
+                let o5 = octave(xk[k] & M31, xk[k + 1] & M31, xf[f],
+                    p0, p1, p2, p3, rf[0], rf[1])
+                let o4 = octave(xk[k + 2] & M31, xk[k + 3] & M31, xf[f + 1],
+                    p4, p5, p6, p7, rf[2], rf[3])
+                let o3 = octave(xk[k + 4] & M31, xk[k + 5] & M31, xf[f + 2],
+                    p8, p9, p10, p11, rf[4], rf[5])
+                let n = o5 * 0.5 + o4 * 0.3 + o3 * 0.2
+                if n - 0.5 - rf[6] > 0.0 {
+                    out[row + x] = 1
+                }
+                // No-op updates: they make p0..p11 values the loop carries,
+                // which the code generator keeps in registers or on the
+                // stack instead of recomputing them here.
+                p0 |= 0; p1 |= 0; p2 |= 0; p3 |= 0; p4 |= 0; p5 |= 0
+                p6 |= 0; p7 |= 0; p8 |= 0; p9 |= 0; p10 |= 0; p11 |= 0
+            }
+        }
+    }
+    out
+}
+
+struct Mesh {
+    vertices: list[vec3] = []
+    normals: list[vec3] = []
+    indices: list[int] = []
+
+    // One square face, corners a b c d in Godot's front-face order
+    // (clockwise seen from outside), as two triangles.
+    pure quad(var self, n: vec3, a: vec3, b: vec3, c: vec3, d: vec3) {
+        let base = self.vertices.len
+        self.vertices.add(a); self.vertices.add(b); self.vertices.add(c); self.vertices.add(d)
+        for k from 0 to 4 { self.normals.add(n) }
+        self.indices.add(base); self.indices.add(base + 1); self.indices.add(base + 2)
+        self.indices.add(base); self.indices.add(base + 2); self.indices.add(base + 3)
+    }
+}
+
+// The mesh of chunk (cx, cy, cz): a face for each solid block side that
+// touches air.
+pub pure mesh(cx: int, cy: int, cz: int, seed: int) -> Mesh {
+    let solid = solids(cx, cy, cz, seed)
+    var m = Mesh()
+    // Never taken: it tells the range analysis the length, so the six
+    // neighbour reads below need no bounds check (`solids` is too big to
+    // inline here, which is how the original's mesher learns it).
+    if solid.len != PAD * PAD * PAD {
+        return m
+    }
+    // Block corners are small whole numbers, so float(ox + x) is exactly
+    // float(ox) + float(x), with no overflow check per block.
+    let base = vec3(cx * SIZE, cy * SIZE, cz * SIZE)
+    for y from 0 to SIZE {
+        for z from 0 to SIZE {
+            for x from 0 to SIZE {
+                let i = ((y + 1) * PAD + z + 1) * PAD + x + 1
+                if solid[i] == 1 {
+                    let p = base + vec3(x, y, z)
+                    if solid[i + 1] == 0 {
+                        m.quad(vec3(1, 0, 0), p + vec3(1, 0, 0), p + vec3(1, 0, 1), p + vec3(1, 1, 1), p + vec3(1, 1, 0))
+                    }
+                    if solid[i - 1] == 0 {
+                        m.quad(vec3(-1, 0, 0), p + vec3(0, 0, 1), p, p + vec3(0, 1, 0), p + vec3(0, 1, 1))
+                    }
+                    if solid[i + PAD * PAD] == 0 {
+                        m.quad(vec3(0, 1, 0), p + vec3(0, 1, 0), p + vec3(1, 1, 0), p + vec3(1, 1, 1), p + vec3(0, 1, 1))
+                    }
+                    if solid[i - PAD * PAD] == 0 {
+                        m.quad(vec3(0, -1, 0), p, p + vec3(0, 0, 1), p + vec3(1, 0, 1), p + vec3(1, 0, 0))
+                    }
+                    if solid[i + PAD] == 0 {
+                        m.quad(vec3(0, 0, 1), p + vec3(1, 0, 1), p + vec3(0, 0, 1), p + vec3(0, 1, 1), p + vec3(1, 1, 1))
+                    }
+                    if solid[i - PAD] == 0 {
+                        m.quad(vec3(0, 0, -1), p, p + vec3(1, 0, 0), p + vec3(1, 1, 0), p + vec3(0, 1, 0))
+                    }
+                }
+            }
+        }
+    }
+    m
+}
+
+// Builds chunk (cx, cy, cz) and returns its face count. The mesh lives in
+// a temporary arena, freed when the block ends.
+pub pure chunk_faces(cx: int, cy: int, cz: int, seed: int) -> int {
+    var faces = 0
+    arena {
+        faces = mesh(cx, cy, cz, seed).indices.len / 6
+    }
+    faces
+}
+
+// For benchmarks: builds every chunk of a world `width` chunks wide and
+// deep; returns the total face count.
+pub bench(seed: int, width: int) -> int {
+    var faces = 0
+    for cx from 0 to width {
+        for cy from 0 to LAYERS {
+            for cz from 0 to width {
+                faces += chunk_faces(cx, cy, cz, seed)
+            }
+        }
+    }
+    faces
+}
+
+// Builds the world as main.kes does and prints its face count, so this
+// file builds on its own: kestrel build voxels3d_tuned.kes
+main() {
+    print(bench(1337, 8))
+}

@@ -1,7 +1,8 @@
 # Builds the 3D voxel world in Kestrel (checks on and off) and C#, checks the
 # outputs agree, and prints the median wall time of each with process startup
 # (an empty world) subtracted. Run from kestrel/bench/voxels3d in PowerShell.
-param([int]$Runs = 7)
+# -Tuned also builds and times voxels3d_tuned.kes (results.md, "Tuned copy").
+param([int]$Runs = 7, [switch]$Tuned)
 $ErrorActionPreference = "Stop"
 $kestrel = Resolve-Path "..\..\target\release\kestrel.exe"
 
@@ -29,6 +30,12 @@ $variants = [ordered]@{
     "Kestrel par for, all threads (checks on)" = @({ & .\k_par.exe }, { & .\k_empty.exe })
     "Kestrel par for, all threads (--release)" = @({ & .\kr_par.exe }, { & .\k_empty.exe })
     "C# .NET 9 Parallel.For" = @({ & $cs 8 par }, { & $cs 0 })
+}
+if ($Tuned) {
+    & $kestrel build voxels3d_tuned.kes -o k_tuned.exe; Check "kestrel build (tuned)"
+    & $kestrel build voxels3d_tuned.kes -o kr_tuned.exe --release; Check "kestrel build --release (tuned)"
+    $variants["Kestrel tuned exe (checks on)"] = @({ & .\k_tuned.exe }, { & .\k_empty.exe })
+    $variants["Kestrel tuned exe (--release)"] = @({ & .\kr_tuned.exe }, { & .\k_empty.exe })
 }
 $expected = (& $cs 8) -join ""
 foreach ($name in $variants.Keys) {

@@ -365,6 +365,19 @@ From `docs/superpowers/specs/2026-10-19-range-analysis-design.md` (its "As built
 - *Tests and harness:* the release pass's 30-second timeout is printed and listed in failure messages but doesn't fail the test (consider failing on a timeout in the proof run); `KESTREL_TEST_ONLY=` (set but empty) now means all programs, and the division proof-failure path is now tested through codegen to a running program (`codegen/tests/proven.rs`), as overflow was and bounds is by the `range_keep` programs (both done 2026-10-20); `split` over the item limit is untested (it needs a 2 GB string), and the Godot bridge's `write_arg` is tested only through `too_long`; the proof check's exe link of `kestrel_rt_proof_failed` is exercised by the verify run but by no focused test; forgetting at a `Bind` and refreshing a loop's hidden end are kept as defence: nothing observable fails without them.
 - *From the final review (2026-10-20):* a list statement's length change relies on codegen evaluating the operands before it finds the place (documented at `change_len` and the codegen sites, pinned by `range_order_list_place.kes`); the stricter alternative is to forget, not move, a length whose index locals the operands wrote. Two holes the review and its fix wave found are fixed and listed in the spec's "As built" (a whole loop element assigned; a lent interface moved into a local by the inliner). The checker refuses a whole assignment to a `var` list parameter and to a matched value inside its `match`, so those forms of the first hole can't be written today; the fix covers them anyway.
 
+## Found by the tuned voxel copy (2026-10-20)
+
+`kestrel/bench/voxels3d/voxels3d_tuned.kes` makes the same world as `voxels3d.kes` 24-29% faster (level with a straight Rust port) by hand; each line is a hand change the compiler should make itself. Measurements and details: `kestrel/bench/voxels3d/results.md`, "Tuned copy".
+- **No loop-invariant code motion (the big one).** Cranelift's e-graph places pure values at their use and never hoists them out of Kestrel's loops, so even a `let k = i64(seed) * C` written before a `while` loop is recomputed in it (five-line repro in results.md). Root cause not found (opt level is `speed`, the e-graph runs); dump the CLIF and check `elaborate_licm_hoist`. Hand workarounds: a row's values in a small array (-12% `--release`, -14% checked) and loop-carried no-op `p |= 0` variables (-6%, -5%).
+- **Reassociate xor/add chains** so the loop-invariant operands are combined outside the loop (`x * A ^ y * B ^ z * C ^ s * D`); measured with the array workaround above.
+- **Demanded bits:** drop a mask whose cleared bits nothing reads, and move a mask through xor onto operands that can be hoisted (-7% `--release`, -4% checked).
+- **Ranges for array elements** (or `@assume`): a value read from an array has its type's whole range, so a bounded value stored and read back keeps the overflow checks it feeds (24 per sample here, +13% checked) unless it is masked again at the read.
+- **Bitwise rules for signed operands:** xor, or and and of values with `|a|`, `|b|` below 2^k should be below 2^k; today only non-negative operands are bounded (an `int` x table cost +30% checked).
+- **Float division by a power-of-two constant** should become a multiply (exact); not measured alone.
+- **Facts across calls, again:** with `solids` too big to inline (822 nodes), `mesh` keeps six bounds checks per block, removed by hand with a never-taken `if solid.len != ... { return m }` (no measurable effect here).
+- **Constants can't use conversions:** `let INV = f64(1.0) / f64(65535.0)` is refused; `let INV: f64 = 1.0 / 65535.0` works.
+- **SIMD:** the tuned sampling loop is 465 instructions per sample, about 420 of them the 24 independent hash chains and 21 mixes, near the core's dispatch width; going further needs `vec4`/`ivec4` or SLP vectorisation.
+
 ## Maps (built 2026-10-09)
 
 - **Not yet:**
