@@ -342,3 +342,33 @@ fn assigning_a_loop_element_still_knows_its_new_length() {
     assert_eq!(bounds(&elem_assign("grid[k].len > 2", "s += 1", "grid[k][2]")).0, vec![]);
     assert_eq!(bounds(&elem_assign("n > 0", "row = [n, n]", "row[1]")).0, vec![]);
 }
+
+/// `cure_now` is inlined: its interface parameter becomes a local holding `g` lent, and its other
+/// argument checks `g.items[1]` (line 14) after that local is made, before `d.heal()` empties `g`.
+fn lent_inlined(read: &str) -> String {
+    format!(
+        "interface Healer {{
+    heal(var self)
+}}
+struct G: Healer {{
+    items: list[int]
+    heal(var self) {{
+        self.items.clear()
+    }}
+}}
+cure_now(var d: Healer, n: int) {{
+    d.heal()
+}}
+f(var g: G) -> int {{
+    cure_now(var g, {read})
+    g.items[1]
+}}"
+    )
+}
+
+#[test]
+fn an_inlined_lent_interface_forgets_at_its_virtual_call() {
+    assert_eq!(bounds(&lent_inlined("g.items[1]")).0, vec![14, 15]);
+    // Its near miss: with no check in the argument, nothing is known about `g.items` anyway.
+    assert_eq!(bounds(&lent_inlined("0")).0, vec![15]);
+}

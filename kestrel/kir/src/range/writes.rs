@@ -1,6 +1,16 @@
 //! What a statement or expression may write. Every place KIR's walker marks as written
 //! (`visit::places`) is a whole write, unless it is one of the known list operations below; so a
 //! write added to KIR later is covered as long as the walker marks it.
+//!
+//! One addition: a virtual call writes its receiver's place as a whole (the walker reads it, since
+//! the interface value itself doesn't change). A borrowed interface value
+//! (`MakeIface { data: Borrowed(g) }`) lends `g` to the call it is passed to, so the walker marks
+//! `g` written where the value is made, and while it is a call's argument that is enough. But
+//! `inline_small` may move such an argument into a local of the inlined body
+//! (`let d = MakeIface Borrowed(g)`, later `d.heal()`), and the call's other arguments run between
+//! the two: `cure_now(var g, g.items[1])` checks `g.items[1]` after the `let` and before `heal`
+//! empties `g.items`. So `Homes` points `d` at `g` (as a loop element points into its list), and
+//! the virtual call's write of `d` forgets every length inside `g`.
 
 use std::collections::HashMap;
 
@@ -200,6 +210,12 @@ impl Collector {
                 if let Some((p, kind)) = list_change(s) {
                     self.kinds.insert(p as *const Place as usize, kind);
                 }
+                if let Stmt::CallVirtual { recv, .. } = s {
+                    self.out.push(Write::Place(recv.clone(), WriteKind::Whole));
+                }
+            }
+            Node::Expr(Expr { kind: ExprKind::CallVirtual { recv, .. }, .. }) => {
+                self.out.push(Write::Place(recv.clone(), WriteKind::Whole));
             }
             Node::Place(p, true) => {
                 let kind = self.kinds.remove(&(p as *const Place as usize)).unwrap_or(WriteKind::Whole);

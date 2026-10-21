@@ -150,16 +150,22 @@ impl Homes {
     pub fn of(f: &Func, par_body: bool) -> Homes {
         let mut bound: HashMap<LocalIdx, Option<Place>> = HashMap::new();
         walk(&f.body, &mut |n| {
-            if let Node::Stmt(Stmt::Bind(l, p)) = n {
-                match bound.get(l) {
-                    None => {
-                        bound.insert(*l, Some(p.clone()));
-                    }
-                    Some(Some(q)) if q == p => {}
-                    Some(_) => {
-                        debug_assert!(false, "`{}` is bound to two different places", f.locals[l.0 as usize].name);
-                        bound.insert(*l, None);
-                    }
+            // A loop element points into its list; a local `inline_small` moved a lent interface
+            // argument into points at the lent place (a `var self` call through it changes that
+            // place: see `writes.rs`).
+            let (l, p, lent) = match n {
+                Node::Stmt(Stmt::Bind(l, p)) => (l, p, false),
+                Node::Stmt(Stmt::Let(l, Expr { kind: ExprKind::MakeIface { data: IfaceData::Borrowed(p), .. }, .. })) => (l, p, true),
+                _ => return,
+            };
+            match bound.get(l) {
+                None => {
+                    bound.insert(*l, Some(p.clone()));
+                }
+                Some(Some(q)) if q == p => {}
+                Some(_) => {
+                    debug_assert!(lent, "`{}` is bound to two different places", f.locals[l.0 as usize].name);
+                    bound.insert(*l, None);
                 }
             }
         });

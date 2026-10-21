@@ -1,0 +1,21 @@
+// expect-exit: 101
+// expect-stderr: index 1 out of bounds for length 0 on line 20
+// `cure_now` is inlined, so `d` becomes a local holding `g` lent. The other argument checks
+// `g.items[1]` after that, and then `d.heal()` empties `g.items`.
+interface Healer {
+    heal(var self)
+}
+struct G: Healer {
+    items: list[int]
+    heal(var self) {
+        self.items.clear()
+    }
+}
+cure_now(var d: Healer, n: int) {
+    d.heal()
+}
+main() {
+    var g = G(items: [1, 2])
+    cure_now(var g, g.items[1])
+    print(g.items[1])
+}
