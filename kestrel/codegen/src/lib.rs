@@ -3,8 +3,10 @@ pub mod export;
 mod func;
 mod globals;
 mod isa;
+mod loop_exits;
 mod native;
 mod par_thunk;
+mod phis;
 pub mod jit;
 pub mod object;
 mod rt;
@@ -16,7 +18,7 @@ use cranelift_module::{FuncId, Linkage, Module};
 use kestrel_kir as kir;
 
 #[doc(hidden)]
-pub use dump::dump;
+pub use dump::{dump, dump_lowered};
 pub use export::{ExportInfo, ExportTy};
 pub use jit::JitProgram;
 pub use object::emit_object;
@@ -99,6 +101,9 @@ pub(crate) fn define_module<M: Module>(
         func::lower_func(module, &mut strings, &shared, &mut ctx.func, &mut fb_ctx, f)?;
         let dumping = dump.as_ref().is_some_and(|d| d.name == f.name);
         ctx.set_disasm(dumping);
+        if let Some(d) = dump.as_deref_mut().filter(|_| dumping) {
+            d.record_input(&ctx.func);
+        }
         module
             .define_function(id, &mut ctx)
             .map_err(|e| format!("codegen failed for `{}`: {e:?}", f.name))?;

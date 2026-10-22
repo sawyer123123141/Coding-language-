@@ -179,6 +179,9 @@ pub(crate) fn lower_func<M: Module>(
     }
     fl.b.seal_all_blocks();
     fl.b.finalize();
+    // Shape the IR so Cranelift hoists loop-invariant code out of loops (see each module).
+    crate::phis::remove_redundant_params(func);
+    crate::loop_exits::put_loop_exits_first(func);
     Ok(())
 }
 

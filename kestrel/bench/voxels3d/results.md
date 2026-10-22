@@ -161,7 +161,7 @@ The chunk offsets don't depend on the loop they are in, and `out[i]` needs a pro
 
 **Each hand change, as a compiler gap.** Measured in two more sessions (5 runs each, checked and `--release` timed separately, whole runs: frozen 609 and 559 ms), adding one change at a time, in this order: step 1's plain locals, then its workaround 1 together with step 2, steps 3 and 4, step 5, step 1's workaround 2, step 7. The copies for the steps are not checked in. Except where it says otherwise, a change makes the same world.
 
-1. **A compiler gap: the compiler should hoist loop-invariant work out of loops, and must not sink work written before a loop into it.** In every loop I looked at, Kestrel's code has no loop-invariant code motion: Cranelift's e-graph pass places every pure value at its use and, on Kestrel's loops, never hoists it back out. A small program shows it: `k`, written before the loop, is computed again on every iteration (`imul ...,0x60000005` inside the loop in the `--release` exe's disassembly; the same with `for`):
+1. **A compiler gap: the compiler should hoist loop-invariant work out of loops, and must not sink work written before a loop into it.** (Found and fixed on 2026-10-21: see "Loop-invariant code motion" below.) In every loop I looked at, Kestrel's code has no loop-invariant code motion: Cranelift's e-graph pass places every pure value at its use and, on Kestrel's loops, never hoists it back out. A small program shows it: `k`, written before the loop, is computed again on every iteration (`imul ...,0x60000005` inside the loop in the `--release` exe's disassembly; the same with `for`):
 
    ```
    pure f(seed: int, n: int) -> int {
@@ -240,3 +240,65 @@ Compile time only: Round B changes no code that a program runs. Spec: `docs/supe
 
 - The assumption does its job in `solids` (the nine chunk offsets, `seed + 1`, `seed + 2` and `y - 64` are gone from the report), but 27 checks come back in `mesh`: the bounds checks `solid[i]`, `solid[i + 1]`, `solid[i + 34 * 34]` and the 24 overflow checks `base + 1`, `base + 2`, `base + 3` in the six inlined `Mesh.quad` copies.
 - An `@assume(seed >= 0)` that removes nothing (and gets the warning) at the top of `solids` or of `mesh` does the same. A small program shows the bounds half: an `@assume` that wraps the end of a function loses the length of the array it returns, so the caller's `solid[i]` keeps its check. **Fixed in the final review's fix wave** (the returned local no longer goes through a temporary): with the assumption the report is now 306 removed and 33 left checked, 7 and 1 `--release` (the same as without it). The `base + k` half comes from Round A's term cap (`MAX_TERMS` = 64, `range/terms.rs`): an assumption's names become terms early, and in `mesh`, with the noise code inlined ahead of the six `quad` copies, `base` and `m.vertices.len` are pushed past 64. Overflow checks, so checked builds only. Not fixed (follow-ups).
+
+## Loop-invariant code motion (2026-10-21)
+
+Gap 1 of the tuned copy: Cranelift hoisted nothing out of Kestrel's loops. The cause was found by dumping the repro's IR before and after optimisation (`dump_lowered` in `kestrel/codegen`, new) and by building Cranelift with its `trace-log` feature for one run (its `elaborate_licm_hoist` statistic was 0). There are three causes, all now worked around in the code generator (`kestrel/codegen`, tests in `codegen/tests/licm.rs`):
+
+1. **A Cranelift 0.116 bug that loses the loop.** The egraph pass places each pure value where it is used and hoists it out of a loop when its operands come from outside. To know which loops it is in, it keeps a stack while it walks the dominator tree, and when it reaches a block outside a loop it pops that loop and doesn't put it back. A loop header's children in the dominator tree are its body and its exit, in CFG reverse postorder. Cranelift's depth-first search takes a `brif`'s first target first, which puts that target *last* in reverse postorder, so Kestrel's `brif more, body, exit` handed the exit to the walk first. The walk popped the loop there, and by the time it reached the body the stack was empty, so nothing in the body was hoisted. The bug was fixed upstream in wasmtime PR #14383 (merged 2026-09-23, first released in wasmtime 50 on 2026-10-20); Kestrel is on Cranelift 0.116 (wasmtime 29). **Workaround** (`codegen/src/loop_exits.rs`): after lowering, each `brif` in a loop whose first target stays in the loop and whose second leaves it is swapped to `brif !c, exit, body`, with the comparison negated (for floats, its exact opposite, NaN included). This covers every loop's own test, `else { break }` and the checks, which already branch to their failure first. It can't cover everything: a block after an `if` always comes after the `if`'s branches, so a `break`, `return` or check inside an `if`'s branch still stops hoisting in the code after that `if` until Cranelift is upgraded.
+2. **Redundant block parameters for the variables of outer loops.** Lowering seals every block at the end (`seal_all_blocks`), so `cranelift_frontend` gives each loop header a parameter for every variable read in the loop, before it knows what the back edge passes. An inner loop that reads the outer loop's `y` kept `block5(y5)`, entered with `jump block5(y1)` and `jump block5(y5)`, which is always `y1`, the outer header's parameter. Cranelift's own pass (`remove_constant_phis`) only removes a parameter whose single value is not itself a parameter, so `y5` stayed, and everything computed from `y` looked as if the inner loop changed it. **Fix** (`codegen/src/phis.rs`): a parameter whose arguments are all one value or the parameter itself is replaced by that value, repeated until none is left.
+3. **Checked arithmetic as side effects.** A checked `+ - *` was one `sadd_overflow` (or `ssub_`, `smul_`) instruction giving both the value and the overflow flag. Cranelift's egraph treats an instruction with two results as a side effect and leaves it where it is written, so in the checked build `cy * 32 + y - 1` (written in the x loop) stayed in the x loop along with everything computed from it. **Fix** (`codegen/src/func/arith.rs`): the value now comes from a plain `iadd`/`isub`/`imul`, which can be hoisted, and the `_overflow` instruction gives only the flag for the check. The check itself still runs where it is written (the open gap "hoisting loop-invariant checks"). When nothing is hoisted, this costs one extra add or multiply per check.
+
+The repro above now computes `k` once, before the loop. In a nested loop, a value that depends only on the outer loop goes to the outer loop's body. A value with a constant operand moves out one loop at a time, which is Cranelift's rule for constants: `seed * 1610612741` goes to the outer body, not the entry.
+
+**The frozen copy's sample loop** (the innermost loop of `voxels3d.mesh`, machine instructions counted from `kernels.exe main.kes --dump voxels3d.mesh`; the tuned copy has 465 `--release`):
+
+| | Old | New |
+|---|---:|---:|
+| `--release`: instructions per sample | 679 | **556** |
+| `--release`: multiplies per sample | 45 | 30 (the 24 hash mixes and the 6 x parts) |
+| Checked: instructions per sample | 728 | **647** |
+| Checked: overflow checks per sample (`seto`) | 13 | 13 |
+
+Every y, z and seed multiply of the hashes and the y and z fractions now leave the x loop. What is left is the other gaps of the tuned copy: the xor chains aren't reassociated (`x * A ^ y * B ^ z * C ^ seed * D` still does three xors per hash in the loop), and the masks and the checks are still there.
+
+**World build, one thread** (Ryzen 7 5800X, Windows 11; whole runs, so about 11-13 ms of startup is included). The old compiler is the `C:\kt\voxtuned` copy (commit 0ad0280's compiler, the base of this branch), and the new one is this branch. Each exe was built by its compiler, and all of them print 463,749. Two sessions of 9 rounds, each taking the variants in turn; medians, with ranges in brackets. The machine was noisy: Round B was being built on `main` in another session, and the frozen `--release` build's median moved from 627 to 557 ms between the sessions. So compare old with new within a session:
+
+| | Session 1 old | Session 1 new | Session 2 old | Session 2 new | New over old |
+|---|---:|---:|---:|---:|---:|
+| Frozen, `--release` | 627 (560-677) | **556** (498-773) | 557 (544-612) | **500** (463-526) | 0.89, 0.90 |
+| Frozen, checks on | 626 (575-690) | 618 (583-725) | 608 (581-644) | 595 (559-629) | 0.99, 0.98 |
+| Tuned, `--release` | 473 (422-548) | 451 (424-598) | 429 (419-488) | 447 (412-480) | 0.95, 1.04 |
+| Tuned, checks on | 491 (444-612) | 472 (441-568) | 437 (413-452) | 435 (420-455) | 0.96, 1.00 |
+
+Session 1's new compiler had causes 1 and 2 fixed but not cause 3; session 2 had all three, and its checked sample loop is the 647 instructions above. Session 1's checked frozen build lost no instructions (635 in the sample block, as before).
+
+- **The frozen `--release` build is 10-11% faster** (627 to 556 ms and 557 to 500). The goal was to approach the tuned copy (0.76 of the frozen time); this gets 0.90. The tuned copy is still 0.86 of the new frozen time in session 2 (429 against 500), because of the reassociation, the masks and the hand-made tables.
+- **The checked frozen build is only 1-2% faster** (608 to 595 ms in session 2), though its sample loop lost 81 instructions. The 13 overflow checks per sample are still in the loop, each an `add`/`imul` with `seto` and a branch on it. Taking checks out of loops is the follow-up "hoisting loop-invariant checks".
+- **The tuned copy doesn't move** (0.95-1.04, within the noise): its hand changes had already taken the invariant work out of the loop.
+
+**Kernels** (`py measure.py --rounds 5 --threads 1 --old DIR`, `--release`, ns per item, median of 5 rounds with ranges; the old column is a `bench/kernels` build from before the fix; the new column was built with all three fixes):
+
+| Kernel | New | Old | New over old |
+|---|---:|---:|---:|
+| `step.kes` | 5.54 (5.38-5.75) | 5.70 (5.37-5.85) | 0.97 |
+| `step_index.kes` | 7.80 (7.49-7.97) | 7.86 (7.51-8.02) | 0.99 |
+| `step_scalar.kes` | 5.64 | 5.62 | 1.00 |
+| `step_pow.kes` | 21.85 | 22.35 | 0.98 |
+| `copy.kes` | 0.86 (0.84-1.24) | 0.91 (0.86-1.34) | 0.95 |
+| `filter.kes` | **4.97** (4.94-5.35) | 5.97 (5.92-6.87) | **0.83** |
+| `filter_loop.kes` | **4.90** (4.79-5.09) | 5.46 (5.35-5.54) | **0.90** |
+| `map.kes` | 2.03 | 2.00 | 1.02 |
+| `map_loop.kes` | 2.00 | 2.11 | 0.95 |
+| `sort_by.kes` | 180.52 | 181.67 | 0.99 |
+| `sort_by_loop.kes` | 115.86 | 118.83 | 0.98 |
+| `iface_hp.kes` | 5.06 | 5.23 | 0.97 |
+| `iface_hp_direct.kes` | 0.34 (0.32-0.37) | 0.53 (0.53-0.58) | 0.64 |
+| `iface_step.kes` | 5.46 | 5.61 | 0.97 |
+| `iface_step_direct.kes` | 0.58 (0.56-0.59) | 0.89 (0.80-0.97) | 0.65 |
+
+- **No kernel is slower** beyond the noise: the largest rise is `map.kes`, +1.5%, with overlapping ranges.
+- `filter` and `filter_loop` are 10-17% faster. I did not take them apart; they are loops with an `if` that adds to a list, so the loop exit's order (cause 1) is the likely reason.
+- The two `_direct` interface loops (0.34 and 0.58 ns against 0.53 and 0.89) are sub-nanosecond loops that moved by 0.3 ns with code layout before (the "Range analysis" section of `kestrel/bench/kernels/results.md`), so I don't count them as a gain.
+
+**Compile time:** no measurable cost. Compiling the voxel world to object code (`kernels.exe main.kes --release --dump voxels3d.mesh`, 7 runs each in turns) takes 89 ms with both compilers. `kestrel build main.kes --release` (9 runs each, alternating which goes first) gave 225 ms old and 252 new as medians, but 170 and 167 as minimums, with ranges of 170-293 and 167-326: noise from the link and the busy machine.
