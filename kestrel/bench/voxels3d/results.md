@@ -193,3 +193,50 @@ The chunk offsets don't depend on the loop they are in, and `out[i]` needs a pro
 **Tried, no effect (not used):**
 - **Multiplying by the reciprocal of 65535 in `f64`** instead of dividing in `float`: `float(f64(v) * (1.0 / 65535.0))` equals `float(v) / 65535.0` for every `v` from 0 to 65535 (checked one by one; the same multiply in `float` differs for 512 of them). It takes the 24 divisions per sample off the divider: 432 against 432 ms `--release` (450 against 446 checked); on the frozen copy's code, 3 runs, 467 to 491 `--release` and 509 to 494 checked (noise). The divider isn't the limit.
 - **Unrolling `quad`'s `for k from 0 to 4 { normals.add(n) }`:** 430 against 432 ms `--release`, 435 against 446 checked (noise). Meshing is about 10% of the world build (about 40-45 ms in both copies, measured by building only the solid flags).
+
+## `@prove` and `@assume` (Round B, 2026-10-21)
+
+Compile time only: Round B changes no code that a program runs. Spec: `docs/superpowers/specs/2026-10-18-at-annotations-design.md` ("As built (Round B)"). The old compiler is the commit before Round B (a0f42fc, built in a worktree at `C:\kt\rb-old`, removed afterwards); the new one is 5be3f31. Both release builds, `CARGO_BUILD_JOBS=2`. `kestrel build` of `main.kes` to an exe (with the MSVC link), one warm-up, then 9 runs of each taking turns, timed with `Measure-Command`; medians, range in brackets. Same machine as above (Ryzen 7 5800X, Windows 11), lightly loaded, no game running. The annotated programs are scratch copies of `voxels3d.kes` outside the repo (`C:\kt\rb-annot`), with `@prove(no_alloc)` on `hash`, `lattice` and `octave` and, in one copy, `@assume(cx >= 0 and cx < 1000 and cy >= 0 and cy < 1000 and cz >= 0 and cz < 1000 and seed >= 0 and seed < 1000000)` as the first statement of `solids`. All contracts hold, and the assumption gets no "removes no check" warning. All builds print 463,749 faces.
+
+**No annotations** (old against new, `main.kes` of this folder; target: no measurable change, under 2%):
+
+| Build | Old | New | New over old |
+|---|---:|---:|---:|
+| checked, run 1 | 178 ms (170-190) | 181 ms (171-191) | +1.7% |
+| checked, run 2 | 178 ms (174-198) | 181 ms (174-185) | +1.7% |
+| `--release`, run 1 | 157 ms (151-185) | 159 ms (149-178) | +1.3% |
+| `--release`, run 2 | 162 ms (157-180) | 160 ms (153-166) | -1.2% |
+
+- **Met, at the edge:** the checked build is 3 ms slower in both sets (+1.7%, under the 2% target), with the ranges overlapping completely; `--release` is level (pooled medians of 18: 160.5 and 159.5 ms). Round A's own table for the same program says 181 (172-195) and 160 (153-211).
+- `kestrel check --report main.kes`, checked and `--release`, is byte-identical between the two compilers (184 and 164 lines). `kestrel check main.kes` takes 20 ms in both. The exe is 512 bytes smaller (220,160 against 220,672 bytes; the runtime changed).
+
+**With annotations** (new compiler only, `kestrel build` of each copy):
+
+| Copy | Checked | `--release` |
+|---|---:|---:|
+| no annotations | 175 ms (169-180) | 155 ms (146-158) |
+| `@prove(no_alloc)` x 3 | 183 ms (178-187), +4.6% | 159 ms (150-165), +2.6% |
+| the same and the `@assume` in `solids` | **296 ms (290-303), +69%** | **255 ms (246-269), +65%** |
+
+- **Contracts alone: target met** (within 10%). **With the assumption: target missed.** The cost is the range analysis of `solids`, which holds the inlined noise code (46 of the 75 ms of analysis Round A measured on this program): an assumption's block runs twice in the deciding pass. It is more than twice the analysis of that function, and I did not profile it. A bigger fact matrix (the assumption adds terms) is the first guess.
+- The cost follows the size of the block an assumption wraps. The same kind of assumption (`@assume(seed >= 0 and seed < 1000000 and width >= 0 and width < 1000)`) as the first statement of `bench`, whose body is a small loop around a call, costs nothing: 185 ms (175-280) against 187 ms (179-211) for the three contracts alone, and `--release` 169 (155-177) against 165 (155-177) (a later set, when the machine was a little slower than for the table above).
+
+**`kestrel check`** (front end alone without annotations):
+
+| Copy | Checked | `--release` |
+|---|---:|---:|
+| no annotations (old: 20 ms, 18-22) | 20 ms (19-25) | 20 ms (19-22) |
+| `@prove(no_alloc)` x 3 | 98 ms (89-101) | 72 ms (68-77) |
+| the same and the `@assume` in `solids` | 278 ms (264-283) | 271 ms (264-289) |
+
+- **With an assumption: target missed.** 2.84 times the contracts-only time checked and 3.76 times `--release` (target at most 2.2). A program with any annotation now runs the analysis in `kestrel check` (about 50-80 ms here), and one with an assumption runs it for both builds, to give the warning.
+
+**An assumption can cost precision** (`kestrel check --report main.kes`, totals, checked | `--release`):
+
+| Copy | Checks removed | Left |
+|---|---|---|
+| `@prove` x 3 | 318 \| 7 | 21 \| 1 |
+| and the `@assume` in `solids` | 303 \| 4 | 36 \| 4 |
+
+- The assumption does its job in `solids` (the nine chunk offsets, `seed + 1`, `seed + 2` and `y - 64` are gone from the report), but 27 checks come back in `mesh`: the bounds checks `solid[i]`, `solid[i + 1]`, `solid[i + 34 * 34]` and the 24 overflow checks `base + 1`, `base + 2`, `base + 3` in the six inlined `Mesh.quad` copies.
+- An `@assume(seed >= 0)` that removes nothing (and gets the warning) at the top of `solids` or of `mesh` does the same. A small program shows the bounds half: an `@assume` that wraps the end of a function loses the length of the array it returns, so the caller's `solid[i]` keeps its check (repro in the follow-ups file). The `base + k` half did not reproduce in a small program and is not explained. Not fixed.

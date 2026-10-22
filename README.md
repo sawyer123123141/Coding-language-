@@ -145,6 +145,22 @@ total: 3 checks, 2 removed, 1 left; 1 allocation; no other ways to fail
 
 A list or an array holds at most 2,147,483,647 items.
 
+**`@prove` and `@assume`.** `@prove` is a promise the compiler checks, and a build that breaks it fails with the chain of calls that broke it. `@assume` tells the compiler a fact it can use, and checks it where it is written.
+
+```kestrel
+@prove(no_alloc, no_checks)
+pure step(var p: Particle, dt: float) { ... }
+
+pure at(xs: [int], i: int) -> int {
+    @assume(i >= 0 and i < xs.len)
+    xs[i]
+}
+```
+
+- `@prove` takes `no_alloc` (nothing allocates), `no_checks` (no overflow, shift, division, narrowing or bounds check is left), `no_panic` (no check and no other way to fail) and `inline` (every call was inlined). It goes before a function, a method, an interface method, or a `for`, `par for` or `while` loop, and covers what the code calls and every place it was inlined. `kestrel check --report` lists what is left in it.
+- `@assume(cond)` holds to the end of its block. A checked build checks it and a false one stops the program ("assumption `i < xs.len` is false on line 3 of f.kes"); under `--release` one that only removes arithmetic checks is trusted, and one that removes a bounds check stays one check. `kestrel check` warns when an assumption removes nothing.
+- `@prove` and `@assume` make `kestrel check` run the whole analysis, so it takes about 50-80 ms longer on the voxel world; an `@assume` around a big block (the inlined noise code) makes the build itself 65-70% slower there, so put one near what it helps. `kestrel/bench/voxels3d/results.md` has the numbers.
+
 ## A window
 
 Four modules are built into the compiler (raylib underneath), and work under both `kestrel run` and `kestrel build`. Windows only for now.
@@ -218,6 +234,6 @@ The core language works: functions, structs with methods, enums and `match`, vec
 
 It also runs inside Godot 4: see [`kestrel/godot`](kestrel/godot/README.md). GDScript calls Kestrel functions, and edits hot-reload.
 
-Also built: closures and function values with the list methods that take them, interfaces (checked method sets with dynamic dispatch), `map` (the hash map), `par for` (loops that run on every core over `pure` code), range analysis (checks the compiler proves can't fail are left out, and `kestrel check --report` lists the rest), global math and random numbers, and the window above with textures, 3D and the voxel viewer. Small structs now stay in registers. Next: a stronger (faster) backend.
+Also built: closures and function values with the list methods that take them, interfaces (checked method sets with dynamic dispatch), `map` (the hash map), `par for` (loops that run on every core over `pure` code), range analysis (checks the compiler proves can't fail are left out, and `kestrel check --report` lists the rest), `@prove` performance contracts and `@assume`, global math and random numbers, and the window above with textures, 3D and the voxel viewer. Small structs now stay in registers. Next: a stronger (faster) backend.
 
 Speed versus Rust is between 1.0x and 1.5x on loops and structs, and about 3x on the voxel heightmap milestone. The particle demo's update step is close now that small structs stay in registers: on one thread it takes 1.07 times Rust's time (1.15 times with the `pow` hoisted out, down from 1.5 and 3.4), but its copy loop is still about 4 times behind, and a whole frame with bulk drawing was only 2-7% behind before that change. Leaving out the checks the compiler proves can't fail makes the 3D voxel world with checks on 2.2 times faster (1.4 s to 0.64 s, now 1.09 times its `--release` time, was 2.4 times) and a `for i` loop over `parts[i]` 26% faster; it adds 40-70 ms to the build of a big program like that one. The numbers are in `kestrel/bench/*/results.md`.

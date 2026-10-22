@@ -352,18 +352,71 @@ From `docs/superpowers/specs/2026-10-19-range-analysis-design.md` (its "As built
 - **Checks inside the runtime's own functions** (`remove_at`, `insert`, a string's `s[i]`) and the map-changed check of a loop over a map: the report lists them as ways to fail; they stay.
 - **Precision left from Task 3:** a map value's list in a loop that writes the map (lowering re-indexes it each time); facts through an inlined helper's parameter copy, kept only when `rebase` finds an equal outside term; a length set by `SetLen` to an expression over a written term is forgotten; after 8 rounds a loop's top keeps only ranges.
 
-**For Round B (`@prove` and `@assume`):**
-- **Block end.** The `@` spec says an assumption lasts until its variables change "or its block ends"; the analysis keeps facts past a block, which is sound for an assumption checked where it was written. Pick: add forgetting at the block's end (less precise, never unsound) or drop the words from the rule.
-- **What an assumption removes** is found by analysing the function again without it and comparing; `refine` (unused, `#[allow(dead_code)]`) is the hook.
-- **Loops are named by the line of their header** in the report; if two loops can share a line, KIR needs a loop id.
-- **A function the analysis gave up on, or code the report's walker cut, must fail every contract** rather than look clean: `events.rs` stops at `MAX_DEPTH = 4096` and lists nothing deeper (allocations and ways to fail, not just checks). Only pathological depth reaches it.
-- **Report data the contracts read:** `no_alloc` and `no_panic` need the runtime's out-of-memory failure (every allocation) to be said not to count, or listed; `m.init` (a constant's initialiser) is not charged to `main`.
+**For Round B (`@prove` and `@assume`): closed 2026-10-21** (built; see "Found while building `@prove` and `@assume`" below and the spec's "As built (Round B)"):
+- **Block end:** decided and built: an assumption ends at its block's `}` (the user's pick, 2026-10-20); the code after the block is analysed as if it weren't there.
+- **What an assumption removes:** found by running its block twice in a deciding pass (with it, and as if no assumption in the block were written) and comparing; `refine` is used now.
+- **Loops are named by the line of their header in the report:** still true for the report. Contracts don't need a loop id: each annotated loop has its own site and `Prove` block, found by id, so two loops on one line are told apart.
+- **A function the analysis gave up on, or code the report's walker cut, fails every contract:** built (a cut counts as a deep give-up; the report still doesn't print `What::Cut`).
+- **Report data the contracts read:** built. Running out of memory and the item limit on growth don't count for `no_panic` (`no_alloc` rules growth out), and `m.init` is charged to `main`'s contracts ("it builds the program's constants first, which ..."). The report's own totals still double-count inlined bodies, and contracts never read them.
 
 **Deferred review notes (minor):**
 - *Report:* totals count an inlined body in the callee's own entry and in each caller that inlined it (not distinct counts); the runtime's out-of-memory failure is not listed; `m.init`'s allocations aren't charged to `main`; one element-copy line ("makes a copy of the string", the elements of `tags`) is unnamed; a function that makes a closure counts the closure's checks even if the function value never reaches a call; a chain takes the nearest reason (a function's own before a call that leads to one), not strictly the first event in the code; statements with no line of their own (a `Dup`, a drop, `FreeArena`, `SetLen`) take the latest line seen in the walk; a function the analysis gave up on lists its checks with no loop information, in walk order; `Stmt::Trap` and `Stmt::Fail` still carry no line.
 - *Analysis:* when a function gives up, the text for every site is built, and `show::write_expr` has a length limit but no depth limit (it recurses to the expression's depth; the other passes do too, but a small-stack host such as Godot is the one that would notice); `debug_assert!(false)` on a site that was never decided panics a debug compiler (a release compiler keeps the check; intentional, it catches gaps in the walk); the budget counts statement visits only, so one huge expression in nested loops costs rounds times its size beyond the budget (a compile-time cost; measure it with the rest).
 - *Tests and harness:* the release pass's 30-second timeout is printed and listed in failure messages but doesn't fail the test (consider failing on a timeout in the proof run); `KESTREL_TEST_ONLY=` (set but empty) now means all programs, and the division proof-failure path is now tested through codegen to a running program (`codegen/tests/proven.rs`), as overflow was and bounds is by the `range_keep` programs (both done 2026-10-20); `split` over the item limit is untested (it needs a 2 GB string), and the Godot bridge's `write_arg` is tested only through `too_long`; the proof check's exe link of `kestrel_rt_proof_failed` is exercised by the verify run but by no focused test; forgetting at a `Bind` and refreshing a loop's hidden end are kept as defence: nothing observable fails without them.
 - *From the final review (2026-10-20):* a list statement's length change relies on codegen evaluating the operands before it finds the place (documented at `change_len` and the codegen sites, pinned by `range_order_list_place.kes`); the stricter alternative is to forget, not move, a length whose index locals the operands wrote. Two holes the review and its fix wave found are fixed and listed in the spec's "As built" (a whole loop element assigned; a lent interface moved into a local by the inliner). The checker refuses a whole assignment to a `var` list parameter and to a matched value inside its `match`, so those forms of the first hole can't be written today; the fix covers them anyway.
+
+## Found while building `@prove` and `@assume` (2026-10-21)
+
+From `docs/superpowers/specs/2026-10-18-at-annotations-design.md` (its "As built (Round B)"), the task reviews and the ledger (`.superpowers/sdd/2026-10-20-round-b-annotations/`, git-ignored). This closes the "For Round B" items of "Found while building range analysis" above. None of the rest blocks anything. Not fixed:
+
+**Owed from the build:**
+- One full `cargo test --workspace --no-fail-fast` (including the exe pass without the proof check), workspace clippy, and clippy in `kestrel/godot` and `kestrel/bench/kernels`: every task ran focused targets in light mode (Task 1b ran 175 of the 212 programs, Task 2 the whole programs target in its proof-check passes); no window, GPU or demo tests (`window_smoke*`, `voxels_demo`, `demos`, `window_print_flush`) ran. Run when the user says the machine is free.
+- The final whole-round Opus review and its fix wave. **Must fix there (Task 2's review):** the deciding path's plain run (`range/assume.rs`, `Cx::assume`) doesn't forget its conditions' writes the way `plain_block` does. It is latent (the checker forbids calls and indexes in conditions), but it breaks Round A's "conditions that write" rule; extend `a_condition_that_writes_is_forgotten` with an index after the block. Also from that review: `the_conditions_teach_the_plain_run_nothing` can't fail (overflow passes teach nothing), so delete or reword it; add an `assume_owning_body` variant with the `Arena` declared after the `@assume`.
+- **To triage in the final review:** `print` allocates in the runtime (the `BufWriter`'s first use, the capture buffer growing) yet passes `no_alloc`, and the print functions codegen generates and `MethodTable.print` and `.copy` have no call edges, so contracts and the report can't see through them.
+
+**Compile time and precision (measured 2026-10-21, `kestrel/bench/voxels3d/results.md`, "`@prove` and `@assume`"):**
+- **The build with an assumption is +65-69% on the voxel world** (296 ms against 175 checked, 255 against 155 `--release`); `@prove` alone is +4.6% and +2.6% (target met), and `kestrel check` with the assumption is 2.84 and 3.76 times the contracts-only time (target 2.2: missed). The assumption wraps all of `solids`, which holds the inlined noise code, so its block runs twice in a deciding pass over the hottest function. Not profiled. Candidates: the plain run could skip the checks it doesn't need to record (it exists for what leaves the block); a real run that finds nothing to remove (no site left in its block that the assumption's terms touch) could be skipped; the facts matrix grows with the terms an assumption adds (Round A's list: make `Facts` copy-on-write or sparse); `kestrel check` analyses both builds for the warning, and could analyse the second only when the first found no removal.
+- **An assumption that wraps the end of a function loses what is known about the value the function returns.** Repro (`kestrel check --report`; delete the `@assume` line and `s[i]`'s bounds check goes away):
+  ```
+  pure make(n: int) -> [u8] {
+      @assume(n >= 0)
+      var out = array[u8](100)
+      out[n & 63] = 1
+      out
+  }
+  pure use_it(n: int) -> int {
+      let s = make(n)
+      var t = 0
+      for i from 0 to 100 { t += int(s[i]) }
+      t
+  }
+  main() { print(use_it(3)) }
+  ```
+  The tail goes through a temporary inside the assumption's body (`Move` of it for a heap value), and the length fact on `out` doesn't follow it. On the voxel world the assumption at the top of `solids` removes 12 checks and loses 27 in `mesh` (3 bounds checks `solid[i]`, `solid[i + 1]`, `solid[i + 34 * 34]`, and 24 overflow checks `base + 1` to `base + 3` in the six inlined `Mesh.quad` copies); an `@assume(seed >= 0)` that removes nothing does the same. The 24 `base + k` checks did not reproduce in a small program and aren't explained. Look at how the tail temporary and the inliner's result read (`Load`) carry list lengths, and at whether the plain run's end state keeps the terms that bound `vertices.len`.
+- **An annotated loop adds one node to the inliner's size count,** so it can flip an `inline` contract at `MAX_NODES` (256).
+- `--report` builds 8 chains and a recursion pass though it reads 2, and `implementations(m)` is computed twice (`summary.rs`); contracts use their own. Cheap to trim.
+
+**Not built (as the addendum says, or the design left out):**
+- **Contracts on function types** (`@prove(no_alloc) (int) -> int`). A call through a function value breaks all four contracts until they exist; inline it or use an interface method.
+- **Natives marked safe.** A native breaks `no_alloc` and `no_panic`, so no contracted code can call `draw.*` or `window.*`; marking a native "doesn't allocate or fail" would need a syntax or a table.
+- **`@prove` on a native in a built-in module** is a parse error ("`@prove` can't go on a native function").
+- **Warnings in `kestrel run` and the Godot add-on.** Only `kestrel check` shows the "removes no check" warning (the add-on has `godot_warn!` wired but asks for none); contract errors do stop both.
+- **Facts across calls.** An assumption at a call site doesn't reach the callee, and a callee's facts don't reach the caller, so a function-level `@prove(no_panic)` and an `@assume` in it can't both hold in a checked build, and moving the assumption to the caller doesn't help.
+- **Indexes that are a constant or a local in an assumption** (`grid[y].len`, `parts[i].items.len`). The restricted form (names, fields, numbers, `.len`, `+ - *`) can't state them; allowing an index that is a constant or a local, evaluated only when the assumption is checked, would recover them. A condition that could divide, index or narrow would also let a condition teach the plain run something, which is why the hole in the must-fix above is latent today.
+- **Products as terms of a fact:** `@assume(xs.len == w * h)` is accepted, but Round A's "products in facts" gap is still there, so `xs[y * w + x]` keeps its check; the voxel world's `out[i]` and `i + 1` (14 checks a sample, per Round A) are not helped.
+
+**Syntax picks the user hasn't ruled on** (the addendum's "(1)" and "(2)", also in the syntax spec; each built in one place, so a change is cheap):
+1. The annotated item may follow `@prove(...)` on the same line or on the next. At most one line break: a blank line or a comment line between is an error (a comment line counting as the break was the implementer's reading of "at most one line break"; say if comments should be allowed). One constant: `MAX_LINE_BREAKS` in `kestrel/syntax/src/parser/annot.rs`.
+2. `@assume` conditions allow only names, fields of them, integer literals, `.len`, `+ - *`, unary `-` and parentheses (`assume_side` in `kestrel/check/src/body/assume.rs`). A disallowed side such as `a / 2 < b` gets the generic form error and not a hint about sides (a minor).
+
+**Deferred minor findings:**
+- *Parsing and checking:* `annot.rs` has an `at` closure written twice, and its helpers return empty without a source (add a `debug_assert`); `prove_run`'s `in_body` flag mixes the item and body cases; untested: a comment line between an annotation and its target, `@assume(a) foo()` on one line, a blank line before an interface method's annotation.
+- *Lowering:* an `if` or `match` arm's heap value with an assumption in it is always copied (`owned(v, false)`) even when there is no cleanup (the brief required it; a move would do when the scope has no cleanup); the inlined result is read with `Load`, which costs an extra copy for an aggregate, only in annotated code; no test for a function-body tail with cleanup (`lower/assume.rs`) beyond `assume_owning_body.kes`.
+- *Analysis and contracts:* an outer assumption goes `Check` whenever any bounds site depends on any inner assumption (sound, conservative); `KESTREL_CHECK_PROOFS=1` can't catch a wrong `Trust` (it shows as "assumption is false"); a debug-only check that every loop target in `Program::proves` produced a site is missing; copy numbering is spread over `prove_copies`, `Regions::step` and the lookups (a comment linking them), and the address-keyed copies map would be fragile if bodies were cloned mid-analysis; the mutation table's rows for a check's own copy and for loop headers are imprecise; no test for a function site that is lost (`region.rs`, "lost track" for a function); the help line for a promised interface call is only given for a direct call, and chains through calls get the default help.
+- *Over-reporting (conservative, not unsound):* a map key set counts for `no_panic` even on a local map that is never iterated; dead copies are still checked (a closure's code left behind after its literal was inlined); a given-up callee names its stop before its first check when both are equally near; the chain through an inlined copy can show the inliner's real call lines, which can surprise ("which can call itself (line 17)" for mutual recursion after `b` was inlined into `a`).
+- *Wording:* "comparison for `sort`" in a `sort_by` recursion message; an ambiguous "it" in another function's give-up (`words.rs`).
+- *Runtime:* `panic.rs` strips `" of "` from `of_file`'s output for the assumption message; use a bare-file-name helper.
+- *Tests:* a false trusted assumption's divide fault under `--release` isn't exercised end to end (documented in the syntax spec; the proof check reports it as the user's assumption).
 
 ## Found by the tuned voxel copy (2026-10-20)
 
