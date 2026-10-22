@@ -73,7 +73,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     fn shift(&mut self, op: BinOp, a: Value, b: Value, t: KTy, line: u32, check: Check) -> Value {
         if check.arith(self.shared.opts.checked_arith) {
             // Unsigned compare: a negative amount looks huge.
-            let bad = self.b.ins().icmp_imm(IntCC::UnsignedGreaterThanOrEqual, b, bits(t) as i64);
+            let bad = self.b.ins().icmp_imm_s(IntCC::UnsignedGreaterThanOrEqual, b, bits(t) as i64);
             self.fail_if(bad, PANIC_SHIFT, line, check);
         }
         match (op, t.is_signed()) {
@@ -99,7 +99,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             let x = self.b.ins().uextend(types::I32, a);
             let y = self.b.ins().uextend(types::I32, b);
             let r = plain(self, x, y);
-            let bad = self.b.ins().icmp_imm(IntCC::UnsignedGreaterThan, r, 255);
+            let bad = self.b.ins().icmp_imm_s(IntCC::UnsignedGreaterThan, r, 255);
             self.fail_if(bad, PANIC_OVERFLOW, line, check);
             return self.b.ins().ireduce(types::I8, r);
         }

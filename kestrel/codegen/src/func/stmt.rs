@@ -182,7 +182,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         // `i < end` held, so `i + 1` can't overflow.
         self.b.switch_to_block(step);
         let i = self.load_place(&place)?;
-        let next = self.b.ins().iadd_imm(i, 1);
+        let next = self.b.ins().iadd_imm_s(i, 1);
         self.store_place(&place, next)?;
         self.b.ins().jump(header, &[]);
 

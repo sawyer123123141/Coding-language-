@@ -1,5 +1,5 @@
 use cranelift_codegen::ir::condcodes::IntCC;
-use cranelift_codegen::ir::{types, InstBuilder, MemFlags, TrapCode, Value};
+use cranelift_codegen::ir::{types, InstBuilder, MemFlagsData, TrapCode, Value};
 use cranelift_module::Module;
 use kestrel_kir::{self as kir, IndexCheck, KTy, Place, Proj};
 use kestrel_runtime::PANIC_BOUNDS;
@@ -77,7 +77,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         if offset == 0 {
             addr
         } else {
-            self.b.ins().iadd_imm(addr, offset as i64)
+            self.b.ins().iadd_imm_s(addr, offset as i64)
         }
     }
 
@@ -95,16 +95,16 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 }
             }
         }
-        let ptr = self.b.ins().load(self.ptr, MemFlags::trusted(), header, 0);
+        let ptr = self.b.ins().load(self.ptr, MemFlagsData::trusted(), header, 0);
         let (size, _) = self.shared.kir.size_align(elem);
-        let at = self.b.ins().imul_imm(i, size as i64);
+        let at = self.b.ins().imul_imm_s(i, size as i64);
         Ok(self.b.ins().iadd(ptr, at))
     }
 
     /// Panics unless `0 <= i < len` for the collection whose header is at `header`; with
     /// `Verify`, fails as a compiler bug instead.
     fn bounds_check(&mut self, header: Value, i: Value, line: u32, check: Check) {
-        let len = self.b.ins().load(types::I64, MemFlags::trusted(), header, 8);
+        let len = self.b.ins().load(types::I64, MemFlagsData::trusted(), header, 8);
         // Unsigned: a negative index looks huge, so one compare checks both ends.
         let bad = self.b.ins().icmp(IntCC::UnsignedGreaterThanOrEqual, i, len);
         let (fail, ok) = (self.b.create_block(), self.b.create_block());
@@ -132,7 +132,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         }
         let ty = self.place_ty(p);
         let addr = self.place_addr(p)?;
-        Ok(self.b.ins().load(cl_type(ty), MemFlags::trusted(), addr, 0))
+        Ok(self.b.ins().load(cl_type(ty), MemFlagsData::trusted(), addr, 0))
     }
 
     pub(crate) fn store_place(&mut self, p: &Place, val: Value) -> Result<(), String> {
@@ -141,7 +141,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             return Ok(());
         }
         let addr = self.place_addr(p)?;
-        self.b.ins().store(MemFlags::trusted(), val, addr, 0);
+        self.b.ins().store(MemFlagsData::trusted(), val, addr, 0);
         Ok(())
     }
 
@@ -160,8 +160,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 if f.ty.is_aggregate() {
                     self.copy_fields(dst, src, at, f.ty);
                 } else {
-                    let v = self.b.ins().load(cl_type(f.ty), MemFlags::trusted(), src, at);
-                    self.b.ins().store(MemFlags::trusted(), v, dst, at);
+                    let v = self.b.ins().load(cl_type(f.ty), MemFlagsData::trusted(), src, at);
+                    self.b.ins().store(MemFlagsData::trusted(), v, dst, at);
                 }
             }
             return;
@@ -175,8 +175,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             _ => (1, types::I8),
         };
         for at in (0..size as i32).step_by(chunk) {
-            let v = self.b.ins().load(chunk_ty, MemFlags::trusted(), src, offset + at);
-            self.b.ins().store(MemFlags::trusted(), v, dst, offset + at);
+            let v = self.b.ins().load(chunk_ty, MemFlagsData::trusted(), src, offset + at);
+            self.b.ins().store(MemFlagsData::trusted(), v, dst, offset + at);
         }
     }
 
@@ -224,7 +224,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 self.read_leaves(e, 0, &mut leaves)?;
                 let dst = self.place_addr(p)?;
                 for (offset, v) in leaves {
-                    self.b.ins().store(MemFlags::trusted(), v, dst, offset);
+                    self.b.ins().store(MemFlagsData::trusted(), v, dst, offset);
                 }
                 return Ok(());
             }

@@ -3,7 +3,7 @@
 //! (`{ptr, len}`) copies like an array of bytes.
 
 use cranelift_codegen::ir::condcodes::IntCC;
-use cranelift_codegen::ir::{types, InstBuilder, MemFlags, Value};
+use cranelift_codegen::ir::{types, InstBuilder, MemFlagsData, Value};
 use cranelift_module::Module;
 use kestrel_kir::{self as kir, KTy, Place};
 
@@ -27,7 +27,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     }
 
     pub(super) fn store(&mut self, v: Value, addr: Value, offset: i32) {
-        self.b.ins().store(MemFlags::trusted(), v, addr, offset);
+        self.b.ins().store(MemFlagsData::trusted(), v, addr, offset);
     }
 
     /// A list's extra fields: its capacity and the current arena, where it will grow.
@@ -83,7 +83,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
 
     pub(crate) fn len(&mut self, p: &Place) -> Result<Value, String> {
         let addr = self.place_addr(p)?;
-        Ok(self.b.ins().load(types::I64, MemFlags::trusted(), addr, LEN))
+        Ok(self.b.ins().load(types::I64, MemFlagsData::trusted(), addr, LEN))
     }
 
     /// `xs.add(v)`. `v` is evaluated first (it may read `xs`), then the
@@ -100,8 +100,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             self.expr(value)?
         };
         let header = self.place_addr(list)?;
-        let len = self.b.ins().load(types::I64, MemFlags::trusted(), header, LEN);
-        let cap = self.b.ins().load(types::I64, MemFlags::trusted(), header, CAP);
+        let len = self.b.ins().load(types::I64, MemFlagsData::trusted(), header, LEN);
+        let cap = self.b.ins().load(types::I64, MemFlagsData::trusted(), header, CAP);
         let full = self.b.ins().icmp(IntCC::SignedGreaterThanOrEqual, len, cap);
         let (grow, append) = (self.b.create_block(), self.b.create_block());
         self.b.ins().brif(full, grow, &[], append, &[]);
@@ -111,15 +111,15 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         self.call_id(self.shared.rt.list_grow, &[header, s, a]);
         self.b.ins().jump(append, &[]);
         self.b.switch_to_block(append);
-        let ptr = self.b.ins().load(self.ptr, MemFlags::trusted(), header, PTR);
-        let at = self.b.ins().imul_imm(len, size);
+        let ptr = self.b.ins().load(self.ptr, MemFlagsData::trusted(), header, PTR);
+        let at = self.b.ins().imul_imm_s(len, size);
         let slot = self.b.ins().iadd(ptr, at);
         if value.ty.is_aggregate() {
             self.copy_aggregate(slot, v, value.ty);
         } else {
             self.store(v, slot, 0);
         }
-        let len = self.b.ins().iadd_imm(len, 1);
+        let len = self.b.ins().iadd_imm_s(len, 1);
         self.store(len, header, LEN);
         Ok(())
     }
@@ -132,9 +132,9 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         }
         let (size, align) = self.elem_size_align(ty);
         let header = self.place_addr(p)?;
-        let ptr = self.b.ins().load(self.ptr, MemFlags::trusted(), header, PTR);
-        let len = self.b.ins().load(types::I64, MemFlags::trusted(), header, LEN);
-        let bytes = self.b.ins().imul_imm(len, size);
+        let ptr = self.b.ins().load(self.ptr, MemFlagsData::trusted(), header, PTR);
+        let len = self.b.ins().load(types::I64, MemFlagsData::trusted(), header, LEN);
+        let bytes = self.b.ins().imul_imm_s(len, size);
         let a = self.b.ins().iconst(types::I64, align);
         let copy = self.call_id(self.shared.rt.dup, &[ptr, bytes, a]).expect("returns a pointer");
         self.store(copy, header, PTR);

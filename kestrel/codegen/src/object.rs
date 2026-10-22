@@ -49,6 +49,6 @@ fn define_c_main(module: &mut ObjectModule, kestrel_main: FuncId) -> Result<(), 
     let call = b.ins().call(start_ref, &[entry]);
     let code = b.inst_results(call)[0];
     b.ins().return_(&[code]);
-    b.finalize();
+    b.finalize(module.target_config());
     module.define_function(main_id, &mut ctx).map_err(|e| format!("codegen failed for C main: {e:?}"))
 }

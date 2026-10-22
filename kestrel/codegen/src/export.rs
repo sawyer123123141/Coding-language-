@@ -3,7 +3,7 @@
 //! add-on can call any of them. Arguments sit in a byte buffer at the
 //! offsets `ExportInfo` gives; the result is written at `ret`.
 
-use cranelift_codegen::ir::{AbiParam, Function, InstBuilder, MemFlags, Signature};
+use cranelift_codegen::ir::{AbiParam, Function, InstBuilder, MemFlagsData, Signature};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_module::{FuncId, Linkage, Module};
 use kestrel_kir::{self as kir, KTy, LocalKind, StructIdx};
@@ -121,19 +121,19 @@ pub(crate) fn define_thunks<M: Module>(module: &mut M, m: &kir::Module, ids: &[F
             }
             for ((p, &t), &at) in f.params.iter().zip(&param_tys).zip(&info.arg_offsets) {
                 vals.push(if f.locals[p.0 as usize].kind == LocalKind::RefParam {
-                    b.ins().iadd_imm(args, at as i64)
+                    b.ins().iadd_imm_s(args, at as i64)
                 } else {
-                    b.ins().load(cl_type(t), MemFlags::trusted(), args, at as i32)
+                    b.ins().load(cl_type(t), MemFlagsData::trusted(), args, at as i32)
                 });
             }
             let fref = module.declare_func_in_func(ids[i], b.func);
             let call = b.ins().call(fref, &vals);
             if f.ret.is_some_and(|r| !r.is_aggregate()) {
                 let v = b.inst_results(call)[0];
-                b.ins().store(MemFlags::trusted(), v, ret, 0);
+                b.ins().store(MemFlagsData::trusted(), v, ret, 0);
             }
             b.ins().return_(&[]);
-            b.finalize();
+            b.finalize(module.target_config());
         }
         let mut ctx = module.make_context();
         ctx.func = func;
@@ -161,7 +161,7 @@ pub(crate) fn define_init_thunk<M: Module>(module: &mut M, m: &kir::Module, ids:
         let fref = module.declare_func_in_func(ids[init.0 as usize], b.func);
         b.ins().call(fref, &[]);
         b.ins().return_(&[]);
-        b.finalize();
+        b.finalize(module.target_config());
     }
     let mut ctx = module.make_context();
     ctx.func = func;

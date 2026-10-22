@@ -2,7 +2,7 @@
 //! (`Stmt::BindGlobal`, for heap constants) and the runtime's call line and file
 //! (`Stmt::SetLine`).
 
-use cranelift_codegen::ir::{types, InstBuilder, MemFlags, Value};
+use cranelift_codegen::ir::{types, InstBuilder, MemFlagsData, Value};
 use cranelift_module::Module;
 use kestrel_kir::{self as kir, GlobalIdx, LocalIdx};
 
@@ -32,7 +32,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         for (data, value) in [(self.shared.rt.call_line, line), (self.shared.rt.call_file, file)] {
             let gv = self.module.declare_data_in_func(data, self.b.func);
             let addr = self.b.ins().symbol_value(self.ptr, gv);
-            self.b.ins().store(MemFlags::trusted(), value, addr, 0);
+            self.b.ins().store(MemFlagsData::trusted(), value, addr, 0);
         }
     }
 

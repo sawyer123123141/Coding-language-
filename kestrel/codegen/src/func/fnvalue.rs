@@ -4,7 +4,7 @@
 //! values after it (see KIR's `lower::env`). A closure literal passed straight to a call has a stack
 //! environment instead: the same block in a stack slot of the caller, holding shallow copies.
 
-use cranelift_codegen::ir::{types, AbiParam, InstBuilder, MemFlags, Signature, StackSlotData, StackSlotKind, Type, Value};
+use cranelift_codegen::ir::{types, AbiParam, InstBuilder, MemFlagsData, Signature, StackSlotData, StackSlotKind, Type, Value};
 use cranelift_codegen::isa::CallConv;
 use cranelift_module::Module;
 use kestrel_kir::{self as kir, FuncIdx, KSig, Place};
@@ -40,9 +40,9 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// Writes the function value of the thunk `thunk` at `dest`: its address and a null environment.
     pub(crate) fn fn_ref_into(&mut self, thunk: FuncIdx, dest: Value) {
         let code = self.func_address(thunk);
-        self.b.ins().store(MemFlags::trusted(), code, dest, 0);
+        self.b.ins().store(MemFlagsData::trusted(), code, dest, 0);
         let env = self.b.ins().iconst(types::I64, 0);
-        self.b.ins().store(MemFlags::trusted(), env, dest, 8);
+        self.b.ins().store(MemFlagsData::trusted(), env, dest, 8);
     }
 
     /// Writes the function value of closure code `code` with a new heap environment at `dest`:
@@ -71,14 +71,14 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// since a value may read `dest`.
     fn fill_env(&mut self, code: FuncIdx, env: &kir::Env, block: Value, size: Value, dest: Value) -> Result<(), String> {
         let copy = self.func_address(env.copy);
-        self.b.ins().store(MemFlags::trusted(), copy, block, 0);
-        self.b.ins().store(MemFlags::trusted(), size, block, 8);
+        self.b.ins().store(MemFlagsData::trusted(), copy, block, 0);
+        self.b.ins().store(MemFlagsData::trusted(), size, block, 8);
         for (v, &offset) in env.values.iter().zip(&env.layout.offsets) {
             self.store_at(v, block, offset as i32)?;
         }
         let code = self.func_address(code);
-        self.b.ins().store(MemFlags::trusted(), code, dest, 0);
-        self.b.ins().store(MemFlags::trusted(), block, dest, 8);
+        self.b.ins().store(MemFlagsData::trusted(), code, dest, 0);
+        self.b.ins().store(MemFlagsData::trusted(), block, dest, 8);
         Ok(())
     }
 
@@ -86,7 +86,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// size is in its header.
     pub(crate) fn env_dup(&mut self, env: &kir::Expr) -> Result<Value, String> {
         let src = self.expr(env)?;
-        let size = self.b.ins().load(types::I64, MemFlags::trusted(), src, 8);
+        let size = self.b.ins().load(types::I64, MemFlagsData::trusted(), src, 8);
         let align = self.b.ins().iconst(types::I64, 8);
         Ok(self.call_id(self.shared.rt.dup, &[src, size, align]).expect("returns a pointer"))
     }
@@ -94,7 +94,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// Points reference local `local` at `offset` bytes into the environment at `env`.
     pub(crate) fn bind_env(&mut self, local: kir::LocalIdx, env: &kir::Expr, offset: u32) -> Result<(), String> {
         let env = self.expr(env)?;
-        let addr = self.b.ins().iadd_imm(env, offset as i64);
+        let addr = self.b.ins().iadd_imm_s(env, offset as i64);
         self.bind_ref(local, addr);
         Ok(())
     }
@@ -103,18 +103,18 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// in the environment's header. A value without one (0) is left alone.
     pub(crate) fn copy_fn_env(&mut self, p: &Place) -> Result<(), String> {
         let addr = self.place_addr(p)?;
-        let env = self.b.ins().load(types::I64, MemFlags::trusted(), addr, 8);
+        let env = self.b.ins().load(types::I64, MemFlagsData::trusted(), addr, 8);
         let (copy_b, merge) = (self.b.create_block(), self.b.create_block());
         self.b.ins().brif(env, copy_b, &[], merge, &[]);
         self.b.switch_to_block(copy_b);
-        let copy = self.b.ins().load(self.ptr, MemFlags::trusted(), env, 0);
+        let copy = self.b.ins().load(self.ptr, MemFlagsData::trusted(), env, 0);
         let mut sig = Signature::new(self.module.isa().default_call_conv());
         sig.params.push(AbiParam::new(types::I64));
         sig.returns.push(AbiParam::new(types::I64));
         let sigref = self.b.import_signature(sig);
         let inst = self.b.ins().call_indirect(sigref, copy, &[env]);
         let fresh = self.b.inst_results(inst)[0];
-        self.b.ins().store(MemFlags::trusted(), fresh, addr, 8);
+        self.b.ins().store(MemFlagsData::trusted(), fresh, addr, 8);
         self.b.ins().jump(merge, &[]);
         self.b.switch_to_block(merge);
         Ok(())
@@ -123,7 +123,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// The environment word of the function value at a place.
     pub(crate) fn fn_env(&mut self, p: &kir::Place) -> Result<Value, String> {
         let addr = self.place_addr(p)?;
-        Ok(self.b.ins().load(types::I64, MemFlags::trusted(), addr, 8))
+        Ok(self.b.ins().load(types::I64, MemFlagsData::trusted(), addr, 8))
     }
 
     /// Calls the code of the function value at `callee` with its environment, then `args`. The code
@@ -137,8 +137,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         dest: Option<Value>,
     ) -> Result<Option<Value>, String> {
         let addr = self.place_addr(callee)?;
-        let code = self.b.ins().load(self.ptr, MemFlags::trusted(), addr, 0);
-        let env = self.b.ins().load(types::I64, MemFlags::trusted(), addr, 8);
+        let code = self.b.ins().load(self.ptr, MemFlagsData::trusted(), addr, 0);
+        let env = self.b.ins().load(types::I64, MemFlagsData::trusted(), addr, 8);
         let mut vals = Vec::with_capacity(args.len() + 2);
         if let Some(r) = sig.ret.filter(|r| r.is_aggregate()) {
             vals.push(match dest {

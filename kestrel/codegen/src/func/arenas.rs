@@ -1,7 +1,7 @@
 //! Arenas (`arena { }`, `in x { }`, dropping) and moves of owning values.
 
 use cranelift_codegen::ir::condcodes::IntCC;
-use cranelift_codegen::ir::{types, InstBuilder, MemFlags, Value};
+use cranelift_codegen::ir::{types, InstBuilder, MemFlagsData, Value};
 use cranelift_module::Module;
 use kestrel_kir::{self as kir, KTy, Place};
 
@@ -19,16 +19,16 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             None => self.new_arena(),
             Some(p) => {
                 let addr = self.place_addr(p)?;
-                let a = self.b.ins().load(self.ptr, MemFlags::trusted(), addr, 0);
+                let a = self.b.ins().load(self.ptr, MemFlagsData::trusted(), addr, 0);
                 let (create, done) = (self.b.create_block(), self.b.create_block());
                 let result = self.b.append_block_param(done, self.ptr);
-                let missing = self.b.ins().icmp_imm(IntCC::Equal, a, 0);
-                self.b.ins().brif(missing, create, &[], done, &[a]);
+                let missing = self.b.ins().icmp_imm_s(IntCC::Equal, a, 0);
+                self.b.ins().brif(missing, create, &[], done, &[a.into()]);
                 self.b.switch_to_block(create);
                 self.b.set_cold_block(create);
                 let fresh = self.new_arena();
-                self.b.ins().store(MemFlags::trusted(), fresh, addr, 0);
-                self.b.ins().jump(done, &[fresh]);
+                self.b.ins().store(MemFlagsData::trusted(), fresh, addr, 0);
+                self.b.ins().jump(done, &[fresh.into()]);
                 self.b.switch_to_block(done);
                 result
             }
@@ -47,10 +47,10 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// Frees the arena at `place` and nulls it, so dropping again does nothing.
     pub(crate) fn free_arena(&mut self, place: &Place) -> Result<(), String> {
         let addr = self.place_addr(place)?;
-        let a = self.b.ins().load(self.ptr, MemFlags::trusted(), addr, 0);
+        let a = self.b.ins().load(self.ptr, MemFlagsData::trusted(), addr, 0);
         self.call_id(self.shared.rt.arena_free, &[a]);
         let null = self.b.ins().iconst(self.ptr, 0);
-        self.b.ins().store(MemFlags::trusted(), null, addr, 0);
+        self.b.ins().store(MemFlagsData::trusted(), null, addr, 0);
         Ok(())
     }
 
@@ -58,10 +58,10 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// dropping again does nothing.
     pub(crate) fn drop_gpu(&mut self, place: &Place) -> Result<(), String> {
         let addr = self.place_addr(place)?;
-        let id = self.b.ins().load(types::I64, MemFlags::trusted(), addr, 0);
+        let id = self.b.ins().load(types::I64, MemFlagsData::trusted(), addr, 0);
         self.call_id(self.shared.rt.gpu_drop, &[id]);
         let zero = self.b.ins().iconst(types::I64, 0);
-        self.b.ins().store(MemFlags::trusted(), zero, addr, 0);
+        self.b.ins().store(MemFlagsData::trusted(), zero, addr, 0);
         Ok(())
     }
 
@@ -73,12 +73,12 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let zero = self.b.ins().iconst(types::I64, 0);
         let mut at = 0;
         while at + 8 <= size as i32 {
-            self.b.ins().store(MemFlags::trusted(), zero, src, at);
+            self.b.ins().store(MemFlagsData::trusted(), zero, src, at);
             at += 8;
         }
         let zero8 = self.b.ins().iconst(types::I8, 0);
         while at < size as i32 {
-            self.b.ins().store(MemFlags::trusted(), zero8, src, at);
+            self.b.ins().store(MemFlagsData::trusted(), zero8, src, at);
             at += 1;
         }
         Ok(())

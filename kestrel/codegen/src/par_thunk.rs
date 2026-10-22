@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use cranelift_codegen::ir::{types, AbiParam, Function, InstBuilder, MemFlags, Signature};
+use cranelift_codegen::ir::{types, AbiParam, Function, InstBuilder, MemFlagsData, Signature};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_module::{FuncId, Linkage, Module};
 use kestrel_kir as kir;
@@ -33,13 +33,13 @@ pub(crate) fn define_par_thunks<M: Module>(module: &mut M, m: &kir::Module, ids:
             // The body's parameters: one address per capture, then `start` and `end`.
             let captures = f.params.len() - 2;
             let mut args: Vec<_> = (0..captures)
-                .map(|k| b.ins().load(ptr, MemFlags::trusted(), env, (k * ptr.bytes() as usize) as i32))
+                .map(|k| b.ins().load(ptr, MemFlagsData::trusted(), env, (k * ptr.bytes() as usize) as i32))
                 .collect();
             args.extend([start, end]);
             let callee = module.declare_func_in_func(ids[fi.0 as usize], b.func);
             b.ins().call(callee, &args);
             b.ins().return_(&[]);
-            b.finalize();
+            b.finalize(module.target_config());
         }
         let mut ctx = module.make_context();
         ctx.func = func;

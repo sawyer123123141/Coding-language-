@@ -22,7 +22,7 @@ pub(crate) fn remove_redundant_params(func: &mut Function) {
     let mut edges: SecondaryMap<Block, Vec<(Inst, usize)>> = SecondaryMap::new();
     for block in func.layout.blocks() {
         let Some(inst) = func.layout.last_inst(block) else { continue };
-        for (i, call) in func.dfg.insts[inst].branch_destination(&func.dfg.jump_tables).iter().enumerate() {
+        for (i, call) in func.dfg.insts[inst].branch_destination(&func.dfg.jump_tables, &func.dfg.exception_tables).iter().enumerate() {
             edges[call.block(&func.dfg.value_lists)].push((inst, i));
         }
     }
@@ -38,7 +38,7 @@ pub(crate) fn remove_redundant_params(func: &mut Function) {
                     Some(value) => {
                         for &(inst, i) in &edges[block] {
                             let dfg = &mut func.dfg;
-                            dfg.insts[inst].branch_destination_mut(&mut dfg.jump_tables)[i].remove(ix, &mut dfg.value_lists);
+                            dfg.insts[inst].branch_destination_mut(&mut dfg.jump_tables, &mut dfg.exception_tables)[i].remove(ix, &mut dfg.value_lists);
                         }
                         func.dfg.remove_block_param(param);
                         func.dfg.change_to_alias(param, value);
@@ -55,8 +55,9 @@ pub(crate) fn remove_redundant_params(func: &mut Function) {
 fn only_value(func: &Function, edges: &[(Inst, usize)], ix: usize, param: Value) -> Option<Value> {
     let mut only = None;
     for &(inst, i) in edges {
-        let call = func.dfg.insts[inst].branch_destination(&func.dfg.jump_tables)[i];
-        let v = func.dfg.resolve_aliases(call.args_slice(&func.dfg.value_lists)[ix]);
+        let call = func.dfg.insts[inst].branch_destination(&func.dfg.jump_tables, &func.dfg.exception_tables)[i];
+        // Kestrel makes no `try_call`, so every argument is a value.
+        let v = func.dfg.resolve_aliases(call.args(&func.dfg.value_lists).nth(ix)?.as_value()?);
         if v == param {
             continue;
         }

@@ -3,7 +3,7 @@
 //! go through the method table (see `tables`): the method's address is loaded from the table and
 //! called with the data pointer where the method expects `self`.
 
-use cranelift_codegen::ir::{types, AbiParam, InstBuilder, MemFlags, Signature, Value};
+use cranelift_codegen::ir::{types, AbiParam, InstBuilder, MemFlagsData, Signature, Value};
 use cranelift_module::Module;
 use kestrel_kir::{self as kir, IfaceData, KSig, Place, TableIdx, TABLE_COPY, TABLE_METHODS, TABLE_PRINT};
 
@@ -18,8 +18,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
 
     /// The address in word `word` of the table of the interface value at `addr`.
     fn table_entry(&mut self, addr: Value, word: u32) -> Value {
-        let table = self.b.ins().load(self.ptr, MemFlags::trusted(), addr, 8);
-        self.b.ins().load(self.ptr, MemFlags::trusted(), table, (word * 8) as i32)
+        let table = self.b.ins().load(self.ptr, MemFlagsData::trusted(), addr, 8);
+        self.b.ins().load(self.ptr, MemFlagsData::trusted(), table, (word * 8) as i32)
     }
 
     /// Writes the interface value with table `table` and the concrete value `data` at `dest`. A
@@ -40,8 +40,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             }
         };
         let table = self.table_addr(table);
-        self.b.ins().store(MemFlags::trusted(), ptr, dest, 0);
-        self.b.ins().store(MemFlags::trusted(), table, dest, 8);
+        self.b.ins().store(MemFlagsData::trusted(), ptr, dest, 0);
+        self.b.ins().store(MemFlagsData::trusted(), table, dest, 8);
         Ok(())
     }
 
@@ -50,7 +50,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// arguments are evaluated. An aggregate result is written to `dest`, or to a temporary.
     pub(crate) fn call_virtual(&mut self, recv: &Place, slot: u32, args: &[kir::Arg], sig: &KSig, dest: Option<Value>) -> Result<Option<Value>, String> {
         let addr = self.place_addr(recv)?;
-        let data = self.b.ins().load(self.ptr, MemFlags::trusted(), addr, 0);
+        let data = self.b.ins().load(self.ptr, MemFlagsData::trusted(), addr, 0);
         let code = self.table_entry(addr, TABLE_METHODS + slot);
         let mut vals = Vec::with_capacity(args.len() + 2);
         if let Some(r) = sig.ret.filter(|r| r.is_aggregate()) {
@@ -85,7 +85,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
 
     /// Prints the concrete value of the interface value at `addr`, through its table.
     pub(crate) fn print_iface(&mut self, addr: Value) {
-        let data = self.b.ins().load(self.ptr, MemFlags::trusted(), addr, 0);
+        let data = self.b.ins().load(self.ptr, MemFlagsData::trusted(), addr, 0);
         let print = self.table_entry(addr, TABLE_PRINT);
         let mut sig = Signature::new(self.module.isa().default_call_conv());
         sig.params.push(AbiParam::new(self.ptr));
@@ -106,7 +106,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// function in its table, which returns the copy's address.
     pub(crate) fn copy_iface(&mut self, p: &Place) -> Result<(), String> {
         let addr = self.place_addr(p)?;
-        let data = self.b.ins().load(types::I64, MemFlags::trusted(), addr, 0);
+        let data = self.b.ins().load(types::I64, MemFlagsData::trusted(), addr, 0);
         let copy = self.table_entry(addr, TABLE_COPY);
         let mut sig = Signature::new(self.module.isa().default_call_conv());
         sig.params.push(AbiParam::new(types::I64));
@@ -114,7 +114,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let sigref = self.b.import_signature(sig);
         let inst = self.b.ins().call_indirect(sigref, copy, &[data]);
         let fresh = self.b.inst_results(inst)[0];
-        self.b.ins().store(MemFlags::trusted(), fresh, addr, 0);
+        self.b.ins().store(MemFlagsData::trusted(), fresh, addr, 0);
         Ok(())
     }
 }
