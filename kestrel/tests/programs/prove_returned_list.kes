@@ -1,0 +1,57 @@
+// A returned local list read after a passing `@prove` block or an `@assume` around the tail, as
+// written (no temporary): the caller keeps its length, and the values and copies are as without
+// the annotations.
+@prove(no_checks)
+pure make(n: int) -> [u8] {
+    var out = array[u8](100)
+    out[n & 63] = 1
+    out
+}
+
+pure make2(n: int) -> [u8] {
+    var out = array[u8](100)
+    @assume(n >= 0)
+    out[n & 63] = 2
+    out
+}
+
+pure make3(n: int) -> [u8] {
+    var out = array[u8](100)
+    @assume(n >= 0)
+    out[n & 63] = 3
+    return out
+}
+
+pure use_it(n: int) -> int {
+    let s = make(n)
+    let s2 = make2(n)
+    let s3 = make3(n)
+    var t = 0
+    for i from 0 to 100 {
+        t += int(s[i]) + int(s2[i]) + int(s3[i])
+    }
+    t
+}
+
+pick(c: bool, n: int) -> list[int] {
+    var xs: list[int] = [n, n + 1]
+    let ys = if c {
+        @assume(n >= 0)
+        xs
+    } else {
+        [0]
+    }
+    xs[0] = 99
+    ys
+}
+
+main() {
+    print(use_it(3))
+    print(use_it(70))
+    print(pick(true, 4))
+    print(pick(false, 4))
+}
+// expect: 6
+// expect: 6
+// expect: [4, 5]
+// expect: [0]

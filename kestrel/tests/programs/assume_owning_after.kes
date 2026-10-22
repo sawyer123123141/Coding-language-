@@ -1,0 +1,63 @@
+// `assume_owning_body` with the arena declared after the `@assume`: it is dropped at the end of
+// the function, after the assumption's body, which gives the value. With an `int` tail, a list
+// tail and `return ys`.
+pure total(xs: [int], n: int) -> int {
+    var s = 0
+    @assume(n >= 0 and n <= xs.len)
+    var a = Arena()
+    in a {
+        let tmp = [1, 2]
+        s += tmp.len
+    }
+    for i from 0 to n {
+        s += xs[i]
+    }
+    s
+}
+
+evens(xs: [int], n: int) -> list[int] {
+    var ys: list[int] = []
+    @assume(n >= 0 and n <= xs.len)
+    var a = Arena()
+    in a {
+        let tmp = [3]
+        ys.add(tmp.len)
+    }
+    for i from 0 to n {
+        if xs[i] % 2 == 0 {
+            ys.add(xs[i])
+        }
+    }
+    ys
+}
+
+odds(xs: [int], n: int) -> list[int] {
+    var ys: list[int] = []
+    @assume(n >= 0 and n <= xs.len)
+    var a = Arena()
+    in a {
+        let tmp = [5, 6]
+        ys.add(tmp.len)
+    }
+    for i from 0 to n {
+        if xs[i] % 2 == 1 {
+            ys.add(xs[i])
+        }
+    }
+    return ys
+}
+
+main() {
+    let xs = [1, 2, 3, 4, 5, 6]
+    print(total(xs, 4))
+    let e = evens(xs, 5)
+    print(e)
+    var o = odds(xs, 6)
+    o[0] = 0
+    print(o)
+    print(e.len + o.len)
+}
+// expect: 12
+// expect: [1, 2, 4]
+// expect: [0, 1, 3, 5]
+// expect: 7

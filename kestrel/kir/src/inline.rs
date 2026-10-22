@@ -244,9 +244,15 @@ impl Inliner<'_> {
     }
 
     /// A contracted callee's expanded `body` and `value` as its sites' `Prove` blocks, the first
-    /// site outermost: the value is computed into a temporary inside them, and read after.
+    /// site outermost: the value is computed into a temporary inside them, and read after. A value
+    /// that is a read of a whole local is read after them as it is (it has no check and makes no
+    /// event, and nothing between changes the local): a temporary would hide the length of a
+    /// returned list from range analysis, which tracks it only for locals it indexes or measures.
     fn marked(&mut self, ids: &[u32], at: u32, mut body: Vec<Stmt>, value: Option<Expr>) -> (Vec<Stmt>, Option<Expr>) {
         let value = value.map(|v| {
+            if v.is_local_read() {
+                return v;
+            }
             let (ty, line) = (v.ty, v.line);
             let tmp = self.temp("result".into(), ty, local_kind(ty));
             body.push(Stmt::Let(tmp, v));

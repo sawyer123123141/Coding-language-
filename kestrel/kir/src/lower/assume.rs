@@ -6,7 +6,8 @@
 //! temporary (moved out when it has heap memory), so the block's value is that temporary and
 //! nothing after the `Assume` but the block's cleanup runs before it is used. A function's body
 //! does the same with its final `return e`, so the function still ends in `Stmt::Return` and the
-//! inliner still takes it.
+//! inliner still takes it. A value that only reads a whole local, in a block with no cleanup, is
+//! given after the `Assume` as written instead (`as_written`).
 
 use kestrel_syntax::ast;
 
@@ -47,7 +48,7 @@ impl FnLowerer<'_> {
             match s {
                 ast::Stmt::Expr(e) if gives && !self.leaves_early(e) => {
                     let v = self.expr(e);
-                    if !inside {
+                    if !inside || self.as_written(&v) {
                         return (Some(v), false);
                     }
                     // As `block_value` and `lower_body` treat it: a function's body with no cleanup
@@ -58,6 +59,9 @@ impl FnLowerer<'_> {
                 // As `return_stmt` treats it.
                 ast::Stmt::Return { value: Some(e), .. } if inside && ending == Ending::Body => {
                     let v = self.expr(e);
+                    if self.as_written(&v) {
+                        return (Some(v), false);
+                    }
                     return (Some(self.settle(v, true, out)), true);
                 }
                 _ => self.stmt(s, out),
@@ -79,10 +83,21 @@ impl FnLowerer<'_> {
             conds.push((id, self.expr(cond)));
         }
         let mut body = Vec::new();
-        let (value, _) = self.rest(&stmts[n..], ending, true, &mut body);
+        let (value, settled) = self.rest(&stmts[n..], ending, true, &mut body);
         out.push(Stmt::Assume { conds, check: AssumeCheck::Check, body });
-        let settled = value.is_some();
         (value, settled)
+    }
+
+    /// Whether the block's value `v` can be given after the assumption as it is, unsettled, so the
+    /// block ends exactly as it would without the assumption: `v` reads a whole local that isn't a
+    /// parameter passed by pointer (nothing runs between the assumption's end and the read, so the
+    /// local still holds it) and the block has no cleanup. A temporary would hide a returned list's
+    /// length from range analysis, which tracks it only for locals it indexes or measures. With a
+    /// cleanup the value is settled before it, in a temporary, either way; a parameter's list is
+    /// copied into one, either way, and the copy is made inside the assumption.
+    fn as_written(&self, v: &Expr) -> bool {
+        let (ExprKind::Load(p) | ExprKind::Move(p)) = &v.kind else { return false };
+        v.is_local_read() && self.locals[p.root.0 as usize].kind != LocalKind::RefParam && !self.scope_has_cleanup()
     }
 
     /// A block's value `v`, computed into a temporary at the end of an assumption's body, the way

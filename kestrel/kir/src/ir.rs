@@ -259,6 +259,14 @@ impl Place {
     }
 }
 
+impl Expr {
+    /// Whether this is a read of a whole local (`Load` or `Move` of it, no projection): nothing to
+    /// check and nothing that runs, so it can stand anywhere the local still holds the same value.
+    pub fn is_local_read(&self) -> bool {
+        matches!(&self.kind, ExprKind::Load(p) | ExprKind::Move(p) if p.path.is_empty())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Func {
     pub name: String,

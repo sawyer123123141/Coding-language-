@@ -104,7 +104,12 @@ impl Cx<'_> {
                 note(outer, key, proven);
             }
         }
-        // The plain run, whose exits and end are the statement's.
+        // The plain run, whose exits and end are the statement's. It forgets what each condition
+        // writes, as `plain_block` does (a trusted copy never runs the write, a checked one does).
+        let mut st = st;
+        for (_, cond) in conds {
+            self.forget(&mut st, &writes::of_expr(cond));
+        }
         self.logs.push(RunLog::new());
         self.plain += 1;
         let end = self.stmts(st, body);

@@ -131,3 +131,36 @@ fn assumptions_keep_their_text() {
     assert_eq!(m.assumptions[0].text, "n > 0");
     assert_eq!(unpack_line(m.assumptions[0].line), (1, 0));
 }
+
+/// `make` with `@assume(n >= 0)` after its first statement, ending in `ending` (`out` or
+/// `return out`).
+fn make_list(ending: &str, arena: bool) -> String {
+    let arena = if arena { " var a = Arena()\n" } else { "" };
+    format!("pure make(n: int) -> [u8] {{\n var out = array[u8](100)\n @assume(n >= 0)\n{arena} out[n & 63] = 1\n {ending}\n}}")
+}
+
+#[test]
+fn a_returned_local_is_read_after_the_assumption_as_it_is() {
+    // No temporary (one would hide the list's length from a caller's range analysis): the block
+    // ends as it would without the assumption.
+    for ending in ["out", "return out"] {
+        let m = lower_src(&make_list(ending, false));
+        let f = func(&m, "make");
+        let [.., Stmt::Assume { .. }, Stmt::Return(Some(v))] = &f.body[..] else { panic!("{:#?}", f.body) };
+        assert!(matches!(&v.kind, ExprKind::Load(p) if f.locals[p.root.0 as usize].name == "out" && p.path.is_empty()), "{ending}: {v:#?}");
+    }
+}
+
+#[test]
+fn with_a_cleanup_it_still_goes_through_a_temporary() {
+    // The arena is declared inside the assumption and dropped after it: the value is settled first.
+    for ending in ["out", "return out"] {
+        let m = lower_src(&make_list(ending, true));
+        let body = &func(&m, "make").body;
+        let i = body.iter().position(|s| matches!(s, Stmt::Assume { .. })).expect("the assumption");
+        let (Stmt::Assume { body: inner, .. }, Some(Stmt::Return(Some(v)))) = (&body[i], body.last()) else { panic!("{body:#?}") };
+        assert!(body.len() > i + 2, "the arena's drop comes between: {body:#?}");
+        let Some(Stmt::Let(t, _)) = inner.last() else { panic!("{inner:#?}") };
+        assert!(matches!(&v.kind, ExprKind::Move(p) if *p == Place::local(*t)), "{ending}: {v:#?}");
+    }
+}

@@ -157,7 +157,9 @@ fn an_inlined_contracted_function_is_a_prove_block() {
     let m = optimized(GET);
     let site = m.contracts.iter().position(|s| s.target == ProveTarget::Func(FuncIdx(idx(&m, "get") as u32))).expect("`get`'s site") as u32;
     assert!(proves(body(&m, "get")).is_empty(), "the own copy is the function itself");
-    // In `step`: `Seq([Let(get.i, k + 1), Prove { site, line 8, [Assume { .. }, ..., Let(t, ..)] }], Load(t))`.
+    // In `step`: `Seq([Let(get.i, k + 1), Prove { site, line 8, [Assume { .., [.., Let(t, ..)] }] }], Move(t))`:
+    // `get`'s value is already a temporary (made inside its assumption), read after the block as it
+    // is, with no second temporary.
     let mut found = Vec::new();
     walk(body(&m, "step"), &mut |n| {
         if let Node::Expr(Expr { kind: ExprKind::Seq(stmts, value), .. }) = n {
@@ -170,9 +172,9 @@ fn an_inlined_contracted_function_is_a_prove_block() {
     // The argument is the caller's code, outside the block.
     let step = &m.funcs[idx(&m, "step")];
     assert!(matches!(args, [Stmt::Let(l, _)] if step.locals[l.0 as usize].name == "get.i"), "{args:#?}");
-    assert!(inner.iter().any(|s| matches!(s, Stmt::Assume { .. })), "{inner:#?}");
-    let Some(Stmt::Let(t, _)) = inner.last() else { panic!("{inner:#?}") };
-    assert!(matches!(&value.kind, ExprKind::Load(p) if p.root == *t && p.path.is_empty()), "{value:#?}");
+    let [Stmt::Assume { body: assumed, .. }] = &inner[..] else { panic!("{inner:#?}") };
+    let Some(Stmt::Let(t, _)) = assumed.last() else { panic!("{assumed:#?}") };
+    assert!(matches!(&value.kind, ExprKind::Load(p) | ExprKind::Move(p) if p.root == *t && p.path.is_empty()), "{value:#?}");
 }
 
 #[test]

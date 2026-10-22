@@ -140,10 +140,12 @@ fn an_assumption_removes_an_overflow_check() {
 }
 
 #[test]
-fn the_conditions_teach_the_plain_run_nothing() {
-    // The checked `n + 1` in the condition passes, which says `n` is below the maximum; that holds
-    // only while the condition runs (a trusted one doesn't), so the `n + 1` after the block keeps
-    // its check: the plain run, whose end leaves the block, never learns it.
+fn a_conditions_own_check_is_left_and_the_block_after_keeps_its_own() {
+    // A pin of today's behaviour, not a test of what a condition teaches: Round A learns nothing
+    // from a passed overflow check, so `n + 1` after the block keeps its check whatever the plain
+    // run does. (The test that a check in a condition teaches the plain run nothing is
+    // `a_check_in_a_condition_teaches_the_plain_run_nothing`, with a division, which does teach.)
+    // The condition's own `n + 1` is decided outside both runs, as the enclosing code's.
     let src = "pure f(n: int) -> int {\n var r = 0\n arena {\n  @assume(n + 1 > 5)\n  r = n\n }\n let k = n + 1\n r ^ k\n}";
     let (m, a) = analysed(src, Checked);
     let left: Vec<u32> = left_of(&m, &a, "f", Overflow).iter().map(|c| line(c.line)).collect();
@@ -222,13 +224,24 @@ fn a_condition_that_writes_is_forgotten() {
             walk_stmt(self, s);
         }
     }
-    for arith in [Checked, Wrapping] {
-        assert_eq!(bounds(src, arith), (vec![], 1), "{arith:?}: as written, the assumption proves `xs[k]`");
+    let written = |src: &str, arith: Arith| {
         let mut m = optimized(src);
         let i = idx(&m, "f");
         Write(None).visit_stmts(&mut m.funcs[i].body);
         let a = kestrel_kir::range::remove_checks(&mut m, arith);
-        assert_eq!(bounds_in(&m, &a, "f"), (vec![12], 0), "{arith:?}");
+        bounds_in(&m, &a, "f")
+    };
+    for arith in [Checked, Wrapping] {
+        assert_eq!(bounds(src, arith), (vec![], 1), "{arith:?}: as written, the assumption proves `xs[k]`");
+        assert_eq!(written(src, arith), (vec![12], 0), "{arith:?}");
+    }
+    // After the block, which the plain run's end leaves: the `if` showed `k` inside `xs`, but the
+    // condition's write (run when the assumption is checked) may have moved it, so `xs[k]` on line
+    // 17 keeps its check. The plain run must forget the write too, as the condition rule does.
+    let after = "next(var x: int, d: int) -> int {\n if d == 0 {\n  x = x + 1\n  return 0\n }\n next(var x, d - 1)\n}\nf(xs: [int], i: int) -> int {\n var k = i\n let w = next(var k, 1)\n var s = w\n if k >= 0 and k < xs.len {\n  arena {\n   @assume(k >= 0 and k < xs.len)\n   s = s + 1\n  }\n  s = s + xs[k]\n }\n s\n}";
+    for arith in [Checked, Wrapping] {
+        assert_eq!(bounds(after, arith), (vec![], 1), "{arith:?}: as written, the `if` proves `xs[k]`");
+        assert_eq!(written(after, arith), (vec![17], 0), "{arith:?}");
     }
 }
 
