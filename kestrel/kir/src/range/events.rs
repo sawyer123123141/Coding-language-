@@ -8,7 +8,7 @@ mod stmts;
 
 use reasons::{elem_text, limit, place_ty};
 use super::show::{expr_text, place_text};
-use super::summary::Reason;
+use super::summary::{Part, Reason};
 use crate::ir::*;
 
 /// What a function does that the report lists.
@@ -27,8 +27,13 @@ pub struct Event {
 #[derive(Clone, Debug, PartialEq)]
 pub enum What {
     Alloc(Reason),
+    /// A way to fail; its reason's `part` says whether it is only running out of resources.
     Fail(Reason),
-    /// A call to a function of the program (a native's call is its own `Alloc` and `Fail`).
+    /// A call whose body isn't known here: through a function value, an interface value or to a
+    /// native. The reason is the report's words ("calls the function value `f`", line, "; its
+    /// body isn't known here").
+    Unknown(Unknown, Reason),
+    /// A call to a function of the program.
     Call(FuncIdx),
     /// A `par for` that runs this body.
     Body(FuncIdx),
@@ -40,6 +45,42 @@ pub enum What {
     /// listed (the analysis gave the function up long before).
     Cut,
 }
+
+/// A call whose body isn't known where it is made.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Unknown {
+    /// Through a function value: it may allocate, fail or have checks.
+    Indirect,
+    /// Through an interface value: it keeps what the interface method promises (the set), and the
+    /// method is the interface's own (`Shape.area`).
+    Virtual(ContractSet, FuncIdx),
+    /// A native: Rust, with no checks of Kestrel's, but it may allocate and fail.
+    Native,
+}
+
+impl Unknown {
+    /// Whether the call may allocate (an item for the report, and `no_alloc`).
+    pub fn allocates(self) -> bool {
+        !matches!(self, Unknown::Virtual(keeps, _) if keeps.contains(ContractSet::NO_ALLOC))
+    }
+
+    /// Whether the call may stop the program (an item for the report, and `no_panic`).
+    pub fn fails(self) -> bool {
+        !matches!(self, Unknown::Virtual(keeps, _) if keeps.contains(ContractSet::NO_PANIC))
+    }
+
+    /// Whether the call may have a check left in it (`no_checks`).
+    pub fn checks(self) -> bool {
+        match self {
+            Unknown::Indirect => true,
+            Unknown::Virtual(keeps, _) => !keeps.contains(ContractSet::NO_CHECKS),
+            Unknown::Native => false,
+        }
+    }
+}
+
+/// The words of a `par for`'s allocation: the arenas the runtime makes for its threads.
+pub const PAR_ARENAS: &str = "a `par for` makes an arena for each thread";
 
 /// How deep the walk goes: past this the code is left unlisted, with a `What::Cut` where it stops
 /// (the analysis gave up on it long before).
@@ -114,7 +155,7 @@ impl Walk<'_> {
     }
 
     fn reason(&self, line: u32, direct: Option<String>, via: String, tail: &str) -> Reason {
-        Reason { direct, via, tail: tail.to_string(), line: self.here(line) }
+        Reason { direct, via, tail: tail.to_string(), line: self.here(line), part: Part::Whole }
     }
 
     fn alloc(&mut self, line: u32, direct: Option<String>, via: String, tail: &str) {
@@ -123,8 +164,20 @@ impl Walk<'_> {
     }
 
     fn fail(&mut self, line: u32, direct: Option<String>, via: String, tail: &str) {
-        let r = self.reason(line, direct, via, tail);
+        self.fail_part(line, direct, via, tail, Part::Whole);
+    }
+
+    /// A way to fail that is only part of what one operation can do (see `Part`).
+    fn fail_part(&mut self, line: u32, direct: Option<String>, via: String, tail: &str, part: Part) {
+        let r = Reason { part, ..self.reason(line, direct, via, tail) };
         self.push(line, What::Fail(r));
+    }
+
+    /// A call whose body isn't known here: `via` is how it is named ("calls the function value
+    /// `f`").
+    fn unknown(&mut self, line: u32, kind: Unknown, via: String) {
+        let r = self.reason(line, None, via, "; its body isn't known here");
+        self.push(line, What::Unknown(kind, r));
     }
 
     /// The built-in a generated function, or a local an inlined one made, belongs to.
@@ -284,10 +337,10 @@ impl Walk<'_> {
                 self.args(args);
                 self.indirect(callee, line);
             }
-            ExprKind::CallVirtual { recv, args, .. } => {
+            ExprKind::CallVirtual { recv, args, keeps, method, .. } => {
                 self.place_walk(recv);
                 self.args(args);
-                self.virtual_call(recv, line);
+                self.virtual_call(recv, line, Unknown::Virtual(*keeps, *method));
             }
             ExprKind::MakeIface { data: IfaceData::Borrowed(p), .. } => self.place_walk(p),
             ExprKind::MakeIface { data: IfaceData::Boxed(x), .. } => {

@@ -1,0 +1,22 @@
+struct P {
+    x: int
+}
+
+pub spawn(var ps: list[P], n: int) {
+    if n <= 0 {
+        return
+    }
+    spawn(var ps, n - 1)
+    // A filler line so the `add` is on line 12.
+    let k = n
+    ps.add(P(x: k))
+}
+
+@prove(no_alloc)
+pub step(var ps: list[P], n: int) {
+    spawn(var ps, n)
+}
+
+main() {}
+
+// error 15: `step` can't be proven `no_alloc`: it calls `spawn` (line 17), which adds to `ps` (line 12) and may grow the list

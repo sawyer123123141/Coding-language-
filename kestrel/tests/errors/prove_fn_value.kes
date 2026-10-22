@@ -1,0 +1,9 @@
+@prove(no_alloc, no_checks, no_panic, inline)
+pub apply(f: (int) -> int, x: int) -> int { f(x) }
+
+main() {}
+
+// error 1: `apply` can't be proven `no_alloc`: it calls the function value `f` (line 2); its body isn't known here
+// error 1: `apply` can't be proven `no_checks`: it calls the function value `f` (line 2); its body isn't known here
+// error 1: `apply` can't be proven `no_panic`: it calls the function value `f` (line 2); its body isn't known here
+// error 1: `apply` can't be proven `inline`: it calls the function value `f` (line 2), which can't be inlined

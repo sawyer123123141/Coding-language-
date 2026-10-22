@@ -8,6 +8,7 @@
 mod arith;
 mod assume;
 mod bounds;
+pub mod contracts;
 mod eval;
 pub mod events;
 pub mod facts;

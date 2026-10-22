@@ -68,7 +68,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             kir::Stmt::CallIndirect { callee, args, sig } => {
                 self.call_indirect(callee, args, sig, None)?;
             }
-            kir::Stmt::CallVirtual { recv, slot, args, sig } => {
+            kir::Stmt::CallVirtual { recv, slot, args, sig, .. } => {
                 self.call_virtual(recv, *slot, args, sig, None)?;
             }
             kir::Stmt::CopyIface(p) => self.copy_iface(p)?,

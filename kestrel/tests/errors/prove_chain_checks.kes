@@ -1,0 +1,19 @@
+@prove(no_checks)
+pub f(xs: list[int], i: int) -> int {
+    var s = 0
+    if i > 0 {
+        s = g(xs, i, 3)
+    }
+    s
+}
+
+pub g(xs: list[int], i: int, d: int) -> int {
+    if d > 0 {
+        return g(xs, i, d - 1)
+    }
+    xs[i]
+}
+
+main() {}
+
+// error 1: `f` can't be proven `no_checks`: it calls `g` (line 5), which has a bounds check (line 14): `xs[i]` may be outside `xs` (`i` can be any `int`)

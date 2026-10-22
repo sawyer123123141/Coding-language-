@@ -1,6 +1,6 @@
 //! The statements of the events walk: each one's operands, then what it does.
 
-use super::{Walk, What, MAX_DEPTH};
+use super::{Unknown, Walk, What, MAX_DEPTH};
 use crate::ir::*;
 use crate::range::show::place_text;
 
@@ -89,10 +89,10 @@ impl Walk<'_> {
                 self.args(args);
                 self.indirect(callee, crate::visit::args_line(args));
             }
-            Stmt::CallVirtual { recv, args, .. } => {
+            Stmt::CallVirtual { recv, args, keeps, method, .. } => {
                 self.place_walk(recv);
                 self.args(args);
-                self.virtual_call(recv, crate::visit::args_line(args));
+                self.virtual_call(recv, crate::visit::args_line(args), Unknown::Virtual(*keeps, *method));
             }
             Stmt::Print(parts) | Stmt::Write(parts) => self.print(parts),
             Stmt::ListAdd(p, value) => {
@@ -122,7 +122,7 @@ impl Walk<'_> {
                 self.expr(count);
                 self.args(args);
                 let line = count.line;
-                self.alloc(line, Some("a `par for` makes an arena for each thread".to_string()), "runs a `par for`".to_string(), " that makes an arena for each thread");
+                self.alloc(line, Some(super::PAR_ARENAS.to_string()), "runs a `par for`".to_string(), " that makes an arena for each thread");
                 self.push(line, What::Body(*func));
             }
             Stmt::SetLine(line) => {

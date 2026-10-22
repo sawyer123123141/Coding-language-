@@ -1,0 +1,22 @@
+@prove(no_checks)
+pub total(xs: list[int], k: int) -> int {
+    var s = 0
+    for i from 0 to xs.len {
+        s += xs[i]
+    }
+    s + xs[k]
+}
+
+@prove(no_checks)
+pub total_xor(xs: list[int], k: int) -> int {
+    var s = 0
+    for i from 0 to xs.len {
+        s = s ^ xs[i]
+    }
+    s ^ xs[k]
+}
+
+main() {}
+
+// error 1: `total` can't be proven `no_checks`: it has an overflow check on line 5: `s + xs[i]` may exceed `int`
+// error 10: `total_xor` can't be proven `no_checks`: it has a bounds check on line 16: `xs[k]` may be outside `xs` (`k` can be any `int`)

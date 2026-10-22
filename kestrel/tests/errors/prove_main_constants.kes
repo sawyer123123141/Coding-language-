@@ -1,0 +1,8 @@
+let TABLE = [1, 2, 3]
+
+@prove(no_alloc)
+main() {
+    print(TABLE.len)
+}
+
+// error 3: `main` can't be proven `no_alloc`: it builds the program's constants first, which makes the arena the constants live in

@@ -1,0 +1,23 @@
+pub f(xs: list[int]) -> int {
+    var s = 0
+    @prove(no_alloc)
+    for x in xs.filter((e) { e > 0 }) {
+        s = s ^ x
+    }
+    s
+}
+
+pub g(xs: list[int]) -> int {
+    var s = 0
+    @prove(no_alloc)
+    for i from 0 to xs.len {
+        if xs.any((e) { e > 0 }) {
+            s = s ^ i
+        }
+    }
+    s
+}
+
+main() {}
+
+// error 3: the loop at line 4 can't be proven `no_alloc`: it allocates on line 4: `filter` builds a new list

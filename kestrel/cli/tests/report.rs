@@ -192,3 +192,20 @@ fn a_trusted_assumption_is_no_way_to_fail_under_release() {
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(!stdout(&out).contains("assumption"), "{}", stdout(&out));
 }
+
+#[test]
+fn a_promised_interface_call_lists_no_allocation() {
+    // `Shape.area` promises `no_alloc`, so `s.area()` lists only that it can fail; `Sized.size`
+    // promises nothing, so `t.size()` lists both.
+    let src = "interface Shape {\n    @prove(no_alloc)\n    area(self) -> int\n}\n\ninterface Sized {\n    size(self) -> int\n}\n\npub f(s: Shape, t: Sized) -> int {\n    s.area() ^ t.size()\n}\n\nmain() {}\n";
+    let dir = project("promised", &[("promised.kes", src)]);
+    let out = kestrel(&["check", "--report"], &dir.join("promised.kes"));
+    assert!(out.status.success(), "{}", stderr(&out));
+    let text = stdout(&out);
+    let want = "  function `f` (line 10): no checks, 1 allocation, 2 other ways to fail
+    line 11: can fail: calls a method of the interface value `s` (line 11); its body isn't known here
+    line 11: allocation: calls a method of the interface value `t` (line 11); its body isn't known here
+    line 11: can fail: calls a method of the interface value `t` (line 11); its body isn't known here
+";
+    assert!(text.contains(want), "{text}");
+}

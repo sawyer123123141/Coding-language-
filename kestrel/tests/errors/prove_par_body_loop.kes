@@ -1,0 +1,10 @@
+main() {
+    var ps = [1, 2, 3]
+    par for p in ps {
+        var acc = p
+        @prove(no_checks)
+        for i from 0 to 4 { acc = acc * 1000 }
+    }
+}
+
+// error 5: the loop at line 6 can't be proven `no_checks`: it has an overflow check on line 6: `acc * 1000` may exceed `int`

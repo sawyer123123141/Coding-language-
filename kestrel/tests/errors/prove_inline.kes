@@ -1,0 +1,42 @@
+pub pure g(x: int) -> int {
+    if x > 0 {
+        return x
+    }
+    0
+}
+
+@prove(inline)
+pub f(x: int) -> int { g(x) }
+
+@prove(inline)
+pub r(n: int) -> int {
+    if n <= 0 {
+        return 0
+    }
+    r(n - 1)
+}
+
+@prove(inline)
+pub c(xs: list[int]) -> list[int] {
+    xs.map((e) { g(e) })
+}
+
+pub pure key(x: int) -> int { g(x) }
+
+@prove(inline)
+pub s(var xs: list[int]) {
+    xs.sort_by((e) { key(e) })
+}
+
+@prove(inline)
+pub mk() -> (int) -> int {
+    (x: int) -> int { g(x) }
+}
+
+main() {}
+
+// error 8: `f` can't be proven `inline`: it calls `g` (line 9), which isn't inlined: it has an early `return`
+// error 11: `r` can't be proven `inline`: it calls `r` (line 16), which isn't inlined: it calls itself
+// error 19: `c` can't be proven `inline`: it calls `g` (line 21), which isn't inlined: it has an early `return`
+// error 31: `mk` can't be proven `inline`: it calls `g` (line 33), which isn't inlined: it has an early `return`
+// error 26: `s` can't be proven `inline`: it calls `g` (line 28), which isn't inlined: it has an early `return`

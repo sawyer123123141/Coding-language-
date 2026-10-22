@@ -1,0 +1,57 @@
+@prove(no_panic)
+pub down(n: int) {
+    if n > 0 {
+        down(n - 1)
+    }
+}
+
+pub a(n: int) {
+    if n <= 0 {
+        return
+    }
+    b(n - 1)
+}
+
+pub b(n: int) {
+    if n > 0 {
+        a(n - 1)
+    }
+}
+
+@prove(no_panic)
+pub start(n: int) {
+    a(n)
+}
+
+// A tree of interface values: `weight` promises `no_panic`, but a `Tree`'s calls itself through
+// the interface.
+interface Node {
+    @prove(no_panic)
+    weight(self) -> int
+}
+
+struct Leaf: Node {
+    w: int = 1
+
+    weight(self) -> int { self.w ^ 1 }
+}
+
+struct Tree: Node {
+    kids: list[Node]
+
+    weight(self) -> int { sum_weights(self.kids) }
+}
+
+pub sum_weights(kids: list[Node]) -> int {
+    var t = 0
+    for k in kids {
+        t = t ^ k.weight()
+    }
+    t
+}
+
+main() {}
+
+// error 1: `down` can't be proven `no_panic`: it can call itself (line 4), so the stack may run out
+// error 21: `start` can't be proven `no_panic`: it calls `a` (line 23), which can call itself (line 17), so the stack may run out
+// error 42: `Tree.weight` can't be proven `no_panic`, which `Node.weight` requires: it calls a method of the interface value `k` (line 48), which can call itself (line 48), so the stack may run out

@@ -1,0 +1,10 @@
+@prove(no_alloc)
+pub grow(var ys: list[int], n: int) {
+    for i from 0 to n {
+        ys.add(i * 2)
+    }
+}
+
+main() {}
+
+// error 1: `grow` can't be proven `no_alloc`: it allocates on line 4: `add` may grow `ys`

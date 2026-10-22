@@ -55,6 +55,9 @@ fn module() -> Module {
         slot: 0,
         args: vec![Arg::Value(expr(ExprKind::Load(Place::local(LocalIdx(1))), KTy::I64))],
         sig: KSig { params: vec![(KTy::I64, false)], ret: Some(KTy::I64) },
+        keeps: ContractSet::default(),
+        // (No interface method of its own: it names a function only for messages.)
+        method: FuncIdx(0),
     };
     let call_get = func(
         "call_get",

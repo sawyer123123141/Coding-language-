@@ -1,0 +1,50 @@
+interface Shape {
+    area(self) -> int
+}
+
+struct Sq: Shape {
+    xs: list[int]
+    i: int = 0
+
+    area(self) -> int { self.xs[self.i] }
+}
+
+pub relay(s: Shape, d: int) -> int {
+    if d <= 0 {
+        return s.area()
+    }
+    relay(s, d - 1)
+}
+
+@prove(no_checks)
+pub total(s: Shape) -> int { relay(s, 1) }
+
+pub relay_fn(f: (int) -> int, d: int) -> int {
+    if d <= 0 {
+        return f(d)
+    }
+    relay_fn(f, d - 1)
+}
+
+@prove(no_checks)
+pub total_fn(f: (int) -> int) -> int { relay_fn(f, 1) }
+
+interface Sized {
+    @prove(no_alloc)
+    size(self) -> int
+}
+
+struct Box: Sized {
+    xs: list[int]
+
+    size(self) -> int { self.xs.len }
+}
+
+@prove(no_checks)
+pub measure(s: Sized) -> int { s.size() }
+
+main() {}
+
+// error 19: `total` can't be proven `no_checks`: it calls `relay` (line 20), which calls a method of the interface value `s` (line 14); its body isn't known here
+// error 29: `total_fn` can't be proven `no_checks`: it calls `relay_fn` (line 30), which calls the function value `f` (line 24); its body isn't known here
+// error 43: `measure` can't be proven `no_checks`: it calls a method of the interface value `s` (line 44); its body isn't known here

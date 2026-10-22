@@ -1,0 +1,10 @@
+interface Shape {
+    area(self) -> float
+}
+
+@prove(no_alloc)
+pub total(s: Shape) -> float { s.area() }
+
+main() {}
+
+// error 5: `total` can't be proven `no_alloc`: it calls a method of the interface value `s` (line 6); its body isn't known here

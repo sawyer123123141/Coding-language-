@@ -2,7 +2,8 @@
 //! allocation and way to fail, checked against its arm in codegen and the runtime function it
 //! calls.
 
-use super::{Walk, What};
+use super::{Unknown, Walk, What};
+use crate::range::summary::Part;
 use crate::range::show::{expr_text, place_text, type_name};
 use crate::range::MAX_ITEMS;
 use crate::ir::*;
@@ -60,8 +61,13 @@ impl Walk<'_> {
                 self.place_walk(p);
                 let at = self.place(p);
                 self.alloc(key.line, Some(format!("setting a key of {at} may grow the map")), format!("sets a key of {at}"), " and may grow the map");
+                // A new key while looping over the map is a logic failure; too many keys is running
+                // out of resources. The report prints them together.
+                let logic = format!("setting a key of {at} fails if it adds a new key while looping over the map");
+                self.fail_part(key.line, Some(logic), format!("sets a key of {at}"), " and fails if it adds a new key while looping over it", Part::Logic);
                 let direct = format!("setting a key of {at} fails if it adds a new key while looping over the map, or if the map would hold more than 2,147,483,647 keys");
-                self.fail(key.line, Some(direct), format!("sets a key of {at}"), " and fails if it adds a new key while looping over it, or if the map would hold more than 2,147,483,647 keys");
+                let tail = " and fails if it adds a new key while looping over it, or if the map would hold more than 2,147,483,647 keys";
+                self.fail_part(key.line, Some(direct), format!("sets a key of {at}"), tail, Part::Resource);
             }
             Stmt::Trap => {
                 self.fail(0, Some("calling an interface method with no body stops the program".to_string()), "calls an interface method with no body".to_string(), "");
@@ -76,9 +82,7 @@ impl Walk<'_> {
     pub(super) fn call(&mut self, g: FuncIdx, line: u32) {
         let callee = &self.m.funcs[g.0 as usize];
         if callee.native.is_some() {
-            let via = format!("calls the native function `{}`", callee.name);
-            self.alloc(line, None, via.clone(), "; its body isn't known here");
-            self.fail(line, None, via, "; its body isn't known here");
+            self.unknown(line, Unknown::Native, format!("calls the native function `{}`", callee.name));
         } else if self.m.init != Some(g) {
             // (The constants are built once, before `main`: not a cost of the call.)
             self.push(line, What::Call(g));
@@ -88,14 +92,12 @@ impl Walk<'_> {
     pub(super) fn indirect(&mut self, callee: &Place, line: u32) {
         let name = place_text(self.m, self.f, callee, callee.path.len());
         let via = if name.starts_with("(...)") { "calls a function value".to_string() } else { format!("calls the function value `{name}`") };
-        self.alloc(line, None, via.clone(), "; its body isn't known here");
-        self.fail(line, None, via, "; its body isn't known here");
+        self.unknown(line, Unknown::Indirect, via);
     }
 
-    pub(super) fn virtual_call(&mut self, recv: &Place, line: u32) {
+    pub(super) fn virtual_call(&mut self, recv: &Place, line: u32, kind: Unknown) {
         let via = format!("calls a method of the interface value `{}`", place_text(self.m, self.f, recv, recv.path.len()));
-        self.alloc(line, None, via.clone(), "; its body isn't known here");
-        self.fail(line, None, via, "; its body isn't known here");
+        self.unknown(line, kind, via);
     }
 
     pub(super) fn list_add(&mut self, p: &Place, line: u32) {
@@ -104,11 +106,11 @@ impl Walk<'_> {
         if let Some(name) = self.builtin_of(p.root).filter(|n| matches!(*n, "filter" | "map")) {
             let via = format!("builds a new list with `{name}`");
             self.alloc(line, Some(format!("`{name}` builds a new list")), via.clone(), "");
-            self.fail(line, Some(format!("`{name}` fails if its list would hold more than {limit} items")), via, &fail_tail);
+            self.fail_part(line, Some(format!("`{name}` fails if its list would hold more than {limit} items")), via, &fail_tail, Part::Resource);
             return;
         }
         self.alloc(line, Some(format!("`add` may grow {xs}")), format!("adds to {xs}"), " and may grow the list");
-        self.fail(line, Some(format!("`add` fails if {xs} would hold more than {limit} items")), format!("adds to {xs}"), &fail_tail);
+        self.fail_part(line, Some(format!("`add` fails if {xs} would hold more than {limit} items")), format!("adds to {xs}"), &fail_tail, Part::Resource);
     }
 
     pub(super) fn list_op(&mut self, op: ListOp, p: &Place, xs: &[Expr]) {
@@ -122,9 +124,14 @@ impl Walk<'_> {
             }
             ListOp::Insert => {
                 self.alloc(line, Some(format!("`insert` may grow {list}")), format!("inserts into {list}"), " and may grow the list");
+                // An index outside the list is a logic failure; too many items is running out of
+                // resources. The report prints them together.
+                let named = quoted(xs.first().map_or(String::new(), |x| self.expr_name(x)), "the index");
+                let logic = format!("`insert` fails if {named} is outside {list}");
+                self.fail_part(line, Some(logic), format!("inserts into {list}"), " and fails if the index is outside it", Part::Logic);
                 let direct = format!("`insert` fails if {index} is outside {list} or {list} would hold more than {limit} items");
                 let tail = format!(" and fails if the index is outside it or the list would hold more than {limit} items");
-                self.fail(line, Some(direct), format!("inserts into {list}"), &tail);
+                self.fail_part(line, Some(direct), format!("inserts into {list}"), &tail, Part::Resource);
             }
             ListOp::Sort => {
                 let name = if xs.len() > 1 { "sort_by" } else { "sort" };

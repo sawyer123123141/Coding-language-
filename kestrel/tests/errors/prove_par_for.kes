@@ -1,0 +1,18 @@
+pub f(var xs: list[int]) {
+    @prove(no_alloc)
+    par for x in xs {
+        x = x ^ 7
+    }
+}
+
+pub g(var xs: list[int], ys: list[int]) {
+    @prove(no_checks)
+    par for i, x in xs {
+        x = x ^ ys[i]
+    }
+}
+
+main() {}
+
+// error 2: the loop at line 3 can't be proven `no_alloc`: it allocates on line 3: a `par for` makes an arena for each thread
+// error 9: the loop at line 10 can't be proven `no_checks`: it has a bounds check on line 11: `ys[i]` may be outside `ys`

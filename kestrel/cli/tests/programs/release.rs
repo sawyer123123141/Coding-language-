@@ -10,6 +10,10 @@ use std::time::{Duration, Instant};
 use super::common::hermetic;
 use super::{build_with, compare, expectations, only_prefixed, programs, Expect, PROOF_FAILED};
 
+/// What a contract's error says: no program test may have one, in either build (the checked runs
+/// compare their whole standard error, so they fail on it already).
+const CONTRACT_FAILED: &str = "can't be proven";
+
 /// How long the release pass lets one program run: a program whose checked run stops on an
 /// overflow may loop when it wraps.
 const RELEASE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -54,7 +58,7 @@ fn kestrel_run_release(path: &Path, exp: &Expect) -> Option<Output> {
 
 /// The release pass: every program under `kestrel run --release` with the proof check on. The
 /// checked expectations don't hold there (an overflow wraps instead of stopping), so it fails only
-/// when a run's standard error has the failed-proof sentence. A run that takes over 30 seconds is
+/// when a run's standard error has the failed-proof sentence or a contract's error. A run that takes over 30 seconds is
 /// killed (a program that stops on an overflow when checked may loop when it wraps); it doesn't
 /// fail the test, but it is listed (see `timeouts_note`).
 #[test]
@@ -73,6 +77,9 @@ fn programs_verify_release() {
                 let stderr = String::from_utf8_lossy(&out.stderr).replace("\r\n", "\n");
                 if stderr.contains(PROOF_FAILED) {
                     failures.push(format!("{name} [release]: a proof failed\n--- stderr ---\n{stderr}"));
+                }
+                if stderr.contains(CONTRACT_FAILED) {
+                    failures.push(format!("{name} [release]: a contract doesn't hold\n--- stderr ---\n{stderr}"));
                 }
             }
         }

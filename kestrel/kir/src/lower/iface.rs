@@ -123,8 +123,9 @@ impl FnLowerer<'_> {
     }
 
     /// The parts of the call `e` of slot `slot` of interface `iface` on its receiver: the
-    /// statements to run first, the place of the interface value, the arguments and the signature.
-    fn iface_call_parts(&mut self, e: &ast::Expr, iface: IfaceId, slot: u32) -> (Vec<Stmt>, Place, Vec<Arg>, KSig) {
+    /// statements to run first, the place of the interface value, the arguments, the signature,
+    /// and what the interface method's `@prove` promises with the method itself.
+    fn iface_call_parts(&mut self, e: &ast::Expr, iface: IfaceId, slot: u32) -> (Vec<Stmt>, Place, Vec<Arg>, KSig, ContractSet, FuncIdx) {
         let ast::ExprKind::MethodCall { receiver, args, .. } = &e.kind else { unreachable!("an interface call is a method call") };
         let t = self.t;
         let f = t.iface(iface).methods[slot as usize];
@@ -146,26 +147,27 @@ impl FnLowerer<'_> {
             })
             .collect();
         let sig = KSig { params, ret: (info.ret != Ty::Unit).then(|| kty(info.ret)) };
-        (pre, recv, lowered, sig)
+        let keeps = self.helpers.proves.keeps(self.program, info.decl(self.program).span);
+        (pre, recv, lowered, sig, keeps, FuncIdx(f.0))
     }
 
     /// A call through an interface value, as a value.
     pub(crate) fn iface_call_value(&mut self, e: &ast::Expr, iface: IfaceId, slot: u32, ty: KTy, line: u32) -> ExprKind {
-        let (pre, recv, args, sig) = self.iface_call_parts(e, iface, slot);
-        Self::with_pre(pre, ExprKind::CallVirtual { recv, slot, args, sig }, ty, line)
+        let (pre, recv, args, sig, keeps, method) = self.iface_call_parts(e, iface, slot);
+        Self::with_pre(pre, ExprKind::CallVirtual { recv, slot, args, sig, keeps, method }, ty, line)
     }
 
     /// A call through an interface value whose result is discarded. An owning result is held
     /// until the block ends, as for a direct call.
     pub(crate) fn iface_call_stmt(&mut self, e: &ast::Expr, iface: IfaceId, slot: u32, out: &mut Vec<Stmt>) {
-        let (pre, recv, args, sig) = self.iface_call_parts(e, iface, slot);
+        let (pre, recv, args, sig, keeps, method) = self.iface_call_parts(e, iface, slot);
         out.extend(pre);
         match sig.ret {
             Some(ret) if self.t.is_owning(self.t.ty(e.id)) => {
-                let call = Expr { kind: ExprKind::CallVirtual { recv, slot, args, sig }, ty: ret, line: self.line(e.span) };
+                let call = Expr { kind: ExprKind::CallVirtual { recv, slot, args, sig, keeps, method }, ty: ret, line: self.line(e.span) };
                 self.keep(call, out);
             }
-            _ => out.push(Stmt::CallVirtual { recv, slot, args, sig }),
+            _ => out.push(Stmt::CallVirtual { recv, slot, args, sig, keeps, method }),
         }
     }
 

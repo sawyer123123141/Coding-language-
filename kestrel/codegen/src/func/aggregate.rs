@@ -68,7 +68,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             ExprKind::CallIndirect { callee, args, sig } => {
                 self.call_indirect(callee, args, sig, Some(dest))?;
             }
-            ExprKind::CallVirtual { recv, slot, args, sig } => {
+            ExprKind::CallVirtual { recv, slot, args, sig, .. } => {
                 self.call_virtual(recv, *slot, args, sig, Some(dest))?;
             }
             ExprKind::MakeIface { table, data } => self.make_iface_into(*table, data, e.line, dest)?,

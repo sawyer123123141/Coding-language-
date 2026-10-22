@@ -222,7 +222,7 @@ pub fn build(m: &Module, a: &Analysis) -> Report {
     let classes = classes(m);
     let events: Vec<Vec<Event>> = m.funcs.iter().map(|f| if f.native.is_some() { Vec::new() } else { events::events(m, f) }).collect();
     let own_checks: Vec<Vec<u64>> = a.funcs.iter().zip(&classes).map(|(c, class)| check_ids(c, *class == Class::Generated)).collect();
-    let summaries = summary::summarize(m, &events, &own_checks);
+    let summaries = summary::summarize(m, a, &events, Some(&own_checks));
     let mut cx = items::Cx::new(m, a, &classes, &events, &summaries);
     let called = called(m);
     let made = made_closures(m);

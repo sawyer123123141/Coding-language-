@@ -1,11 +1,12 @@
 //! The step after `compile` for a program with annotations: range analysis runs once, in place, in
-//! the build's own mode (codegen then compiles the module as it is: see `Module::analysed`), and,
+//! the build's own mode (codegen then compiles the module as it is: see `Module::analysed`), every
+//! `@prove` contract is decided against that build (one error for each that doesn't hold), and,
 //! for `kestrel check`, each `@assume` that removes no check in either build gets a warning.
 //!
 //! A program with no `@prove` (and, when warnings are asked for, no `@assume`) is left exactly as
 //! `compile` made it, so it costs nothing: codegen analyses a copy of it as before.
 
-use kestrel_kir::range::{remove_checks, Analysis, Arith};
+use kestrel_kir::range::{contracts, remove_checks, Analysis, Arith};
 use kestrel_kir::Module;
 use kestrel_syntax::Diagnostic;
 
@@ -37,6 +38,14 @@ pub fn prove(c: &mut Compiled, checked: bool, warn: bool, style: DiagStyle) -> P
     if let Some(mut other) = other {
         let other_analysis = remove_checks(&mut other, Arith::of(!checked));
         diags.extend(useless_assumptions(&c.module, &[&analysis, &other_analysis]));
+    }
+    // Each contract that doesn't hold in this build is an error.
+    for e in contracts::check(&c.module, &analysis) {
+        let d = Diagnostic::error(e.span, e.message);
+        diags.push(match e.help {
+            Some(help) => d.with_help(help),
+            None => d,
+        });
     }
     let text = if diags.is_empty() { String::new() } else { report(&c.sources, &diags, style) };
     let ok = !diags.iter().any(Diagnostic::is_error);

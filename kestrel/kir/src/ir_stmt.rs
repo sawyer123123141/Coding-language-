@@ -21,7 +21,7 @@ pub enum Stmt {
     CallIndirect { callee: Place, args: Vec<Arg>, sig: KSig },
     /// A call through an interface value whose result (if any) is discarded (see
     /// `ExprKind::CallVirtual`).
-    CallVirtual { recv: Place, slot: u32, args: Vec<Arg>, sig: KSig },
+    CallVirtual { recv: Place, slot: u32, args: Vec<Arg>, sig: KSig, keeps: ContractSet, method: FuncIdx },
     Print(Vec<PrintArg>),
     /// Prints with no separators and no newline (used by generated printers).
     Write(Vec<PrintArg>),

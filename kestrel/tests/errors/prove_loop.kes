@@ -1,0 +1,17 @@
+pub f(n: int) -> int {
+    var acc = 1
+    @prove(no_checks)
+    for i from 0 to n {
+        acc = acc * 3
+    }
+    var s = 0
+    @prove(no_checks)
+    for i from 0 to n {
+        s = s ^ i
+    }
+    acc + s
+}
+
+main() {}
+
+// error 3: the loop at line 4 can't be proven `no_checks`: it has an overflow check on line 5: `acc * 3` may exceed `int`

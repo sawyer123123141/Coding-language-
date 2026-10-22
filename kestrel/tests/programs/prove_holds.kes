@@ -1,0 +1,42 @@
+// Contracts that hold, in a checked build and under `--release`.
+
+@prove(no_checks)
+pure get(xs: list[int], i: int) -> int {
+    @assume(i >= 0 and i < xs.len)
+    xs[i]
+}
+
+// Recursive, so `no_panic` would fail, but it allocates nothing and keeps no check.
+@prove(no_alloc, no_checks)
+pure count(n: int) -> int {
+    if n <= 0 {
+        return 0
+    }
+    count(n - 1) ^ 1
+}
+
+@prove(no_panic)
+push(var ys: list[int]) {
+    ys.add(1)
+}
+
+main() {
+    let xs: list[int] = [1, 2, 3, 4]
+    var s = 0
+    @prove(no_alloc, no_checks, no_panic, inline)
+    for i from 0 to xs.len {
+        s = s ^ xs[i]
+    }
+    var hits = 0
+    @prove(no_alloc)
+    for i from 0 to 3 {
+        if xs.any((e) { e > i }) {
+            hits = hits ^ 1
+        }
+    }
+    var ys: list[int] = [0]
+    push(var ys)
+    print(s, get(xs, 2), count(5), hits, ys.len)
+}
+
+// expect: 4 3 1 1 2

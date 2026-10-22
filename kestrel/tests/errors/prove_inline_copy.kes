@@ -1,0 +1,15 @@
+pub f9(x: int) -> int { x ^ 9 }
+pub f8(x: int) -> int { f9(x ^ 8) }
+pub f7(x: int) -> int { f8(x ^ 7) }
+pub f6(x: int) -> int { f7(x ^ 6) }
+pub f5(x: int) -> int { f6(x ^ 5) }
+pub f4(x: int) -> int { f5(x ^ 4) }
+pub f3(x: int) -> int { f4(x ^ 3) }
+@prove(inline)
+pub f2(x: int) -> int { f3(x ^ 2) }
+pub f1(x: int) -> int { f2(x ^ 1) }
+pub f0(x: int) -> int { f1(x) }
+
+main() {}
+
+// error 8: `f2` can't be proven `inline` where it is inlined into `f0` (line 10): it calls `f9` (line 2), which isn't inlined: inlined calls nest more than 8 deep

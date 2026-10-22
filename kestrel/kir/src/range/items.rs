@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use super::events::{Event, What};
 use super::report::{callee_name, Class, FuncReport, Item, ItemKind, Owners};
-use super::summary::{chain_text, reason_text, Summary};
+use super::summary::{chain_text, reason_text, Part, Summary};
 use super::Analysis;
 use crate::ir::*;
 
@@ -106,7 +106,17 @@ impl<'a> Cx<'a> {
             let mut item = |kind: ItemKind, text: String| out.push(Item { line: e.line, loops: e.loops.clone(), kind, text });
             match &e.what {
                 What::Alloc(r) => item(ItemKind::Allocation, reason_text(self.m, r, home)),
+                // (A logic part is printed with the resource part after it, whose words say both.)
+                What::Fail(r) if r.part == Part::Logic => {}
                 What::Fail(r) => item(ItemKind::CanFail, reason_text(self.m, r, home)),
+                What::Unknown(kind, r) => {
+                    if kind.allocates() {
+                        item(ItemKind::Allocation, reason_text(self.m, r, home));
+                    }
+                    if kind.fails() {
+                        item(ItemKind::CanFail, reason_text(self.m, r, home));
+                    }
+                }
                 What::Body(_) | What::Closure(_) | What::Cut => {}
                 What::Call(callee) => {
                     let c = callee.0 as usize;
@@ -151,24 +161,29 @@ impl<'a> Cx<'a> {
     /// into; the items of one line are the checks, then the rest, each in the order the code runs
     /// them; then the loops are grouped.
     fn arrange(&self, home: Option<FuncIdx>, checks: Vec<Item>, others: Vec<Item>) -> Vec<Item> {
-        let own = |line: u32| match (self.owners.of(line), home) {
-            (Some(o), Some(h)) => o == h,
-            _ => true,
-        };
-        let mut keyed: Vec<(u32, u8, Item)> = Vec::new();
-        for list in [checks, others] {
-            let mut anchor = home.map_or(0, |h| self.m.funcs[h.0 as usize].lines.0);
-            for item in list {
-                if own(item.line) {
-                    anchor = item.line;
-                }
-                let rank = u8::from(!matches!(item.kind, ItemKind::Check(_)));
-                keyed.push((anchor, rank, item));
-            }
-        }
-        keyed.sort_by_key(|(anchor, rank, _)| (*anchor, *rank));
-        group(keyed.into_iter().map(|(_, _, item)| item).collect())
+        arrange(self.m, &self.owners, home, checks, others)
     }
+}
+
+/// Puts the items of function `home` in the order the report prints them (see `Cx::arrange`).
+pub(super) fn arrange(m: &Module, owners: &Owners, home: Option<FuncIdx>, checks: Vec<Item>, others: Vec<Item>) -> Vec<Item> {
+    let own = |line: u32| match (owners.of(line), home) {
+        (Some(o), Some(h)) => o == h,
+        _ => true,
+    };
+    let mut keyed: Vec<(u32, u8, Item)> = Vec::new();
+    for list in [checks, others] {
+        let mut anchor = home.map_or(0, |h| m.funcs[h.0 as usize].lines.0);
+        for item in list {
+            if own(item.line) {
+                anchor = item.line;
+            }
+            let rank = u8::from(!matches!(item.kind, ItemKind::Check(_)));
+            keyed.push((anchor, rank, item));
+        }
+    }
+    keyed.sort_by_key(|(anchor, rank, _)| (*anchor, *rank));
+    group(keyed.into_iter().map(|(_, _, item)| item).collect())
 }
 
 /// A loop and what is inside it, or an item.

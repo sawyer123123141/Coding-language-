@@ -1,0 +1,51 @@
+@prove(no_panic)
+pub take(var xs: list[int]) {
+    xs.remove_at(0)
+}
+
+@prove(no_panic)
+pub get(xs: list[int], i: int) -> int {
+    xs[i]
+}
+
+@prove(no_panic)
+pub sum(xs: list[int], n: int) -> int {
+    @assume(n <= xs.len)
+    var s = 0
+    for i from 0 to n {
+        s = s ^ xs[i]
+    }
+    s
+}
+
+@prove(no_panic)
+pub make(n: int) -> int {
+    let a = array[int](n)
+    a.len
+}
+
+@prove(no_panic)
+pub push(var ys: list[int]) {
+    ys.add(1)
+}
+
+@prove(no_panic)
+pub put(var xs: list[int], i: int) {
+    xs.insert(i, 1)
+}
+
+@prove(no_panic)
+pub fill(var m: map[int, int]) {
+    for k in m {
+        m[k ^ 1] = 1
+    }
+}
+
+main() {}
+
+// error 1: `take` can't be proven `no_panic`: it can fail on line 3: `remove_at` fails if `0` is outside `xs`
+// error 6: `get` can't be proven `no_panic`: it has a bounds check on line 8: `xs[i]` may be outside `xs`
+// error 11: `sum` can't be proven `no_panic`: it can fail on line 13: the assumption `n <= xs.len` is checked here
+// error 21: `make` can't be proven `no_panic`: it can fail on line 23: `array[int](...)` fails if its length is negative or more than 2,147,483,647
+// error 32: `put` can't be proven `no_panic`: it can fail on line 34: `insert` fails if `i` is outside `xs`
+// error 37: `fill` can't be proven `no_panic`: it can fail on line 40: setting a key of `m` fails if it adds a new key while looping over the map

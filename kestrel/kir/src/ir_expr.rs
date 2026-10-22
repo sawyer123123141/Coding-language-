@@ -94,8 +94,10 @@ pub enum ExprKind {
     MakeIface { table: TableIdx, data: IfaceData },
     /// A call of method `slot` of the interface value at `recv`, through its table: the method
     /// gets the result pointer (if any), the value's data pointer as `self`, then `args`, which
-    /// follow `sig` (whose parameters leave out `self`).
-    CallVirtual { recv: Place, slot: u32, args: Vec<Arg>, sig: KSig },
+    /// follow `sig` (whose parameters leave out `self`). `keeps` is what the interface method's
+    /// `@prove` promises (every implementation is checked to keep it), and `method` is the
+    /// interface method's own function (its stub, `Shape.area`), for messages.
+    CallVirtual { recv: Place, slot: u32, args: Vec<Arg>, sig: KSig, keeps: ContractSet, method: FuncIdx },
     /// A struct with every field given, in declaration order.
     StructLit(StructIdx, Vec<Expr>),
     /// An enum value: the variant and its fields in declaration order.

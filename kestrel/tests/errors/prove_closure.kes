@@ -1,0 +1,8 @@
+@prove(no_alloc)
+pub adder(n: int) -> (int) -> int {
+    (x: int) -> int { x ^ n }
+}
+
+main() {}
+
+// error 1: `adder` can't be proven `no_alloc`: it allocates on line 3: a closure that holds captured values makes an environment for them

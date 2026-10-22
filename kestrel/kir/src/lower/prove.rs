@@ -57,6 +57,20 @@ impl Proves {
     }
 }
 
+impl Proves {
+    /// What the `@prove` on the declaration at `span` promises (`no_panic` bringing `no_checks`):
+    /// for an interface method, what a call through the interface keeps.
+    pub(crate) fn keeps(&self, program: &Program, span: Span) -> ContractSet {
+        let mut set = ContractSet::default();
+        if let Some(&k) = self.by_target.get(&span) {
+            for &(c, _) in &program.proves[k].contracts {
+                set.insert(ContractSet::of(c));
+            }
+        }
+        set
+    }
+}
+
 impl Helpers {
     /// Gives each loop site whose `Prove` block is in `body` the function `to`, where `body` now is.
     pub(crate) fn repoint(&mut self, body: &[Stmt], to: FuncIdx) {

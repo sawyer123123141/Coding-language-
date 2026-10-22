@@ -1,0 +1,35 @@
+// An interface method's contract: every implementation keeps it, so a call through the
+// interface does too.
+
+interface Shape {
+    @prove(no_alloc, no_panic)
+    area(self) -> float
+}
+
+struct Sq: Shape {
+    side: float = 1.0
+
+    area(self) -> float { self.side * self.side }
+}
+
+struct Disc: Shape {
+    r: float = 1.0
+
+    area(self) -> float { 3.0 * self.r * self.r }
+}
+
+@prove(no_alloc, no_panic)
+total(shapes: list[Shape]) -> float {
+    var t = 0.0
+    for s in shapes {
+        t = t + s.area()
+    }
+    t
+}
+
+main() {
+    let shapes: list[Shape] = [Sq(side: 2.0), Disc(r: 1.0)]
+    print(total(shapes))
+}
+
+// expect: 7
