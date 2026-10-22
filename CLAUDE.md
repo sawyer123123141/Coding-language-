@@ -4,7 +4,7 @@ A compiled language for games (Rust + Cranelift). The compiler is the Cargo work
 
 ## Start here
 
-**Read `docs/superpowers/plans/2026-10-10-handoff.md` first.** Its "Start here" section has the current status and the next task (Round B, `@prove`/`@assume`, built 2026-10-21 and its final review and fix wave done; the full suite and clippy are owed, then what the handoff's 2026-10-21 section lists next); the rest has the user's decisions and preferences and environment gotchas.
+**Read `docs/superpowers/plans/2026-10-10-handoff.md` first.** Its "Start here" section has the current status and the next task (Round B, `@prove`/`@assume`, built, reviewed and verified 2026-10-21; next is what the handoff's 2026-10-21 section lists); the rest has the user's decisions and preferences and environment gotchas.
 
 ## Where things are
 

@@ -314,5 +314,4 @@ The final whole-round review (Opus, over a0f42fc..7c7356c, about 20 probe progra
 
 ### Still owed
 
-- The full suite and clippy (above): every task and the fix wave ran focused targets in light mode.
 - The deferred minors from every task, and the compile-time and precision misses above: `docs/superpowers/plans/2026-10-09-core-2a-followups.md`, "Found while building `@prove` and `@assume`".
