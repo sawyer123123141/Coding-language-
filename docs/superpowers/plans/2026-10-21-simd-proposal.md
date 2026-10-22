@@ -1,5 +1,7 @@
 # Proposal: SIMD vector types (2026-10-21)
 
+**Decided 2026-10-21: the user took every pick.** `vec4`/`ivec4` as 4-lane SIMD values; `ivec4` overflow follows `int`; wrapping operators `*%`, `+%`, `-%` on `int`, `i64` and `ivec4` (they never check); a one-value fill (`vec4(0.5)`) for every vector type, `vec2` and `vec3` included; `ivec2`/`ivec3` built this round as plain (non-SIMD) structs. Next: spec, then plan.
+
 The user leaned toward explicit vector types over auto-vectorisation on 2026-10-21 ("a might be best") and asked for this proposal. It is written in GDScript terms. It shows a pick for each part, the alternatives rejected, and the questions the user has to decide. Nothing is built until the user approves it.
 
 ## What SIMD is, briefly
