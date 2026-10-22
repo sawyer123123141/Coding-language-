@@ -41,20 +41,25 @@ impl Cx<'_> {
         }
         let operands = [(l, a), (r, b)];
         Val::range(match op {
-            BinOp::Add | BinOp::Sub | BinOp::Mul => {
+            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::AddWrap | BinOp::SubWrap | BinOp::MulWrap => {
+                // `*% +% -%` have no check and wrap in every build: a result outside the type is
+                // any value of it, and a linear form holds only when nothing wrapped.
+                let wrapping = op.is_wrapping();
                 let exact = match op {
-                    BinOp::Add => iv::add(a, b),
-                    BinOp::Sub => iv::sub(a, b),
+                    BinOp::Add | BinOp::AddWrap => iv::add(a, b),
+                    BinOp::Sub | BinOp::SubWrap => iv::sub(a, b),
                     _ => iv::mul(a, b),
                 };
-                self.site(e, CheckKind::Overflow, exact.fits(ty), already, &operands);
-                let r = iv::settle(exact, ty, checked);
-                let keep = already || checked || exact.fits(ty);
+                if !wrapping {
+                    self.site(e, CheckKind::Overflow, exact.fits(ty), already, &operands);
+                }
+                let r = iv::settle(exact, ty, checked && !wrapping);
+                let keep = exact.fits(ty) || (!wrapping && (already || checked));
                 let constant = |v: &Val| (v.r.lo == v.r.hi).then_some(v.r.lo);
                 return match (op, constant(&vb), constant(&va)) {
-                    (BinOp::Add, Some(k), _) => va.plus(r, k, keep),
-                    (BinOp::Sub, Some(k), _) => va.plus(r, -k, keep),
-                    (BinOp::Add, None, Some(k)) => vb.plus(r, k, keep),
+                    (BinOp::Add | BinOp::AddWrap, Some(k), _) => va.plus(r, k, keep),
+                    (BinOp::Sub | BinOp::SubWrap, Some(k), _) => va.plus(r, -k, keep),
+                    (BinOp::Add | BinOp::AddWrap, None, Some(k)) => vb.plus(r, k, keep),
                     _ => Val::range(r),
                 };
             }

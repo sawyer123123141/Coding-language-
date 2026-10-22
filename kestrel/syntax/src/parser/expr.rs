@@ -89,6 +89,8 @@ impl Parser {
             let op = match self.peek() {
                 Tok::Plus => BinaryOp::Add,
                 Tok::Minus => BinaryOp::Sub,
+                Tok::PlusPercent => BinaryOp::AddWrap,
+                Tok::MinusPercent => BinaryOp::SubWrap,
                 _ => return Ok(lhs),
             };
             self.bump();
@@ -104,6 +106,7 @@ impl Parser {
                 Tok::Star => BinaryOp::Mul,
                 Tok::Slash => BinaryOp::Div,
                 Tok::Percent => BinaryOp::Rem,
+                Tok::StarPercent => BinaryOp::MulWrap,
                 _ => return Ok(lhs),
             };
             self.bump();

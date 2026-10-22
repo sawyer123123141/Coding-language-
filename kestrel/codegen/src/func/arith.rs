@@ -58,6 +58,10 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         }
         match op {
             BinOp::Add | BinOp::Sub | BinOp::Mul => self.int_arith(op, a, b, t, line, check),
+            // `*% +% -%`: plain wrapping instructions on the operand type, in every build.
+            BinOp::AddWrap => self.b.ins().iadd(a, b),
+            BinOp::SubWrap => self.b.ins().isub(a, b),
+            BinOp::MulWrap => self.b.ins().imul(a, b),
             BinOp::Div | BinOp::Rem => self.int_div(op, (a, b), t, line, const_divisor, check),
             BinOp::BitAnd => self.b.ins().band(a, b),
             BinOp::BitOr => self.b.ins().bor(a, b),

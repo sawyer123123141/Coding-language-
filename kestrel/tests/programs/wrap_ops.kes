@@ -1,0 +1,28 @@
+// `*% +% -%` and `*%= +%= -%=` wrap around and never stop the program.
+pure mix32(h: int) -> int {
+    var x = h
+    x = (x ^ (x >> 16)) *% 0x45D9F3B
+    x = (x ^ (x >> 16)) *% 0x45D9F3B
+    x ^ (x >> 16)
+}
+
+main() {
+    let lo = -2147483647 - 1
+    print(2147483647 +% 1, lo -% 1, 65536 *% 65536)
+    let big: i64 = 9223372036854775807
+    print(big +% 1)
+    let a: u8 = 200
+    print(a +% 100, a -% 201, u8(16) *% 16)
+    var h = 12345
+    h *%= 0x5BD1E995
+    h +%= 2147483647
+    h -%= -5
+    print(h)
+    print(mix32(1), mix32(123456789))
+}
+
+// expect: -2147483648 2147483647 0
+// expect: -9223372036854775808
+// expect: 44 255 0
+// expect: 1300820529
+// expect: 824515495 1952335732

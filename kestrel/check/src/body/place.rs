@@ -140,10 +140,13 @@ impl<'a> BodyChecker<'a> {
                 "replace the whole value that owns it",
             );
         }
+        if self.wrap_compound(target, target_ty, op, value) {
+            return;
+        }
         if op != AssignOp::Set && self.t.vec_dims(target_ty).is_some() {
             return self.check_vec_compound(target_ty, op, value);
         }
-        if op.binary().is_some_and(|b| b.is_bitwise()) && !target_ty.is_int() && target_ty != Ty::Error {
+        if op.binary().is_some_and(|b| b.is_bitwise() || b.is_wrapping()) && !target_ty.is_int() && target_ty != Ty::Error {
             let msg = format!("`{}` needs an integer, found {}", op.symbol(), self.tn(target_ty));
             self.error(target.span, msg);
         }

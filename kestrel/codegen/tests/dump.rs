@@ -38,3 +38,15 @@ fn a_struct_store_into_a_list_checks_the_index_once() {
     // One bounds check on `dst[i]` (its failure path ends in `trap user2`), not one per field.
     assert_eq!(code.matches("trap user2").count(), 1, "{code}");
 }
+
+#[test]
+fn a_wrapping_multiply_never_traps() {
+    // In a checked build `a * b` ends its failure path in `trap user2`; `a *% b` has none.
+    let checked = Options::default();
+    let m = common::optimized("pure f(a: int, b: int) -> int { a *% b }\nmain() {}\n");
+    let code = dump(&m, checked, "f").unwrap();
+    assert!(code.contains("imul") && !code.contains("trap user2"), "{code}");
+    let m = common::optimized("pure f(a: int, b: int) -> int { a * b }\nmain() {}\n");
+    let code = dump(&m, checked, "f").unwrap();
+    assert_eq!(code.matches("trap user2").count(), 1, "{code}");
+}

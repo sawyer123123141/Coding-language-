@@ -38,7 +38,7 @@ fn at_is_a_token() {
 fn numbers() {
     assert_eq!(
         toks("42 1_000 0xFF 2.5 5"),
-        vec![Tok::Int(42), Tok::Int(1000), Tok::Int(255), Tok::Float(2.5), Tok::Int(5), Tok::Eof]
+        vec![Tok::Int(42), Tok::Int(1000), Tok::Hex(255), Tok::Float(2.5), Tok::Int(5), Tok::Eof]
     );
 }
 
@@ -174,4 +174,42 @@ fn bit_operators() {
         ]
     );
     assert_eq!(errors("a && b"), vec!["Kestrel uses `and`, not `&&`"]);
+}
+
+#[test]
+fn wrapping_operators_are_tokens() {
+    let (t, d) = lex("a *% b +% c -% d");
+    assert!(d.is_empty());
+    let kinds: Vec<Tok> = t.iter().map(|t| t.tok.clone()).collect();
+    assert_eq!(
+        kinds,
+        vec![id("a"), Tok::StarPercent, id("b"), Tok::PlusPercent, id("c"), Tok::MinusPercent, id("d"), Tok::Eof]
+    );
+    // `*%` is one token, with adjacent characters.
+    assert_eq!((t[1].span.start, t[1].span.end), (2, 4));
+    assert_eq!((t[3].span.start, t[3].span.end), (7, 9));
+
+    assert_eq!(
+        toks("h *%= 3 +%= -%= x"),
+        vec![id("h"), Tok::StarPercentEq, Tok::Int(3), Tok::PlusPercentEq, Tok::MinusPercentEq, id("x"), Tok::Eof]
+    );
+    let (t, _) = lex("h *%= 3");
+    assert_eq!((t[1].span.start, t[1].span.end), (2, 5));
+
+    // The old operators lex as before.
+    assert_eq!(toks("a %= b"), vec![id("a"), Tok::PercentEq, id("b"), Tok::Eof]);
+    assert_eq!(toks("a % b"), vec![id("a"), Tok::Percent, id("b"), Tok::Eof]);
+    assert_eq!(toks("a * % "), vec![id("a"), Tok::Star, Tok::Percent, Tok::Eof]);
+    assert_eq!(toks("a * b % c"), vec![id("a"), Tok::Star, id("b"), Tok::Percent, id("c"), Tok::Eof]);
+    assert_eq!(toks("a -= 1"), vec![id("a"), Tok::MinusEq, Tok::Int(1), Tok::Eof]);
+}
+
+#[test]
+fn a_wrapping_operator_ending_a_line_continues_it() {
+    assert_eq!(toks("a *%\nb"), vec![id("a"), Tok::StarPercent, id("b"), Tok::Eof]);
+}
+
+#[test]
+fn hex_literals_are_marked() {
+    assert_eq!(toks("0xFF 255 0x1_0"), vec![Tok::Hex(255), Tok::Int(255), Tok::Hex(16), Tok::Eof]);
 }

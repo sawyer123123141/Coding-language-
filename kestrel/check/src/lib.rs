@@ -38,6 +38,7 @@ pub fn check_with(program: &Program, needs_main: bool) -> (Option<Tables>, Vec<D
     let mut t = Tables {
         expr_ty: vec![Ty::Error; program.expr_count as usize],
         builtin_ranges: program.builtin_ranges.clone(),
+        hex_literals: program.hex_literals.iter().copied().collect(),
         ..Tables::default()
     };
     let mut diags = Vec::new();

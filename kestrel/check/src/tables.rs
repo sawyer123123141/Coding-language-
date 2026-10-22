@@ -328,6 +328,13 @@ pub struct Tables {
     /// Copied from the program: where the built-in modules' source is. Only they may
     /// name `GpuHandle` (see `in_builtin`).
     pub builtin_ranges: Vec<std::ops::Range<u32>>,
+    /// Copied from the program: the integer literals written in hex, which may use their type's
+    /// full width (see `hex_literal`).
+    pub hex_literals: HashSet<ExprId>,
+    /// The hex literals above their type's positive range but within its bit width (`0xFFFFFFFF`
+    /// as an `int`), by id: the value is the bit pattern read as the type's signed integer
+    /// (-1 there). KIR reads the literal's value from here.
+    pub wrapped_literals: HashMap<ExprId, i64>,
 }
 
 impl Tables {

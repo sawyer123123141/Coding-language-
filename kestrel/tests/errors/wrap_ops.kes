@@ -1,0 +1,15 @@
+// The wrapping operators are for integers; floats and vectors keep the plain ones.
+main() {
+    let a = 1.5 *% 2.0
+    var f = 1.0
+    f +%= 2.0
+    let v = vec2(1, 2) -% vec2(1, 1)
+    let x = 0x1FFFFFFFF
+    let y = 2654435761
+}
+
+// error 3: `*%` wraps integers; for floats use `*`
+// error 5: `+%=` wraps integers; for floats use `+=`
+// error 6: `-%` wraps integers; for floats use `-`
+// error 7: `8589934591` doesn't fit in int
+// error 8: `2654435761` doesn't fit in int

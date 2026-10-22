@@ -385,7 +385,8 @@ impl Picker<'_> {
             ExprKind::Load(p) if p.path.is_empty() => self.local(p.root),
             ExprKind::Len(p) => self.len(p, p.path.len()),
             ExprKind::Cast(x) | ExprKind::Proven(x) | ExprKind::Seq(_, x) => self.linear(x),
-            ExprKind::Binary(BinOp::Add | BinOp::Sub, a, b) | ExprKind::RandInt(a, b) => {
+            // (`+%` and `-%` have a linear form only when they didn't wrap: see `arith`.)
+            ExprKind::Binary(BinOp::Add | BinOp::Sub | BinOp::AddWrap | BinOp::SubWrap, a, b) | ExprKind::RandInt(a, b) => {
                 self.linear(a);
                 self.linear(b);
             }

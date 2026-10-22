@@ -13,6 +13,10 @@ pub enum AssignOp {
     BitXor,
     Shl,
     Shr,
+    /// `*%=`, `+%=`, `-%=`: the wrapping forms.
+    MulWrap,
+    AddWrap,
+    SubWrap,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,6 +47,10 @@ pub enum BinaryOp {
     BitXor,
     Shl,
     Shr,
+    /// `*%`, `+%`, `-%`: they wrap around on overflow and never check.
+    MulWrap,
+    AddWrap,
+    SubWrap,
 }
 
 impl BinaryOp {
@@ -66,7 +74,26 @@ impl BinaryOp {
             BinaryOp::BitXor => "^",
             BinaryOp::Shl => "<<",
             BinaryOp::Shr => ">>",
+            BinaryOp::MulWrap => "*%",
+            BinaryOp::AddWrap => "+%",
+            BinaryOp::SubWrap => "-%",
         }
+    }
+
+    /// The checked operator a wrapping one stands for (`*%` is `*`), for messages that point
+    /// at it; `None` for every other operator.
+    pub fn plain(self) -> Option<BinaryOp> {
+        match self {
+            BinaryOp::MulWrap => Some(BinaryOp::Mul),
+            BinaryOp::AddWrap => Some(BinaryOp::Add),
+            BinaryOp::SubWrap => Some(BinaryOp::Sub),
+            _ => None,
+        }
+    }
+
+    /// `*% +% -%`.
+    pub fn is_wrapping(self) -> bool {
+        self.plain().is_some()
     }
 
     pub fn is_comparison(self) -> bool {
@@ -93,6 +120,9 @@ impl AssignOp {
             AssignOp::BitXor => "^=",
             AssignOp::Shl => "<<=",
             AssignOp::Shr => ">>=",
+            AssignOp::MulWrap => "*%=",
+            AssignOp::AddWrap => "+%=",
+            AssignOp::SubWrap => "-%=",
         }
     }
 
@@ -110,6 +140,9 @@ impl AssignOp {
             AssignOp::BitXor => Some(BinaryOp::BitXor),
             AssignOp::Shl => Some(BinaryOp::Shl),
             AssignOp::Shr => Some(BinaryOp::Shr),
+            AssignOp::MulWrap => Some(BinaryOp::MulWrap),
+            AssignOp::AddWrap => Some(BinaryOp::AddWrap),
+            AssignOp::SubWrap => Some(BinaryOp::SubWrap),
         }
     }
 }

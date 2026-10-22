@@ -160,6 +160,9 @@ fn op_text(op: BinOp) -> &'static str {
         BinOp::BitXor => "^",
         BinOp::Shl => "<<",
         BinOp::Shr => ">>",
+        BinOp::AddWrap => "+%",
+        BinOp::SubWrap => "-%",
+        BinOp::MulWrap => "*%",
     }
 }
 

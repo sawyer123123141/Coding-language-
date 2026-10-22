@@ -66,11 +66,13 @@ pub fn link(modules: Vec<Module>, reserved: fn(&str) -> bool) -> (Program, Vec<D
     let (mut expr_count, mut bind_count) = (0, 0);
     let mut items = Vec::new();
     let mut proves = Vec::new();
+    let mut hex_literals = Vec::new();
     let mut diags = Vec::new();
     for (i, m) in modules.into_iter().enumerate() {
         expr_count = expr_count.max(m.program.expr_count);
         bind_count = bind_count.max(m.program.bind_count);
         proves.extend(m.program.proves);
+        hex_literals.extend(m.program.hex_literals);
         let (scope, locals) = (HashMap::new(), Vec::new());
         let mut rw = Rewriter { scope, exports: &exports, names: &names, module: i, locals, reserved, diags: Vec::new() };
         for (name, e) in &exports[i] {
@@ -89,7 +91,7 @@ pub fn link(modules: Vec<Module>, reserved: fn(&str) -> bool) -> (Program, Vec<D
         }
         diags.append(&mut rw.diags);
     }
-    (Program { items, expr_count, bind_count, builtin_ranges: Vec::new(), proves }, diags)
+    (Program { items, expr_count, bind_count, builtin_ranges: Vec::new(), proves, hex_literals }, diags)
 }
 
 struct Rewriter<'a> {

@@ -76,6 +76,8 @@ impl<'a> BodyChecker<'a> {
     }
 
     fn int_literal(&mut self, e: &Expr, n: u64, want: Option<Ty>) -> Ty {
+        // (A literal checked again at another type loses the value it had at the first.)
+        self.t.wrapped_literals.remove(&e.id);
         let ty = match want {
             Some(t) if t.is_numeric() => t,
             _ => Ty::Int,
@@ -86,6 +88,9 @@ impl<'a> BodyChecker<'a> {
             Ty::I64 => i64::MAX as u64,
             _ => return ty,
         };
+        if n > max && self.hex_literal(e, n, ty) {
+            return ty;
+        }
         if n > max {
             let mut d = Diagnostic::error(e.span, format!("`{n}` doesn't fit in {}", self.tn(ty)));
             if ty == Ty::Int {
@@ -95,6 +100,22 @@ impl<'a> BodyChecker<'a> {
             return Ty::Error;
         }
         ty
+    }
+
+    /// A hex literal above `ty`'s positive range but within its bit width is that bit pattern
+    /// (`0xFFFFFFFF` is -1 as an `int`): recorded in `Tables::wrapped_literals`. Returns whether
+    /// `n` is one; `u8` has no bit patterns above its range.
+    fn hex_literal(&mut self, e: &Expr, n: u64, ty: Ty) -> bool {
+        let wrapped = match ty {
+            Ty::Int if n <= u32::MAX as u64 => n as u32 as i32 as i64,
+            Ty::I64 => n as i64,
+            _ => return false,
+        };
+        if !self.t.hex_literals.contains(&e.id) {
+            return false;
+        }
+        self.t.wrapped_literals.insert(e.id, wrapped);
+        true
     }
 
     /// A use of `local`: it must not have been moved or removed on the way here, and a view

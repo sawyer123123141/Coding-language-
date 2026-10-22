@@ -62,6 +62,8 @@ pub fn checks_of(e: &Expr, arith: Arith) -> Vec<CheckKind> {
         ExprKind::Unary(UnOp::Neg, _) if e.ty.is_int() && checked => vec![CheckKind::Overflow],
         ExprKind::Binary(op, l, r) if l.ty.is_int() => match op {
             BinOp::Add | BinOp::Sub | BinOp::Mul if checked => vec![CheckKind::Overflow],
+            // `*% +% -%` wrap and never check.
+            BinOp::AddWrap | BinOp::SubWrap | BinOp::MulWrap => Vec::new(),
             BinOp::Shl | BinOp::Shr if checked => vec![CheckKind::Shift],
             BinOp::Div | BinOp::Rem if divides_checked(l.ty, r) => vec![CheckKind::Division],
             _ => Vec::new(),

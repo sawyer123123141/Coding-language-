@@ -330,6 +330,9 @@ pub(crate) fn binop(op: ast::BinaryOp) -> BinOp {
         ast::BinaryOp::BitXor => BinOp::BitXor,
         ast::BinaryOp::Shl => BinOp::Shl,
         ast::BinaryOp::Shr => BinOp::Shr,
+        ast::BinaryOp::AddWrap => BinOp::AddWrap,
+        ast::BinaryOp::SubWrap => BinOp::SubWrap,
+        ast::BinaryOp::MulWrap => BinOp::MulWrap,
         ast::BinaryOp::And | ast::BinaryOp::Or => unreachable!("lowered to And/Or nodes"),
     }
 }

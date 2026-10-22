@@ -335,3 +335,27 @@ fn remove_is_still_a_name_everywhere_else() {
     assert_eq!(body("x.remove(k)"), "{(.call x remove k)}");
     assert_eq!(body("remove\nb"), "{remove; b}");
 }
+
+#[test]
+fn wrapping_operators_bind_like_their_plain_ones() {
+    assert_eq!(body("a +% b *% c"), "{(+% a (*% b c))}");
+    assert_eq!(body("a *% b ^ c"), "{(^ (*% a b) c)}");
+    assert_eq!(body("a -% b -% c"), "{(-% (-% a b) c)}");
+    assert_eq!(body("a + b *% c"), "{(+ a (*% b c))}");
+    assert_eq!(body("a *% b * c"), "{(* (*% a b) c)}");
+    assert_eq!(body("h *%= 3"), "{(*%= h 3)}");
+    assert_eq!(body("h +%= 3"), "{(+%= h 3)}");
+    assert_eq!(body("h -%= 3"), "{(-%= h 3)}");
+    assert!(matches!(
+        fn_decl(&ok("main() {\n    var h = 1\n    h *%= 3\n}"), 0).body.stmts[1],
+        Stmt::Assign { op: AssignOp::MulWrap, .. }
+    ));
+}
+
+#[test]
+fn hex_literals_are_listed_on_the_program() {
+    let p = ok("main() {\n    let a = 0xFF\n    let b = 255\n}");
+    assert_eq!(p.hex_literals.len(), 1);
+    let Stmt::Let { value, .. } = &fn_decl(&p, 0).body.stmts[0] else { panic!("not a let") };
+    assert_eq!(p.hex_literals[0], value.id);
+}

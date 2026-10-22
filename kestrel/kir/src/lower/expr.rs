@@ -45,7 +45,8 @@ impl<'a> FnLowerer<'a> {
                 if ty.is_float() {
                     ExprKind::Float(*n as f64)
                 } else {
-                    ExprKind::Int(*n as i64)
+                    // A hex literal above its type's positive range is its bit pattern.
+                    ExprKind::Int(self.t.wrapped_literals.get(&e.id).copied().unwrap_or(*n as i64))
                 }
             }
             ast::ExprKind::Float(f) => ExprKind::Float(*f),

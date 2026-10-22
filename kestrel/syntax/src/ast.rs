@@ -21,6 +21,9 @@ pub struct Program {
     /// The `@prove` annotations, kept beside the tree and keyed by the span of the function,
     /// method or loop each is on, so no node changes shape. Spans are unique, so a target has one.
     pub proves: Vec<ProveAnnot>,
+    /// The integer literals written in hex (`0xFF`), by id, kept beside the tree so `ExprKind::Int`
+    /// stays as it is. A hex literal may use its type's full width: `0xFFFFFFFF` is an `int`'s bit pattern.
+    pub hex_literals: Vec<ExprId>,
 }
 
 /// What a `@prove` promises (see `2026-10-18-at-annotations-design.md`).

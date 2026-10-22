@@ -44,7 +44,7 @@ impl Parser {
     pub(super) fn primary(&mut self) -> PResult<Expr> {
         let span = self.span();
         let kind = match self.peek().clone() {
-            Tok::Int(n) => ExprKind::Int(n),
+            Tok::Int(n) | Tok::Hex(n) => ExprKind::Int(n),
             Tok::Float(f) => ExprKind::Float(f),
             Tok::Str(s) => ExprKind::Str(s),
             Tok::StrParts(parts) => {
@@ -113,8 +113,13 @@ impl Parser {
                 return Err(());
             }
         };
+        let hex = matches!(self.peek(), Tok::Hex(_));
         self.bump();
-        Ok(self.expr_node(kind, span))
+        let e = self.expr_node(kind, span);
+        if hex {
+            self.hex_literals.push(e.id);
+        }
+        Ok(e)
     }
 
     fn call(&mut self, name: String, name_span: Span) -> PResult<Expr> {

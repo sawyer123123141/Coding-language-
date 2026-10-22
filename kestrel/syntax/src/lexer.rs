@@ -77,7 +77,7 @@ impl<'a> Lexer<'a> {
             }
             let digits: String = self.src[start + 2..self.pos].chars().filter(|&c| c != '_').collect();
             match u64::from_str_radix(&digits, 16) {
-                Ok(n) => self.push(Tok::Int(n), start),
+                Ok(n) => self.push(Tok::Hex(n), start),
                 Err(_) => self.error(start, "number is too large"),
             }
             return;
@@ -209,6 +209,18 @@ impl<'a> Lexer<'a> {
         if &three == b"<<=" || &three == b">>=" {
             self.pos += 3;
             return self.push(if three[0] == b'<' { Tok::ShlEq } else { Tok::ShrEq }, start);
+        }
+        // `*%=`, `+%=` and `-%=` come before `*%`, `+%` and `-%`, and those before `*`, `+`, `-` and `%=`.
+        let wrapping = match (three[0], three[1]) {
+            (b'*', b'%') => Some((Tok::StarPercent, Tok::StarPercentEq)),
+            (b'+', b'%') => Some((Tok::PlusPercent, Tok::PlusPercentEq)),
+            (b'-', b'%') => Some((Tok::MinusPercent, Tok::MinusPercentEq)),
+            _ => None,
+        };
+        if let Some((plain, assign)) = wrapping {
+            let compound = three[2] == b'=';
+            self.pos += if compound { 3 } else { 2 };
+            return self.push(if compound { assign } else { plain }, start);
         }
         let two = [self.peek(0), self.peek(1)];
         let pair = match &two {

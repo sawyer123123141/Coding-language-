@@ -48,6 +48,8 @@ pub struct Parser {
     base: u32,
     /// The `@prove`s read so far, one per target (see `annot`).
     proves: Vec<ProveAnnot>,
+    /// The ids of the integer literals written in hex.
+    hex_literals: Vec<ExprId>,
 }
 
 impl Parser {
@@ -76,6 +78,7 @@ impl Parser {
             src: String::new(),
             base: 0,
             proves: Vec::new(),
+            hex_literals: Vec::new(),
         }
     }
 
@@ -89,7 +92,15 @@ impl Parser {
     pub fn parse_program(mut self) -> (Program, Vec<Diagnostic>) {
         let items = self.items();
         let proves = std::mem::take(&mut self.proves);
-        let program = Program { items, expr_count: self.next_expr, bind_count: self.next_bind, builtin_ranges: Vec::new(), proves };
+        let hex_literals = std::mem::take(&mut self.hex_literals);
+        let program = Program {
+            items,
+            expr_count: self.next_expr,
+            bind_count: self.next_bind,
+            builtin_ranges: Vec::new(),
+            proves,
+            hex_literals,
+        };
         (program, self.finish_diags())
     }
 

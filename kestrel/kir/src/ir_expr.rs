@@ -152,11 +152,21 @@ pub enum BinOp {
     /// Both operands have the result's type (lowering converts the amount).
     Shl,
     Shr,
+    /// `*%`, `+%`, `-%` (integers): the result wraps around and nothing is ever checked, in
+    /// every build.
+    AddWrap,
+    SubWrap,
+    MulWrap,
 }
 
 impl BinOp {
     pub fn is_comparison(self) -> bool {
         matches!(self, BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge)
+    }
+
+    /// `*% +% -%`.
+    pub fn is_wrapping(self) -> bool {
+        matches!(self, BinOp::AddWrap | BinOp::SubWrap | BinOp::MulWrap)
     }
 }
 

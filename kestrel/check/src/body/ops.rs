@@ -89,6 +89,9 @@ impl<'a> BodyChecker<'a> {
                 let hint = want.filter(|t| t.is_numeric());
                 let lt = self.check_expr(lhs, hint);
                 let rt = self.check_expr(rhs, Some(lt).filter(|t| t.is_numeric()).or(hint));
+                if op.is_wrapping() {
+                    return self.wrap_binary(e, op, lhs, lt, rhs, rt);
+                }
                 if op == BinaryOp::Add && (lt == Ty::Str || rt == Ty::Str) {
                     return self.str_concat(e, lt, rt);
                 }
@@ -143,7 +146,7 @@ impl<'a> BodyChecker<'a> {
     }
 
     /// Both operands must be numbers that meet at a common type.
-    fn operands(&mut self, e: &Expr, op: BinaryOp, lhs: &Expr, lt: Ty, rhs: &Expr, rt: Ty) -> Ty {
+    pub(super) fn operands(&mut self, e: &Expr, op: BinaryOp, lhs: &Expr, lt: Ty, rhs: &Expr, rt: Ty) -> Ty {
         if lt == Ty::Error || rt == Ty::Error {
             return Ty::Error;
         }

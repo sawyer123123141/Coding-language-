@@ -4,6 +4,10 @@ use crate::span::Span;
 pub enum Tok {
     Ident(String),
     Int(u64),
+    /// An integer written in hex (`0xFF`): it may use its type's full width (see
+    /// `Program::hex_literals`). A separate token, not a flag on `Token`, which would make every
+    /// `Token` on the parser's stack bigger.
+    Hex(u64),
     Float(f64),
     Str(String),
     /// A string with `{...}` interpolation.
@@ -17,6 +21,8 @@ pub enum Tok {
     // operators
     Plus, Minus, Star, Slash, Percent, Assign, EqEq, NotEq, Lt, Gt, Le, Ge,
     PlusEq, MinusEq, StarEq, SlashEq, PercentEq,
+    /// `*% +% -%` and `*%= +%= -%=`: arithmetic that wraps around and never checks.
+    StarPercent, PlusPercent, MinusPercent, StarPercentEq, PlusPercentEq, MinusPercentEq,
     Amp, Pipe, Caret, Tilde, Shl, Shr, AmpEq, PipeEq, CaretEq, ShlEq, ShrEq,
     Eof,
 }
@@ -78,7 +84,8 @@ impl Tok {
             Plus | Minus | Star | Slash | Percent | Assign | EqEq | NotEq | Lt | Gt | Le | Ge
                 | PlusEq | MinusEq | StarEq | SlashEq | PercentEq | And | Or | Comma | Arrow
                 | Dot | LBrace | Amp | Pipe | Caret | Tilde | Shl | Shr | AmpEq | PipeEq | CaretEq
-                | ShlEq | ShrEq
+                | ShlEq | ShrEq | StarPercent | PlusPercent | MinusPercent | StarPercentEq
+                | PlusPercentEq | MinusPercentEq
         )
     }
 
@@ -87,7 +94,7 @@ impl Tok {
         use Tok::*;
         match self {
             Ident(s) => format!("name `{s}`"),
-            Int(n) => format!("number `{n}`"),
+            Int(n) | Hex(n) => format!("number `{n}`"),
             Float(f) => format!("number `{f}`"),
             Str(_) | StrParts(_) => "a string".into(),
             Newline => "end of line".into(),
@@ -113,7 +120,9 @@ impl Tok {
             StarEq => "*=", SlashEq => "/=", PercentEq => "%=",
             Amp => "&", Pipe => "|", Caret => "^", Tilde => "~", Shl => "<<", Shr => ">>",
             AmpEq => "&=", PipeEq => "|=", CaretEq => "^=", ShlEq => "<<=", ShrEq => ">>=",
-            Ident(_) | Int(_) | Float(_) | Str(_) | StrParts(_) | Newline | Eof => "",
+            StarPercent => "*%", PlusPercent => "+%", MinusPercent => "-%", StarPercentEq => "*%=",
+            PlusPercentEq => "+%=", MinusPercentEq => "-%=",
+            Ident(_) | Int(_) | Hex(_) | Float(_) | Str(_) | StrParts(_) | Newline | Eof => "",
         }
     }
 }

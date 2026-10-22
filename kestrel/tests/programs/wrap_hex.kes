@@ -1,0 +1,17 @@
+// A hex literal may use its type's full width: `0x9E3779B1` is an `int`'s bit pattern.
+main() {
+    let PRIME = 0x9E3779B1
+    print(PRIME, 1 *% PRIME, 0x9E3779B1 *% 5)
+    var h = 7
+    h *%= 0x9E3779B1
+    print(h)
+    let w: i64 = 3
+    print(w *% 0x9E3779B97F4A7C15)
+    let x: i64 = 0xFFFFFFFF
+    print(x, i64(0xFFFFFFFF), 0xFFFFFFFF)
+}
+
+// expect: -1640531535 -1640531535 387276917
+// expect: 1401181143
+// expect: -2691343689449507777
+// expect: 4294967295 4294967295 -1
