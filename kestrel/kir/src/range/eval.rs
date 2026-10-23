@@ -61,6 +61,7 @@ impl Cx<'_> {
             ExprKind::Unary(UnOp::Neg, _) | ExprKind::Cast(_) => self.arith(st, e, sure, false),
             ExprKind::Binary(_, l, _) if l.ty.is_int() => self.arith(st, e, sure, false),
             ExprKind::Proven(inner) => self.arith(st, inner, sure, true),
+            ExprKind::VecLit(_) | ExprKind::Splat(_) | ExprKind::Shuffle(..) | ExprKind::LaneOf(..) => self.vector(st, e, sure),
             ExprKind::Unary(UnOp::BitNot, x) if e.ty.is_int() => Val::range(iv::bit_not(self.eval(st, x, sure), e.ty)),
             ExprKind::Unary(_, x)
             | ExprKind::Some(x)

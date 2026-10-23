@@ -139,7 +139,17 @@ pub(crate) fn rename_expr(e: &mut Expr, subst: &[Subst]) {
                 rename_expr(x, subst);
             }
         }
-        ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::Proven(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) | ExprKind::EnvDup(x) | ExprKind::BlockDup { src: x, .. } => {
+        ExprKind::Unary(_, x)
+        | ExprKind::Cast(x)
+        | ExprKind::Proven(x)
+        | ExprKind::FieldOf(x, _)
+        | ExprKind::ArrayNew(x)
+        | ExprKind::Some(x)
+        | ExprKind::EnvDup(x)
+        | ExprKind::BlockDup { src: x, .. }
+        | ExprKind::Splat(x)
+        | ExprKind::Shuffle(x, _)
+        | ExprKind::LaneOf(x, _) => {
             rename_expr(x, subst)
         }
         ExprKind::MakeFn { env: EnvKind::Heap(env) | EnvKind::Stack(env), .. } => {
@@ -163,7 +173,12 @@ pub(crate) fn rename_expr(e: &mut Expr, subst: &[Subst]) {
             rename_place(recv, subst);
             rename_args(args, subst);
         }
-        ExprKind::StructLit(_, xs) | ExprKind::VariantLit(_, _, xs) | ExprKind::ArrayLit(xs) | ExprKind::Math(_, xs) | ExprKind::Str(_, xs) => {
+        ExprKind::StructLit(_, xs)
+        | ExprKind::VariantLit(_, _, xs)
+        | ExprKind::ArrayLit(xs)
+        | ExprKind::VecLit(xs)
+        | ExprKind::Math(_, xs)
+        | ExprKind::Str(_, xs) => {
             for x in xs {
                 rename_expr(x, subst);
             }

@@ -11,7 +11,9 @@ fn bits(t: KTy) -> u32 {
         KTy::Bool | KTy::U8 => 8,
         KTy::I32 | KTy::F32 => 32,
         KTy::I64 | KTy::F64 => 64,
-        KTy::Struct(_)
+        KTy::F32X4
+        | KTy::I32X4
+        | KTy::Struct(_)
         | KTy::Enum(_)
         | KTy::Str
         | KTy::Array(_)
@@ -22,7 +24,7 @@ fn bits(t: KTy) -> u32 {
         | KTy::Optional(_)
         | KTy::Fn
         | KTy::Iface => {
-            unreachable!("aggregates and arenas aren't numbers")
+            unreachable!("vectors, aggregates and arenas have no one width")
         }
     }
 }
@@ -40,6 +42,10 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         const_divisor: Option<i64>,
         check: Check,
     ) -> Value {
+        // Here, not in `expr`, so a `Proven` vector operation takes this path too.
+        if t.is_vector() {
+            return self.simd_binary(op, a, b, t);
+        }
         if op.is_comparison() {
             return self.compare(op, a, b, t);
         }

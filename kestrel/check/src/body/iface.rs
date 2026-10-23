@@ -134,7 +134,7 @@ impl<'a> BodyChecker<'a> {
     /// can point at it. This mirrors that function, and must change with it: a local or
     /// parameter (a capture read inside a closure included), a constant KIR reads in place
     /// (`Tables::const_read_in_place`, which `kir::lower::consts::hoisted` asks too), a field of a place
-    /// (a swizzle, `.len` or an enum variant has no `field_index`), and an element of a place
+    /// or a lane of a `vec4` (a swizzle, `.len` or an enum variant is neither), and an element of a place
     /// that is an array or list. A map lookup `m[k]` and a string index `s[i]` build a value, so
     /// they are not places.
     pub(super) fn is_kir_place(&self, e: &Expr) -> bool {
@@ -145,7 +145,7 @@ impl<'a> BodyChecker<'a> {
                 _ => false,
             },
             ExprKind::Index { base, .. } => !matches!(self.t.ty(base.id), Ty::Map(..) | Ty::Str) && self.is_kir_place(base),
-            ExprKind::Field { base, .. } => self.t.field_index.contains_key(&e.id) && self.is_kir_place(base),
+            ExprKind::Field { base, .. } => self.is_field_or_lane(e) && self.is_kir_place(base),
             _ => false,
         }
     }

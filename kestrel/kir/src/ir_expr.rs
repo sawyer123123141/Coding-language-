@@ -106,6 +106,14 @@ pub enum ExprKind {
     Tag(Place),
     /// A field of a struct value that isn't a place (e.g. a call's result).
     FieldOf(Box<Expr>, u32),
+    /// A vector (`ty`, `F32X4` or `I32X4`) of these lane values, one per lane, evaluated in order.
+    VecLit(Vec<Expr>),
+    /// A vector (`ty`) with the number (of its lane type) in every lane.
+    Splat(Box<Expr>),
+    /// A vector (`ty`) whose lane `i` is lane `.1[i]` of the vector `.0` (`v.wzyx`).
+    Shuffle(Box<Expr>, [u8; 4]),
+    /// Lane `.1` of a vector value that isn't a place (e.g. a call's result).
+    LaneOf(Box<Expr>, u8),
     /// Runs the statements, then yields the value. Used to evaluate
     /// labelled arguments in source order.
     Seq(Vec<Stmt>, Box<Expr>),
@@ -149,7 +157,8 @@ pub enum BinOp {
     BitAnd,
     BitOr,
     BitXor,
-    /// Both operands have the result's type (lowering converts the amount).
+    /// Both operands have the result's type (lowering converts the amount); a vector's amount
+    /// has its lane type.
     Shl,
     Shr,
     /// `*%`, `+%`, `-%` (integers): the result wraps around and nothing is ever checked, in
@@ -215,7 +224,9 @@ pub struct Env {
 
 /// Where an environment's parts are: the header holds the copy function's address at offset 0
 /// and `size` (an `i64`) at 8; the captured values follow at `offsets`, each at its natural
-/// alignment. `size` counts the header and is a multiple of 8, the block's alignment.
+/// alignment. `size` counts the header and is a multiple of 8. Every block (made in an arena,
+/// copied, or in a stack slot) is aligned to `ENV_ALIGN`, so a `vec4` capture at a multiple of 16
+/// is 16-aligned in memory.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EnvLayout {
     pub offsets: Vec<u32>,
@@ -224,3 +235,5 @@ pub struct EnvLayout {
 
 /// The size of an environment's header: the copy function's address and the size.
 pub const ENV_HEADER: u32 = 16;
+/// The alignment of every environment block: the largest a capture may need (a `vec4`'s).
+pub const ENV_ALIGN: u32 = 16;

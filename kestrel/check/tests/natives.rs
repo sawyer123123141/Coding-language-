@@ -264,3 +264,18 @@ fn a_struct_that_contains_itself_is_reported_once_not_looped_over() {
     let src = "struct A {\n a: A\n}\nstruct B {\n c: C\n}\nstruct C {\n b: B\n}\nnative f(xs: [A], d: B) -> A\nmain() {}\n";
     assert_eq!(errors(src), ["struct `A` contains itself", "struct `B` contains itself", "struct `C` contains itself"]);
 }
+
+#[test]
+fn natives_refuse_vec4() {
+    assert_eq!(errors("native f(v: vec4)\nmain() {}\n"), vec![BAD_TYPE]);
+    assert_eq!(errors("native f() -> vec4\nmain() {}\n"), vec![BAD_TYPE]);
+    assert_eq!(errors("struct S {\n v: vec4\n}\nnative f(s: S)\nmain() {}\n"), vec![BAD_TYPE]);
+    assert_eq!(errors("native f(vs: [vec4])\nmain() {}\n"), vec![BAD_TYPE]);
+    // The same in a built-in module, whose natives Kestrel's own code declares.
+    let src = "native f(v: vec4)\nmain() {}\n";
+    let (mut p, d) = parse(src);
+    assert!(d.is_empty());
+    p.builtin_ranges = std::iter::once(0..src.len() as u32).collect();
+    let errs: Vec<String> = check(&p).1.into_iter().map(|d| d.message).collect();
+    assert_eq!(errs, vec![BAD_TYPE]);
+}

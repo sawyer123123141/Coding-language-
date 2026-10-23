@@ -110,6 +110,7 @@ impl<'a> FnLowerer<'a> {
             ast::ExprKind::Call { args, .. } => match self.t.res[&e.id] {
                 Res::Convert(_) => ExprKind::Cast(Box::new(self.expr(&args[0].value))),
                 Res::Construct(sid) if self.t.vec_makes.contains(&e.id) => self.vec_make(sid, args, ty, line),
+                Res::SimdMake(_) => self.simd_make(e, args, ty, line),
                 Res::NewArena => ExprKind::NewArena,
                 Res::Builtin(b) => self.builtin_call(b, args, ty, line),
                 Res::Fn(f) if self.wants_scratch(f, args) => self.scratch_call_value(e, f, args, ty, line),
@@ -162,6 +163,7 @@ impl<'a> FnLowerer<'a> {
                 KTy::Map(..) => ExprKind::MapNew,
                 _ => ExprKind::ListNew,
             },
+            ast::ExprKind::Field { base, .. } if self.t.lanes.contains_key(&e.id) => self.lane_read(e, base, self.t.lanes[&e.id]),
             ast::ExprKind::Field { base, .. } if self.t.swizzles.contains_key(&e.id) => {
                 let comps = self.t.swizzles[&e.id].clone();
                 self.swizzle(base, &comps, ty, line)

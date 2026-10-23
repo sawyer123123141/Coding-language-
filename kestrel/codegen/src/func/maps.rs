@@ -46,7 +46,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             self.lower_into(key, addr)?;
         } else {
             let v = self.expr(key)?;
-            self.b.ins().store(MemFlags::trusted(), v, addr, 0);
+            self.store_value(v, addr, 0);
         }
         Ok(addr)
     }
@@ -148,8 +148,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         if ty.is_aggregate() {
             self.copy_aggregate(dst, src, ty);
         } else {
-            let v = self.b.ins().load(super::cl_type(ty), MemFlags::trusted(), src, 0);
-            self.b.ins().store(MemFlags::trusted(), v, dst, 0);
+            let v = self.load_at(ty, src, 0);
+            self.store_value(v, dst, 0);
         }
     }
 
@@ -182,7 +182,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         if value.ty.is_aggregate() {
             self.copy_aggregate(slot, v, value.ty);
         } else {
-            self.b.ins().store(MemFlags::trusted(), v, slot, 0);
+            self.store_value(v, slot, 0);
         }
         Ok(())
     }

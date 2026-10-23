@@ -16,6 +16,7 @@ mod math;
 mod par;
 mod place;
 mod print;
+mod simd;
 mod stmt;
 mod strings;
 
@@ -32,9 +33,10 @@ use kestrel_kir::{self as kir, KTy, LocalIdx, LocalKind};
 
 use crate::rt::RtFuncs;
 pub(crate) use check::Check;
+pub(crate) use simd::mem_flags;
 use crate::Options;
 
-/// The register type of a scalar. Structs live in memory and have none.
+/// The register type of a number or a vector. Structs live in memory and have none.
 pub(crate) fn cl_type(t: KTy) -> Type {
     match t {
         KTy::Bool | KTy::U8 => types::I8,
@@ -42,6 +44,8 @@ pub(crate) fn cl_type(t: KTy) -> Type {
         KTy::I64 => types::I64,
         KTy::F32 => types::F32,
         KTy::F64 => types::F64,
+        KTy::F32X4 => types::F32X4,
+        KTy::I32X4 => types::I32X4,
         KTy::Struct(_)
         | KTy::Enum(_)
         | KTy::Str

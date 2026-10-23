@@ -27,7 +27,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     }
 
     pub(super) fn store(&mut self, v: Value, addr: Value, offset: i32) {
-        self.b.ins().store(MemFlags::trusted(), v, addr, offset);
+        self.store_value(v, addr, offset);
     }
 
     /// A list's extra fields: its capacity and the current arena, where it will grow.

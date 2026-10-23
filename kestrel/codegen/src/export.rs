@@ -8,7 +8,7 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_module::{FuncId, Linkage, Module};
 use kestrel_kir::{self as kir, KTy, LocalKind, StructIdx};
 
-use crate::func::cl_type;
+use crate::func::{cl_type, mem_flags};
 
 /// A parameter or result type, as a host sees it.
 #[derive(Clone, Debug, PartialEq)]
@@ -52,6 +52,8 @@ pub(crate) fn export_ty(m: &kir::Module, ty: KTy) -> ExportTy {
         KTy::F32 => ExportTy::Float,
         KTy::F64 => ExportTy::F64,
         KTy::Str => ExportTy::Str,
+        KTy::F32X4 => ExportTy::Other("vec4".into()),
+        KTy::I32X4 => ExportTy::Other("ivec4".into()),
         KTy::Struct(StructIdx(0)) => ExportTy::Vec2,
         KTy::Struct(StructIdx(1)) => ExportTy::Vec3,
         KTy::Array(e) | KTy::List(e) => {
@@ -123,14 +125,14 @@ pub(crate) fn define_thunks<M: Module>(module: &mut M, m: &kir::Module, ids: &[F
                 vals.push(if f.locals[p.0 as usize].kind == LocalKind::RefParam {
                     b.ins().iadd_imm(args, at as i64)
                 } else {
-                    b.ins().load(cl_type(t), MemFlags::trusted(), args, at as i32)
+                    b.ins().load(cl_type(t), mem_flags(t), args, at as i32)
                 });
             }
             let fref = module.declare_func_in_func(ids[i], b.func);
             let call = b.ins().call(fref, &vals);
             if f.ret.is_some_and(|r| !r.is_aggregate()) {
                 let v = b.inst_results(call)[0];
-                b.ins().store(MemFlags::trusted(), v, ret, 0);
+                b.ins().store(f.ret.map_or(MemFlags::trusted(), mem_flags), v, ret, 0);
             }
             b.ins().return_(&[]);
             b.finalize();

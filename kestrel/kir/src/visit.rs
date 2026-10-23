@@ -149,7 +149,17 @@ pub fn walk_expr<'a>(e: &'a Expr, f: &mut impl FnMut(Node<'a>)) {
         }
         ExprKind::Format(parts) => print_args(parts, f),
         ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::FnEnv(p) => place(p, false, f),
-        ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::Proven(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) | ExprKind::EnvDup(x) | ExprKind::BlockDup { src: x, .. } => {
+        ExprKind::Unary(_, x)
+        | ExprKind::Cast(x)
+        | ExprKind::Proven(x)
+        | ExprKind::FieldOf(x, _)
+        | ExprKind::ArrayNew(x)
+        | ExprKind::Some(x)
+        | ExprKind::EnvDup(x)
+        | ExprKind::BlockDup { src: x, .. }
+        | ExprKind::Splat(x)
+        | ExprKind::Shuffle(x, _)
+        | ExprKind::LaneOf(x, _) => {
             walk_expr(x, f)
         }
         ExprKind::MakeFn { env: EnvKind::Heap(env) | EnvKind::Stack(env), .. } => {
@@ -173,7 +183,12 @@ pub fn walk_expr<'a>(e: &'a Expr, f: &mut impl FnMut(Node<'a>)) {
             place(callee, false, f);
             args(a, f);
         }
-        ExprKind::StructLit(_, xs) | ExprKind::VariantLit(_, _, xs) | ExprKind::ArrayLit(xs) | ExprKind::Math(_, xs) | ExprKind::Str(_, xs) => {
+        ExprKind::StructLit(_, xs)
+        | ExprKind::VariantLit(_, _, xs)
+        | ExprKind::ArrayLit(xs)
+        | ExprKind::VecLit(xs)
+        | ExprKind::Math(_, xs)
+        | ExprKind::Str(_, xs) => {
             for x in xs {
                 walk_expr(x, f);
             }

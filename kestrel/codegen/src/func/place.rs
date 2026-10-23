@@ -4,7 +4,7 @@ use cranelift_module::Module;
 use kestrel_kir::{self as kir, IndexCheck, KTy, Place, Proj};
 use kestrel_runtime::PANIC_BOUNDS;
 
-use super::{cl_type, Check, FuncLowerer, Slot};
+use super::{Check, FuncLowerer, Slot};
 
 impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// The type of the value stored at a place.
@@ -19,6 +19,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 (Proj::Payload, KTy::Optional(el)) => kir.elem(el),
                 (Proj::MapKey { .. }, KTy::Map(k, _)) => kir.elem(k),
                 (Proj::MapValue { .. }, KTy::Map(_, v)) => kir.elem(v),
+                (Proj::Lane(_), KTy::F32X4 | KTy::I32X4) => ty.lane(),
                 _ => unreachable!("place path doesn't match the type"),
             };
         }
@@ -63,6 +64,12 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                     let header = self.offset(addr, offset);
                     addr = self.entry_part(header, ty, at, true, *checked)?;
                     (ty, offset) = (kir.elem(v), 0);
+                    continue;
+                }
+                // A lane: 4 bytes at `4 * lane` (always the place's last step).
+                (Proj::Lane(i), KTy::F32X4 | KTy::I32X4) => {
+                    offset += 4 * i32::from(*i);
+                    ty = ty.lane();
                     continue;
                 }
                 _ => unreachable!("place path doesn't match the type"),
@@ -125,23 +132,36 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         }
     }
 
-    /// Loads the scalar stored at a place.
+    /// Loads the number or vector stored at a place (a lane of a vector in a register included).
     pub(crate) fn load_place(&mut self, p: &Place) -> Result<Value, String> {
-        if let (Slot::Var(v), true) = (self.slots[p.root.0 as usize], p.path.is_empty()) {
-            return Ok(self.b.use_var(v));
+        if let Slot::Var(v) = self.slots[p.root.0 as usize] {
+            let whole = self.b.use_var(v);
+            return Ok(match p.path.as_slice() {
+                [] => whole,
+                [Proj::Lane(i)] => self.b.ins().extractlane(whole, *i),
+                _ => unreachable!("a register local has no fields"),
+            });
         }
         let ty = self.place_ty(p);
         let addr = self.place_addr(p)?;
-        Ok(self.b.ins().load(cl_type(ty), MemFlags::trusted(), addr, 0))
+        Ok(self.load_at(ty, addr, 0))
     }
 
     pub(crate) fn store_place(&mut self, p: &Place, val: Value) -> Result<(), String> {
-        if let (Slot::Var(v), true) = (self.slots[p.root.0 as usize], p.path.is_empty()) {
+        if let Slot::Var(v) = self.slots[p.root.0 as usize] {
+            let val = match p.path.as_slice() {
+                [] => val,
+                [Proj::Lane(i)] => {
+                    let whole = self.b.use_var(v);
+                    self.b.ins().insertlane(whole, val, *i)
+                }
+                _ => unreachable!("a register local has no fields"),
+            };
             self.b.def_var(v, val);
             return Ok(());
         }
         let addr = self.place_addr(p)?;
-        self.b.ins().store(MemFlags::trusted(), val, addr, 0);
+        self.store_value(val, addr, 0);
         Ok(())
     }
 
@@ -160,8 +180,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 if f.ty.is_aggregate() {
                     self.copy_fields(dst, src, at, f.ty);
                 } else {
-                    let v = self.b.ins().load(cl_type(f.ty), MemFlags::trusted(), src, at);
-                    self.b.ins().store(MemFlags::trusted(), v, dst, at);
+                    let v = self.load_at(f.ty, src, at);
+                    self.store_value(v, dst, at);
                 }
             }
             return;
@@ -224,7 +244,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 self.read_leaves(e, 0, &mut leaves)?;
                 let dst = self.place_addr(p)?;
                 for (offset, v) in leaves {
-                    self.b.ins().store(MemFlags::trusted(), v, dst, offset);
+                    self.store_value(v, dst, offset);
                 }
                 return Ok(());
             }

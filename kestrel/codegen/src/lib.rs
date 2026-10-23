@@ -22,6 +22,8 @@ pub use dump::{dump, dump_lowered};
 pub use export::{ExportInfo, ExportTy};
 pub use jit::JitProgram;
 pub use object::emit_object;
+#[doc(hidden)]
+pub use object::emit_object_for;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Options {
@@ -59,6 +61,7 @@ pub(crate) fn define_module<M: Module>(
     opts: Options,
     mut dump: Option<&mut dump::Dump>,
 ) -> Result<Vec<FuncId>, String> {
+    isa::check_simd(module.isa(), m)?;
     // Range analysis runs here, on a copy, with this build's arithmetic: so every way of compiling
     // gets it, and the proofs always assume the mode of the code emitted. A module the driver
     // analysed already (an annotated program) is compiled as it is, for its own build only.

@@ -28,7 +28,8 @@ pub fn leaves(structs: &[StructLayout], ty: KTy) -> Option<Vec<Leaf>> {
 
 fn collect(structs: &[StructLayout], ty: KTy, path: &mut Vec<u32>, out: &mut Vec<Leaf>) -> Option<()> {
     match ty {
-        KTy::Bool | KTy::U8 | KTy::I32 | KTy::I64 | KTy::F32 | KTy::F64 => out.push(Leaf { path: path.clone(), ty }),
+        // A vector is one leaf: it stays one SIMD value, never four lanes.
+        KTy::Bool | KTy::U8 | KTy::I32 | KTy::I64 | KTy::F32 | KTy::F64 | KTy::F32X4 | KTy::I32X4 => out.push(Leaf { path: path.clone(), ty }),
         KTy::Struct(s) => {
             for (i, f) in structs[s.0 as usize].fields.iter().enumerate() {
                 path.push(i as u32);
@@ -50,9 +51,28 @@ pub fn is_plain_struct(structs: &[StructLayout], ty: KTy) -> bool {
 }
 
 /// The field indexes of a path made only of `Proj::Field` steps (every path inside a plain
-/// type), or `None` for any other step.
+/// type), or `None` for any other step. A trailing `Proj::Lane` (a lane of a vector leaf) is
+/// left out: it stays on whatever place replaces the leaf's (see `lane_of`).
 pub fn field_path(path: &[Proj]) -> Option<Vec<u32>> {
-    path.iter().map(|step| if let Proj::Field(i) = step { Some(*i) } else { None }).collect()
+    let fields = match path.last() {
+        Some(Proj::Lane(_)) => &path[..path.len() - 1],
+        _ => path,
+    };
+    fields.iter().map(|step| if let Proj::Field(i) = step { Some(*i) } else { None }).collect()
+}
+
+/// The lane a path ends in, if it ends in one.
+pub fn lane_of(path: &[Proj]) -> Option<u8> {
+    match path.last() {
+        Some(Proj::Lane(i)) => Some(*i),
+        _ => None,
+    }
+}
+
+/// The place of the leaf local `l` standing for a place whose path ended in `lane` (if any): the
+/// local, or its lane.
+pub fn leaf_or_lane(l: LocalIdx, lane: Option<u8>) -> Place {
+    Place { root: l, path: lane.map(Proj::Lane).into_iter().collect() }
 }
 
 /// The leaves under `prefix` (a field path into the type), which are next to each other.
@@ -95,9 +115,10 @@ pub fn leaf_name(structs: &[StructLayout], name: &str, ty: KTy, leaf: &Leaf) -> 
     out
 }
 
-/// A zero of scalar type `ty`.
+/// A zero of scalar type `ty`; a vector's is a `Splat` of its lane's zero.
 pub fn zero(ty: KTy, line: u32) -> Expr {
     let kind = match ty {
+        KTy::F32X4 | KTy::I32X4 => ExprKind::Splat(Box::new(zero(ty.lane(), line))),
         KTy::F32 | KTy::F64 => ExprKind::Float(0.0),
         KTy::Bool => ExprKind::Bool(false),
         _ => ExprKind::Int(0),

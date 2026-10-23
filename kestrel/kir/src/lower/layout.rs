@@ -38,6 +38,7 @@ impl Layouts<'_> {
             KTy::I32 | KTy::F32 => (4, 4),
             KTy::I64 | KTy::F64 | KTy::Arena | KTy::Gpu => (8, 8),
             KTy::Str | KTy::Array(_) | KTy::Fn | KTy::Iface => (16, 8),
+            KTy::F32X4 | KTy::I32X4 => (16, 16),
             KTy::List(_) => (32, 8),
             KTy::Map(..) => (64, 8),
             KTy::Optional(e) => {

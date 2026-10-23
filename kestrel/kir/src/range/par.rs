@@ -52,7 +52,7 @@ fn body_list(body: &Func, args: &[Arg], count: &Expr) -> Option<Place> {
     let Arg::Ref(q) = &args[k] else { return None };
     let rest = &p.path[q.path.len()..];
     let stable = rest.iter().all(|s| match s {
-        Proj::Field(_) | Proj::Variant(..) | Proj::Payload => true,
+        Proj::Field(_) | Proj::Variant(..) | Proj::Payload | Proj::Lane(_) => true,
         Proj::Index { at, .. } => matches!(at.kind, ExprKind::Int(_)),
         Proj::MapKey { .. } | Proj::MapValue { .. } => false,
     });

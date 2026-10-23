@@ -102,7 +102,17 @@ pub fn walk_expr<V: VisitMut + ?Sized>(v: &mut V, e: &mut Expr) {
             }
             v.visit_place(p);
         }
-        ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::Proven(x) | ExprKind::FieldOf(x, _) | ExprKind::ArrayNew(x) | ExprKind::Some(x) | ExprKind::EnvDup(x) | ExprKind::BlockDup { src: x, .. } => {
+        ExprKind::Unary(_, x)
+        | ExprKind::Cast(x)
+        | ExprKind::Proven(x)
+        | ExprKind::FieldOf(x, _)
+        | ExprKind::ArrayNew(x)
+        | ExprKind::Some(x)
+        | ExprKind::EnvDup(x)
+        | ExprKind::BlockDup { src: x, .. }
+        | ExprKind::Splat(x)
+        | ExprKind::Shuffle(x, _)
+        | ExprKind::LaneOf(x, _) => {
             v.visit_expr(x)
         }
         ExprKind::MakeFn { env: EnvKind::Heap(env) | EnvKind::Stack(env), .. } => {
@@ -125,7 +135,12 @@ pub fn walk_expr<V: VisitMut + ?Sized>(v: &mut V, e: &mut Expr) {
             v.visit_place(recv);
             walk_args(v, args);
         }
-        ExprKind::StructLit(_, xs) | ExprKind::VariantLit(_, _, xs) | ExprKind::ArrayLit(xs) | ExprKind::Math(_, xs) | ExprKind::Str(_, xs) => {
+        ExprKind::StructLit(_, xs)
+        | ExprKind::VariantLit(_, _, xs)
+        | ExprKind::ArrayLit(xs)
+        | ExprKind::VecLit(xs)
+        | ExprKind::Math(_, xs)
+        | ExprKind::Str(_, xs) => {
             for x in xs {
                 v.visit_expr(x);
             }

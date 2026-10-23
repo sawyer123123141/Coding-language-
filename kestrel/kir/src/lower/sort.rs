@@ -339,6 +339,10 @@ fn expr_builds(e: &Expr, calls: &mut Vec<FuncIdx>) -> bool {
         | ExprKind::VariantLit(..)
         | ExprKind::Tag(_)
         | ExprKind::FieldOf(..)
+        | ExprKind::VecLit(_)
+        | ExprKind::Splat(_)
+        | ExprKind::Shuffle(..)
+        | ExprKind::LaneOf(..)
         | ExprKind::Seq(..)
         | ExprKind::If { .. } => false,
     }

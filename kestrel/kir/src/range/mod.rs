@@ -25,6 +25,7 @@ pub mod sites;
 pub mod state;
 pub mod summary;
 mod stmt;
+mod vector;
 pub mod terms;
 pub mod tracked;
 pub mod writes;

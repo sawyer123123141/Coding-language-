@@ -194,6 +194,7 @@ pub(super) fn place_ty(m: &Module, f: &Func, p: &Place) -> KTy {
             (Proj::Index { .. }, KTy::Array(el) | KTy::List(el)) => m.elem(el),
             (Proj::MapKey { .. }, KTy::Map(k, _)) => m.elem(k),
             (Proj::MapValue { .. }, KTy::Map(_, v)) => m.elem(v),
+            (Proj::Lane(_), KTy::F32X4 | KTy::I32X4) => ty.lane(),
             _ => return ty,
         };
     }

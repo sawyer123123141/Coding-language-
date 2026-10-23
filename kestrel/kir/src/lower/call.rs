@@ -31,6 +31,12 @@ impl<'a> FnLowerer<'a> {
                 p.path.push(Proj::Index { at: self.expr(index), check: IndexCheck::Checked });
                 Some(p)
             }
+            // A lane of a vector place, the place's last step.
+            ast::ExprKind::Field { base, .. } if self.t.lanes.contains_key(&e.id) => {
+                let mut p = self.place(base)?;
+                p.path.push(Proj::Lane(self.t.lanes[&e.id] as u8));
+                Some(p)
+            }
             ast::ExprKind::Field { base, .. } => {
                 // `Enum.Variant` parses as a field access but isn't a place.
                 let field = *self.t.field_index.get(&e.id)?;

@@ -83,6 +83,7 @@ pub fn type_name(ty: KTy) -> &'static str {
         KTy::Bool => "bool",
         KTy::F32 => "float",
         KTy::F64 => "f64",
+        KTy::F32X4 | KTy::I32X4 => super::vector::vector_name(ty),
         _ => "value",
     }
 }
@@ -169,7 +170,7 @@ fn op_text(op: BinOp) -> &'static str {
 }
 
 /// An operand of a binary operation: in parentheses when it is itself one.
-fn write_operand(m: &Module, f: &Func, e: &Expr, s: &mut String) {
+pub(super) fn write_operand(m: &Module, f: &Func, e: &Expr, s: &mut String) {
     let inner = match &e.kind {
         ExprKind::Proven(x) => x,
         _ => e,
@@ -183,7 +184,7 @@ fn write_operand(m: &Module, f: &Func, e: &Expr, s: &mut String) {
     }
 }
 
-fn write_expr(m: &Module, f: &Func, e: &Expr, s: &mut String) {
+pub(super) fn write_expr(m: &Module, f: &Func, e: &Expr, s: &mut String) {
     if s.len() > MAX_CHARS * 4 {
         return; // cut later anyway
     }
@@ -233,6 +234,7 @@ fn write_expr(m: &Module, f: &Func, e: &Expr, s: &mut String) {
             write_expr(m, f, b, s);
             s.push(')');
         }
+        ExprKind::VecLit(_) | ExprKind::Splat(_) | ExprKind::Shuffle(..) | ExprKind::LaneOf(..) => super::vector::write_vector(m, f, e, s),
         _ => s.push_str("(...)"),
     }
 }
@@ -268,6 +270,11 @@ fn write_place(m: &Module, f: &Func, p: &Place, upto: usize, s: &mut String) {
             (Proj::MapValue { .. }, KTy::Map(_, v)) => {
                 s.push_str("[...]");
                 m.elem(v)
+            }
+            (Proj::Lane(i), KTy::F32X4 | KTy::I32X4) => {
+                s.push('.');
+                s.push_str(super::vector::lane_name(*i));
+                ty.lane()
             }
             _ => {
                 s.push_str("(...)");

@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use crate::ir::*;
 use crate::layout::StructLayout;
-use crate::leaves::{field_path, is_plain_struct, leaf_place, leaves, load, rebuild, under, zero, Leaf};
+use crate::leaves::{field_path, is_plain_struct, lane_of, leaf_or_lane, leaf_place, leaves, load, rebuild, under, zero, Leaf};
 use crate::visit_mut::{walk_expr, walk_place, walk_stmt, VisitMut};
 
 /// A split root's leaves and the local that holds each.
@@ -28,16 +28,22 @@ impl Rewriter<'_> {
         LocalIdx(self.locals.len() as u32 - 1)
     }
 
-    /// The local holding the leaf at `p`, when `p` is rooted at a split root.
-    fn leaf_local(&self, p: &Place) -> Option<LocalIdx> {
+    /// The place of the leaf at `p`, when `p` is rooted at a split root: the local holding it, or
+    /// a lane of that local when `p` is a lane of a vector leaf.
+    fn leaf_local(&self, p: &Place) -> Option<Place> {
         let split = self.roots.get(&p.root)?;
         let path = field_path(&p.path).expect("a split root's places are field paths");
         let k = split.leaves.iter().position(|l| l.path == path).expect("a scalar place is a leaf");
-        Some(split.locals[k])
+        Some(leaf_or_lane(split.locals[k], lane_of(&p.path)))
     }
 
-    /// The value at `p` (rooted at a split root): its leaf local, or a `StructLit` of them.
+    /// The value at `p` (rooted at a split root): its leaf local (or a lane of it), or a
+    /// `StructLit` of them.
     fn read(&self, p: &Place, ty: KTy, line: u32) -> Expr {
+        if lane_of(&p.path).is_some() {
+            let at = self.leaf_local(p).expect("a split root's place");
+            return Expr { kind: ExprKind::Load(at), ty, line };
+        }
         let split = &self.roots[&p.root];
         let path = field_path(&p.path).expect("a split root's places are field paths");
         let range = under(&split.leaves, &path);
@@ -183,7 +189,7 @@ impl Rewriter<'_> {
             self.visit_expr(&mut e);
             self.visit_place(&mut dest);
             let dest = match self.leaf_local(&dest) {
-                Some(l) => Place::local(l),
+                Some(at) => at,
                 None => dest,
             };
             out.push(Stmt::Assign(dest, e));
@@ -202,7 +208,7 @@ impl Rewriter<'_> {
         for (leaf, v) in leaves(self.structs, ty).expect("a plain struct").iter().zip(vals) {
             let p = leaf_place(&dest, leaf);
             let p = match self.leaf_local(&p) {
-                Some(l) => Place::local(l),
+                Some(at) => at,
                 None => p,
             };
             out.push(Stmt::Assign(p, v));

@@ -1,0 +1,35 @@
+next(var n: int) -> float {
+    n += 1
+    print("part {n}")
+    float(n)
+}
+
+main() {
+    var n = 0
+    let v = vec4(w: next(var n), x: next(var n), y: 0, z: 0)
+    print(v)
+    // Mixed and fill makes evaluate each part once, in source order.
+    let m = vec4(vec2(next(var n), next(var n)), next(var n), 0)
+    print(m, vec4(next(var n)))
+    // The left side is read before the right side changes it.
+    var k = vec4(1)
+    let r = k * vec4(bump(var k))
+    print(r, k)
+    k += vec4(bump(var k))
+    print(k)
+}
+
+bump(var v: vec4) -> float {
+    v.x += 10
+    v.x
+}
+// expect: part 1
+// expect: part 2
+// expect: vec4(x: 2, y: 0, z: 0, w: 1)
+// expect: part 3
+// expect: part 4
+// expect: part 5
+// expect: part 6
+// expect: vec4(x: 3, y: 4, z: 5, w: 0) vec4(x: 6, y: 6, z: 6, w: 6)
+// expect: vec4(x: 11, y: 11, z: 11, w: 11) vec4(x: 11, y: 1, z: 1, w: 1)
+// expect: vec4(x: 32, y: 22, z: 22, w: 22)

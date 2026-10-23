@@ -35,6 +35,11 @@ pub enum KTy {
     I64,
     F32,
     F64,
+    /// `vec4`: four `F32` lanes as one SIMD value (lane `i` at byte `4 * i`), kept in a register
+    /// like a number and never split into lanes. Size and alignment 16.
+    F32X4,
+    /// Four `I32` lanes as one SIMD value, like `F32X4` (`ivec4`).
+    I32X4,
     /// A struct, laid out by `Module::structs`. Lives in memory, never in a register.
     Struct(StructIdx),
     /// An enum, laid out by `Module::enums`: a u8 tag, then the variant's fields.
@@ -88,6 +93,21 @@ impl KTy {
                 | KTy::Fn
                 | KTy::Iface
         )
+    }
+
+    /// A SIMD vector (`F32X4`, `I32X4`). It answers `false` to `is_int`, `is_float`, `is_signed`
+    /// and `is_aggregate`: every question about its lanes goes through `lane()`.
+    pub fn is_vector(self) -> bool {
+        matches!(self, KTy::F32X4 | KTy::I32X4)
+    }
+
+    /// The type of one lane of a vector (`F32` or `I32`); a scalar's lane is itself.
+    pub fn lane(self) -> KTy {
+        match self {
+            KTy::F32X4 => KTy::F32,
+            KTy::I32X4 => KTy::I32,
+            other => other,
+        }
     }
 
     pub fn is_float(self) -> bool {
@@ -234,6 +254,8 @@ pub enum Proj {
     /// The value of entry `at` of a map. Checked, it panics unless the
     /// entry is still there (the loop body may have replaced the map).
     MapValue { at: Expr, checked: bool },
+    /// Lane `.0` of a vector (`v.x` is lane 0). Only ever a place's last step.
+    Lane(u8),
 }
 
 impl Proj {
@@ -241,14 +263,14 @@ impl Proj {
     pub fn at(&self) -> Option<&Expr> {
         match self {
             Proj::Index { at, .. } | Proj::MapKey { at } | Proj::MapValue { at, .. } => Some(at),
-            Proj::Field(_) | Proj::Variant(..) | Proj::Payload => None,
+            Proj::Field(_) | Proj::Variant(..) | Proj::Payload | Proj::Lane(_) => None,
         }
     }
 
     pub fn at_mut(&mut self) -> Option<&mut Expr> {
         match self {
             Proj::Index { at, .. } | Proj::MapKey { at } | Proj::MapValue { at, .. } => Some(at),
-            Proj::Field(_) | Proj::Variant(..) | Proj::Payload => None,
+            Proj::Field(_) | Proj::Variant(..) | Proj::Payload | Proj::Lane(_) => None,
         }
     }
 }

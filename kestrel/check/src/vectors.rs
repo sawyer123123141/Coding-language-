@@ -15,12 +15,19 @@ pub struct VecKind {
 }
 
 /// Every vector type, with its kind.
-const VECTORS: [(Ty, VecKind); 4] = [
+const VECTORS: [(Ty, VecKind); 5] = [
     (Ty::Struct(VEC2), VecKind { dims: 2, int: false, simd: false }),
     (Ty::Struct(VEC3), VecKind { dims: 3, int: false, simd: false }),
+    (Ty::Vec4, VecKind { dims: 4, int: false, simd: true }),
     (Ty::Struct(IVEC2), VecKind { dims: 2, int: true, simd: false }),
     (Ty::Struct(IVEC3), VecKind { dims: 3, int: true, simd: false }),
 ];
+
+/// The name of the vector type with `dims` components of ints (`int`) or floats: `vec4`,
+/// `ivec3`. (Every name exists as a type, or will: messages may name one.)
+pub fn vector_name(dims: u32, int: bool) -> String {
+    format!("{}vec{dims}", if int { "i" } else { "" })
+}
 
 /// The component names, in order; a vector of `dims` components has the first `dims`.
 pub const COMPONENTS: [&str; 4] = ["x", "y", "z", "w"];
@@ -56,11 +63,6 @@ impl VecKind {
     /// conversion message names.
     pub fn as_float(self) -> Ty {
         vector_ty(self.dims, false).expect("every int vector has a float vector of its size")
-    }
-
-    /// The vector of the same size with int components (`ivec3` for `vec3`).
-    pub fn as_int(self) -> Ty {
-        vector_ty(self.dims, true).expect("every float vector has an int vector of its size")
     }
 
     /// `/`: every vector but `ivec4` (the CPU can't divide integer lanes at once).

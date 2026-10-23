@@ -76,7 +76,7 @@ impl<'a> BodyChecker<'a> {
     fn is_place(&self, e: &Expr) -> bool {
         match &e.kind {
             ExprKind::Ident(_) => matches!(self.t.res.get(&e.id), Some(Res::Local(_))),
-            ExprKind::Field { base, .. } => self.t.field_index.contains_key(&e.id) && self.is_place(base),
+            ExprKind::Field { base, .. } => self.is_field_or_lane(e) && self.is_place(base),
             ExprKind::Index { base, .. } => matches!(self.t.ty(base.id), Ty::Array(_) | Ty::List(_)) && self.is_place(base),
             _ => false,
         }

@@ -55,7 +55,7 @@ impl<'a> BodyChecker<'a> {
             }
             Ty::Enum(id) => self.t.enm(id).methods.contains_key(name),
             Ty::Iface(id) => self.iface_method(id, name).is_some(),
-            _ => false,
+            _ => self.t.vector(base_ty).is_some() && Builtin::vector_method(name).is_some(),
         };
         if is_method {
             self.error(span, format!("methods can't be used as values yet; wrap it: `(e) {{ e.{name}() }}`"));

@@ -1,0 +1,37 @@
+// What `vec4` refuses: how it is made, the operators it has, its lanes, and (until they are built)
+// its built-ins.
+main() {
+    let a = vec4(1, 2, 3)
+    let b = vec4(1) < vec4(2)
+    let c = vec4(1) & 1
+    let d = vec4(1) % 2.0
+    let e = vec4(1) *% 2
+    let f = vec3(1, 2, 3).w
+    let g = vec4(1) == vec3(1)
+    let h = vec4(x: 1, vec2(1, 2), w: 4)
+    let i = vec4(1).q
+    let j = ivec3(vec4(1))
+    let k = vec4(x: 1, y: 2)
+    let l = min(vec4(1), 2)
+    let m = vec4(1).sum()
+    let n = ~vec4(1)
+    var o = vec4(1)
+    o <<= 1
+    let p = map[vec4, int]()
+}
+// error 4: `vec4` has 4 components, but these values give 3; give 4, one value for all of them, or none for zeros
+// error 5: `<` doesn't compare vectors; compare components, like `a.x < b.x`
+// error 6: `&` needs integers, found vec4
+// error 7: `%` doesn't work on vectors
+// error 8: `*%` wraps integers; for floats use `*`
+// error 9: `vec3` has no field `w`
+// error 10: `==` can't mix vec4 and vec3
+// error 11: labels only work when every component is a number, like `vec4(x: 1, y: 2, z: 3, w: 4)`
+// error 12: `vec4` has no field `q`
+// error 13: `ivec3` takes ints and int vectors, found vec4; convert it with `ivec4(...)` first
+// error 14: missing fields `z` and `w` for `vec4`
+// error 15: `min` doesn't take a `vec4` yet; use its lanes, like `v.x`
+// error 16: `sum` doesn't take a `vec4` yet; use its lanes, like `v.x`
+// error 17: `~` needs an integer, found vec4
+// error 19: `<<=` needs integers, found vec4
+// error 20: map keys must be integers, bools or strings, not `vec4`

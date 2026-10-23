@@ -100,23 +100,29 @@ impl<'a> BodyChecker<'a> {
             .filter(|&(fi, slot)| slot.is_none() && !info.fields[fi].has_default && !zero_vector)
             .map(|(fi, _)| format!("`{}`", info.fields[fi].name))
             .collect();
-        if bound && !missing.is_empty() {
-            let msg = match missing.as_slice() {
-                [one] => format!("missing field {one} for `{}`", info.name),
-                [init @ .., last] => format!("missing fields {} and {last} for `{}`", init.join(", "), info.name),
-                [] => unreachable!("not empty"),
-            };
-            if vector {
-                self.error_help(e.span, msg, format!("give every component, one value for all of them, or none for zeros: `{}()`", info.name));
-            } else {
-                self.error(e.span, msg);
-            }
+        if bound && !self.missing_fields(e, &info.name, &missing, vector) {
             ok = false;
         }
         if ok {
             self.t.ctor_args.insert(e.id, slots);
         }
         Ty::Struct(sid)
+    }
+
+    /// Reports the fields (written with backticks) a make of `owner` leaves out, if any; a vector
+    /// gets help on its forms. Returns whether none are missing.
+    pub(super) fn missing_fields(&mut self, e: &Expr, owner: &str, missing: &[String], vector: bool) -> bool {
+        let msg = match missing {
+            [] => return true,
+            [one] => format!("missing field {one} for `{owner}`"),
+            [init @ .., last] => format!("missing fields {} and {last} for `{owner}`", init.join(", ")),
+        };
+        if vector {
+            self.error_help(e.span, msg, format!("give every component, one value for all of them, or none for zeros: `{owner}()`"));
+        } else {
+            self.error(e.span, msg);
+        }
+        false
     }
 
     pub(crate) fn check_field(&mut self, e: &Expr) -> Ty {
@@ -133,6 +139,9 @@ impl<'a> BodyChecker<'a> {
         }
         if self.method_value_error(base_ty, name, *name_span) {
             return Ty::Error;
+        }
+        if self.t.vector(base_ty).is_some_and(|k| k.simd) {
+            return self.simd_lane(e, base_ty, name, *name_span);
         }
         let (owner, fields) = match base_ty {
             Ty::Struct(sid) => {

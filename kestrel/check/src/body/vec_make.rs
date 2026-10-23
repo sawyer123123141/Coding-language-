@@ -6,19 +6,23 @@
 use kestrel_syntax::ast::{Arg, Expr};
 
 use super::BodyChecker;
-use crate::tables::{Res, StructId};
+use crate::tables::Res;
 use crate::ty::Ty;
-use crate::vectors::{vec_kind, VecKind};
+use crate::vectors::{vec_kind, vector_name, VecKind, COMPONENTS};
 
 impl<'a> BodyChecker<'a> {
-    /// A call of a vector type's name. The values are checked first, in source order, to tell the
-    /// forms apart; one number per component (labelled or not) and none go to
-    /// `check_construct_with`, the rest are recorded in `Tables::vec_makes`.
-    pub(crate) fn check_vec_make(&mut self, e: &Expr, sid: StructId, args: &[Arg]) -> Ty {
-        let vt = Ty::Struct(sid);
+    /// A call of a vector type's name (`vt`). The values are checked first, in source order, to tell
+    /// the forms apart; one number per component (labelled or not) and none bind like a struct's
+    /// fields (`check_construct_with`, or `simd_lanes` for a SIMD vector), the rest are recorded in
+    /// `Tables::vec_makes`.
+    pub(crate) fn check_vec_make(&mut self, e: &Expr, vt: Ty, args: &[Arg]) -> Ty {
         let kind = self.t.vector(vt).expect("a vector type's name");
         let tys: Vec<Ty> = args.iter().map(|a| self.check_expr(&a.value, Some(kind.lane()))).collect();
-        self.t.res.insert(e.id, Res::Construct(sid));
+        let res = match vt {
+            Ty::Struct(sid) => Res::Construct(sid),
+            _ => Res::SimdMake(vt),
+        };
+        self.t.res.insert(e.id, res);
         if tys.contains(&Ty::Error) {
             return vt;
         }
@@ -34,10 +38,41 @@ impl<'a> BodyChecker<'a> {
         }
         let per_component = !tys.iter().any(is_vector) && args.len() == kind.dims as usize;
         if labelled || args.is_empty() || per_component {
-            return self.check_construct_with(e, sid, args, Some(&tys));
+            return match vt {
+                Ty::Struct(sid) => self.check_construct_with(e, sid, args, Some(&tys)),
+                _ => self.simd_lanes(e, vt, kind, args, &tys),
+            };
         }
         if self.vec_parts(e, vt, kind, args, &tys) {
             self.t.vec_makes.insert(e.id);
+        }
+        vt
+    }
+
+    /// `vec4(1, 2, 3, 4)`, `vec4(w: 4, z: 3, y: 2, x: 1)`, `vec4()`: the numbers (already checked,
+    /// as `tys`) bind to the lanes like arguments to parameters, positional first, then labels; none
+    /// at all is zeros. Records the binding in `ctor_args`, one entry per lane.
+    fn simd_lanes(&mut self, e: &Expr, vt: Ty, kind: VecKind, args: &[Arg], tys: &[Ty]) -> Ty {
+        let name = self.tn(vt);
+        let lanes = &COMPONENTS[..kind.dims as usize];
+        let (slots, mut ok) = self.bind_args(&name, lanes, args, "field");
+        // In source order, the order they run in.
+        for (ai, a) in args.iter().enumerate() {
+            if a.is_var {
+                self.error(a.span, "constructor arguments can't be `var`");
+                ok = false;
+            }
+            if slots.contains(&Some(ai)) {
+                self.finish_value(&a.value, tys[ai], Some(kind.lane()));
+            }
+            self.consume(&a.value);
+        }
+        if ok && !args.is_empty() {
+            let missing: Vec<String> = slots.iter().zip(lanes).filter(|(s, _)| s.is_none()).map(|(_, l)| format!("`{l}`")).collect();
+            ok = self.missing_fields(e, &name, &missing, true);
+        }
+        if ok {
+            self.t.ctor_args.insert(e.id, slots);
         }
         vt
     }
@@ -74,8 +109,9 @@ impl<'a> BodyChecker<'a> {
                 Some(k) => {
                     let converts = args.len() == 1 && k.dims == kind.dims;
                     if k.int != kind.int && !converts {
-                        let (what, wanted) = if kind.int { ("ints and int vectors", k.as_int()) } else { ("floats and float vectors", k.as_float()) };
-                        let msg = format!("`{}` takes {what}, found {}; convert it with `{}(...)` first", self.tn(vt), self.tn(ty), self.tn(wanted));
+                        let what = if kind.int { "ints and int vectors" } else { "floats and float vectors" };
+                        let wanted = vector_name(k.dims, kind.int);
+                        let msg = format!("`{}` takes {what}, found {}; convert it with `{wanted}(...)` first", self.tn(vt), self.tn(ty));
                         self.error(a.value.span, msg);
                         ok = false;
                     }

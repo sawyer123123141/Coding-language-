@@ -297,7 +297,14 @@ impl Walk<'_> {
                 }
                 self.str_op(*op, xs, line);
             }
-            ExprKind::Some(x) | ExprKind::Unary(_, x) | ExprKind::Cast(x) | ExprKind::Proven(x) | ExprKind::FieldOf(x, _) => self.expr(x),
+            ExprKind::Some(x)
+            | ExprKind::Unary(_, x)
+            | ExprKind::Cast(x)
+            | ExprKind::Proven(x)
+            | ExprKind::FieldOf(x, _)
+            | ExprKind::Splat(x)
+            | ExprKind::Shuffle(x, _)
+            | ExprKind::LaneOf(x, _) => self.expr(x),
             ExprKind::EnvDup(x) => {
                 self.expr(x);
                 self.alloc(line, Some("copies a closure's environment".to_string()), "copies a closure's environment".to_string(), "");
@@ -310,7 +317,7 @@ impl Walk<'_> {
                 self.expr(a);
                 self.expr(b);
             }
-            ExprKind::Math(_, xs) | ExprKind::StructLit(_, xs) | ExprKind::VariantLit(_, _, xs) => {
+            ExprKind::Math(_, xs) | ExprKind::StructLit(_, xs) | ExprKind::VariantLit(_, _, xs) | ExprKind::VecLit(xs) => {
                 for x in xs {
                     self.expr(x);
                 }

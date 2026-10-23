@@ -24,6 +24,7 @@ mod par;
 mod prove;
 mod remove;
 mod scopes;
+mod simd;
 mod sort;
 mod stmt;
 mod strings;
@@ -98,6 +99,7 @@ pub(crate) fn kty(ty: Ty) -> KTy {
         Ty::Float => KTy::F32,
         Ty::F64 => KTy::F64,
         Ty::Str => KTy::Str,
+        Ty::Vec4 => KTy::F32X4,
         Ty::Struct(s) => KTy::Struct(StructIdx(s.0)),
         Ty::Enum(e) => KTy::Enum(EnumIdx(e.0)),
         Ty::Array(e) => KTy::Array(ElemIdx(e.0)),
@@ -305,8 +307,9 @@ impl<'a> FnLowerer<'a> {
     }
 }
 
-/// A shift's amount, converted to the shifted value's type if it differs.
+/// A shift's amount, converted to the shifted value's type (a vector's lane type) if it differs.
 pub(crate) fn shift_amount(op: BinOp, amount: Expr, ty: KTy) -> Expr {
+    let ty = ty.lane();
     if !matches!(op, BinOp::Shl | BinOp::Shr) || amount.ty == ty {
         return amount;
     }

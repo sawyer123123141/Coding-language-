@@ -220,9 +220,9 @@ impl<'a> BodyChecker<'a> {
             return Ty::Error;
         }
         let Which::Other(method) = which else { return self.list_add(e, receiver, args, elem) };
-        if matches!(method, ListMethod::Has | ListMethod::Find) && !(elem.is_numeric() || matches!(elem, Ty::Bool | Ty::Str | Ty::Error)) {
+        if matches!(method, ListMethod::Has | ListMethod::Find) && !(elem.is_numeric() || matches!(elem, Ty::Bool | Ty::Str | Ty::Vec4 | Ty::Error)) {
             let msg = format!(
-                "`{name}` needs items that `==` can compare (numbers, bools and strings); `{}` holds `{}`",
+                "`{name}` needs items that `==` can compare (numbers, bools, strings and `vec4`); `{}` holds `{}`",
                 self.tn(recv_ty),
                 self.tn(elem)
             );

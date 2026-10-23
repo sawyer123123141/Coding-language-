@@ -68,3 +68,27 @@ fn makes_resolve() {
     assert_eq!(t.vec_makes.len(), 9);
     assert_eq!(t.ctor_args.len(), 6);
 }
+
+#[test]
+fn vec4_types() {
+    let src = "main() {\n let a = vec4(1).xy\n let b = vec3(1, 2, 3).xyzz\n let c = vec4(1).w\n let d = vec4(1, 2, 3, 4).wzyx\n let e = vec4(w: 4, z: 3, y: 2, x: 1) * 2 + 1\n let f = vec4(1) == vec4(2)\n print(a, b, c, d, e, f)\n}\n";
+    let (t, ty) = local_types(src);
+    assert_eq!(ty(&t, "a"), "vec2");
+    assert_eq!(ty(&t, "b"), "vec4");
+    assert_eq!(ty(&t, "c"), "float");
+    assert_eq!(ty(&t, "d"), "vec4");
+    assert_eq!(ty(&t, "e"), "vec4");
+    assert_eq!(ty(&t, "f"), "bool");
+    assert_eq!(t.lanes.values().copied().collect::<Vec<_>>(), vec![3]);
+}
+
+#[test]
+fn vec4_lanes_are_places() {
+    let src = "struct P {\n pos: vec4\n}\nmain() {\n var v = vec4()\n v.x = 1\n v.w += 2\n var p = P(pos: v)\n p.pos.y = 3\n print(v, p)\n}\n";
+    let (t, ty) = local_types(src);
+    assert_eq!(ty(&t, "v"), "vec4");
+    let errs = run("main() {\n let v = vec4()\n v.x = 1\n}\n").1;
+    assert_eq!(errs, vec!["can't change `v`: it was declared with `let`"]);
+    let errs = run("main() {\n var v = vec4()\n v.xy = vec2()\n}\n").1;
+    assert_eq!(errs, vec!["only variables, fields and elements can be assigned to"]);
+}

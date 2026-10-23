@@ -52,3 +52,13 @@ fn define_c_main(module: &mut ObjectModule, kestrel_main: FuncId) -> Result<(), 
     b.finalize();
     module.define_function(main_id, &mut ctx).map_err(|e| format!("codegen failed for C main: {e:?}"))
 }
+
+/// Compiles `m` for `isa` (any target, not only this machine) into a native object file, with no
+/// C `main`: for tests of what a build for another CPU accepts.
+#[doc(hidden)]
+pub fn emit_object_for(m: &kir::Module, opts: Options, isa: cranelift_codegen::isa::OwnedTargetIsa) -> Result<Vec<u8>, String> {
+    let builder = ObjectBuilder::new(isa, "kestrel", cranelift_module::default_libcall_names()).map_err(|e| e.to_string())?;
+    let mut module = ObjectModule::new(builder);
+    define_module(&mut module, m, opts, None)?;
+    module.finish().emit().map_err(|e| e.to_string())
+}

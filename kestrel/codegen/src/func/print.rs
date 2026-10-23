@@ -3,7 +3,7 @@ use cranelift_codegen::ir::{types, InstBuilder, MemFlags, Value};
 use cranelift_module::{DataDescription, Module};
 use kestrel_kir::{self as kir, FieldLayout, KTy};
 
-use super::{cl_type, FuncLowerer};
+use super::FuncLowerer;
 
 impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// `print(...)` (`line`: spaces between arguments, then a newline), or
@@ -72,7 +72,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         Ok(())
     }
 
-    fn print_scalar(&mut self, v: Value, ty: KTy) -> Result<(), String> {
+    pub(crate) fn print_scalar(&mut self, v: Value, ty: KTy) -> Result<(), String> {
         let rt = self.shared.rt;
         match ty {
             KTy::Bool => self.call_id(rt.print_bool, &[v]),
@@ -87,6 +87,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             KTy::I64 => self.call_id(rt.print_i64, &[v]),
             KTy::F32 => self.call_id(rt.print_f32, &[v]),
             KTy::F64 => self.call_id(rt.print_f64, &[v]),
+            KTy::F32X4 | KTy::I32X4 => return self.print_vector(v, ty),
             KTy::Struct(_)
             | KTy::Enum(_)
             | KTy::Str
@@ -135,7 +136,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 if inner.is_aggregate() {
                     self.print_aggregate(addr, at, inner)?;
                 } else {
-                    let v = self.b.ins().load(cl_type(inner), MemFlags::trusted(), addr, at);
+                    let v = self.load_at(inner, addr, at);
                     self.print_scalar(v, inner)?;
                 }
                 self.b.ins().jump(done, &[]);
@@ -201,14 +202,14 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             } else if f.ty.is_aggregate() {
                 self.print_aggregate(addr, at, f.ty)?;
             } else {
-                let v = self.b.ins().load(cl_type(f.ty), MemFlags::trusted(), addr, at);
+                let v = self.load_at(f.ty, addr, at);
                 self.print_scalar(v, f.ty)?;
             }
         }
         Ok(())
     }
 
-    fn print_text(&mut self, s: &str) -> Result<(), String> {
+    pub(crate) fn print_text(&mut self, s: &str) -> Result<(), String> {
         let (p, n) = self.string(s)?;
         self.call_id(self.shared.rt.print_str, &[p, n]);
         Ok(())

@@ -1,8 +1,9 @@
 //! Function values: `{code, env}` in memory, built from a thunk's or a closure's address, and calls
 //! through them. A closure that captures values has a heap environment: a block in the current
-//! arena with a 16-byte header (the address of its copy function, then the block's size) and the
-//! values after it (see KIR's `lower::env`). A closure literal passed straight to a call has a stack
-//! environment instead: the same block in a stack slot of the caller, holding shallow copies.
+//! arena, aligned to `ENV_ALIGN`, with a 16-byte header (the address of its copy function, then the
+//! block's size) and the values after it (see KIR's `lower::env`). A closure literal passed straight to
+//! a call has a stack environment instead: the same block in a stack slot of the caller, holding
+//! shallow copies.
 
 use cranelift_codegen::ir::{types, AbiParam, InstBuilder, MemFlags, Signature, StackSlotData, StackSlotKind, Type, Value};
 use cranelift_codegen::isa::CallConv;
@@ -49,7 +50,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// the block is allocated in the current arena, then filled (see `fill_env`).
     pub(crate) fn heap_fn_into(&mut self, code: FuncIdx, env: &kir::Env, line: u32, dest: Value) -> Result<(), String> {
         let (one, size) = (self.b.ins().iconst(types::I64, 1), self.b.ins().iconst(types::I64, env.layout.size as i64));
-        let align = self.b.ins().iconst(types::I64, 8);
+        let align = self.b.ins().iconst(types::I64, i64::from(kir::ENV_ALIGN));
         let (l, f) = self.loc_args(line);
         let block = self.call_id(self.shared.rt.alloc, &[one, size, align, l, f]).expect("returns a pointer");
         self.fill_env(code, env, block, size, dest)
@@ -59,7 +60,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// slot of this function, filled like a heap environment (so a callee that stores the value
     /// copies it out through the copy function in the header), with shallow copies of the values.
     pub(crate) fn stack_fn_into(&mut self, code: FuncIdx, env: &kir::Env, dest: Value) -> Result<(), String> {
-        let data = StackSlotData::new(StackSlotKind::ExplicitSlot, env.layout.size, 3);
+        let data = StackSlotData::new(StackSlotKind::ExplicitSlot, env.layout.size, kir::ENV_ALIGN.trailing_zeros() as u8);
         let slot = self.b.create_sized_stack_slot(data);
         let block = self.b.ins().stack_addr(self.ptr, slot, 0);
         let size = self.b.ins().iconst(types::I64, env.layout.size as i64);
@@ -87,7 +88,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     pub(crate) fn env_dup(&mut self, env: &kir::Expr) -> Result<Value, String> {
         let src = self.expr(env)?;
         let size = self.b.ins().load(types::I64, MemFlags::trusted(), src, 8);
-        let align = self.b.ins().iconst(types::I64, 8);
+        let align = self.b.ins().iconst(types::I64, i64::from(kir::ENV_ALIGN));
         Ok(self.call_id(self.shared.rt.dup, &[src, size, align]).expect("returns a pointer"))
     }
 

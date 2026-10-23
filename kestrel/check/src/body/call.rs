@@ -42,9 +42,12 @@ impl<'a> BodyChecker<'a> {
         if let Some(b) = Builtin::global(name) {
             return self.check_builtin_call(e, b, args);
         }
+        if let Some(vt) = Ty::from_name(name).filter(|&t| self.t.vector(t).is_some()) {
+            return self.check_vec_make(e, vt, args);
+        }
         if let Some(&sid) = self.t.struct_by_name.get(name) {
             if self.t.vector(Ty::Struct(sid)).is_some() {
-                return self.check_vec_make(e, sid, args);
+                return self.check_vec_make(e, Ty::Struct(sid), args);
             }
             return self.check_construct(e, sid, args);
         }
@@ -116,7 +119,7 @@ impl<'a> BodyChecker<'a> {
             Some(Res::Str(_)) => {
                 self.error(e.span, "this only reads the string, so the line does nothing");
             }
-            Some(Res::Convert(_) | Res::Construct(_) | Res::Variant(..) | Res::NewArena) => {
+            Some(Res::Convert(_) | Res::Construct(_) | Res::SimdMake(_) | Res::Variant(..) | Res::NewArena) => {
                 self.error(e.span, "this line has no effect; did you mean to continue the line above?");
             }
             _ => {}

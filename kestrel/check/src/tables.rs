@@ -91,6 +91,8 @@ pub enum Res {
     Fn(FnId),
     Print,
     Convert(Ty),
+    /// `vec4(...)`: builds a SIMD vector of this type (`ctor_args` per lane, or `vec_makes`).
+    SimdMake(Ty),
     /// `Point(...)`: builds a struct.
     Construct(StructId),
     /// `Block.Air` or `Block.Stone(...)`: builds an enum value.
@@ -293,9 +295,12 @@ pub struct Tables {
     /// For a struct or variant constructor: per field, the argument index,
     /// or `None` for the default.
     pub ctor_args: HashMap<ExprId, Vec<Option<usize>>>,
+    /// For a lane of a `vec4` (`v.x`, `p.pos.w`): which one, 0 to 3. A lane of a place is a place,
+    /// as a field is; a swizzle (`v.xz`) is in `swizzles`.
+    pub lanes: HashMap<ExprId, u32>,
     /// For a swizzle like `v.xz`: the components it picks, in order.
     pub swizzles: HashMap<ExprId, Vec<u32>>,
-    /// The vector makes that aren't one number per component (`Res::Construct`, no `ctor_args`): a
+    /// The vector makes that aren't one number per component (no `ctor_args`): a
     /// fill (`vec3(0.5)`), a copy or conversion (`vec3(iv)`) and a mixed make (`vec3(v2, 1)`).
     pub vec_makes: HashSet<ExprId>,
     /// Reads of owning variables that move them (they can't be copied).
@@ -374,15 +379,5 @@ impl Tables {
     /// Whether `span` starts inside the source of a built-in module.
     pub fn in_builtin(&self, span: Span) -> bool {
         self.builtin_ranges.iter().any(|r| r.contains(&span.start))
-    }
-
-    pub fn intern_elem(&mut self, ty: Ty) -> ElemId {
-        if let Some(&id) = self.elem_ids.get(&ty) {
-            return id;
-        }
-        let id = ElemId(self.elems.len() as u32);
-        self.elems.push(ty);
-        self.elem_ids.insert(ty, id);
-        id
     }
 }

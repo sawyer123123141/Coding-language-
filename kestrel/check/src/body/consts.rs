@@ -235,7 +235,7 @@ pub(crate) fn is_const_expr(e: &Expr, t: &Tables) -> bool {
         // A struct construction (`Color(1, 0, 0)`, `vec2(0, 1)`) is a value like any other. A
         // capitalised name that isn't a function is one meant to be (an unknown struct, an enum, a
         // constant): `check_call` says what's wrong with it.
-        ExprKind::Call { name, args, .. } if t.struct_by_name.contains_key(name) || names_no_fn(name, t) => all(args),
+        ExprKind::Call { name, args, .. } if t.struct_by_name.contains_key(name) || is_simd_name(name, t) || names_no_fn(name, t) => all(args),
         // A component or swizzle of a constant vector (`ORIGIN.x`, `ORIGIN.xy`); the base's type
         // decides it, once checked (`struct_field_read` refuses any other field).
         ExprKind::Field { base, .. } => names_enum(base) || is_const_expr(base, t),
@@ -291,4 +291,9 @@ pub(crate) fn struct_field_read(e: &Expr, t: &Tables) -> Option<Span> {
         ExprKind::MapLit(entries) => entries.iter().find_map(|(k, v)| struct_field_read(k, t).or_else(|| struct_field_read(v, t))),
         _ => None,
     }
+}
+
+/// Whether `name` is a SIMD vector type's (`vec4`), whose make is a value like a struct's.
+fn is_simd_name(name: &str, t: &Tables) -> bool {
+    Ty::from_name(name).is_some_and(|ty| t.vector(ty).is_some())
 }

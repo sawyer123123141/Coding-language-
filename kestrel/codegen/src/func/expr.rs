@@ -24,7 +24,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             ExprKind::Str(op, args) => self.str_scalar(*op, args)?,
             ExprKind::FieldOf(base, i) => {
                 let addr = self.field_addr(base, *i)?;
-                self.b.ins().load(ty, MemFlags::trusted(), addr, 0)
+                self.load_at(e.ty, addr, 0)
             }
             ExprKind::Seq(stmts, value) => {
                 self.stmts(stmts)?;
@@ -33,6 +33,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             ExprKind::FnEnv(p) => self.fn_env(p)?,
             ExprKind::EnvDup(env) => self.env_dup(env)?,
             ExprKind::BlockDup { src, size, align } => self.block_dup(src, *size, *align)?,
+            ExprKind::VecLit(_) | ExprKind::Splat(_) | ExprKind::Shuffle(..) | ExprKind::LaneOf(..) => self.simd_expr(e)?,
             ExprKind::Tag(p) => {
                 let addr = self.place_addr(p)?;
                 self.b.ins().load(types::I8, MemFlags::trusted(), addr, 0)
@@ -106,7 +107,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         Ok(match &e.kind {
             ExprKind::Unary(UnOp::Neg, inner) => {
                 let v = self.expr(inner)?;
-                if e.ty.is_float() {
+                if e.ty.is_float() || e.ty == KTy::F32X4 {
                     self.b.ins().fneg(v)
                 } else {
                     let zero = self.iconst(e.ty, 0);

@@ -113,7 +113,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             self.lower_into(e, dest)
         } else {
             let v = self.expr(e)?;
-            self.b.ins().store(MemFlags::trusted(), v, base, offset);
+            self.store_value(v, base, offset);
             Ok(())
         }
     }

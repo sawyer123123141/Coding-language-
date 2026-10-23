@@ -12,11 +12,12 @@ pub struct Interval {
     pub hi: i128,
 }
 
-/// The number of bits of an integer type (a `bool` counts as 8, as codegen stores it).
+/// The number of bits of an integer type (a `bool` counts as 8, as codegen stores it); a vector's
+/// is its lane's.
 pub fn width(ty: KTy) -> u32 {
     match ty {
         KTy::Bool | KTy::U8 => 8,
-        KTy::I32 => 32,
+        KTy::I32 | KTy::I32X4 => 32,
         _ => 64,
     }
 }
@@ -31,13 +32,14 @@ impl Interval {
         Interval { lo: v, hi: v }
     }
 
-    /// Every value of `ty`: `u8` is 0 to 255, `int` 32 bits, `i64` 64 bits, `bool` 0 to 1. Any
-    /// other type (only asked about by mistake) gets the `i64` range.
+    /// Every value of `ty`: `u8` is 0 to 255, `int` 32 bits, `i64` 64 bits, `bool` 0 to 1; an
+    /// int vector's is its lane's (one range stands for every lane). Any other type (only asked
+    /// about by mistake) gets the `i64` range.
     pub fn of_type(ty: KTy) -> Self {
         match ty {
             KTy::Bool => Interval::new(0, 1),
             KTy::U8 => Interval::new(0, 255),
-            KTy::I32 => Interval::new(i32::MIN.into(), i32::MAX.into()),
+            KTy::I32 | KTy::I32X4 => Interval::new(i32::MIN.into(), i32::MAX.into()),
             _ => Interval::new(i64::MIN.into(), i64::MAX.into()),
         }
     }

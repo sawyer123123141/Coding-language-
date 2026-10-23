@@ -50,6 +50,9 @@ impl<'a> FnLowerer<'a> {
     /// `l == r` (every component equal) or, with `ne`, `l != r` (its opposite) where one side is
     /// a vector; a number is every component. Each side is evaluated once, left to right.
     pub(crate) fn vec_equal(&mut self, ne: bool, l: Expr, r: Expr, line: u32) -> ExprKind {
+        if l.ty.is_vector() || r.ty.is_vector() {
+            return Self::simd_equal(ne, l, r, line);
+        }
         let vty = if l.ty.is_aggregate() { l.ty } else { r.ty };
         let KTy::Struct(s) = vty else { unreachable!("vectors are structs") };
         let (dims, lane) = (self.dims(s), self.lane(s));

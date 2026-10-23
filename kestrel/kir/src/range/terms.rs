@@ -79,7 +79,7 @@ pub fn key_of(f: &Func, p: &Place, upto: usize) -> Option<PlaceKey> {
                 ExprKind::Int(c) => Step::Const(*c),
                 _ => Step::Local(local_value(f, at)?),
             },
-            Proj::MapKey { .. } | Proj::MapValue { .. } => return None,
+            Proj::MapKey { .. } | Proj::MapValue { .. } | Proj::Lane(_) => return None,
         });
     }
     Some(PlaceKey { root: p.root, path })
@@ -95,6 +95,7 @@ pub fn place_ty(m: &Module, f: &Func, p: &Place, upto: usize) -> KTy {
             (Proj::Index { .. }, KTy::Array(el) | KTy::List(el)) | (Proj::Payload, KTy::Optional(el)) => m.elem(el),
             (Proj::MapKey { .. }, KTy::Map(k, _)) => m.elem(k),
             (Proj::MapValue { .. }, KTy::Map(_, v)) => m.elem(v),
+            (Proj::Lane(_), KTy::F32X4 | KTy::I32X4) => ty.lane(),
             _ => return KTy::I64,
         };
     }
@@ -271,7 +272,7 @@ fn shape(p: &Proj) -> Shape {
         Proj::Field(i) => Shape::Field(*i),
         Proj::Variant(..) => Shape::Variant,
         Proj::Payload => Shape::Payload,
-        Proj::Index { .. } | Proj::MapKey { .. } | Proj::MapValue { .. } => Shape::Elem,
+        Proj::Index { .. } | Proj::MapKey { .. } | Proj::MapValue { .. } | Proj::Lane(_) => Shape::Elem,
     }
 }
 

@@ -14,6 +14,9 @@ pub enum Ty {
     Float,
     F64,
     Str,
+    /// `vec4`: four `float`s as one SIMD value, a plain number-like value (not a struct, never
+    /// split into lanes). Its lanes are read and written as `.x .y .z .w` (`Tables::lanes`).
+    Vec4,
     /// A user-defined struct; its name lives in `Tables::structs`.
     Struct(StructId),
     Enum(EnumId),
@@ -52,6 +55,7 @@ impl Ty {
             "f64" => Ty::F64,
             "bool" => Ty::Bool,
             "string" => Ty::Str,
+            "vec4" => Ty::Vec4,
             "Arena" => Ty::Arena,
             "GpuHandle" => Ty::Gpu,
             _ => return None,
@@ -69,6 +73,7 @@ impl Ty {
             Ty::Float => "float",
             Ty::F64 => "f64",
             Ty::Str => "string",
+            Ty::Vec4 => "vec4",
             Ty::Struct(_) => "struct",
             Ty::Enum(_) => "enum",
             Ty::Variant(..) => "variant",

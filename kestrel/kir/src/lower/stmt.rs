@@ -61,6 +61,9 @@ impl<'a> FnLowerer<'a> {
                             ExprKind::Format(parts)
                         } else if ty.is_aggregate() {
                             self.vec_combine(binop(bop), cur, rhs, ty, line)
+                        } else if ty.is_vector() {
+                            // `v *= 2.0`: the number fills every lane.
+                            Self::simd_binary(binop(bop), cur, rhs, ty, line)
                         } else {
                             ExprKind::Binary(binop(bop), Box::new(cur), Box::new(rhs))
                         };

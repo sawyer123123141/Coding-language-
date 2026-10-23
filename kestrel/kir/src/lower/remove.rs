@@ -14,6 +14,7 @@ use kestrel_syntax::{ast, Span};
 use super::helpers::owning;
 use super::FnLowerer;
 use crate::ir::*;
+use crate::leaves::zero;
 
 /// A loop that removes its item, being lowered.
 pub(crate) struct RemoveLoop {
@@ -30,16 +31,6 @@ fn load(l: LocalIdx, ty: KTy, line: u32) -> Expr {
 
 fn int(n: i64, ty: KTy, line: u32) -> Expr {
     Expr { kind: ExprKind::Int(n), ty, line }
-}
-
-/// The zero of a scalar type.
-fn zero(ty: KTy, line: u32) -> Expr {
-    let kind = match ty {
-        KTy::Bool => ExprKind::Bool(false),
-        KTy::F32 | KTy::F64 => ExprKind::Float(0.0),
-        _ => ExprKind::Int(0),
-    };
-    Expr { kind, ty, line }
 }
 
 impl<'a> FnLowerer<'a> {

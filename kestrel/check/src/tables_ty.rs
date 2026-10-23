@@ -197,3 +197,15 @@ impl Tables {
         }
     }
 }
+
+impl Tables {
+    pub fn intern_elem(&mut self, ty: Ty) -> crate::tables::ElemId {
+        if let Some(&id) = self.elem_ids.get(&ty) {
+            return id;
+        }
+        let id = crate::tables::ElemId(self.elems.len() as u32);
+        self.elems.push(ty);
+        self.elem_ids.insert(ty, id);
+        id
+    }
+}
