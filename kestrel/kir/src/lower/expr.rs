@@ -198,8 +198,16 @@ impl<'a> FnLowerer<'a> {
 /// or `None` if `e` is anything else.
 fn literal_as(t: &Tables, e: &ast::Expr, to: KTy) -> Option<f64> {
     match &e.kind {
-        ast::ExprKind::Int(n) if to == KTy::F32 => Some(*n as f32 as f64),
-        ast::ExprKind::Int(n) => Some(*n as f64),
+        // A hex literal above its type's positive range is its bit pattern (`0xFFFFFFFF` is -1).
+        ast::ExprKind::Int(n) => {
+            let v = t.wrapped_literals.get(&e.id).copied();
+            Some(match (v, to) {
+                (Some(w), KTy::F32) => w as f32 as f64,
+                (Some(w), _) => w as f64,
+                (None, KTy::F32) => *n as f32 as f64,
+                (None, _) => *n as f64,
+            })
+        }
         ast::ExprKind::Float(f) => Some(*f),
         ast::ExprKind::Ident(_) => match t.res.get(&e.id) {
             Some(Res::Builtin(b)) => constant_value(*b),

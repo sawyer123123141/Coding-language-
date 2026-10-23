@@ -9,9 +9,28 @@ main() {
     print(w *% 0x9E3779B97F4A7C15)
     let x: i64 = 0xFFFFFFFF
     print(x, i64(0xFFFFFFFF), 0xFFFFFFFF)
+    // Next to a float, the literal is still an `int`: -1.
+    let y = 0xFFFFFFFF
+    let d: f64 = 1.5
+    print(y * 1.5, 0xFFFFFFFF * 1.5, 0xFFFFFFFF * d)
+    // Meeting an `i64`, a hex literal is read as an `i64`, whichever side it is on.
+    print(0xFFFFFFFF + w, w + 0xFFFFFFFF, 0xFFFFFFFF *% w, w *% 0xFFFFFFFF)
+    print(0xFFFFFFFF < w, w < 0xFFFFFFFF, 0xFFFFFFFF & w, w & 0xFFFFFFFF)
+    // Next to a `u8` it is an `int`, as any literal is.
+    let c: u8 = 3
+    print(0xFFFFFFFF + c, 7 *% c)
+    // Dividing by the `int` -1 is still checked: 10 / -1 is fine.
+    var ten = 10
+    ten /= 0xFFFFFFFF
+    print(ten)
 }
 
 // expect: -1640531535 -1640531535 387276917
 // expect: 1401181143
 // expect: -2691343689449507777
 // expect: 4294967295 4294967295 -1
+// expect: -1.5 -1.5 -1.5
+// expect: 4294967298 4294967298 12884901885 12884901885
+// expect: false true 3 3
+// expect: 2 21
+// expect: -10

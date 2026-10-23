@@ -1,0 +1,10 @@
+// A hex literal that is the smallest integer of its type can't be negated.
+main() {
+    let a = -0x80000000
+    let b: i64 = -0x8000000000000000
+    let c: i64 = -0x80000000
+    let d = -0xFFFFFFFF
+}
+
+// error 3: `-0x80000000` negates -2147483648, which overflows; write `0x80000000`
+// error 4: `-0x8000000000000000` negates -9223372036854775808, which overflows; write `0x8000000000000000`

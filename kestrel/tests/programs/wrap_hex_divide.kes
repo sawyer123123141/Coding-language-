@@ -1,0 +1,18 @@
+// `0xFFFFFFFF` is -1 in an `int`, so dividing the smallest `int` by it is the division that
+// overflows, and it is still checked.
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+
+main() {
+    print(id(10, 3) / 0xFFFFFFFF, id(7, 2) % 0xFFFFFFFF)
+    let lo = id(-2147483647, 2) - 1
+    print(lo / 0xFFFFFFFF)
+}
+
+// expect: -10 0
+// expect-exit: 101
+// expect-stderr: integer overflow on line 13

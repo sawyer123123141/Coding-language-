@@ -30,6 +30,14 @@ impl<'a> BodyChecker<'a> {
                     self.error(inner.span, "can't negate a u8");
                     return Ty::Error;
                 }
+                // `-0x80000000` would negate the smallest `int`, which overflows (as `-2147483648` does not fit).
+                if let (ExprKind::Int(n), Some(&v)) = (&inner.kind, self.t.wrapped_literals.get(&inner.id)) {
+                    if v == i32::MIN as i64 && ty == Ty::Int || v == i64::MIN && ty == Ty::I64 {
+                        let msg = format!("`-0x{n:X}` negates {v}, which overflows; write `0x{n:X}`");
+                        self.error(inner.span, msg);
+                        return Ty::Error;
+                    }
+                }
                 if !ty.is_numeric() && ty != Ty::Error {
                     let msg = format!("`-` needs a number, found {}", self.tn(ty));
                     self.error(inner.span, msg);
@@ -145,6 +153,19 @@ impl<'a> BodyChecker<'a> {
         lt.is_int() && rt.is_int()
     }
 
+    /// A hex literal meeting a wider integer is read at that type, so `0xFFFFFFFF + w` and
+    /// `w + 0xFFFFFFFF` agree for an `i64` `w` (4294967295, not -1). Returns whether `e` was one
+    /// and is now typed `to`. (Floats are different: `0xFFFFFFFF * 1.5` keeps the literal an `int`.)
+    fn retype_hex(&mut self, e: &Expr, from: Ty, to: Ty) -> bool {
+        let ExprKind::Int(n) = e.kind else { return false };
+        if !to.is_int() || from == to || !self.t.hex_literals.contains(&e.id) {
+            return false;
+        }
+        let ty = self.int_literal(e, n, Some(to));
+        self.t.expr_ty[e.id.0 as usize] = ty;
+        true
+    }
+
     /// Both operands must be numbers that meet at a common type.
     pub(super) fn operands(&mut self, e: &Expr, op: BinaryOp, lhs: &Expr, lt: Ty, rhs: &Expr, rt: Ty) -> Ty {
         if lt == Ty::Error || rt == Ty::Error {
@@ -158,8 +179,11 @@ impl<'a> BodyChecker<'a> {
         }
         match Ty::common(lt, rt) {
             Some(c) => {
-                self.coerce(lhs, lt, c);
-                self.coerce(rhs, rt, c);
+                for (side, t) in [(lhs, lt), (rhs, rt)] {
+                    if !self.retype_hex(side, t, c) {
+                        self.coerce(side, t, c);
+                    }
+                }
                 c
             }
             None => {

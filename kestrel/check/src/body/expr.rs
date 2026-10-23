@@ -75,7 +75,7 @@ impl<'a> BodyChecker<'a> {
         }
     }
 
-    fn int_literal(&mut self, e: &Expr, n: u64, want: Option<Ty>) -> Ty {
+    pub(super) fn int_literal(&mut self, e: &Expr, n: u64, want: Option<Ty>) -> Ty {
         // (A literal checked again at another type loses the value it had at the first.)
         self.t.wrapped_literals.remove(&e.id);
         let ty = match want {

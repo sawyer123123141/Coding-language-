@@ -111,3 +111,21 @@ fn wrapping_operators_refuse_other_types() {
     let (_, errs) = run("main() {\n    let x = true +% false\n}\n");
     assert_eq!(errs, vec!["`+%` needs integers, found bool".to_string()]);
 }
+
+#[test]
+fn a_hex_literal_meeting_an_i64_is_read_as_an_i64_on_either_side() {
+    for expr in ["0xFFFFFFFF + w", "w + 0xFFFFFFFF", "0xFFFFFFFF *% w", "0xFFFFFFFF < w"] {
+        let t = ok(&format!("main() {{\n    let w: i64 = 3\n    print({expr})\n}}\n"));
+        assert!(t.wrapped_literals.is_empty(), "{expr}");
+    }
+    // Alone, or next to a float, it stays an `int`.
+    let t = ok("main() {\n    let x = 0xFFFFFFFF\n    print(x * 1.5, 0xFFFFFFFF * 1.5)\n}\n");
+    assert_eq!(t.wrapped_literals.len(), 2);
+}
+
+#[test]
+fn the_smallest_integer_written_in_hex_cannot_be_negated() {
+    let (_, errs) = run("main() {\n    let a = -0x80000000\n}\n");
+    assert_eq!(errs, vec!["`-0x80000000` negates -2147483648, which overflows; write `0x80000000`".to_string()]);
+    ok("main() {\n    let a: i64 = -0x80000000\n    let b = -0xFFFFFFFF\n    print(a, b)\n}\n");
+}
