@@ -118,9 +118,12 @@ fn a_hex_literal_meeting_an_i64_is_read_as_an_i64_on_either_side() {
         let t = ok(&format!("main() {{\n    let w: i64 = 3\n    print({expr})\n}}\n"));
         assert!(t.wrapped_literals.is_empty(), "{expr}");
     }
-    // Alone, or next to a float, it stays an `int`.
-    let t = ok("main() {\n    let x = 0xFFFFFFFF\n    print(x * 1.5, 0xFFFFFFFF * 1.5)\n}\n");
-    assert_eq!(t.wrapped_literals.len(), 2);
+    // Alone it stays an `int`, and so does the variable that holds it.
+    let t = ok("main() {\n    let x = 0xFFFFFFFF\n    print(x * 1.5)\n}\n");
+    assert_eq!(t.wrapped_literals.len(), 1);
+    // Next to a float it is the float it spells, on either side.
+    let t = ok("main() {\n    let d: f64 = 1.5\n    print(0xFFFFFFFF * d, d * 0xFFFFFFFF, 0xFFFFFFFF * 1.5, 1.5 * 0xFFFFFFFF)\n}\n");
+    assert!(t.wrapped_literals.is_empty());
 }
 
 #[test]

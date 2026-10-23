@@ -9,10 +9,11 @@ main() {
     print(w *% 0x9E3779B97F4A7C15)
     let x: i64 = 0xFFFFFFFF
     print(x, i64(0xFFFFFFFF), 0xFFFFFFFF)
-    // Next to a float, the literal is still an `int`: -1.
+    // Next to a float, a literal is the float it spells, on either side; a variable holding it is an `int`: -1.
     let y = 0xFFFFFFFF
     let d: f64 = 1.5
-    print(y * 1.5, 0xFFFFFFFF * 1.5, 0xFFFFFFFF * d)
+    print(y * 1.5, 0xFFFFFFFF * 1.5, 1.5 * 0xFFFFFFFF)
+    print(0xFFFFFFFF * d, d * 0xFFFFFFFF)
     // Meeting an `i64`, a hex literal is read as an `i64`, whichever side it is on.
     print(0xFFFFFFFF + w, w + 0xFFFFFFFF, 0xFFFFFFFF *% w, w *% 0xFFFFFFFF)
     print(0xFFFFFFFF < w, w < 0xFFFFFFFF, 0xFFFFFFFF & w, w & 0xFFFFFFFF)
@@ -29,7 +30,8 @@ main() {
 // expect: 1401181143
 // expect: -2691343689449507777
 // expect: 4294967295 4294967295 -1
-// expect: -1.5 -1.5 -1.5
+// expect: -1.5 6442451000 6442451000
+// expect: 6442450942.5 6442450942.5
 // expect: 4294967298 4294967298 12884901885 12884901885
 // expect: false true 3 3
 // expect: 2 21
