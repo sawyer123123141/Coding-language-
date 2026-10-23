@@ -1,0 +1,18 @@
+// `ivec4` products that reach the edges of `int` without passing them must not stop; the second
+// line rotates the lanes, so each edge is checked in the low and in the high pair of lanes.
+id(v: ivec4, d: int) -> ivec4 {
+    if d == 0 {
+        return v
+    }
+    id(v, d - 1)
+}
+
+main() {
+    print(ivec4(46340, -65536, -2147483647 - 1, 2147483647) * ivec4(46341, 32768, 1, -1))
+    let a = id(ivec4(46340, -65536, -2147483647 - 1, 2147483647), 2).zwxy
+    let b = id(ivec4(46341, 32768, 1, -1), 2).zwxy
+    print(a * b, a * 1, -1 * b)
+}
+
+// expect: ivec4(x: 2147441940, y: -2147483648, z: -2147483648, w: -2147483647)
+// expect: ivec4(x: -2147483648, y: -2147483647, z: 2147441940, w: -2147483648) ivec4(x: -2147483648, y: 2147483647, z: 46340, w: -65536) ivec4(x: -1, y: 1, z: -46341, w: -32768)

@@ -1,0 +1,116 @@
+// `ivec4` wherever a value can be: struct fields with defaults, constants, `var` lanes, lists
+// (with `has`, `find`, `remove` and `par for`), closures, maps, optionals, arrays, enum payloads,
+// a value `if`, interpolation, and a hash carried around a loop.
+struct Cell {
+    id: u8
+    at: ivec4
+    step: ivec4 = ivec4(0, 1, 0, 0)
+}
+
+enum Shape {
+    Dot
+    Box { at: ivec4, n: int }
+}
+
+let K = ivec4(1, 2, 3, 4)
+
+bump(var v: ivec4) {
+    v.x += 1
+}
+
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+
+apply(f: () -> ivec4) -> ivec4 {
+    f()
+}
+
+more() {
+    var arr = [ivec4(1), ivec4(2, 3, 4, 5)]
+    arr[1].z = 0
+    arr[0] <<= id(3, 1)
+    print(arr, arr[1].wzyx.x)
+    var s = Shape.Box(at: ivec4(1, 3, 3, 4), n: 2)
+    match s {
+        Box b { b.at.w = 0 }
+        Dot { }
+    }
+    match s {
+        Box b { print(b.at.y * b.n, b.at) }
+        Dot { print(0) }
+    }
+    let big = if id(1, 2) > 0 { ivec4(1) } else { ivec4(2) }
+    print(big == ivec4(1), big != ivec4(1, 1, 1, 2), ivec4(vec4(big) * 2.5))
+    var h = ivec4(1, 2, 3, 4)
+    for i from 0 to 3 {
+        h = (h ^ (h >> 13)) *% 0x5BD1E995
+        h +%= i
+    }
+    print(h)
+}
+
+main() {
+    var c = Cell(id: 1, at: ivec4(1, 2, 3, 4))
+    c.at += c.step
+    c.at.w = 0
+    bump(var c.at)
+    print(c)
+
+    var vs = list[ivec4]()
+    for i from 0 to 3 {
+        vs.add(ivec4(i))
+    }
+    vs[2].y = 7
+    print(vs, vs.has(ivec4(1)), vs.has(ivec4(5)), vs.find(ivec4(2, 7, 2, 2)))
+
+    let k = ivec4(1, 2, 3, 4)
+    let u: u8 = 7
+    let f = () -> ivec4 { k * u }
+    print(apply(f), "k = {k}")
+
+    var m = map[int, ivec4]()
+    m[3] = ivec4(3, 2, 1, 0)
+    let got = m[3] else {
+        return
+    }
+    print(got, got.z)
+
+    var o: ivec4? = none
+    print(o)
+    o = ivec4(9)
+    print(o)
+
+    print(K, K.w, K.wzyx, K.xy)
+
+    par for v in vs {
+        v = v * 2 + 1
+        v.w = 5
+    }
+    print(vs)
+
+    for v in vs {
+        if v.y > 4 {
+            remove v
+        }
+    }
+    print(vs)
+    more()
+}
+
+// expect: Cell(id: 1, at: ivec4(x: 2, y: 3, z: 3, w: 0), step: ivec4(x: 0, y: 1, z: 0, w: 0))
+// expect: [ivec4(x: 0, y: 0, z: 0, w: 0), ivec4(x: 1, y: 1, z: 1, w: 1), ivec4(x: 2, y: 7, z: 2, w: 2)] true false 2
+// expect: ivec4(x: 7, y: 14, z: 21, w: 28) k = ivec4(x: 1, y: 2, z: 3, w: 4)
+// expect: ivec4(x: 3, y: 2, z: 1, w: 0) 1
+// expect: none
+// expect: ivec4(x: 9, y: 9, z: 9, w: 9)
+// expect: ivec4(x: 1, y: 2, z: 3, w: 4) 4 ivec4(x: 4, y: 3, z: 2, w: 1) ivec2(x: 1, y: 2)
+// expect: [ivec4(x: 1, y: 1, z: 1, w: 5), ivec4(x: 3, y: 3, z: 3, w: 5), ivec4(x: 5, y: 15, z: 5, w: 5)]
+// expect: [ivec4(x: 1, y: 1, z: 1, w: 5), ivec4(x: 3, y: 3, z: 3, w: 5)]
+// expect: [ivec4(x: 8, y: 8, z: 8, w: 8), ivec4(x: 2, y: 3, z: 0, w: 5)] 5
+// expect: 6 ivec4(x: 1, y: 3, z: 3, w: 0)
+// expect: true true ivec4(x: 2, y: 2, z: 2, w: 2)
+// expect: ivec4(x: -772214088, y: 1031486168, z: -126260111, w: 1648932922)

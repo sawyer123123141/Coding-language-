@@ -1,0 +1,8 @@
+// Negating an `ivec4` with the lowest `int` in one lane (lane x) overflows.
+main() {
+    let a = ivec4(-2147483647 - 1, 0, 0, 0)
+    print(-a)
+}
+
+// expect-exit: 101
+// expect-stderr: integer overflow on line 4

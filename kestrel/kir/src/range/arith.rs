@@ -14,6 +14,9 @@ impl Cx<'_> {
     /// An integer `-x`, binary operation or conversion: its value, and its check decided (unless
     /// `already` proven: a module analysed before).
     pub(super) fn arith(&mut self, st: &State, e: &Expr, sure: bool, already: bool) -> Val {
+        if super::vector::is_int_vector_op(e) {
+            return self.vector_arith(st, e, sure, already);
+        }
         match &e.kind {
             ExprKind::Unary(UnOp::Neg, x) => {
                 let a = self.eval(st, x, sure);
@@ -126,7 +129,7 @@ impl Cx<'_> {
 
     /// Decides the check of kind `kind` on `e` (`safe`: it can't fail), unless it was proven
     /// `already` or codegen doesn't emit it in this build.
-    fn site(&mut self, e: &Expr, kind: CheckKind, safe: bool, already: bool, operands: &[(&Expr, Interval)]) {
+    pub(super) fn site(&mut self, e: &Expr, kind: CheckKind, safe: bool, already: bool, operands: &[(&Expr, Interval)]) {
         // Only a check codegen emits in this build is a site.
         if !already && sites::checks_of(e, self.arith).contains(&kind) {
             self.decide(expr_key(e), kind, e.line, safe, |cx| super::show::check_text(cx.m, cx.f, kind, e, operands));

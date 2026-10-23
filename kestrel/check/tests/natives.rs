@@ -271,6 +271,8 @@ fn natives_refuse_vec4() {
     assert_eq!(errors("native f() -> vec4\nmain() {}\n"), vec![BAD_TYPE]);
     assert_eq!(errors("struct S {\n v: vec4\n}\nnative f(s: S)\nmain() {}\n"), vec![BAD_TYPE]);
     assert_eq!(errors("native f(vs: [vec4])\nmain() {}\n"), vec![BAD_TYPE]);
+    assert_eq!(errors("native f(v: ivec4)\nmain() {}\n"), vec![BAD_TYPE]);
+    assert_eq!(errors("native f() -> ivec4\nmain() {}\n"), vec![BAD_TYPE]);
     // The same in a built-in module, whose natives Kestrel's own code declares.
     let src = "native f(v: vec4)\nmain() {}\n";
     let (mut p, d) = parse(src);

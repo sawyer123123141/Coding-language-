@@ -30,8 +30,10 @@ pub fn place_text(m: &Module, f: &Func, p: &Place, upto: usize) -> String {
 pub fn check_text(m: &Module, f: &Func, kind: CheckKind, e: &Expr, operands: &[(&Expr, Interval)]) -> String {
     let what = expr_text(m, f, e);
     let ty = operands.first().map_or(e.ty, |(x, _)| x.ty);
+    // An `ivec4` check holds for all four lanes, and its limits are a lane's (`int`'s).
+    let lanes = if ty.is_vector() { " in a lane" } else { "" };
     let head = match kind {
-        CheckKind::Overflow => format!("`{what}` may exceed `{}`", type_name(e.ty)),
+        CheckKind::Overflow => format!("`{what}` may exceed `{}`{lanes}", type_name(e.ty.lane())),
         CheckKind::Shift => format!("`{what}` may shift by less than 0 or more than {}", width(ty) - 1),
         CheckKind::Division if operands.get(1).is_some_and(|(_, r)| !r.contains(0)) => {
             format!("`{what}` may divide the lowest `{}` by -1", type_name(ty))
@@ -42,8 +44,11 @@ pub fn check_text(m: &Module, f: &Func, kind: CheckKind, e: &Expr, operands: &[(
     };
     let evidence: Vec<String> = operands
         .iter()
-        .filter(|(x, _)| !matches!(x.kind, ExprKind::Int(_)))
-        .map(|(x, r)| format!("`{}` {}", expr_text(m, f, x), range_text(*r, x.ty)))
+        .filter(|(x, _)| !super::vector::is_literal(x))
+        .map(|(x, r)| match ty.is_vector() {
+            true => super::vector::lanes_evidence(m, f, x, *r),
+            false => format!("`{}` {}", expr_text(m, f, x), range_text(*r, x.ty)),
+        })
         .collect();
     if evidence.is_empty() {
         head
@@ -208,9 +213,9 @@ pub(super) fn write_expr(m: &Module, f: &Func, e: &Expr, s: &mut String) {
             write_operand(m, f, x, s);
         }
         ExprKind::Binary(op, a, b) => {
-            write_operand(m, f, a, s);
+            write_operand(m, f, filled(a), s);
             s.push_str(&format!(" {} ", op_text(*op)));
-            write_operand(m, f, b, s);
+            write_operand(m, f, filled(b), s);
         }
         ExprKind::And(a, b) | ExprKind::Or(a, b) => {
             write_operand(m, f, a, s);
@@ -236,6 +241,14 @@ pub(super) fn write_expr(m: &Module, f: &Func, e: &Expr, s: &mut String) {
         }
         ExprKind::VecLit(_) | ExprKind::Splat(_) | ExprKind::Shuffle(..) | ExprKind::LaneOf(..) => super::vector::write_vector(m, f, e, s),
         _ => s.push_str("(...)"),
+    }
+}
+
+/// An operand as the source wrote it: a number that fills a vector's lanes is the number (`h * 3`).
+fn filled(x: &Expr) -> &Expr {
+    match &x.kind {
+        ExprKind::Splat(n) if matches!(n.kind, ExprKind::Int(_) | ExprKind::Float(_)) => n,
+        _ => x,
     }
 }
 

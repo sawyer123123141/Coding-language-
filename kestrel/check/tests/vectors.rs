@@ -83,6 +83,22 @@ fn vec4_types() {
 }
 
 #[test]
+fn ivec4_types() {
+    let src = "main() {\n let a = ivec4(1).wzyx\n let b = ivec4(1).xy\n let c = ivec4(1).w\n let d = ivec4(1, 2, 3, 4) * 2 >> 1\n let e = ivec4(vec4(1.5))\n let f = vec4(ivec4(1))\n let g = ivec4(1) *% 0x9E3779B1\n let h = ~ivec4(1) == ivec4(x: 1, y: 2, z: 3, w: 4)\n print(a, b, c, d, e, f, g, h)\n}\n";
+    let (t, ty) = local_types(src);
+    assert_eq!(ty(&t, "a"), "ivec4");
+    assert_eq!(ty(&t, "b"), "ivec2");
+    assert_eq!(ty(&t, "c"), "int");
+    assert_eq!(ty(&t, "d"), "ivec4");
+    assert_eq!(ty(&t, "e"), "ivec4");
+    assert_eq!(ty(&t, "f"), "vec4");
+    assert_eq!(ty(&t, "g"), "ivec4");
+    assert_eq!(ty(&t, "h"), "bool");
+    // `.w` is a lane; `.wzyx` and `.xy` are swizzles.
+    assert_eq!(t.lanes.values().copied().collect::<Vec<_>>(), vec![3]);
+}
+
+#[test]
 fn vec4_lanes_are_places() {
     let src = "struct P {\n pos: vec4\n}\nmain() {\n var v = vec4()\n v.x = 1\n v.w += 2\n var p = P(pos: v)\n p.pos.y = 3\n print(v, p)\n}\n";
     let (t, ty) = local_types(src);

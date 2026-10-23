@@ -100,6 +100,7 @@ pub(crate) fn kty(ty: Ty) -> KTy {
         Ty::F64 => KTy::F64,
         Ty::Str => KTy::Str,
         Ty::Vec4 => KTy::F32X4,
+        Ty::IVec4 => KTy::I32X4,
         Ty::Struct(s) => KTy::Struct(StructIdx(s.0)),
         Ty::Enum(e) => KTy::Enum(EnumIdx(e.0)),
         Ty::Array(e) => KTy::Array(ElemIdx(e.0)),

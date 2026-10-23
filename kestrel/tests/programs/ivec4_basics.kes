@@ -1,0 +1,35 @@
+main() {
+    let h = ivec4(1, 2, 3, 4)
+    let k = (h ^ (h >> 1)) & 0xFFFF
+    print(k, ~h, h | 8, h -% ivec4(5))
+    print(h *% 0x5BD1E995, h +% 2147483647, h *% 0x9E3779B1)
+    print(ivec4(7), ivec4(), ivec4(ivec3(1, 2, 3), 4), h.wzyx, h.xy, h.xyz)
+    print(vec4(k) / 2.0, ivec4(vec4(1.9, -1.9, 3000000000.0, -3000000000.0)))
+    print(ivec4(vec4(sqrt(-1.0))), int(sqrt(-1.0)))
+    print(h + 1, h - h, h * h, -h, h << 2, h >> 1)
+    print(ivec4(-8, -1, 7, -2147483647 - 1) >> 1)
+    print(h == ivec4(1, 2, 3, 4), h != ivec4(1, 2, 3, 4), ivec4(x: 1, y: 2, z: 3, w: 4) == h)
+    var c = ivec4(1, 2, 3, 4)
+    c *= 3
+    c += 1
+    c -= 2
+    c <<= 1
+    c >>= 2
+    c &= 0xFF
+    c |= 16
+    c ^= 1
+    c *%= 3
+    c +%= 1
+    c -%= 1
+    print(c)
+}
+
+// expect: ivec4(x: 1, y: 3, z: 2, w: 6) ivec4(x: -2, y: -3, z: -4, w: -5) ivec4(x: 9, y: 10, z: 11, w: 12) ivec4(x: -4, y: -3, z: -2, w: -1)
+// expect: ivec4(x: 1540483477, y: -1214000342, z: 326483135, w: 1866966612) ivec4(x: -2147483648, y: -2147483647, z: -2147483646, w: -2147483645) ivec4(x: -1640531535, y: 1013904226, z: -626627309, w: 2027808452)
+// expect: ivec4(x: 7, y: 7, z: 7, w: 7) ivec4(x: 0, y: 0, z: 0, w: 0) ivec4(x: 1, y: 2, z: 3, w: 4) ivec4(x: 4, y: 3, z: 2, w: 1) ivec2(x: 1, y: 2) ivec3(x: 1, y: 2, z: 3)
+// expect: vec4(x: 0.5, y: 1.5, z: 1, w: 3) ivec4(x: 1, y: -1, z: 2147483647, w: -2147483648)
+// expect: ivec4(x: 0, y: 0, z: 0, w: 0) 0
+// expect: ivec4(x: 2, y: 3, z: 4, w: 5) ivec4(x: 0, y: 0, z: 0, w: 0) ivec4(x: 1, y: 4, z: 9, w: 16) ivec4(x: -1, y: -2, z: -3, w: -4) ivec4(x: 4, y: 8, z: 12, w: 16) ivec4(x: 0, y: 1, z: 1, w: 2)
+// expect: ivec4(x: -4, y: -1, z: 3, w: -1073741824)
+// expect: true false true
+// expect: ivec4(x: 48, y: 57, z: 63, w: 60)

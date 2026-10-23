@@ -109,3 +109,94 @@ fn without_sse41_vectors_are_refused() {
     let without = common::optimized("pure f(v: vec3) -> float {\n v.x\n}\nmain() {\n print(f(vec3(1)))\n}\n");
     assert!(emit_object_for(&without, Options::default(), isa_without_sse41()).is_ok());
 }
+
+#[test]
+fn an_ivec4_add_has_one_check() {
+    let traps = |src: &str, opts: Options| dump(&common::optimized(src), opts, "g").unwrap().matches("trap user2").count();
+    let plain = "pure g(a: ivec4, b: ivec4) -> ivec4 {\n a + b\n}\nmain() {}\n";
+    assert_eq!(traps(plain, Options::default()), 1);
+    assert_eq!(traps(plain, release()), 0);
+    let wrapping = "pure g(a: ivec4, b: ivec4) -> ivec4 {\n a +% b\n}\nmain() {}\n";
+    assert_eq!(traps(wrapping, Options::default()), 0);
+    // `-v`, `*` and a shift: one check each.
+    let more = "pure g(a: ivec4, b: ivec4, n: int) -> ivec4 {\n (-a * b) << n\n}\nmain() {}\n";
+    assert_eq!(traps(more, Options::default()), 3);
+    assert_eq!(traps(more, release()), 0);
+}
+
+#[test]
+fn ivec4_shift_right_is_arithmetic() {
+    let m = common::optimized("pure g(h: ivec4) -> ivec4 {\n h >> 1\n}\nmain() {}\n");
+    for opts in [Options::default(), release()] {
+        let code = dump(&m, opts, "g").unwrap();
+        assert!(code.contains("sshr") && !code.contains("ushr"), "{code}");
+    }
+}
+
+#[test]
+fn ivec4_calls_follow_the_abi() {
+    let src = PASS.replace("vec4", "ivec4").replace("-> float", "-> int");
+    let p = jit(&src);
+    assert_eq!(call0::<i32>(&p, "t"), 15);
+    assert_eq!(call0::<i32>(&p, "t_lanes"), 11 + 220 + 3300 + 44000);
+}
+
+/// Every CLIF line of `code` that loads or stores a SIMD vector: `load.f32x4`, `store.i32x4`, or a
+/// `store` of a value the CLIF gives a vector type (a block parameter, or a typed result).
+fn vector_accesses(code: &str) -> Vec<&str> {
+    let is_vector = |ty: &str| ty == "f32x4" || ty == "i32x4";
+    let mut vectors: Vec<&str> = Vec::new();
+    for line in code.lines().map(str::trim) {
+        if line.starts_with("block") {
+            let params = line.split(['(', ')']).nth(1).unwrap_or("");
+            vectors.extend(params.split(", ").filter_map(|p| p.split_once(": ")).filter(|(_, t)| is_vector(t)).map(|(v, _)| v));
+        } else if let Some((v, rest)) = line.split_once(" = ") {
+            let op = rest.split_whitespace().next().unwrap_or("");
+            if op.split_once('.').is_some_and(|(_, t)| is_vector(t)) {
+                vectors.push(v);
+            }
+        }
+    }
+    code.lines()
+        .filter(|line| {
+            let l = line.trim();
+            let typed = ["load.f32x4", "load.i32x4", "store.f32x4", "store.i32x4"].iter().any(|op| l.starts_with(op) || l.contains(&format!("= {op}")));
+            let stored = l.strip_prefix("store ").and_then(|rest| rest.split(", ").next()).and_then(|first| first.split_whitespace().last());
+            typed || stored.is_some_and(|v| vectors.contains(&v))
+        })
+        .collect()
+}
+
+/// No load or store of a vector carries Cranelift's `aligned` flag (spec R1, M19): an element, a
+/// struct field and a capture are read, and an element and a struct field are written.
+#[test]
+fn vector_memory_access_is_never_aligned() {
+    let src = "struct P {\n id: u8\n pos: vec4\n cell: ivec4\n}
+pure elem(vs: [vec4], i: int) -> vec4 {\n vs[i] * 2\n}
+pure ielem(vs: [ivec4], i: int) -> ivec4 {\n vs[i] *% 2\n}
+pure field(p: P) -> vec4 {\n p.pos + p.pos\n}
+pure ifield(p: P) -> ivec4 {\n p.cell ^ p.cell\n}
+set(var vs: [ivec4], var ws: [vec4], i: int, v: ivec4, w: vec4) {\n vs[i] = v\n ws[i] = w\n}
+make(v: vec4, c: ivec4) -> P {\n P(id: 1, pos: v, cell: c)\n}
+captured(k: vec4, c: ivec4) -> int {\n let f = () -> int { int((k * 2).x) + (c *% 3).w }\n f()\n}
+main() {}\n";
+    let m = common::optimized(src);
+    let mut seen = 0;
+    for name in ["elem", "ielem", "field", "ifield", "set", "make", "captured"] {
+        let code = dump(&m, release(), name).unwrap();
+        let accesses = vector_accesses(&code);
+        assert!(!accesses.is_empty(), "no vector access found in `{name}`:\n{code}");
+        for line in &accesses {
+            assert!(!line.contains("aligned"), "`{name}`: {line}\n{code}");
+        }
+        seen += accesses.len();
+    }
+    // The closure's body reads both captures, whole, from its environment.
+    let names: Vec<&str> = m.funcs.iter().map(|f| f.name.as_str()).collect();
+    let body = *names.iter().find(|n| n.starts_with("__kestrel_closure")).unwrap_or_else(|| panic!("no closure body in {names:?}"));
+    let code = dump(&m, release(), body).unwrap();
+    let accesses = vector_accesses(&code);
+    assert!(accesses.len() >= 2, "{code}");
+    assert!(accesses.iter().all(|l| !l.contains("aligned")), "{code}");
+    assert!(seen + accesses.len() >= 10, "{seen}");
+}

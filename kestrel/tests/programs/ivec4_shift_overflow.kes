@@ -1,0 +1,14 @@
+// An `ivec4` shifts every lane by one `int`, checked like an `int` shift.
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+
+main() {
+    print(ivec4(1) << id(32, 3))
+}
+
+// expect-exit: 101
+// expect-stderr: shift amount out of range on line 10

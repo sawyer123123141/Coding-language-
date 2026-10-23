@@ -1,0 +1,8 @@
+// One lane of an `ivec4` difference overflows (lane z), with a number filling the right side.
+main() {
+    let a = ivec4(0, 0, -2147483647 - 1, 0)
+    print(a - 1)
+}
+
+// expect-exit: 101
+// expect-stderr: integer overflow on line 4

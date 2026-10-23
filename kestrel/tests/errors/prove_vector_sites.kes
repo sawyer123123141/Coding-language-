@@ -1,0 +1,20 @@
+@prove(no_checks)
+pure f(a: ivec4, b: ivec4) -> ivec4 {
+    a + b
+}
+
+// `-v`, `*` and a shift are sites too; wrapping operators and bit operators have none.
+@prove(no_panic)
+pure g(a: ivec4, n: int) -> ivec4 {
+    (a +% a) & 255 ^ ~a
+}
+
+@prove(no_panic)
+pure h(a: ivec4, n: int) -> ivec4 {
+    -a * 3 << n
+}
+
+main() {}
+
+// error 1: `f` can't be proven `no_checks`: it has an overflow check on line 3: `a + b` may exceed `int` in a lane (the lanes of `a` can be any `int`; the lanes of `b` can be any `int`)
+// error 12: `h` can't be proven `no_panic`: it has an overflow check on line 14: `-a` may exceed `int` in a lane (the lanes of `a` can be any `int`)

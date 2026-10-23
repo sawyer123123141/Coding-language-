@@ -28,7 +28,7 @@ main() {
 // error 10: `==` can't mix vec4 and vec3
 // error 11: labels only work when every component is a number, like `vec4(x: 1, y: 2, z: 3, w: 4)`
 // error 12: `vec4` has no field `q`
-// error 13: `ivec3` takes ints and int vectors, found vec4; convert it with `ivec4(...)` first
+// error 13: `ivec3` has 3 components, but these values give 4; give 3, one value for all of them, or none for zeros
 // error 14: missing fields `z` and `w` for `vec4`
 // error 15: `min` doesn't take a `vec4` yet; use its lanes, like `v.x`
 // error 16: `sum` doesn't take a `vec4` yet; use its lanes, like `v.x`

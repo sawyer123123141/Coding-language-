@@ -1,5 +1,5 @@
 //! Which checks codegen emits for a KIR node: the sites range analysis decides. This mirrors
-//! codegen's `func/arith.rs` and `func/divide.rs` exactly; a site missing here would never be
+//! codegen's `func/arith.rs`, `func/divide.rs` and `func/simd_check.rs` exactly; a site missing here would never be
 //! removed (sound), but one listed here that codegen doesn't emit would be counted wrongly. Also
 //! every site of a function, found by walking it (`sites_of`).
 
@@ -59,7 +59,14 @@ pub fn wrap_literal(ty: KTy, c: i64) -> i64 {
 pub fn checks_of(e: &Expr, arith: Arith) -> Vec<CheckKind> {
     let checked = arith.checked();
     match &e.kind {
-        ExprKind::Unary(UnOp::Neg, _) if e.ty.is_int() && checked => vec![CheckKind::Overflow],
+        ExprKind::Unary(UnOp::Neg, _) if (e.ty.is_int() || e.ty == KTy::I32X4) && checked => vec![CheckKind::Overflow],
+        // An `ivec4` operation is one check for all four lanes (`func/simd_check.rs`); it has no
+        // `/` or `%`.
+        ExprKind::Binary(op, l, _) if l.ty == KTy::I32X4 => match op {
+            BinOp::Add | BinOp::Sub | BinOp::Mul if checked => vec![CheckKind::Overflow],
+            BinOp::Shl | BinOp::Shr if checked => vec![CheckKind::Shift],
+            _ => Vec::new(),
+        },
         ExprKind::Binary(op, l, r) if l.ty.is_int() => match op {
             BinOp::Add | BinOp::Sub | BinOp::Mul if checked => vec![CheckKind::Overflow],
             // `*% +% -%` wrap and never check.

@@ -1,0 +1,9 @@
+// One lane of an `ivec4` product overflows (lane w, in the high pair of lanes): 46341 * 46341 is
+// just above the largest `int`.
+main() {
+    let a = ivec4(1, 1, 1, 46341)
+    print(a * ivec4(1, 1, 1, 46341))
+}
+
+// expect-exit: 101
+// expect-stderr: integer overflow on line 5

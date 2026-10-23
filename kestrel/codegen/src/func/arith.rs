@@ -44,7 +44,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     ) -> Value {
         // Here, not in `expr`, so a `Proven` vector operation takes this path too.
         if t.is_vector() {
-            return self.simd_binary(op, a, b, t);
+            return self.simd_binary(op, (a, b), t, line, check);
         }
         if op.is_comparison() {
             return self.compare(op, a, b, t);
@@ -161,6 +161,9 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     pub(crate) fn cast(&mut self, v: Value, from: KTy, to: KTy, line: u32, check: Check) -> Value {
         if from == to {
             return v;
+        }
+        if from.is_vector() {
+            return self.simd_cast(v, to);
         }
         let to_ty = cl_type(to);
         match (from.is_float(), to.is_float()) {

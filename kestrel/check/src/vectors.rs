@@ -15,16 +15,17 @@ pub struct VecKind {
 }
 
 /// Every vector type, with its kind.
-const VECTORS: [(Ty, VecKind); 5] = [
+const VECTORS: [(Ty, VecKind); 6] = [
     (Ty::Struct(VEC2), VecKind { dims: 2, int: false, simd: false }),
     (Ty::Struct(VEC3), VecKind { dims: 3, int: false, simd: false }),
     (Ty::Vec4, VecKind { dims: 4, int: false, simd: true }),
     (Ty::Struct(IVEC2), VecKind { dims: 2, int: true, simd: false }),
     (Ty::Struct(IVEC3), VecKind { dims: 3, int: true, simd: false }),
+    (Ty::IVec4, VecKind { dims: 4, int: true, simd: true }),
 ];
 
 /// The name of the vector type with `dims` components of ints (`int`) or floats: `vec4`,
-/// `ivec3`. (Every name exists as a type, or will: messages may name one.)
+/// `ivec3`. (Every name is a vector type's: messages name them.)
 pub fn vector_name(dims: u32, int: bool) -> String {
     format!("{}vec{dims}", if int { "i" } else { "" })
 }

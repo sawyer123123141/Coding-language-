@@ -107,7 +107,9 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         Ok(match &e.kind {
             ExprKind::Unary(UnOp::Neg, inner) => {
                 let v = self.expr(inner)?;
-                if e.ty.is_float() || e.ty == KTy::F32X4 {
+                if e.ty.is_vector() {
+                    self.simd_neg(v, e.ty, e.line, check)
+                } else if e.ty.is_float() {
                     self.b.ins().fneg(v)
                 } else {
                     let zero = self.iconst(e.ty, 0);

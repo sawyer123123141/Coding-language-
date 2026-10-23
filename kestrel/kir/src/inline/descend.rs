@@ -114,18 +114,16 @@ impl Inliner<'_> {
                 }
             }
             ExprKind::Unary(_, x)
-        | ExprKind::Cast(x)
-        | ExprKind::Proven(x)
-        | ExprKind::FieldOf(x, _)
-        | ExprKind::ArrayNew(x)
-        | ExprKind::Some(x)
-        | ExprKind::EnvDup(x)
-        | ExprKind::BlockDup { src: x, .. }
-        | ExprKind::Splat(x)
-        | ExprKind::Shuffle(x, _)
-        | ExprKind::LaneOf(x, _) => {
-                self.expr(x, depth)
-            }
+            | ExprKind::Cast(x)
+            | ExprKind::Proven(x)
+            | ExprKind::FieldOf(x, _)
+            | ExprKind::ArrayNew(x)
+            | ExprKind::Some(x)
+            | ExprKind::EnvDup(x)
+            | ExprKind::BlockDup { src: x, .. }
+            | ExprKind::Splat(x)
+            | ExprKind::Shuffle(x, _)
+            | ExprKind::LaneOf(x, _) => self.expr(x, depth),
             ExprKind::MakeFn { env: EnvKind::Heap(env) | EnvKind::Stack(env), .. } => {
                 for x in &mut env.values {
                     self.expr(x, depth);
@@ -147,11 +145,11 @@ impl Inliner<'_> {
                 self.args(args, depth);
             }
             ExprKind::StructLit(_, xs)
-        | ExprKind::VariantLit(_, _, xs)
-        | ExprKind::ArrayLit(xs)
-        | ExprKind::VecLit(xs)
-        | ExprKind::Math(_, xs)
-        | ExprKind::Str(_, xs) => {
+            | ExprKind::VariantLit(_, _, xs)
+            | ExprKind::ArrayLit(xs)
+            | ExprKind::VecLit(xs)
+            | ExprKind::Math(_, xs)
+            | ExprKind::Str(_, xs) => {
                 for x in xs {
                     self.expr(x, depth);
                 }

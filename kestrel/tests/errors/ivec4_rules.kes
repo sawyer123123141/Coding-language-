@@ -1,0 +1,41 @@
+// What `ivec4` refuses: how it is made, the operators it has, and (until they are built) its
+// built-ins.
+main() {
+    let a = ivec4(1.5)
+    let b = ivec4(1) / 2
+    let c = ivec4(1) % 2
+    var q = ivec4(1)
+    q /= 2
+    let d = ivec4(1) * 0.5
+    let e = ivec4(1) >> ivec4(1)
+    let f = ivec4(1, 2)
+    let g = ivec4(vec2(1, 2), 3, 4)
+    q %= 2
+    let n: i64 = 5
+    let h = ivec4(n)
+    let i = ivec4(1) < ivec4(2)
+    let j = ivec4(1) == ivec3(1)
+    let k = ivec4(1).q
+    let l = ivec4(1) *% 1.5
+    let m = min(ivec4(1), 2)
+    let o = ivec3(vec4(1))
+    let p = map[ivec4, int]()
+}
+
+// error 4: `ivec4` holds ints, found float; convert it with `int(...)` first
+// error 5: `ivec4` has no `/`: the CPU can't divide integer lanes at once; for a power of two use `>>`, or divide each lane, like `v.x / n`
+// error 6: `ivec4` has no `%`: the CPU can't divide integer lanes at once; for a power of two use `&`, or take each lane, like `v.x % n`
+// error 8: `ivec4` has no `/`: the CPU can't divide integer lanes at once; for a power of two use `>>`, or divide each lane, like `v.x / n`
+// error 9: `*` can't mix ivec4 and float; convert with `vec4(...)` first
+// error 10: `>>` shifts every component by one `int`; shift each component on its own for different amounts
+// error 11: `ivec4` has 4 components, but these values give 2; give 4, one value for all of them, or none for zeros
+// error 12: `ivec4` takes ints and int vectors, found vec2; convert it with `ivec2(...)` first
+// error 13: `ivec4` has no `%`: the CPU can't divide integer lanes at once; for a power of two use `&`, or take each lane, like `v.x % n`
+// error 15: `ivec4` holds ints, found i64; convert it with `int(...)` first
+// error 16: `<` doesn't compare vectors; compare components, like `a.x < b.x`
+// error 17: `==` can't mix ivec4 and ivec3
+// error 18: `ivec4` has no field `q`
+// error 19: `*%` wraps integers; for floats use `*`
+// error 20: `min` doesn't take a `ivec4` yet; use its lanes, like `v.x`
+// error 21: `ivec3` has 3 components, but these values give 4; give 3, one value for all of them, or none for zeros
+// error 22: map keys must be integers, bools or strings, not `ivec4`

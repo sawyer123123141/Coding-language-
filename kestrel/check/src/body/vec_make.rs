@@ -95,10 +95,13 @@ impl<'a> BodyChecker<'a> {
 
     /// A fill, a copy, a conversion or a mixed make: each number becomes one component (or, alone,
     /// all of them), each vector of the same kind gives its components, and one vector of the
-    /// other kind and the same size converts. Returns whether it is right (V1, V3).
+    /// other kind and the same size converts. Returns whether it is right (V1, V3). When the
+    /// components don't add up, that is the one error (V1): converting a value (V3's advice)
+    /// wouldn't fix it (`ivec3(vec4(1))`).
     fn vec_parts(&mut self, e: &Expr, vt: Ty, kind: VecKind, args: &[Arg], tys: &[Ty]) -> bool {
         let mut ok = true;
         let mut count = 0;
+        let mut kinds = Vec::new();
         for (a, &ty) in args.iter().zip(tys) {
             if a.is_var {
                 self.error(a.span, "constructor arguments can't be `var`");
@@ -112,8 +115,7 @@ impl<'a> BodyChecker<'a> {
                         let what = if kind.int { "ints and int vectors" } else { "floats and float vectors" };
                         let wanted = vector_name(k.dims, kind.int);
                         let msg = format!("`{}` takes {what}, found {}; convert it with `{wanted}(...)` first", self.tn(vt), self.tn(ty));
-                        self.error(a.value.span, msg);
-                        ok = false;
+                        kinds.push((a.value.span, msg));
                     }
                     count += k.dims;
                 }
@@ -129,6 +131,10 @@ impl<'a> BodyChecker<'a> {
             let n = kind.dims;
             let msg = format!("`{}` has {n} components, but these values give {count}; give {n}, one value for all of them, or none for zeros", self.tn(vt));
             self.error(e.span, msg);
+            return false;
+        }
+        for (span, msg) in kinds {
+            self.error(span, msg);
             ok = false;
         }
         ok

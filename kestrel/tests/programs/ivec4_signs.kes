@@ -1,0 +1,25 @@
+// Lanes whose sign changes without overflowing must not stop (I5): the `+` and `-` checks look at
+// the signs of the operands and the result together, lane by lane. The second half takes its
+// operands through a call, so nothing is known about them, and rotates the lanes one place.
+id(v: ivec4, d: int) -> ivec4 {
+    if d == 0 {
+        return v
+    }
+    id(v, d - 1)
+}
+
+main() {
+    print(ivec4(-1, 1, -5, 5) + ivec4(2, -2, 10, -10), ivec4(-1, 1, -5, 5) - ivec4(-2, 2, -10, 10), ivec4(2147483647, -2147483647 - 1, 0, -1) + ivec4(-1, 1, -1, 1))
+    let a = id(ivec4(-1, 1, -5, 5), 2).yzwx
+    let b = id(ivec4(2, -2, 10, -10), 2).yzwx
+    let c = id(ivec4(-2, 2, -10, 10), 2).yzwx
+    let d = id(ivec4(2147483647, -2147483647 - 1, 0, -1), 2).yzwx
+    let e = id(ivec4(-1, 1, -1, 1), 2).yzwx
+    print(a + b, a - c, d + e)
+    // The edges themselves: the largest and the lowest `int` reached exactly.
+    print(ivec4(-2147483647, 2147483646, 0, 0) - id(ivec4(1, -1, 0, 0), 1), ivec4(2147483646, -2147483647, 0, 0) + id(ivec4(1, -1, 0, 0), 1), -id(ivec4(2147483647, -2147483647, 0, 1), 1))
+}
+
+// expect: ivec4(x: 1, y: -1, z: 5, w: -5) ivec4(x: 1, y: -1, z: 5, w: -5) ivec4(x: 2147483646, y: -2147483647, z: -1, w: 0)
+// expect: ivec4(x: -1, y: 5, z: -5, w: 1) ivec4(x: -1, y: 5, z: -5, w: 1) ivec4(x: -2147483647, y: -1, z: 0, w: 2147483646)
+// expect: ivec4(x: -2147483648, y: 2147483647, z: 0, w: 0) ivec4(x: 2147483647, y: -2147483648, z: 0, w: 0) ivec4(x: -2147483647, y: 2147483647, z: 0, w: -1)

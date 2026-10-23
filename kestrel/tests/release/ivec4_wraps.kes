@@ -1,0 +1,16 @@
+// Built with `--release`: `ivec4` wraps lane by lane, as `int` does, with no check.
+id(v: ivec4, d: int) -> ivec4 {
+    if d == 0 {
+        return v
+    }
+    id(v, d - 1)
+}
+
+main() {
+    print(ivec4(2147483647, 1, 2, 3) + 1, ivec4(65536) * 65536, -ivec4(-2147483647 - 1))
+    let m = id(ivec4(-2147483647 - 1, 2147483647, 46341, -1), 2)
+    print(m - 1, m * m, -m, m << 33, m >> 33)
+}
+
+// expect: ivec4(x: -2147483648, y: 2, z: 3, w: 4) ivec4(x: 0, y: 0, z: 0, w: 0) ivec4(x: -2147483648, y: -2147483648, z: -2147483648, w: -2147483648)
+// expect: ivec4(x: 2147483647, y: 2147483646, z: 46340, w: -2) ivec4(x: 0, y: 1, z: -2147479015, w: 1) ivec4(x: -2147483648, y: -2147483647, z: -46341, w: 1) ivec4(x: 0, y: -2, z: 92682, w: -2) ivec4(x: -1073741824, y: 1073741823, z: 23170, w: -1)

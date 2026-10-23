@@ -17,6 +17,7 @@ mod par;
 mod place;
 mod print;
 mod simd;
+mod simd_check;
 mod stmt;
 mod strings;
 

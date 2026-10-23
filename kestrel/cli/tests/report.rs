@@ -228,3 +228,35 @@ total: 4 checks, 1 removed, 3 left; no allocations; no other ways to fail
 ";
     assert_eq!(stdout(&out), want);
 }
+
+#[test]
+fn ivec4_checks_are_one_item_per_operation() {
+    // One check for all four lanes, worded with the lane type; wrapping and bit operators have
+    // none, and `--release` has none at all.
+    let src = "pub f(a: ivec4, b: ivec4, n: int) -> ivec4 {
+    let c = a * 3 + b
+    let d = -c << n
+    let e = (a +% b) & 255 ^ ~a
+    d - e
+}
+
+main() {}
+";
+    let dir = project("ivec4", &[("ivec4.kes", src)]);
+    let out = kestrel(&["check", "--report"], &dir.join("ivec4.kes"));
+    assert!(out.status.success(), "{}", stderr(&out));
+    let want = "ivec4.kes
+  function `f` (line 1): 5 checks left (0 removed), no allocations
+    line 2: overflow check: `a * 3` may exceed `int` in a lane (the lanes of `a` can be any `int`)
+    line 2: overflow check: `(a * 3) + b` may exceed `int` in a lane (the lanes of `a * 3` can be any `int`; the lanes of `b` can be any `int`)
+    line 3: overflow check: `-c` may exceed `int` in a lane (the lanes of `c` can be any `int`)
+    line 3: shift check: `-c << n` may shift by less than 0 or more than 31 (the lanes of `-c` can be any `int`; `n` can be any `int`)
+    line 5: overflow check: `d - e` may exceed `int` in a lane (the lanes of `d` can be any `int`; the lanes of `e` can be any `int`)
+  function `main` (line 8): no checks, no allocations
+total: 5 checks, 0 removed, 5 left; no allocations; no other ways to fail
+";
+    assert_eq!(stdout(&out), want);
+    let out = kestrel(&["check", "--report", "--release"], &dir.join("ivec4.kes"));
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(stdout(&out).contains("total: 0 checks, 0 removed, 0 left"), "{}", stdout(&out));
+}

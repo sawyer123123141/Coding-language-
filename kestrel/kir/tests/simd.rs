@@ -162,3 +162,43 @@ fn vector_forms_read_as_kestrel() {
     assert_eq!(text("d"), "g(...).y");
     assert_eq!(text("e"), "v.z");
 }
+
+/// The assignments in `f`'s body, in order.
+fn assigns(f: &Func) -> Vec<&Expr> {
+    f.body.iter().filter_map(|s| if let Stmt::Assign(_, e) = s { Some(e) } else { None }).collect()
+}
+
+#[test]
+fn an_ivec4_shift_keeps_a_scalar_amount() {
+    let src = "pure f(h: ivec4) -> ivec4 {\n h >> 1\n}\npure g(h: ivec4, n: int) -> ivec4 {\n var k = h\n k >>= n\n k\n}\nmain() {}\n";
+    let m = lowered(src, false);
+    let ExprKind::Binary(BinOp::Shr, v, one) = &returned(func(&m, "f")).kind else { panic!("{:?}", returned(func(&m, "f"))) };
+    assert_eq!((v.ty, one.ty), (KTy::I32X4, KTy::I32));
+    assert!(matches!(one.kind, ExprKind::Int(1)), "{one:?}");
+    let g = func(&m, "g");
+    let ExprKind::Binary(BinOp::Shr, cur, n) = &assigns(g)[0].kind else { panic!("{:?}", assigns(g)) };
+    assert_eq!((cur.ty, n.ty), (KTy::I32X4, KTy::I32));
+    assert!(matches!(n.kind, ExprKind::Load(_)), "{n:?}");
+}
+
+#[test]
+fn an_ivec4_compound_with_a_number_is_splat() {
+    let src = "pure f(h: ivec4) -> ivec4 {\n var k = h\n k *= 3\n k &= 0xFFFF\n k *%= 3\n k\n}\nmain() {}\n";
+    let m = lowered(src, false);
+    let f = func(&m, "f");
+    let ops: Vec<(BinOp, i64)> = assigns(f)
+        .iter()
+        .map(|e| match &e.kind {
+            ExprKind::Binary(op, cur, n) => {
+                assert!(matches!(cur.kind, ExprKind::Load(_)) && cur.ty == KTy::I32X4, "{cur:?}");
+                assert_eq!((e.ty, n.ty), (KTy::I32X4, KTy::I32X4), "{e:?}");
+                let ExprKind::Splat(x) = &n.kind else { panic!("{n:?}") };
+                let ExprKind::Int(c) = x.kind else { panic!("{x:?}") };
+                assert_eq!(x.ty, KTy::I32);
+                (*op, c)
+            }
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(ops, vec![(BinOp::Mul, 3), (BinOp::BitAnd, 0xFFFF), (BinOp::MulWrap, 3)]);
+}

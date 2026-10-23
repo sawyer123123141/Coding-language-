@@ -57,8 +57,8 @@ pub enum ExprKind {
     Or(Box<Expr>, Box<Expr>),
     /// Convert the operand to this expression's `ty`.
     Cast(Box<Expr>),
-    /// An integer `Binary(Add | Sub | Mul | Div | Rem | Shl | Shr, ..)`, `Unary(Neg, ..)` or
-    /// narrowing integer `Cast` all of whose checks range analysis proved. For `/` and `%`
+    /// An integer or `ivec4` `Binary(Add | Sub | Mul | Div | Rem | Shl | Shr, ..)`, `Unary(Neg, ..)`
+    /// or narrowing integer `Cast` all of whose checks range analysis proved. For `/` and `%`
     /// that means the divisor is never 0 and never -1 with the dividend at its type's minimum,
     /// so codegen emits a plain divide. Only range analysis makes one, as KIR's last step.
     Proven(Box<Expr>),
@@ -157,8 +157,9 @@ pub enum BinOp {
     BitAnd,
     BitOr,
     BitXor,
-    /// Both operands have the result's type (lowering converts the amount); a vector's amount
-    /// has its lane type.
+    /// Both operands have the result's type (lowering converts the amount), except on a vector:
+    /// its amount is one number of its lane type (`ivec4 << int`), shifting every lane. `>>` is
+    /// arithmetic on signed types and `ivec4`.
     Shl,
     Shr,
     /// `*%`, `+%`, `-%` (integers): the result wraps around and nothing is ever checked, in
