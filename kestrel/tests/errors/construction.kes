@@ -1,9 +1,9 @@
 main() {
-    let a = vec3(1)
+    let a = vec3(1, 2)
     let b = vec2(x: 1)
     let c = Paddle(pos: vec2(0, 0))
 }
 
-// error 2: missing fields `y` and `z` for `vec3`
+// error 2: `vec3` has 3 components, but these values give 2; give 3, one value for all of them, or none for zeros
 // error 3: missing field `y` for `vec2`
 // error 4: unknown struct `Paddle`

@@ -10,6 +10,7 @@ mod str_method;
 pub mod tables;
 mod tables_ty;
 pub mod ty;
+mod vectors;
 
 use kestrel_syntax::ast::Program;
 use kestrel_syntax::Diagnostic;
@@ -19,8 +20,9 @@ pub use collect::is_reserved_name;
 pub use natives::wants_scratch;
 pub use tables::{
     ConstId, ConstInfo, EnumId, EnumInfo, FieldInfo, FnId, FnInfo, IfaceId, IfaceInfo, ListMethod, LocalId, LocalInfo, ParamSig, Res, StrMethod, StructId,
-    StructInfo, Tables, VariantInfo, BUILTIN_STRUCTS, VEC2, VEC3,
+    StructInfo, Tables, VariantInfo, BUILTIN_STRUCTS, IVEC2, IVEC3, VEC2, VEC3,
 };
+pub use vectors::{vec_kind, vector_ty, VecKind};
 pub use closure::{Capture, ClosureInfo};
 pub use sig::{sig_accepts, Sig, SigId, SigParam};
 pub use iface::implements;

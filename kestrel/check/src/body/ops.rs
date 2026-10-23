@@ -14,6 +14,9 @@ impl<'a> BodyChecker<'a> {
             }
             UnaryOp::BitNot => {
                 let ty = self.check_expr(inner, want.filter(|t| t.is_int()));
+                if self.t.vector(ty).is_some_and(|k| k.has_bits()) {
+                    return ty;
+                }
                 if !ty.is_int() && ty != Ty::Error {
                     let msg = format!("`~` needs an integer, found {}", self.tn(ty));
                     self.error(inner.span, msg);
@@ -23,7 +26,7 @@ impl<'a> BodyChecker<'a> {
             }
             UnaryOp::Neg => {
                 let ty = self.check_expr(inner, want.filter(|t| t.is_numeric()));
-                if self.t.vec_dims(ty).is_some() {
+                if self.t.vector(ty).is_some() {
                     return ty;
                 }
                 if ty == Ty::U8 {
@@ -59,12 +62,18 @@ impl<'a> BodyChecker<'a> {
             BinaryOp::Shl | BinaryOp::Shr => {
                 let lt = self.check_expr(lhs, want.filter(|t| t.is_int()));
                 let rt = self.check_expr(rhs, Some(lt).filter(|t| t.is_int()));
+                if self.either_vector(lt, rt) {
+                    return self.vec_binary(e, op, lhs, lt, rhs, rt);
+                }
                 self.bit_operands(op, lhs, lt, rhs, rt);
                 if lt.is_int() { lt } else { Ty::Error }
             }
             _ if op.is_bitwise() => {
                 let lt = self.check_expr(lhs, want.filter(|t| t.is_int()));
                 let rt = self.check_expr(rhs, Some(lt).filter(|t| t.is_int()));
+                if self.either_vector(lt, rt) {
+                    return self.vec_binary(e, op, lhs, lt, rhs, rt);
+                }
                 if !self.bit_operands(op, lhs, lt, rhs, rt) {
                     return Ty::Error;
                 }
@@ -73,6 +82,10 @@ impl<'a> BodyChecker<'a> {
             _ if op.is_comparison() => {
                 let lt = self.check_expr(lhs, None);
                 let rt = self.check_expr(rhs, Some(lt).filter(|t| t.is_numeric()));
+                if self.either_vector(lt, rt) {
+                    self.vec_binary(e, op, lhs, lt, rhs, rt);
+                    return Ty::Bool;
+                }
                 // (Rule 7b's `holds_fn` stays separate: it doesn't look inside interface values.)
                 // Testing against `none` compares no values (it asks only whether there is one), so
                 // `d == none` is not a comparison of interface values.
@@ -103,7 +116,7 @@ impl<'a> BodyChecker<'a> {
                 if op == BinaryOp::Add && (lt == Ty::Str || rt == Ty::Str) {
                     return self.str_concat(e, lt, rt);
                 }
-                if self.t.vec_dims(lt).is_some() || self.t.vec_dims(rt).is_some() {
+                if self.either_vector(lt, rt) {
                     return self.vec_binary(e, op, lhs, lt, rhs, rt);
                 }
                 self.operands(e, op, lhs, lt, rhs, rt)
@@ -111,34 +124,9 @@ impl<'a> BodyChecker<'a> {
         }
     }
 
-    /// `+ - * /` on vectors: component-wise with a vector of the same size,
-    /// or with a number (applied to every component).
-    fn vec_binary(&mut self, e: &Expr, op: BinaryOp, lhs: &Expr, lt: Ty, rhs: &Expr, rt: Ty) -> Ty {
-        if lt == Ty::Error || rt == Ty::Error {
-            return Ty::Error;
-        }
-        let sym = op.symbol();
-        if !matches!(op, BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div) {
-            self.error(e.span, format!("`{sym}` doesn't work on vectors"));
-            return Ty::Error;
-        }
-        let (vec, scalar, scalar_ty) = match (self.t.vec_dims(lt), self.t.vec_dims(rt)) {
-            (Some(_), Some(_)) if lt == rt => return lt,
-            (Some(_), Some(_)) => {
-                let msg = format!("`{sym}` can't mix {} and {}", self.tn(lt), self.tn(rt));
-                self.error(e.span, msg);
-                return Ty::Error;
-            }
-            (Some(_), None) => (lt, rhs, rt),
-            _ => (rt, lhs, lt),
-        };
-        if !scalar_ty.is_numeric() {
-            let msg = format!("`{sym}` needs a vector and a number, found {} and {}", self.tn(lt), self.tn(rt));
-            self.error(e.span, msg);
-            return Ty::Error;
-        }
-        self.coerce(scalar, scalar_ty, Ty::Float);
-        vec
+    /// Whether either operand is a vector (see `vec_binary`).
+    pub(super) fn either_vector(&self, lt: Ty, rt: Ty) -> bool {
+        self.t.vector(lt).is_some() || self.t.vector(rt).is_some()
     }
 
     /// Bit operators take integers. Returns whether both sides are.
@@ -158,7 +146,7 @@ impl<'a> BodyChecker<'a> {
     /// the float it spells (4294967295.0 times an `f64` 1.5, whichever side it is on). Returns
     /// whether `e` was one and is now typed `to`. (A variable that holds a wrapped hex literal is an
     /// `int`: `x * 1.5` is -1.5.)
-    fn retype_hex(&mut self, e: &Expr, from: Ty, to: Ty) -> bool {
+    pub(super) fn retype_hex(&mut self, e: &Expr, from: Ty, to: Ty) -> bool {
         let ExprKind::Int(n) = e.kind else { return false };
         if !to.is_numeric() || from == to || !self.t.hex_literals.contains(&e.id) {
             return false;

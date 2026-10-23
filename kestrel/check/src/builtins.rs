@@ -1,5 +1,5 @@
 //! The built-in functions and constants: GDScript-style global math and
-//! random numbers, plus the `vec2` / `vec3` methods.
+//! random numbers, plus the vector methods.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Builtin {
@@ -29,13 +29,15 @@ pub enum Builtin {
     RandSeed,
     Pi,
     Tau,
-    /// `vec2` / `vec3` methods.
+    /// Methods of the float vectors.
     Length,
     Normalized,
     Dot,
     DistanceTo,
     /// `vec3` only.
     Cross,
+    /// `v.sum()` on every vector: its components added left to right.
+    Sum,
 }
 
 /// Every global function and constant. A new variant belongs here or in `METHODS`.
@@ -68,7 +70,7 @@ const GLOBALS: [Builtin; 26] = [
     Builtin::Tau,
 ];
 
-const METHODS: [Builtin; 5] = [Builtin::Length, Builtin::Normalized, Builtin::Dot, Builtin::DistanceTo, Builtin::Cross];
+const METHODS: [Builtin; 6] = [Builtin::Length, Builtin::Normalized, Builtin::Dot, Builtin::DistanceTo, Builtin::Cross, Builtin::Sum];
 
 const GLOBAL_NAME_LIST: [&str; GLOBALS.len()] = {
     let mut names = [""; GLOBALS.len()];
@@ -89,7 +91,7 @@ impl Builtin {
         GLOBALS.into_iter().find(|b| b.name() == name)
     }
 
-    /// A `vec2` / `vec3` method by name.
+    /// A vector method by name.
     pub fn vector_method(name: &str) -> Option<Builtin> {
         METHODS.into_iter().find(|b| b.name() == name)
     }
@@ -127,6 +129,7 @@ impl Builtin {
             Builtin::Dot => "dot",
             Builtin::DistanceTo => "distance_to",
             Builtin::Cross => "cross",
+            Builtin::Sum => "sum",
         }
     }
 
@@ -144,7 +147,7 @@ impl Builtin {
     pub fn arity(self) -> usize {
         use Builtin::*;
         match self {
-            Pi | Tau | Randf | Length | Normalized => 0,
+            Pi | Tau | Randf | Length | Normalized | Sum => 0,
             Sqrt | Sin | Cos | Tan | Asin | Acos | Atan | Exp | Log | Floor | Ceil | Round | Abs | Sign | RandSeed | Dot
             | DistanceTo | Cross => 1,
             Atan2 | Pow | Min | Max | RandfRange | RandiRange => 2,

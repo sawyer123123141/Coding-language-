@@ -1,0 +1,35 @@
+// The rules every vector type shares: how to make one, and which operators and built-ins it has.
+main() {
+    let a = ivec3(1, 2)
+    let b = ivec2(1.5)
+    let n: i64 = 3
+    let c = ivec2(n)
+    let d = ivec3(vec2(1, 2), 3)
+    let e = vec3(ivec2(1, 2), 3)
+    let f = vec3(x: 1, vec2(1, 2))
+    let g = ivec2(1, 2) * 0.5
+    let h = vec3(1, 2, 3) < vec3(1, 2, 3)
+    let i = ivec2(1, 2) >> ivec2(1, 1)
+    let j = sqrt(ivec2(4, 9))
+    let k = ivec2(1, 2).length()
+    let l = vec2(1, 2).cross(vec2(1, 2))
+    let m = vec2(1, 2) & 1
+    let o = vec2(1, 2) % 2.0
+    let ivec2 = 1
+}
+
+// error 3: `ivec3` has 3 components, but these values give 2; give 3, one value for all of them, or none for zeros
+// error 4: `ivec2` holds ints, found float; convert it with `int(...)` first
+// error 6: `ivec2` holds ints, found i64; convert it with `int(...)` first
+// error 7: `ivec3` takes ints and int vectors, found vec2; convert it with `ivec2(...)` first
+// error 8: `vec3` takes floats and float vectors, found ivec2; convert it with `vec2(...)` first
+// error 9: labels only work when every component is a number, like `vec4(x: 1, y: 2, z: 3, w: 4)`
+// error 10: `*` can't mix ivec2 and float; convert with `vec2(...)` first
+// error 11: `<` doesn't compare vectors; compare components, like `a.x < b.x`
+// error 12: `>>` shifts every component by one `int`; shift each component on its own for different amounts
+// error 13: `sqrt` needs floats; convert with `vec2(...)` first
+// error 14: `length` needs a float vector; convert with `vec2(...)` first
+// error 15: `cross` needs a vec3; vec2 has no cross product
+// error 16: `&` needs integers, found vec2
+// error 17: `%` doesn't work on vectors
+// error 18: `ivec2` is a built-in name; pick another

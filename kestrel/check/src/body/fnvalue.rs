@@ -51,7 +51,7 @@ impl<'a> BodyChecker<'a> {
     pub(crate) fn method_value_error(&mut self, base_ty: Ty, name: &str, span: Span) -> bool {
         let is_method = match base_ty {
             Ty::Struct(sid) => {
-                self.t.strukt(sid).methods.contains_key(name) || (self.t.vec_dims(base_ty).is_some() && Builtin::vector_method(name).is_some())
+                self.t.strukt(sid).methods.contains_key(name) || (self.t.vector(base_ty).is_some() && Builtin::vector_method(name).is_some())
             }
             Ty::Enum(id) => self.t.enm(id).methods.contains_key(name),
             Ty::Iface(id) => self.iface_method(id, name).is_some(),

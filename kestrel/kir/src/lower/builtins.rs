@@ -67,6 +67,10 @@ impl<'a> FnLowerer<'a> {
 
     /// A call to a global built-in function; the call's type is `ty`.
     pub(crate) fn builtin_call(&mut self, b: Builtin, args: &[ast::Arg], ty: KTy, line: u32) -> ExprKind {
+        // On vectors, lane by lane (`lerp` combines whole vectors).
+        if ty.is_aggregate() && b != Builtin::Lerp {
+            return self.vec_lane_call(b, args, ty, line);
+        }
         let op = match b {
             Builtin::Sqrt => MathOp::Sqrt,
             Builtin::Sin => MathOp::Sin,
@@ -112,7 +116,7 @@ impl<'a> FnLowerer<'a> {
     }
 
     /// `v` evaluated once, in order: a literal can be repeated, anything else goes through a temporary.
-    fn once(&mut self, v: Expr, pre: &mut Vec<Stmt>) -> Expr {
+    pub(super) fn once(&mut self, v: Expr, pre: &mut Vec<Stmt>) -> Expr {
         match v.kind {
             ExprKind::Int(_) | ExprKind::Float(_) => v,
             _ => self.spill(v, pre),
@@ -139,7 +143,7 @@ impl<'a> FnLowerer<'a> {
         Self::with_pre(pre, kind, ty, line)
     }
 
-    fn float_call(&mut self, b: Builtin, vals: Vec<Expr>, ty: KTy, line: u32, pre: &mut Vec<Stmt>) -> ExprKind {
+    pub(super) fn float_call(&mut self, b: Builtin, vals: Vec<Expr>, ty: KTy, line: u32, pre: &mut Vec<Stmt>) -> ExprKind {
         match b {
             Builtin::Abs => ExprKind::Math(MathOp::Abs, vals),
             Builtin::Min => ExprKind::Math(MathOp::Min, vals),
@@ -159,7 +163,7 @@ impl<'a> FnLowerer<'a> {
     }
 
     /// `vals` have been through `once`, so each can be read more than once.
-    fn int_call(&mut self, b: Builtin, vals: Vec<Expr>, ty: KTy, line: u32, pre: &mut Vec<Stmt>) -> ExprKind {
+    pub(super) fn int_call(&mut self, b: Builtin, vals: Vec<Expr>, ty: KTy, line: u32, pre: &mut Vec<Stmt>) -> ExprKind {
         let flag = KTy::Bool;
         match b {
             Builtin::Abs => {

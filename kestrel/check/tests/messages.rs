@@ -55,12 +55,14 @@ fn a_constant_called_like_a_function_says_to_drop_the_parens() {
 #[test]
 fn a_vector_needs_every_component_or_none() {
     assert_eq!(
-        errors("main() {\n let v = vec3(1)\n}\n"),
-        one("missing fields `y` and `z` for `vec3`", "give every component, or none for a zero vector: `vec3()`")
+        errors("main() {\n let v = vec3(1, 2)\n}\n"),
+        vec![("`vec3` has 3 components, but these values give 2; give 3, one value for all of them, or none for zeros".to_string(), None)]
     );
     assert_eq!(
         errors("main() {\n let v = vec2(x: 1)\n}\n"),
-        one("missing field `y` for `vec2`", "give every component, or none for a zero vector: `vec2()`")
+        one("missing field `y` for `vec2`", "give every component, one value for all of them, or none for zeros: `vec2()`")
     );
+    // One value is all of them.
+    assert_eq!(errors("main() {\n let v = vec3(1)\n print(v)\n}\n"), vec![]);
     assert_eq!(errors("let O = vec3()\nmain() {\n let v = vec2()\n print(O, v)\n}\n"), vec![]);
 }

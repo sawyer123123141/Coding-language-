@@ -11,9 +11,12 @@ use crate::tables::{
     BUILTIN_STRUCTS,
 };
 use crate::ty::Ty;
+use crate::vectors::COMPONENTS;
 
-pub(crate) const BUILTINS: &[&str] =
-    &["print", "int", "i64", "u8", "float", "f64", "bool", "string", "vec2", "vec3", "array", "list", "map", "Arena", "GpuHandle"];
+pub(crate) const BUILTINS: &[&str] = &[
+    "print", "int", "i64", "u8", "float", "f64", "bool", "string", "vec2", "vec3", "vec4", "ivec2", "ivec3", "ivec4", "array", "list", "map", "Arena",
+    "GpuHandle",
+];
 
 /// Names an item, local or parameter can't take: types and constructors (`BUILTINS`),
 /// and every global built-in function or constant.
@@ -111,14 +114,15 @@ pub(crate) fn collect(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnos
     }
 }
 
-/// `vec2` and `vec3`: structs of floats, always `StructId` 0 and 1.
+/// `vec2` and `vec3` (structs of floats) and `ivec2` and `ivec3` (structs of ints), always
+/// `StructId` 0 to 3 (see `VEC2` ... `IVEC3`).
 fn add_builtin_vectors(t: &mut Tables) {
-    for (name, comps) in [("vec2", &["x", "y"][..]), ("vec3", &["x", "y", "z"][..])] {
+    for (name, dims, lane) in [("vec2", 2, Ty::Float), ("vec3", 3, Ty::Float), ("ivec2", 2, Ty::Int), ("ivec3", 3, Ty::Int)] {
         let id = StructId(t.structs.len() as u32);
         t.struct_by_name.insert(name.to_string(), id);
-        let fields = comps
+        let fields = COMPONENTS[..dims]
             .iter()
-            .map(|c| FieldInfo { name: c.to_string(), ty: Ty::Float, span: Span::default(), has_default: false, default_allocates: false })
+            .map(|c| FieldInfo { name: c.to_string(), ty: lane, span: Span::default(), has_default: false, default_allocates: false })
             .collect();
         t.structs.push(StructInfo { name: name.to_string(), item: usize::MAX, span: Span::default(), fields, methods: HashMap::new(), ifaces: Vec::new() });
     }

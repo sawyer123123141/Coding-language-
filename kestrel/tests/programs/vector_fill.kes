@@ -1,0 +1,15 @@
+// One value fills every component; a vector converts to the other kind of its size (an `int`
+// conversion truncates toward zero); numbers and vectors mix when their components add up.
+main() {
+    print(vec2(0.5), vec3(2), ivec2(7), ivec3(-1))
+    let v2 = vec2(1, 2)
+    print(vec3(v2, 3), vec3(0.5, v2))
+    let iv = ivec3(3, -4, 5)
+    print(vec3(iv), ivec3(vec3(1.9, -1.9, 2.5)))
+    print(ivec2(), ivec3(), ivec2(x: 4, y: 5))
+}
+
+// expect: vec2(x: 0.5, y: 0.5) vec3(x: 2, y: 2, z: 2) ivec2(x: 7, y: 7) ivec3(x: -1, y: -1, z: -1)
+// expect: vec3(x: 1, y: 2, z: 3) vec3(x: 0.5, y: 1, z: 2)
+// expect: vec3(x: 3, y: -4, z: 5) ivec3(x: 1, y: -1, z: 2)
+// expect: ivec2(x: 0, y: 0) ivec3(x: 0, y: 0, z: 0) ivec2(x: 4, y: 5)

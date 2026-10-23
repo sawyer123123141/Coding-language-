@@ -43,6 +43,9 @@ impl<'a> BodyChecker<'a> {
             return self.check_builtin_call(e, b, args);
         }
         if let Some(&sid) = self.t.struct_by_name.get(name) {
+            if self.t.vector(Ty::Struct(sid)).is_some() {
+                return self.check_vec_make(e, sid, args);
+            }
             return self.check_construct(e, sid, args);
         }
         let Some(&fid) = self.t.fn_by_name.get(name) else {

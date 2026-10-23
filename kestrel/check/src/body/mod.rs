@@ -15,6 +15,7 @@ mod fnvalue;
 mod iface;
 mod let_else;
 mod in_block;
+mod lanes;
 mod list_fns;
 mod lists;
 mod maps;
@@ -31,6 +32,9 @@ mod remove;
 mod stmt;
 mod strings;
 mod structs;
+mod vec_builtins;
+mod vec_make;
+mod vec_ops;
 mod wrap;
 
 pub(crate) use consts::{check_consts, is_const_expr};

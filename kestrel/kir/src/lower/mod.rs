@@ -29,6 +29,8 @@ mod stmt;
 mod strings;
 mod tables;
 mod temps;
+mod vec_builtins;
+mod vec_make;
 mod vector;
 
 use std::collections::{HashMap, HashSet};

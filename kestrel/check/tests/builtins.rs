@@ -183,7 +183,10 @@ fn builtin_errors() {
         ("main() {\n let small: u8 = 7\n print(max(small, 300))\n}\n", "`300` doesn't fit in u8"),
         ("main() {\n print(sign(vec2(1, 2)))\n}\n", "`sign` needs a number here, found vec2"),
         ("main() {\n print(lerp(1, 2))\n}\n", "`lerp` takes three values"),
-        ("main() {\n print(lerp(1, vec2(1, 2), 0.5))\n}\n", "`lerp` needs two numbers or two vectors of the same size, found int and vec2"),
+        // (A number next to a vector fills its lanes: `lerp(1, vec2(1, 2), 0.5)` is fine.)
+        ("main() {\n print(lerp(vec3(1), vec2(1, 2), 0.5))\n}\n", "`lerp` needs two numbers or two vectors of the same size, found vec3 and vec2"),
+        ("main() {\n print(lerp(vec2(1, 2), true, 0.5))\n}\n", "`lerp` needs two numbers or two vectors of the same size, found vec2 and bool"),
+        ("main() {\n print(lerp(ivec2(1, 2), 3, 0.5))\n}\n", "`lerp` needs floats; convert with `vec2(...)` first"),
         ("main() {\n print(lerp(vec2(1, 2), vec3(1, 2, 3), 0.5))\n}\n", "`lerp` needs two numbers or two vectors of the same size, found vec2 and vec3"),
         ("main() {\n print(lerp(\"a\", \"b\", 0.5))\n}\n", "`lerp` needs two numbers or two vectors of the same size, found string and string"),
         ("main() {\n print(lerp(1, 2, vec2(1, 2)))\n}\n", "`lerp` needs a number here, found vec2"),

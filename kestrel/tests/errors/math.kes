@@ -7,7 +7,7 @@ main() {
 }
 abs(x: int) -> int { x }
 other() {
-    print(lerp(vec2(1, 1), 2.0, 0.5))
+    print(lerp(vec2(1, 1), vec3(1, 1, 1), 0.5))
     print(vec2(1, 1).dot(vec3(1, 1, 1)))
     print(vec2(1, 1).length(2))
     print(min(1, "a"))
@@ -35,7 +35,7 @@ dice() {
 // error 5: the result of `sqrt` is unused, so this line does nothing
 // error 6: `atan2` takes two values
 // error 8: `abs` is a built-in name; pick another
-// error 10: `lerp` needs two numbers or two vectors of the same size, found vec2 and float
+// error 10: `lerp` needs two numbers or two vectors of the same size, found vec2 and vec3
 // error 11: expected vec2, found vec3
 // error 12: `length` takes no values
 // error 13: `min` needs a number here, found string

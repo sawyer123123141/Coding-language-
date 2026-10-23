@@ -143,8 +143,8 @@ impl<'a> BodyChecker<'a> {
         if self.wrap_compound(target, target_ty, op, value) {
             return;
         }
-        if op != AssignOp::Set && self.t.vec_dims(target_ty).is_some() {
-            return self.check_vec_compound(target_ty, op, value);
+        if op != AssignOp::Set && self.t.vector(target_ty).is_some() {
+            return self.check_vec_compound(target, target_ty, op, value);
         }
         if op.binary().is_some_and(|b| b.is_bitwise() || b.is_wrapping()) && !target_ty.is_int() && target_ty != Ty::Error {
             let msg = format!("`{}` needs an integer, found {}", op.symbol(), self.tn(target_ty));
@@ -169,19 +169,6 @@ impl<'a> BodyChecker<'a> {
         }
         if let Some(l) = reinit {
             self.moved.remove(&l);
-        }
-    }
-
-    /// `v += w`, `v *= 2.0`: the value is a vector of the same size, or a number.
-    fn check_vec_compound(&mut self, target_ty: Ty, op: AssignOp, value: &Expr) {
-        let value_ty = self.check_expr(value, None);
-        if op == AssignOp::Rem {
-            self.error(value.span, "`%=` doesn't work on vectors");
-        } else if value_ty.is_numeric() {
-            self.coerce(value, value_ty, Ty::Float);
-        } else if value_ty != target_ty && value_ty != Ty::Error {
-            let msg = format!("`{}` needs a {} or a number, found {}", op.symbol(), self.tn(target_ty), self.tn(value_ty));
-            self.error(value.span, msg);
         }
     }
 }

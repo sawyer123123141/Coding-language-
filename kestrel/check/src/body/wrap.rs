@@ -1,15 +1,17 @@
 //! The wrapping operators `*% +% -%` and `*%= +%= -%=`: integer arithmetic that wraps around on
-//! overflow and never checks, in every build. The types that have them are listed in `wraps`.
+//! overflow and never checks, in every build. The types that have them are listed in `wraps`
+//! (on an int vector they go through `vec_binary`).
 
 use kestrel_syntax::ast::{AssignOp, BinaryOp, Expr};
 use kestrel_syntax::Span;
 
 use super::BodyChecker;
 use crate::ty::Ty;
+use crate::vectors::vec_kind;
 
-/// Whether the wrapping operators work on `ty`: `int`, `i64` and `u8`.
+/// Whether the wrapping operators work on `ty`: `int`, `i64`, `u8` and the int vectors.
 pub(super) fn wraps(ty: Ty) -> bool {
-    ty.is_int()
+    ty.is_int() || vec_kind(ty).is_some_and(|k| k.has_bits())
 }
 
 impl<'a> BodyChecker<'a> {
@@ -23,6 +25,9 @@ impl<'a> BodyChecker<'a> {
             let plain = op.plain().expect("a wrapping operator");
             self.wrap_float_error(e.span, op.symbol(), plain.symbol());
             return Ty::Error;
+        }
+        if self.either_vector(lt, rt) {
+            return self.vec_binary(e, op, lhs, lt, rhs, rt);
         }
         for (side, t) in [(lhs, lt), (rhs, rt)] {
             if !wraps(t) {
@@ -48,9 +53,9 @@ impl<'a> BodyChecker<'a> {
         true
     }
 
-    /// Types with no wrapping form: floats and every vector.
+    /// Types with no wrapping form: floats and the float vectors.
     fn no_wrap(&self, ty: Ty) -> bool {
-        ty.is_float() || self.t.vec_dims(ty).is_some()
+        ty.is_float() || self.t.vector(ty).is_some_and(|k| !k.has_bits())
     }
 
     /// W1: the message that sends floats to the plain operator.

@@ -131,11 +131,11 @@ const SHAPES: &str = "struct Point {\n    x: int\n    y: int = 7\n\n    pure sum
 #[test]
 fn struct_layouts_are_c_like() {
     let m = lower_src("struct S {\n    a: u8\n    b: i64\n    c: u8\n}\nstruct T {\n    s: S\n    d: int\n}\nmain() {}\n");
-    // Structs 0 and 1 are the built-in vec2 and vec3.
-    let s = &m.structs[2];
+    // Structs 0 to 3 are the built-in vec2, vec3, ivec2 and ivec3.
+    let s = &m.structs[4];
     assert_eq!(s.fields.iter().map(|f| f.offset).collect::<Vec<_>>(), vec![0, 8, 16]);
     assert_eq!((s.size, s.align), (24, 8));
-    let t = &m.structs[3];
+    let t = &m.structs[5];
     assert_eq!(t.fields.iter().map(|f| f.offset).collect::<Vec<_>>(), vec![0, 24]);
     assert_eq!((t.size, t.align), (32, 8));
 }
@@ -148,7 +148,7 @@ fn struct_locals_live_in_memory_and_params_by_pointer() {
     assert!(main.locals[0].ty.is_aggregate());
     let sum = func(&m, "Point.sum");
     assert_eq!(sum.locals[0].kind, LocalKind::RefParam);
-    assert_eq!(func(&m, "make").ret, Some(KTy::Struct(StructIdx(2))));
+    assert_eq!(func(&m, "make").ret, Some(KTy::Struct(StructIdx(4))));
 }
 
 #[test]
@@ -156,7 +156,7 @@ fn constructors_fill_defaults_and_fields_are_places() {
     let m = lower_src(SHAPES);
     let make = func(&m, "make");
     match &make.body[..] {
-        [Stmt::Return(Some(Expr { kind: ExprKind::StructLit(StructIdx(2), fields), .. }))] => {
+        [Stmt::Return(Some(Expr { kind: ExprKind::StructLit(StructIdx(4), fields), .. }))] => {
             assert!(matches!(fields[0].kind, ExprKind::Load(_)));
             assert!(matches!(fields[1].kind, ExprKind::Int(7)));
         }

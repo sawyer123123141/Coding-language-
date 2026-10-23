@@ -64,9 +64,10 @@ impl<'a> FnLowerer<'a> {
                 Res::FnValue(f) => self.fn_ref(f),
                 other => unreachable!("name resolved to {other:?}"),
             },
-            ast::ExprKind::Unary { op: ast::UnaryOp::Neg, expr } if self.vec_ty(e).is_some() => {
+            ast::ExprKind::Unary { op: op @ (ast::UnaryOp::Neg | ast::UnaryOp::BitNot), expr } if self.vec_ty(e).is_some() => {
                 let v = self.expr(expr);
-                self.vec_negate(v, ty, line)
+                let op = if *op == ast::UnaryOp::Neg { UnOp::Neg } else { UnOp::BitNot };
+                self.vec_unary(op, v, ty, line)
             }
             ast::ExprKind::Unary { op, expr } => {
                 let op = match op {
@@ -77,6 +78,12 @@ impl<'a> FnLowerer<'a> {
                 ExprKind::Unary(op, Box::new(self.expr(expr)))
             }
             ast::ExprKind::Binary { op: ast::BinaryOp::Add, lhs, rhs } if ty == KTy::Str => self.str_concat(lhs, rhs),
+            ast::ExprKind::Binary { op: op @ (ast::BinaryOp::Eq | ast::BinaryOp::Ne), lhs, rhs }
+                if self.vec_ty(lhs).is_some() || self.vec_ty(rhs).is_some() =>
+            {
+                let (l, r) = (self.expr(lhs), self.expr(rhs));
+                self.vec_equal(*op == ast::BinaryOp::Ne, l, r, line)
+            }
             ast::ExprKind::Binary { op, lhs, rhs } if self.vec_ty(e).is_some() => {
                 let (l, r) = (self.expr(lhs), self.expr(rhs));
                 self.vec_combine(binop(*op), l, r, ty, line)
@@ -102,6 +109,7 @@ impl<'a> FnLowerer<'a> {
             }
             ast::ExprKind::Call { args, .. } => match self.t.res[&e.id] {
                 Res::Convert(_) => ExprKind::Cast(Box::new(self.expr(&args[0].value))),
+                Res::Construct(sid) if self.t.vec_makes.contains(&e.id) => self.vec_make(sid, args, ty, line),
                 Res::NewArena => ExprKind::NewArena,
                 Res::Builtin(b) => self.builtin_call(b, args, ty, line),
                 Res::Fn(f) if self.wants_scratch(f, args) => self.scratch_call_value(e, f, args, ty, line),

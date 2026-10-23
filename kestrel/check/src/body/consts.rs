@@ -229,7 +229,8 @@ pub(crate) fn is_const_expr(e: &Expr, t: &Tables) -> bool {
         // capitalised name that isn't a function is one meant to be (an unknown struct, an enum, a
         // constant): `check_call` says what's wrong with it.
         ExprKind::Call { name, args, .. } if t.struct_by_name.contains_key(name) || names_no_fn(name, t) => all(args),
-        ExprKind::Field { base, .. } => names_enum(base),
+        // A swizzle of a constant vector (`ORIGIN.xy`) is a new vector, built like a make.
+        ExprKind::Field { base, name, .. } => names_enum(base) || (is_swizzle_name(name) && is_const_expr(base, t)),
         ExprKind::MethodCall { receiver, args, .. } => names_enum(receiver) && all(args),
         ExprKind::Unary { expr, .. } => is_const_expr(expr, t),
         ExprKind::Binary { lhs, rhs, .. } => is_const_expr(lhs, t) && is_const_expr(rhs, t),
@@ -254,4 +255,9 @@ fn names_no_fn(name: &str, t: &Tables) -> bool {
     let capitalised = name.starts_with(|c: char| c.is_ascii_uppercase());
     let other = t.enum_by_name.contains_key(name) || t.consts.iter().any(|c| c.name == name);
     (capitalised || other) && !t.fn_by_name.contains_key(name)
+}
+
+/// Whether `name` could pick components of a vector (`xy`, `zyx`, `wzyx`): 2 to 4 of `x y z w`.
+fn is_swizzle_name(name: &str) -> bool {
+    (2..=4).contains(&name.len()) && name.chars().all(|c| "xyzw".contains(c))
 }

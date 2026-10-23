@@ -1,0 +1,18 @@
+// Every make and a swizzle are constant expressions, in constants and field defaults.
+let HALF = vec3(0.5)
+let STEP = ivec3(1, ivec2(2, 3))
+let FLAT = STEP.zx
+let BACK = vec3(STEP)
+
+struct Cell {
+    at: ivec2 = FLAT.yx
+    size: vec2 = vec2(1)
+}
+
+main() {
+    print(HALF, STEP, FLAT, BACK)
+    print(Cell())
+}
+
+// expect: vec3(x: 0.5, y: 0.5, z: 0.5) ivec3(x: 1, y: 2, z: 3) ivec2(x: 3, y: 1) vec3(x: 1, y: 2, z: 3)
+// expect: Cell(at: ivec2(x: 1, y: 3), size: vec2(x: 1, y: 1))

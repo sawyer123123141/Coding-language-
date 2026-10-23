@@ -1,0 +1,16 @@
+// The lane-by-lane built-ins, with a number filling every lane, and `sum`.
+main() {
+    let v = vec3(-1.5, 2.25, 9)
+    print(abs(v), floor(v), ceil(v), round(v))
+    print(sqrt(vec2(4, 9)), min(v, 1), max(v, vec3(0)), clamp(v, -1, 2))
+    print(lerp(vec2(0, 10), vec2(10, 20), 0.5))
+    let iv = ivec3(-3, 4, 7)
+    print(abs(iv), min(iv, 5), max(iv, ivec3(0)), clamp(iv, 0, 5))
+    print(v.sum(), iv.sum(), vec2(1, 2) == vec2(1, 2))
+}
+
+// expect: vec3(x: 1.5, y: 2.25, z: 9) vec3(x: -2, y: 2, z: 9) vec3(x: -1, y: 3, z: 9) vec3(x: -2, y: 2, z: 9)
+// expect: vec2(x: 2, y: 3) vec3(x: -1.5, y: 1, z: 1) vec3(x: 0, y: 2.25, z: 9) vec3(x: -1, y: 2, z: 2)
+// expect: vec2(x: 5, y: 15)
+// expect: ivec3(x: 3, y: 4, z: 7) ivec3(x: -3, y: 4, z: 5) ivec3(x: 0, y: 4, z: 7) ivec3(x: 0, y: 4, z: 5)
+// expect: 9.75 8 true

@@ -1,0 +1,22 @@
+// `ivec2` and `ivec3` operators work component by component, each as `int` does.
+main() {
+    let a = ivec3(1, 2, 3)
+    let b = ivec3(10, 20, 30)
+    print(a + b, b - a, a * 2, 3 * a, -a)
+    print(b & 6, a | ivec3(8), a ^ b, ~a, b >> 1, a << 2)
+    print(a *% 2, ivec2(2147483647, 0) +% 1)
+    print(a.zyx, a.xz, a.x + a.y, a == ivec3(1, 2, 3), a != a)
+    print(ivec3(7, -7, 9) / 2, ivec3(7, -7, 9) % 4, ivec2(9, 8) / ivec2(3, 2))
+    var c = a
+    c.y = 9
+    c += ivec3(1)
+    c /= 2
+    print(c)
+}
+
+// expect: ivec3(x: 11, y: 22, z: 33) ivec3(x: 9, y: 18, z: 27) ivec3(x: 2, y: 4, z: 6) ivec3(x: 3, y: 6, z: 9) ivec3(x: -1, y: -2, z: -3)
+// expect: ivec3(x: 2, y: 4, z: 6) ivec3(x: 9, y: 10, z: 11) ivec3(x: 11, y: 22, z: 29) ivec3(x: -2, y: -3, z: -4) ivec3(x: 5, y: 10, z: 15) ivec3(x: 4, y: 8, z: 12)
+// expect: ivec3(x: 2, y: 4, z: 6) ivec2(x: -2147483648, y: 1)
+// expect: ivec3(x: 3, y: 2, z: 1) ivec2(x: 1, y: 3) 3 true false
+// expect: ivec3(x: 3, y: -3, z: 4) ivec3(x: 3, y: -3, z: 1) ivec2(x: 3, y: 4)
+// expect: ivec3(x: 1, y: 5, z: 2)

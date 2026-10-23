@@ -51,7 +51,8 @@ impl<'a> FnLowerer<'a> {
                             rhs
                         };
                         let line = rhs.line;
-                        let rhs = shift_amount(binop(bop), rhs, ty);
+                        // (A vector's shift amount becomes its lane type in `vec_combine`.)
+                        let rhs = if ty.is_aggregate() { rhs } else { shift_amount(binop(bop), rhs, ty) };
                         let cur = Expr { kind: ExprKind::Load(place.clone()), ty, line };
                         let kind = if ty == KTy::Str {
                             // `s += t` is `s = s + t`: a new string, built before it replaces `s`.

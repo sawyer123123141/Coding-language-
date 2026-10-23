@@ -224,6 +224,8 @@ fn uses_in(program: &Program, t: &Tables, e: &ast::Expr, out: &mut Vec<ConstId>)
         // may name a heap constant that must be built first.
         ast::ExprKind::TypeCall { args, .. } | ast::ExprKind::MethodCall { args, .. } => all(args, out),
         ast::ExprKind::Unary { expr, .. } => uses_in(program, t, expr, out),
+        // A swizzle of a constant (`ORIGIN.xy`).
+        ast::ExprKind::Field { base, .. } => uses_in(program, t, base, out),
         ast::ExprKind::Binary { lhs, rhs, .. } => {
             uses_in(program, t, lhs, out);
             uses_in(program, t, rhs, out);

@@ -1,0 +1,35 @@
+// Each part of a mixed or labelled make runs once, in source order.
+next(var n: int) -> float {
+    n += 1
+    print(n)
+    float(n)
+}
+
+side(var n: int) -> vec2 {
+    n *= 10
+    print(n)
+    vec2(n, n + 1)
+}
+
+k(var n: int) -> int {
+    n += 1
+    print(n)
+    n
+}
+
+main() {
+    var n = 0
+    print(vec3(next(var n), side(var n)))
+    print(ivec3(z: k(var n), x: k(var n), y: 0))
+    print(vec3(side(var n), next(var n)))
+}
+
+// expect: 1
+// expect: 10
+// expect: vec3(x: 1, y: 10, z: 11)
+// expect: 11
+// expect: 12
+// expect: ivec3(x: 12, y: 0, z: 11)
+// expect: 120
+// expect: 121
+// expect: vec3(x: 120, y: 121, z: 121)

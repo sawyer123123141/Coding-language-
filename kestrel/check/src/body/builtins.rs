@@ -1,5 +1,5 @@
 //! Typing for the global built-ins: `sqrt(x)`, `atan2(y, x)`, `PI`,
-//! `clamp(x, lo, hi)`... and the `vec2` / `vec3` methods.
+//! `clamp(x, lo, hi)`... (with vectors, see `vec_builtins`).
 
 use kestrel_syntax::ast::{Arg, Expr};
 use kestrel_syntax::Span;
@@ -9,6 +9,7 @@ use super::BodyChecker;
 use crate::builtins::Builtin;
 use crate::tables::Res;
 use crate::ty::Ty;
+use crate::vectors::is_lane_builtin;
 
 /// How a call's value count reads in "`sqrt` takes one value".
 fn count_words(n: usize) -> &'static str {
@@ -22,13 +23,13 @@ fn count_words(n: usize) -> &'static str {
 }
 
 /// The functions that take floats and give a float (`sqrt`...`round`, `randf_range`).
-fn is_float_function(b: Builtin) -> bool {
+pub(super) fn is_float_function(b: Builtin) -> bool {
     use Builtin::*;
     matches!(b, Sqrt | Sin | Cos | Tan | Asin | Acos | Atan | Atan2 | Exp | Log | Pow | Floor | Ceil | Round | RandfRange)
 }
 
 /// What is wrong with the values written in a built-in call, if anything.
-fn args_problem(e: &Expr, b: Builtin, args: &[Arg]) -> Option<(Span, String)> {
+pub(super) fn args_problem(e: &Expr, b: Builtin, args: &[Arg]) -> Option<(Span, String)> {
     if let Some(bad) = args.iter().find(|a| a.label.is_some() || a.is_var) {
         Some((bad.span, "built-in functions take plain values, not labels or `var`".to_string()))
     } else if args.len() != b.arity() {
@@ -70,6 +71,7 @@ impl<'a> BodyChecker<'a> {
                 Ty::Float
             }
             Builtin::RandiRange | Builtin::RandSeed => self.check_integer_args(e, b, args),
+            _ if is_lane_builtin(b) => self.check_lane_call(e, b, args),
             _ if is_float_function(b) => self.check_float_args(e, b, args),
             _ => self.check_met_args(e, b, args, Self::number_arg),
         }
@@ -93,37 +95,8 @@ impl<'a> BodyChecker<'a> {
         }
     }
 
-    /// A call to a `vec2` / `vec3` method (`length`, `normalized`, `dot`,
-    /// `distance_to`, and `cross` on a `vec3`). Its values are vectors of the
-    /// receiver's type.
-    pub(crate) fn check_vector_method(&mut self, e: &Expr, b: Builtin, receiver: &Expr, receiver_ty: Ty, args: &[Arg]) -> Ty {
-        if let Some((span, msg)) = args_problem(e, b, args) {
-            self.error(span, msg);
-            self.check_loose_args(args);
-            return Ty::Error;
-        }
-        for a in args {
-            self.check_value(&a.value, Some(receiver_ty));
-        }
-        if b == Builtin::Cross && self.t.vec_dims(receiver_ty) != Some(3) {
-            self.error(e.span, "`cross` needs a vec3; vec2 has no cross product");
-            return Ty::Error;
-        }
-        // A receiver that is a plain place (`p.pos`) is read after the values
-        // are computed, so they must not change it. (One that computes an
-        // index, like `vs[i]`, is copied first, in order.)
-        let later: Vec<&Expr> = args.iter().map(|a| &a.value).collect();
-        self.check_changed_later(&[receiver], &later);
-        self.t.res.insert(e.id, Res::Builtin(b));
-        if matches!(b, Builtin::Normalized | Builtin::Cross) {
-            receiver_ty
-        } else {
-            Ty::Float
-        }
-    }
-
     /// `ty`, the type of `e`, which a built-in needs to be a number.
-    fn require_number(&mut self, b: Builtin, e: &Expr, ty: Ty) -> Ty {
+    pub(super) fn require_number(&mut self, b: Builtin, e: &Expr, ty: Ty) -> Ty {
         if ty.is_numeric() || ty == Ty::Error {
             return ty;
         }
@@ -155,7 +128,7 @@ impl<'a> BodyChecker<'a> {
 
     /// Converts every argument to the type they all meet at, which is the result's.
     /// `tys` are their types, all numbers.
-    fn meet_args(&mut self, e: &Expr, b: Builtin, args: &[Arg], tys: &[Ty]) -> Ty {
+    pub(super) fn meet_args(&mut self, e: &Expr, b: Builtin, args: &[Arg], tys: &[Ty]) -> Ty {
         let result = tys.iter().copied().reduce(|x, y| Ty::common(x, y).expect("numbers meet at one of them")).unwrap_or(Ty::Float);
         for (a, &ty) in args.iter().zip(tys) {
             self.coerce(&a.value, ty, result);
@@ -211,8 +184,8 @@ impl<'a> BodyChecker<'a> {
         }
     }
 
-    /// `lerp(a, b, t)`: two numbers (the result is a float, even for integers)
-    /// or two vectors of the same type, and a number `t` of the result's type.
+    /// `lerp(a, b, t)`: two numbers (the result is a float, even for integers) and a number `t`
+    /// of the result's type; with a vector, see `check_vec_lerp`.
     fn check_lerp(&mut self, e: &Expr, args: &[Arg]) -> Ty {
         let mut tys = [Ty::Error; 3];
         for (slot, a) in tys.iter_mut().zip(args) {
@@ -221,27 +194,32 @@ impl<'a> BodyChecker<'a> {
         }
         let [first, second, t] = tys;
         let t = self.require_number(Builtin::Lerp, &args[2].value, t);
-        let vector = self.t.vec_dims(first).is_some();
-        let fits = if vector { second == first } else { first.is_numeric() && second.is_numeric() };
-        if !fits {
-            if first != Ty::Error && second != Ty::Error {
-                let (a, b) = (self.tn(first), self.tn(second));
-                let msg = format!("`lerp` needs two numbers or two vectors of the same size, found {a} and {b}");
-                self.error(e.span, msg);
-            }
+        if self.either_vector(first, second) {
+            return self.check_vec_lerp(e, args, [first, second, t]);
+        }
+        if !first.is_numeric() || !second.is_numeric() {
+            self.lerp_mismatch(e, first, second);
             return Ty::Error;
         }
         if t == Ty::Error {
             return Ty::Error;
         }
-        // Integers have no halfway points: they meet at `float`. Vector components are floats.
-        let common = Ty::common(first, second).expect("numbers, and equal vectors, meet at one of them");
-        let result = if !vector && common.is_int() { Ty::Float } else { common };
-        let t_to = if vector { Ty::Float } else { result };
+        // Integers have no halfway points: they meet at `float`.
+        let common = Ty::common(first, second).expect("numbers meet at one of them");
+        let result = if common.is_int() { Ty::Float } else { common };
         self.coerce(&args[0].value, first, result);
         self.coerce(&args[1].value, second, result);
-        self.coerce(&args[2].value, t, t_to);
+        self.coerce(&args[2].value, t, result);
         self.t.res.insert(e.id, Res::Builtin(Builtin::Lerp));
         result
+    }
+
+    /// `lerp`'s first two values are neither two numbers nor two vectors of one type.
+    pub(super) fn lerp_mismatch(&mut self, e: &Expr, first: Ty, second: Ty) {
+        if first != Ty::Error && second != Ty::Error {
+            let (a, b) = (self.tn(first), self.tn(second));
+            let msg = format!("`lerp` needs two numbers or two vectors of the same size, found {a} and {b}");
+            self.error(e.span, msg);
+        }
     }
 }

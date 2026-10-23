@@ -22,10 +22,12 @@ pub struct ConstId(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct StructId(pub u32);
 
-/// The built-in vector types are the first structs, before any user struct.
+/// The built-in vector types are the first structs, before any user struct (see `vectors`).
 pub const VEC2: StructId = StructId(0);
 pub const VEC3: StructId = StructId(1);
-pub const BUILTIN_STRUCTS: u32 = 2;
+pub const IVEC2: StructId = StructId(2);
+pub const IVEC3: StructId = StructId(3);
+pub const BUILTIN_STRUCTS: u32 = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EnumId(pub u32);
@@ -293,6 +295,9 @@ pub struct Tables {
     pub ctor_args: HashMap<ExprId, Vec<Option<usize>>>,
     /// For a swizzle like `v.xz`: the components it picks, in order.
     pub swizzles: HashMap<ExprId, Vec<u32>>,
+    /// The vector makes that aren't one number per component (`Res::Construct`, no `ctor_args`): a
+    /// fill (`vec3(0.5)`), a copy or conversion (`vec3(iv)`) and a mixed make (`vec3(v2, 1)`).
+    pub vec_makes: HashSet<ExprId>,
     /// Reads of owning variables that move them (they can't be copied).
     pub moves: HashSet<ExprId>,
     /// Per struct and enum: whether it holds an `Arena` or a `GpuHandle` somewhere inside.
@@ -352,15 +357,6 @@ impl Tables {
 
     pub fn strukt(&self, id: StructId) -> &StructInfo {
         &self.structs[id.0 as usize]
-    }
-
-    /// The number of components when `ty` is `vec2` or `vec3`.
-    pub fn vec_dims(&self, ty: Ty) -> Option<u32> {
-        match ty {
-            Ty::Struct(VEC2) => Some(2),
-            Ty::Struct(VEC3) => Some(3),
-            _ => None,
-        }
     }
 
     pub fn enm(&self, id: EnumId) -> &EnumInfo {

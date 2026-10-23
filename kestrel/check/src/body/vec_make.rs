@@ -1,0 +1,100 @@
+//! Making a vector (syntax pick 3, the same for every vector type): one number per component
+//! (`vec3(1, 2, 3)`, or labelled like a struct's fields), none for zeros (`vec3()`), one number
+//! for all of them (`vec3(0.5)`), one vector to copy or convert (`vec3(v)`, `vec3(iv)`), or numbers
+//! and vectors whose components add up to the vector's, in order (`vec3(v2, 1)`, the shader rule).
+
+use kestrel_syntax::ast::{Arg, Expr};
+
+use super::BodyChecker;
+use crate::tables::{Res, StructId};
+use crate::ty::Ty;
+use crate::vectors::{vec_kind, VecKind};
+
+impl<'a> BodyChecker<'a> {
+    /// A call of a vector type's name. The values are checked first, in source order, to tell the
+    /// forms apart; one number per component (labelled or not) and none go to
+    /// `check_construct_with`, the rest are recorded in `Tables::vec_makes`.
+    pub(crate) fn check_vec_make(&mut self, e: &Expr, sid: StructId, args: &[Arg]) -> Ty {
+        let vt = Ty::Struct(sid);
+        let kind = self.t.vector(vt).expect("a vector type's name");
+        let tys: Vec<Ty> = args.iter().map(|a| self.check_expr(&a.value, Some(kind.lane()))).collect();
+        self.t.res.insert(e.id, Res::Construct(sid));
+        if tys.contains(&Ty::Error) {
+            return vt;
+        }
+        let is_vector = |ty: &Ty| vec_kind(*ty).is_some();
+        let labelled = args.iter().any(|a| a.label.is_some());
+        // V4 is tested first, among all the values: it wins over how the labels bind.
+        if labelled && tys.iter().any(is_vector) {
+            self.error(e.span, "labels only work when every component is a number, like `vec4(x: 1, y: 2, z: 3, w: 4)`");
+            return vt;
+        }
+        if !self.int_numbers(vt, kind, args, &tys) {
+            return vt;
+        }
+        let per_component = !tys.iter().any(is_vector) && args.len() == kind.dims as usize;
+        if labelled || args.is_empty() || per_component {
+            return self.check_construct_with(e, sid, args, Some(&tys));
+        }
+        if self.vec_parts(e, vt, kind, args, &tys) {
+            self.t.vec_makes.insert(e.id);
+        }
+        vt
+    }
+
+    /// V2: an int vector takes `int` and `u8` numbers only. Returns whether every number is one.
+    fn int_numbers(&mut self, vt: Ty, kind: VecKind, args: &[Arg], tys: &[Ty]) -> bool {
+        if !kind.int {
+            return true;
+        }
+        let mut ok = true;
+        for (a, &ty) in args.iter().zip(tys) {
+            if matches!(ty, Ty::Float | Ty::F64 | Ty::I64) {
+                let msg = format!("`{}` holds ints, found {}; convert it with `int(...)` first", self.tn(vt), self.tn(ty));
+                self.error(a.value.span, msg);
+                ok = false;
+            }
+        }
+        ok
+    }
+
+    /// A fill, a copy, a conversion or a mixed make: each number becomes one component (or, alone,
+    /// all of them), each vector of the same kind gives its components, and one vector of the
+    /// other kind and the same size converts. Returns whether it is right (V1, V3).
+    fn vec_parts(&mut self, e: &Expr, vt: Ty, kind: VecKind, args: &[Arg], tys: &[Ty]) -> bool {
+        let mut ok = true;
+        let mut count = 0;
+        for (a, &ty) in args.iter().zip(tys) {
+            if a.is_var {
+                self.error(a.span, "constructor arguments can't be `var`");
+                ok = false;
+            }
+            let ty = self.reject_never(&a.value, ty);
+            match self.t.vector(ty) {
+                Some(k) => {
+                    let converts = args.len() == 1 && k.dims == kind.dims;
+                    if k.int != kind.int && !converts {
+                        let (what, wanted) = if kind.int { ("ints and int vectors", k.as_int()) } else { ("floats and float vectors", k.as_float()) };
+                        let msg = format!("`{}` takes {what}, found {}; convert it with `{}(...)` first", self.tn(vt), self.tn(ty), self.tn(wanted));
+                        self.error(a.value.span, msg);
+                        ok = false;
+                    }
+                    count += k.dims;
+                }
+                None => {
+                    self.coerce(&a.value, ty, kind.lane());
+                    count += 1;
+                }
+            }
+            self.consume(&a.value);
+        }
+        let fill = args.len() == 1 && count == 1;
+        if ok && !fill && count != kind.dims {
+            let n = kind.dims;
+            let msg = format!("`{}` has {n} components, but these values give {count}; give {n}, one value for all of them, or none for zeros", self.tn(vt));
+            self.error(e.span, msg);
+            ok = false;
+        }
+        ok
+    }
+}

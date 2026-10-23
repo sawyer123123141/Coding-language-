@@ -201,8 +201,8 @@ impl<'a> FnLowerer<'a> {
                     Some(ast::Item::Struct(decl)) => {
                         self.value(decl.fields[fi].default.as_ref().expect("checker requires a default for a missing field"))
                     }
-                    // `vec2()` and `vec3()`: a built-in vector's components start at zero.
-                    _ => Expr { kind: ExprKind::Float(0.0), ty: super::kty(t.strukt(sid).fields[fi].ty), line: self.line(e.span) },
+                    // `vec2()` and `ivec3()`: a built-in vector's components start at zero.
+                    _ => super::builtins::number(0, super::kty(t.strukt(sid).fields[fi].ty), self.line(e.span)),
                 },
             });
         }

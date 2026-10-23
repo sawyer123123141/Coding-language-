@@ -6,7 +6,7 @@ use super::lists::written;
 use super::place::Immutable;
 use super::{is_const_expr, BodyChecker};
 use crate::builtins::Builtin;
-use crate::tables::{ListMethod, LocalId, Res, StructId, Tables, BUILTIN_STRUCTS, VEC2, VEC3};
+use crate::tables::{ListMethod, LocalId, Res, StructId, Tables, BUILTIN_STRUCTS};
 use crate::ty::Ty;
 
 /// Field defaults are constant expressions of the field's type (see `is_const_expr`), built again
@@ -55,6 +55,12 @@ fn builds_owning(e: &Expr, t: &Tables) -> bool {
 impl<'a> BodyChecker<'a> {
     /// `Point(1, y: 2)`: arguments bind to fields like parameters; defaults fill the rest.
     pub(crate) fn check_construct(&mut self, e: &Expr, sid: StructId, args: &[Arg]) -> Ty {
+        self.check_construct_with(e, sid, args, None)
+    }
+
+    /// `check_construct`, where `checked` (when given) holds the type each argument was already
+    /// checked to (a vector make checks its values first, to tell its forms apart).
+    pub(crate) fn check_construct_with(&mut self, e: &Expr, sid: StructId, args: &[Arg], checked: Option<&[Ty]>) -> Ty {
         self.t.res.insert(e.id, Res::Construct(sid));
         let info = self.t.strukt(sid).clone();
         let names: Vec<&str> = info.fields.iter().map(|f| f.name.as_str()).collect();
@@ -63,17 +69,22 @@ impl<'a> BodyChecker<'a> {
         // In source order, the order they run in: a move must come after every read.
         for (ai, a) in args.iter().enumerate() {
             let Some(fi) = slots.iter().position(|s| *s == Some(ai)) else {
-                self.check_expr(&a.value, None);
+                if checked.is_none() {
+                    self.check_expr(&a.value, None);
+                }
                 continue;
             };
             if a.is_var {
                 self.error(a.span, "constructor arguments can't be `var`");
             }
-            self.check_value(&a.value, Some(info.fields[fi].ty));
+            match checked {
+                Some(tys) => self.finish_value(&a.value, tys[ai], Some(info.fields[fi].ty)),
+                None => self.check_value(&a.value, Some(info.fields[fi].ty)),
+            };
             self.consume(&a.value);
         }
-        // `vec2()` and `vec3()` are zero vectors, like Godot's `Vector2()`.
-        let vector = matches!(sid, VEC2 | VEC3);
+        // `vec2()` and `ivec3()` are zero vectors, like Godot's `Vector2()`.
+        let vector = self.t.vector(Ty::Struct(sid)).is_some();
         let zero_vector = vector && args.is_empty();
         let missing: Vec<String> = slots
             .iter()
@@ -88,7 +99,7 @@ impl<'a> BodyChecker<'a> {
                 [] => unreachable!("not empty"),
             };
             if vector {
-                self.error_help(e.span, msg, format!("give every component, or none for a zero vector: `{}()`", info.name));
+                self.error_help(e.span, msg, format!("give every component, one value for all of them, or none for zeros: `{}()`", info.name));
             } else {
                 self.error(e.span, msg);
             }
@@ -174,7 +185,7 @@ impl<'a> BodyChecker<'a> {
             }
             return ty;
         }
-        if let (Some(_), Some(b)) = (self.t.vec_dims(receiver_ty), Builtin::vector_method(name)) {
+        if let (Some(_), Some(b)) = (self.t.vector(receiver_ty), Builtin::vector_method(name)) {
             return self.check_vector_method(e, b, receiver, receiver_ty, args);
         }
         // `b.on_click()` calls a field of function type, when no method has that name.
@@ -246,19 +257,6 @@ impl<'a> BodyChecker<'a> {
             Some(Res::List(m)) => !matches!(m, ListMethod::Insert | ListMethod::RemoveAt),
             _ => false,
         }
-    }
-
-    /// `v.xz`, `v.zyx`: 2 or 3 components of a vector, as a new vector.
-    fn swizzle(&self, base_ty: Ty, name: &str) -> Option<(Vec<u32>, Ty)> {
-        let dims = self.t.vec_dims(base_ty)?;
-        let comps: Option<Vec<u32>> = name.chars().map(|c| "xyz"[..dims as usize].find(c).map(|i| i as u32)).collect();
-        let comps = comps?;
-        let ty = match comps.len() {
-            2 => Ty::Struct(crate::tables::VEC2),
-            3 => Ty::Struct(crate::tables::VEC3),
-            _ => return None,
-        };
-        Some((comps, ty))
     }
 
     /// The variable a `var self` call changes, once it's known it may change.

@@ -1,0 +1,14 @@
+// Each component of an `ivec2` division is checked as an `int` division.
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+
+main() {
+    print(ivec2(1, 2) / ivec2(1, id(0, 3)))
+}
+
+// expect-exit: 101
+// expect-stderr: division by zero on line 10
