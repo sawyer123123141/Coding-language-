@@ -1,5 +1,5 @@
-// What `vec4` refuses: how it is made, the operators it has, its lanes, and (until they are built)
-// its built-ins.
+// What `vec4` refuses: how it is made, the operators it has
+// and its lanes.
 main() {
     let a = vec4(1, 2, 3)
     let b = vec4(1) < vec4(2)
@@ -30,8 +30,6 @@ main() {
 // error 12: `vec4` has no field `q`
 // error 13: `ivec3` has 3 components, but these values give 4; give 3, one value for all of them, or none for zeros
 // error 14: missing fields `z` and `w` for `vec4`
-// error 15: `min` doesn't take a `vec4` yet; use its lanes, like `v.x`
-// error 16: `sum` doesn't take a `vec4` yet; use its lanes, like `v.x`
 // error 17: `~` needs an integer, found vec4
 // error 19: `<<=` needs integers, found vec4
 // error 20: map keys must be integers, bools or strings, not `vec4`

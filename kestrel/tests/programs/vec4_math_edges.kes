@@ -1,0 +1,53 @@
+// Every lane-by-lane built-in of `vec4` and `ivec4` gives what the scalar built-in gives lane by
+// lane, NaN, infinity, -0 and the halves included: each pair of lines below is equal.
+id(x: float, d: int) -> float {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+
+main() {
+    let z = id(0, 2)
+    let nan = z / z
+    let inf = 1 / z
+    let v = vec4(nan, inf, -z, -2.5)
+    let w = vec4(1, nan, z, 2.5)
+    let u = vec4(-inf, 0.5, -0.5, 1.5)
+    print(min(v, w), max(v, w), abs(v), floor(u), ceil(u))
+    print(vec4(min(v.x, w.x), min(v.y, w.y), min(v.z, w.z), min(v.w, w.w)), vec4(max(v.x, w.x), max(v.y, w.y), max(v.z, w.z), max(v.w, w.w)), vec4(abs(v.x), abs(v.y), abs(v.z), abs(v.w)), vec4(floor(u.x), floor(u.y), floor(u.z), floor(u.w)), vec4(ceil(u.x), ceil(u.y), ceil(u.z), ceil(u.w)))
+    print(round(v), round(u), round(vec4(1.5, -1.5, 0.5, 2.4999998)), sqrt(vec4(-1, 2, inf, nan)))
+    print(vec4(round(v.x), round(v.y), round(v.z), round(v.w)), vec4(round(u.x), round(u.y), round(u.z), round(u.w)), vec4(round(1.5), round(-1.5), round(0.5), round(2.4999998)), vec4(sqrt(-1), sqrt(2), sqrt(inf), sqrt(nan)))
+    print(clamp(u, -1, 1), clamp(v, w, vec4(3)), lerp(u, w, 0.5), lerp(1, u, 0.5))
+    print(vec4(clamp(u.x, -1, 1), clamp(u.y, -1, 1), clamp(u.z, -1, 1), clamp(u.w, -1, 1)), vec4(clamp(v.x, w.x, 3), clamp(v.y, w.y, 3), clamp(v.z, w.z, 3), clamp(v.w, w.w, 3)), vec4(lerp(u.x, w.x, 0.5), lerp(u.y, w.y, 0.5), lerp(u.z, w.z, 0.5), lerp(u.w, w.w, 0.5)), vec4(lerp(1, u.x, 0.5), lerp(1, u.y, 0.5), lerp(1, u.z, 0.5), lerp(1, u.w, 0.5)))
+    let a = vec4(0.1, 0.2, 0.3, 0.4)
+    let b = vec4(3, 5, 7, 11)
+    let s = ((a.x + a.y) + a.z) + a.w
+    print(a.sum(), s, a.sum() == s)
+    let d = ((a.x * b.x + a.y * b.y) + a.z * b.z) + a.w * b.w
+    print(a.dot(b), d, a.dot(b) == d, b.length() == sqrt(b.dot(b)), a.distance_to(b) == (a - b).length())
+    let n = b.normalized()
+    let l = b.length()
+    print(n, vec4(b.x / l, b.y / l, b.z / l, b.w / l))
+    print(vec4(1, nan, 0, 0).normalized(), vec4(inf, 0, 0, 0).normalized())
+    let p = ivec4(-2147483647, 5, 2147483647, -7)
+    let q = ivec4(3, -5, 7, 0)
+    print(min(p, q), max(p, q), abs(p), clamp(p, -6, 6), clamp(q, p, ivec4(4)), p.sum() == -2)
+    print(ivec4(min(p.x, q.x), min(p.y, q.y), min(p.z, q.z), min(p.w, q.w)), ivec4(max(p.x, q.x), max(p.y, q.y), max(p.z, q.z), max(p.w, q.w)), ivec4(abs(p.x), abs(p.y), abs(p.z), abs(p.w)), ivec4(clamp(p.x, -6, 6), clamp(p.y, -6, 6), clamp(p.z, -6, 6), clamp(p.w, -6, 6)), ivec4(clamp(q.x, p.x, 4), clamp(q.y, p.y, 4), clamp(q.z, p.z, 4), clamp(q.w, p.w, 4)), true)
+    print(q.sum(), q.x + q.y + q.z + q.w)
+}
+
+
+// expect: vec4(x: NaN, y: NaN, z: -0, w: -2.5) vec4(x: NaN, y: NaN, z: 0, w: 2.5) vec4(x: NaN, y: inf, z: 0, w: 2.5) vec4(x: -inf, y: 0, z: -1, w: 1) vec4(x: -inf, y: 1, z: -0, w: 2)
+// expect: vec4(x: NaN, y: NaN, z: -0, w: -2.5) vec4(x: NaN, y: NaN, z: 0, w: 2.5) vec4(x: NaN, y: inf, z: 0, w: 2.5) vec4(x: -inf, y: 0, z: -1, w: 1) vec4(x: -inf, y: 1, z: -0, w: 2)
+// expect: vec4(x: NaN, y: inf, z: -0, w: -3) vec4(x: -inf, y: 1, z: -1, w: 2) vec4(x: 2, y: -2, z: 1, w: 2) vec4(x: NaN, y: 1.4142135, z: inf, w: NaN)
+// expect: vec4(x: NaN, y: inf, z: -0, w: -3) vec4(x: -inf, y: 1, z: -1, w: 2) vec4(x: 2, y: -2, z: 1, w: 2) vec4(x: NaN, y: 1.4142135, z: inf, w: NaN)
+// expect: vec4(x: -1, y: 0.5, z: -0.5, w: 1) vec4(x: NaN, y: NaN, z: 0, w: 2.5) vec4(x: NaN, y: NaN, z: -0.25, w: 2) vec4(x: -inf, y: 0.75, z: 0.25, w: 1.25)
+// expect: vec4(x: -1, y: 0.5, z: -0.5, w: 1) vec4(x: NaN, y: NaN, z: 0, w: 2.5) vec4(x: NaN, y: NaN, z: -0.25, w: 2) vec4(x: -inf, y: 0.75, z: 0.25, w: 1.25)
+// expect: 1 1 true
+// expect: 7.8 7.8 true true true
+// expect: vec4(x: 0.21004201, y: 0.35007003, z: 0.49009803, w: 0.77015406) vec4(x: 0.21004201, y: 0.35007003, z: 0.49009803, w: 0.77015406)
+// expect: vec4(x: 0, y: 0, z: 0, w: 0) vec4(x: NaN, y: 0, z: 0, w: 0)
+// expect: ivec4(x: -2147483647, y: -5, z: 7, w: -7) ivec4(x: 3, y: 5, z: 2147483647, w: 0) ivec4(x: 2147483647, y: 5, z: 2147483647, w: 7) ivec4(x: -6, y: 5, z: 6, w: -6) ivec4(x: 3, y: 4, z: 4, w: 0) true
+// expect: ivec4(x: -2147483647, y: -5, z: 7, w: -7) ivec4(x: 3, y: 5, z: 2147483647, w: 0) ivec4(x: 2147483647, y: 5, z: 2147483647, w: 7) ivec4(x: -6, y: 5, z: 6, w: -6) ivec4(x: 3, y: 4, z: 4, w: 0) true
+// expect: 5 5

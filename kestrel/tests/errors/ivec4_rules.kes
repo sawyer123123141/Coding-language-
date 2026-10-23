@@ -1,5 +1,5 @@
-// What `ivec4` refuses: how it is made, the operators it has, and (until they are built) its
-// built-ins.
+// What `ivec4` refuses: how it is made, the operators it has
+// and its lanes.
 main() {
     let a = ivec4(1.5)
     let b = ivec4(1) / 2
@@ -36,6 +36,5 @@ main() {
 // error 17: `==` can't mix ivec4 and ivec3
 // error 18: `ivec4` has no field `q`
 // error 19: `*%` wraps integers; for floats use `*`
-// error 20: `min` doesn't take a `ivec4` yet; use its lanes, like `v.x`
 // error 21: `ivec3` has 3 components, but these values give 4; give 3, one value for all of them, or none for zeros
 // error 22: map keys must be integers, bools or strings, not `ivec4`

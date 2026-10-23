@@ -280,3 +280,14 @@ fn vector_checks_read_as_lanes() {
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(stdout(&out).contains("function `g` (line 1): no checks left (3 removed), no allocations"), "{}", stdout(&out));
 }
+
+#[test]
+fn a_proven_ivec4_program_has_no_vector_checks_left() {
+    // `-v`, shifts by a known amount and a masked product: all seven removed, `id`'s own check left.
+    let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/programs/ivec4_proven.kes");
+    let out = kestrel(&["check", "--report"], &file);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(text.contains("function `main` (line 10): no checks left (7 removed), no allocations"), "{text}");
+    assert!(text.contains("total: 8 checks, 7 removed, 1 left"), "{text}");
+}

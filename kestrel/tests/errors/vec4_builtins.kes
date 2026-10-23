@@ -1,0 +1,14 @@
+// What the built-ins of the SIMD vectors refuse: floats-only functions on int vectors, methods of
+// float vectors on int vectors, `cross` off a `vec3`, and the functions that take numbers only.
+main() {
+    let a = floor(ivec4(1))
+    let b = ivec4(1).dot(ivec4(1))
+    let c = vec4(1).cross(vec4(1))
+    let d = sin(vec4(1))
+    let e = sign(vec4(1))
+}
+// error 4: `floor` needs floats; convert with `vec4(...)` first
+// error 5: `dot` needs a float vector; convert with `vec4(...)` first
+// error 6: `cross` needs a vec3; vec4 has no cross product
+// error 7: `sin` needs a number here, found vec4
+// error 8: `sign` needs a number here, found vec4

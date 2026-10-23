@@ -1,5 +1,5 @@
 // The masked-hash shape over a loop: range analysis removes the masked product's and sum's checks
-// (each removal verified when the proof check is on), keeps the loop-carried ones it can't prove,
+// (each removal verified when the proof check is on), keeps the scalar products and sums it can't prove,
 // and the checksum shows the values are right.
 id(x: int, d: int) -> int {
     if d == 0 {

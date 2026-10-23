@@ -1,0 +1,14 @@
+// An int vector's `abs` has the check of `-v`: kept for any lane, gone for a small range.
+@prove(no_checks)
+pure f(a: ivec4) -> ivec4 {
+    abs(a)
+}
+
+@prove(no_checks, no_panic)
+pure g(h: ivec4) -> ivec4 {
+    abs(h & 255) * 1000 + min(h, 7) * 0
+}
+
+main() {}
+
+// error 2: `f` can't be proven `no_checks`: it has an overflow check on line 4: `-(...)` may exceed `int` in a lane

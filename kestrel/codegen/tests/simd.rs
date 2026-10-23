@@ -217,3 +217,26 @@ main() {}\n";
     assert!(accesses.iter().all(|l| !l.contains("aligned")), "{code}");
     assert!(seen + accesses.len() >= 10, "{seen}");
 }
+
+/// `--release` dumps of the built-ins of `vec4` and `ivec4`: each is vector instructions with no
+/// call (not a libcall for `round`, `floor` ... and not a call of a runtime function).
+#[test]
+fn vector_math_makes_no_calls() {
+    let cases = [
+        ("round", "pure f(a: vec4) -> vec4 {\n round(a)\n}\n", "f32x4"),
+        ("floor", "pure f(a: vec4) -> vec4 {\n floor(a)\n}\n", "floor"),
+        ("min", "pure f(a: vec4, b: vec4) -> vec4 {\n min(a, b)\n}\n", "fmin"),
+        ("clamp", "pure f(a: vec4) -> vec4 {\n clamp(a, 0, 1)\n}\n", "fmax"),
+        ("normalized", "pure f(a: vec4) -> vec4 {\n a.normalized()\n}\n", "sqrt"),
+        ("ivec4 min", "pure f(a: ivec4, b: ivec4) -> ivec4 {\n min(a, b)\n}\n", "smin"),
+    ];
+    for (name, src, op) in cases {
+        let m = common::optimized(&format!("{src}main() {{}}\n"));
+        let code = dump(&m, release(), "f").unwrap();
+        // (The signature's `windows_fastcall` is no call.)
+        let calls = code.lines().any(|l| l.contains("= call") || l.trim_start().starts_with("call") || l.contains("callq"));
+        assert!(!calls, "{name} calls something:\n{code}");
+        assert!(code.contains(op), "{name} has no `{op}`:\n{code}");
+        assert!(code.contains(if name == "ivec4 min" { "i32x4" } else { "f32x4" }), "{name} isn't a vector operation:\n{code}");
+    }
+}

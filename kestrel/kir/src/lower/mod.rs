@@ -25,6 +25,7 @@ mod prove;
 mod remove;
 mod scopes;
 mod simd;
+mod simd_builtins;
 mod sort;
 mod stmt;
 mod strings;

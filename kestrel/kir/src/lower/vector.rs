@@ -125,6 +125,9 @@ impl<'a> FnLowerer<'a> {
         let mut pre = Vec::new();
         let v = self.expr(receiver);
         let vty = v.ty;
+        if vty.is_vector() {
+            return self.simd_method(b, v, args, ty, line);
+        }
         let KTy::Struct(s) = vty else { unreachable!("vector methods are called on vectors") };
         let dims = self.dims(s);
         let kind = match b {

@@ -67,7 +67,10 @@ impl<'a> FnLowerer<'a> {
 
     /// A call to a global built-in function; the call's type is `ty`.
     pub(crate) fn builtin_call(&mut self, b: Builtin, args: &[ast::Arg], ty: KTy, line: u32) -> ExprKind {
-        // On vectors, lane by lane (`lerp` combines whole vectors).
+        // On vectors, lane by lane (`lerp` combines whole vectors); a SIMD vector is one operation.
+        if ty.is_vector() && b != Builtin::Lerp {
+            return self.simd_lane_call(b, args, ty, line);
+        }
         if ty.is_aggregate() && b != Builtin::Lerp {
             return self.vec_lane_call(b, args, ty, line);
         }
@@ -216,7 +219,7 @@ impl<'a> FnLowerer<'a> {
         let vals: Vec<Expr> = args.iter().map(|a| self.expr(&a.value)).collect();
         let vals = vals.into_iter().map(|v| self.once(v, &mut pre)).collect();
         let [x, y, t] = values(vals);
-        let kind = if ty.is_aggregate() {
+        let kind = if ty.is_aggregate() || ty.is_vector() {
             let diff = node(self.vec_combine(BinOp::Sub, y, x.clone(), ty, line), ty, line);
             let scaled = node(self.vec_combine(BinOp::Mul, diff, t, ty, line), ty, line);
             self.vec_combine(BinOp::Add, x, scaled, ty, line)

@@ -18,6 +18,7 @@ mod place;
 mod print;
 mod simd;
 mod simd_check;
+mod simd_math;
 mod stmt;
 mod strings;
 

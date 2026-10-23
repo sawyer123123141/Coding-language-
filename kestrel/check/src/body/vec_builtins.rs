@@ -63,9 +63,6 @@ impl<'a> BodyChecker<'a> {
         let vt = *tys.iter().find(|t| self.t.vector(**t).is_some()).expect("a vector");
         let kind = self.t.vector(vt).expect("a vector");
         let name = b.name();
-        if self.simd_builtin_error(e, name, vt) {
-            return Ty::Error;
-        }
         if !kind.has_builtin(b) {
             let msg = format!("`{name}` needs floats; convert with `{}(...)` first", self.tn(kind.as_float()));
             self.error(e.span, msg);
@@ -98,9 +95,6 @@ impl<'a> BodyChecker<'a> {
         }
         let vt = if self.t.vector(first).is_some() { first } else { second };
         let kind = self.t.vector(vt).expect("a vector");
-        if self.simd_builtin_error(e, "lerp", vt) {
-            return Ty::Error;
-        }
         if !kind.has_builtin(Builtin::Lerp) {
             let msg = format!("`lerp` needs floats; convert with `{}(...)` first", self.tn(kind.as_float()));
             self.error(e.span, msg);
@@ -134,10 +128,6 @@ impl<'a> BodyChecker<'a> {
         }
         let kind = self.t.vector(receiver_ty).expect("a vector receiver");
         let name = b.name();
-        if self.simd_builtin_error(e, name, receiver_ty) {
-            self.check_loose_args(args);
-            return Ty::Error;
-        }
         if b != Builtin::Sum && !kind.has_float_math() {
             let msg = format!("`{name}` needs a float vector; convert with `{}(...)` first", self.tn(kind.as_float()));
             self.error(e.span, msg);
@@ -163,16 +153,5 @@ impl<'a> BodyChecker<'a> {
             Builtin::Sum => kind.lane(),
             _ => Ty::Float,
         }
-    }
-
-    /// The built-ins of a SIMD vector (`vec4`) aren't built yet: `name` on one is refused, with
-    /// the way around it. Returns whether `vt` is one (after reporting it).
-    fn simd_builtin_error(&mut self, e: &Expr, name: &str, vt: Ty) -> bool {
-        if !self.t.vector(vt).is_some_and(|k| k.simd) {
-            return false;
-        }
-        let msg = format!("`{name}` doesn't take a `{}` yet; use its lanes, like `v.x`", self.tn(vt));
-        self.error(e.span, msg);
-        true
     }
 }

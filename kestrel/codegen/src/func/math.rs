@@ -17,6 +17,9 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         for a in args {
             vals.push(self.expr(a)?);
         }
+        if ty.is_vector() {
+            return Ok(self.simd_math(op, &vals, ty));
+        }
         let x = vals[0];
         Ok(match op {
             MathOp::Sqrt => self.b.ins().sqrt(x),

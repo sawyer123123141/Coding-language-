@@ -190,3 +190,35 @@ fn release_has_no_vector_checks() {
         assert_eq!(counts(&m, &a, "f"), (0, 0), "{src}");
     }
 }
+
+#[test]
+fn min_and_max_keep_lane_ranges() {
+    // The ends of the two ranges: `min` caps the high end, `max` lifts the low one.
+    for body in ["min(h & 255, 100) * 1000", "max(h & 255, 10) * 1000", "clamp(h, 0, 255) * 1000", "max(h & 255, -(h & 255)) * 1000", "abs(h & 255) * 1000"] {
+        let (m, a) = analysed(&format!("pure f(h: ivec4) -> ivec4 {{\n {body}\n}}"), Checked);
+        assert_eq!(checks(&m, &a, "f").left.len(), 0, "{body}: {:#?}", checks(&m, &a, "f").left);
+    }
+    // A bound on one side only proves nothing about the other.
+    for body in ["min(h, 100) * 1000", "max(h, 10) * 1000", "min(h & 255, h) * 1000"] {
+        let (m, a) = analysed(&format!("pure f(h: ivec4) -> ivec4 {{\n {body}\n}}"), Checked);
+        assert_eq!(left_of(&m, &a, "f", Overflow).len(), 1, "{body}: {:#?}", checks(&m, &a, "f").left);
+    }
+}
+
+#[test]
+fn an_int_vectors_abs_has_only_the_negations_check() {
+    // `abs(v)` is `max(v, -v)`: one `Neg` check, kept for any `int` and gone for a small range.
+    let (m, a) = analysed("pure f(h: ivec4) -> ivec4 {\n abs(h)\n}", Checked);
+    assert_eq!(counts(&m, &a, "f"), (0, 1), "{:#?}", checks(&m, &a, "f").left);
+    let (m, a) = analysed("pure f(h: ivec4) -> ivec4 {\n abs(h & 255)\n}", Checked);
+    assert_eq!(counts(&m, &a, "f"), (1, 0), "{:#?}", checks(&m, &a, "f").left);
+    // Under `--release` it has none.
+    let (m, a) = analysed("pure f(h: ivec4) -> ivec4 {\n abs(h)\n}", Wrapping);
+    assert_eq!(counts(&m, &a, "f"), (0, 0));
+}
+
+#[test]
+fn a_negated_fill_loses_its_check() {
+    let (m, a) = analysed("pure f(n: int) -> ivec4 {\n -ivec4(n & 255)\n}", Checked);
+    assert_eq!(counts(&m, &a, "f"), (1, 0), "{:#?}", checks(&m, &a, "f").left);
+}
