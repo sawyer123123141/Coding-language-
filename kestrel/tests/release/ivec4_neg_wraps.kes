@@ -1,0 +1,18 @@
+// Built with `--release`: `-v` wraps the lowest `int` to itself, so the index below is 1, not 0,
+// and its bounds check must stay.
+id(v: ivec4, d: int) -> ivec4 {
+    if d == 0 {
+        return v
+    }
+    id(v, d - 1)
+}
+
+main() {
+    var out = [0]
+    let v = (id(ivec4(0), 2) & 1) - 2147483647 - 1
+    out[(-v).x - 2147483647] = 7
+    print(out)
+}
+
+// expect-exit: 101
+// expect-stderr: index 1 out of bounds for length 1 on line 13

@@ -1,14 +1,13 @@
 //! SIMD vectors (`vec4`, `ivec4`): one Cranelift `F32X4` or `I32X4` value, in a register like a
-//! number. Lanes are
-//! `extractlane`/`insertlane` on a register and a 4-byte access at `4 * lane` in memory; a swizzle
-//! is a byte `shuffle` of the value seen as `I8X16`; `==` compares every lane and asks whether all
-//! are equal.
+//! number. Lanes are `extractlane`/`insertlane` on a register and a 4-byte access at `4 * lane` in
+//! memory; a swizzle is a byte `shuffle` of the value seen as `I8X16`; `==` compares every lane and
+//! asks whether all are equal.
 //!
 //! **Memory access.** Every load and store whose type may be a vector goes through `mem_flags`
-//! (or `value_flags`, by a value's own type): a vector access carries no `aligned` flag, so a layout that misses the
-//! 16-byte alignment is slower, never a fault (Cranelift folds only flagged addresses into the
-//! non-VEX SSE instructions that fault when misaligned). A stack slot is sized and aligned by
-//! `size_align` and keeps Cranelift's own flags.
+//! (or `value_flags`, by a value's own type): a vector access carries no `aligned` flag, so a
+//! layout that misses the 16-byte alignment is slower, never a fault (Cranelift folds only flagged
+//! addresses into the non-VEX SSE instructions that fault when misaligned). A stack slot is sized
+//! and aligned by `size_align` and keeps Cranelift's own flags.
 
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{types, ConstantData, Endianness, InstBuilder, MemFlags, Value};

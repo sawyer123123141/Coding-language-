@@ -141,8 +141,13 @@ fn ivec4_calls_follow_the_abi() {
     assert_eq!(call0::<i32>(&p, "t_lanes"), 11 + 220 + 3300 + 44000);
 }
 
+/// The CLIF instructions that take a vector and give a scalar.
+const VECTOR_TO_SCALAR: [&str; 4] = ["extractlane", "vhigh_bits", "vany_true", "vall_true"];
+
 /// Every CLIF line of `code` that loads or stores a SIMD vector: `load.f32x4`, `store.i32x4`, or a
-/// `store` of a value the CLIF gives a vector type (a block parameter, or a typed result).
+/// `store` of a value that is a vector: a block parameter or a result the CLIF gives a vector
+/// type, or the result of an instruction with a vector operand (`v7 = imul v5, v6`, whose type the
+/// text leaves out), other than one that gives a scalar (`VECTOR_TO_SCALAR`).
 fn vector_accesses(code: &str) -> Vec<&str> {
     let is_vector = |ty: &str| ty == "f32x4" || ty == "i32x4";
     let mut vectors: Vec<&str> = Vec::new();
@@ -152,7 +157,11 @@ fn vector_accesses(code: &str) -> Vec<&str> {
             vectors.extend(params.split(", ").filter_map(|p| p.split_once(": ")).filter(|(_, t)| is_vector(t)).map(|(v, _)| v));
         } else if let Some((v, rest)) = line.split_once(" = ") {
             let op = rest.split_whitespace().next().unwrap_or("");
-            if op.split_once('.').is_some_and(|(_, t)| is_vector(t)) {
+            let typed = op.split_once('.').is_some_and(|(_, t)| is_vector(t));
+            let name = op.split('.').next().unwrap_or(op);
+            let mut operands = rest[op.len()..].split(',').filter_map(|a| a.split_whitespace().last());
+            let computed = !VECTOR_TO_SCALAR.contains(&name) && operands.any(|a| vectors.contains(&a));
+            if typed || computed {
                 vectors.push(v);
             }
         }
@@ -168,7 +177,8 @@ fn vector_accesses(code: &str) -> Vec<&str> {
 }
 
 /// No load or store of a vector carries Cranelift's `aligned` flag (spec R1, M19): an element, a
-/// struct field and a capture are read, and an element and a struct field are written.
+/// struct field and a capture are read, and an element and a struct field are written, each also
+/// with a computed vector.
 #[test]
 fn vector_memory_access_is_never_aligned() {
     let src = "struct P {\n id: u8\n pos: vec4\n cell: ivec4\n}
@@ -178,14 +188,21 @@ pure field(p: P) -> vec4 {\n p.pos + p.pos\n}
 pure ifield(p: P) -> ivec4 {\n p.cell ^ p.cell\n}
 set(var vs: [ivec4], var ws: [vec4], i: int, v: ivec4, w: vec4) {\n vs[i] = v\n ws[i] = w\n}
 make(v: vec4, c: ivec4) -> P {\n P(id: 1, pos: v, cell: c)\n}
+seti(var vs: [ivec4], i: int, v: ivec4) {\n vs[i] = v *% 2\n}
+makei(v: vec4, c: ivec4) -> P {\n P(id: 2, pos: v * 2, cell: c ^ c)\n}
 captured(k: vec4, c: ivec4) -> int {\n let f = () -> int { int((k * 2).x) + (c *% 3).w }\n f()\n}
 main() {}\n";
     let m = common::optimized(src);
     let mut seen = 0;
-    for name in ["elem", "ielem", "field", "ifield", "set", "make", "captured"] {
+    for name in ["elem", "ielem", "field", "ifield", "set", "make", "seti", "makei", "captured"] {
         let code = dump(&m, release(), name).unwrap();
         let accesses = vector_accesses(&code);
         assert!(!accesses.is_empty(), "no vector access found in `{name}`:\n{code}");
+        // A computed vector is stored with no type in the text: it is found by its operands.
+        if name.ends_with('i') {
+            let stores = accesses.iter().filter(|l| l.trim().starts_with("store ")).count();
+            assert!(stores >= 1, "no store of a computed vector found in `{name}`:\n{code}");
+        }
         for line in &accesses {
             assert!(!line.contains("aligned"), "`{name}`: {line}\n{code}");
         }

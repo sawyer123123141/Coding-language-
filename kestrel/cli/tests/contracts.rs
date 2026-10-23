@@ -219,3 +219,13 @@ fn a_chain_into_another_file_names_it() {
     assert_eq!(out.status.code(), Some(1));
     assert_eq!(stderr(&out), "3:8: error: `step` can't be proven `no_alloc`: it calls `grow` (line 5), which adds to `ys` (prove_geom.kes:5) and may grow the list\n");
 }
+
+#[test]
+fn an_assumption_on_an_ivec4_lane_removes_no_check() {
+    // One lane says nothing about the other three, so the vector's check stays and it warns.
+    let src = "show(v: ivec4) {\n    @assume(v.x >= 0 and v.x < 10)\n    print(v * 1000)\n}\n\nmain() { show(ivec4(1)) }\n";
+    let dir = project("lane", &[("lane.kes", src)]);
+    let out = kestrel(&["check", "--diagnostics=short"], &dir.join("lane.kes"));
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(stderr(&out), "2:5: warning: `@assume(v.x >= 0 and v.x < 10)` removes no check; delete it\n");
+}

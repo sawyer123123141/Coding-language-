@@ -2,7 +2,10 @@
 //! `or` know. A comparison of two integers adds a fact between their linear forms and narrows the
 //! range of a local on either side; `and`, `or` and `not` combine their parts in order; anything
 //! else teaches nothing. Each part forgets what it writes before it is evaluated and after it
-//! refines (a part may change what it reads, or what an earlier part compared).
+//! refines (a part may change what it reads, or what an earlier part compared). A comparison of
+//! vectors refines nothing, and neither does one of a lane of an `ivec4` (`v.x < 10`): a lane load
+//! has no linear form and is no local's value (`terms::local_value`), since one lane says nothing
+//! about the other three (R17).
 
 use super::bounds::{Lin, Val};
 use super::facts::ZERO;

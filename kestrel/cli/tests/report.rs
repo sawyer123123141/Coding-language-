@@ -250,7 +250,7 @@ main() {}
     line 2: overflow check: `a * 3` may exceed `int` in a lane (the lanes of `a` can be any `int`)
     line 2: overflow check: `(a * 3) + b` may exceed `int` in a lane (the lanes of `a * 3` can be any `int`; the lanes of `b` can be any `int`)
     line 3: overflow check: `-c` may exceed `int` in a lane (the lanes of `c` can be any `int`)
-    line 3: shift check: `-c << n` may shift by less than 0 or more than 31 (the lanes of `-c` can be any `int`; `n` can be any `int`)
+    line 3: shift check: `-c << n` may shift by less than 0 or more than 31 (the lanes of `-c` are -2,147,483,647 or more; `n` can be any `int`)
     line 5: overflow check: `d - e` may exceed `int` in a lane (the lanes of `d` can be any `int`; the lanes of `e` can be any `int`)
   function `main` (line 8): no checks, no allocations
 total: 5 checks, 0 removed, 5 left; no allocations; no other ways to fail
@@ -259,4 +259,24 @@ total: 5 checks, 0 removed, 5 left; no allocations; no other ways to fail
     let out = kestrel(&["check", "--report", "--release"], &dir.join("ivec4.kes"));
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(stdout(&out).contains("total: 0 checks, 0 removed, 0 left"), "{}", stdout(&out));
+}
+
+#[test]
+fn vector_checks_read_as_lanes() {
+    // One range stands for all four lanes, written with the lane type.
+    let src = "pub f(a: ivec4, h: ivec4) -> ivec4 {\n    a * (h & 0xFFFF)\n}\n\nmain() {}\n";
+    let dir = project("lanes", &[("lanes.kes", src)]);
+    let out = kestrel(&["check", "--report"], &dir.join("lanes.kes"));
+    assert!(out.status.success(), "{}", stderr(&out));
+    let text = stdout(&out);
+    let line = text.lines().find(|l| l.contains("line 2: overflow check")).unwrap_or_else(|| panic!("{text}"));
+    for want in ["may exceed `int` in a lane", "the lanes of `a` can be any `int`", "are 0 to 65,535"] {
+        assert!(line.contains(want), "{want}: {text}");
+    }
+    // A shift by a known amount and a masked product are removed, and not listed.
+    let src = "pub g(h: ivec4) -> ivec4 {\n    let k = h & 0xFFFF\n    (k * 3 + 1) >> 1\n}\n\nmain() {}\n";
+    let dir = project("lanes_removed", &[("removed.kes", src)]);
+    let out = kestrel(&["check", "--report"], &dir.join("removed.kes"));
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(stdout(&out).contains("function `g` (line 1): no checks left (3 removed), no allocations"), "{}", stdout(&out));
 }

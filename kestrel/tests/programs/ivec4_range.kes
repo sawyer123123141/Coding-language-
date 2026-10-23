@@ -1,0 +1,29 @@
+// The masked-hash shape over a loop: range analysis removes the masked product's and sum's checks
+// (each removal verified when the proof check is on), keeps the loop-carried ones it can't prove,
+// and the checksum shows the values are right.
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+
+pure mix(h: ivec4) -> ivec4 {
+    let k = h & 0xFFFF
+    k * 3 + ivec4(0, 1, 0, 1)
+}
+
+main() {
+    let n = id(1000, 3)
+    var sum = 0
+    var acc = ivec4(0)
+    for i from 0 to n {
+        let r = mix(ivec4(i * 7919, i * 104729, -i, i *% 0x9E3779B1))
+        acc = (acc ^ r) & 0xFFFF
+        let t = acc * 2 + (r >> 3)
+        sum = sum + r.x + r.y + r.z + r.w + t.w
+    }
+    print(sum, acc)
+}
+
+// expect: 568894144 ivec4(x: 16, y: 55840, z: 61552, w: 28624)

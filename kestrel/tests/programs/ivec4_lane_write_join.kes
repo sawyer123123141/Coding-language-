@@ -1,0 +1,9 @@
+main() {
+    var v = ivec4(2147483647, 0, 0, 0)
+    v.y = 5
+    print(v + 1)
+}
+
+// Writing a small lane keeps the other three: lane x still overflows.
+// expect-exit: 101
+// expect-stderr: integer overflow on line 4

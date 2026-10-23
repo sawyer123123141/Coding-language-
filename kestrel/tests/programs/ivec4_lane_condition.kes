@@ -1,0 +1,10 @@
+main() {
+    var v = ivec4(1, 2147483647, 0, 0)
+    if v.x < 10 {
+        print(v + 1)
+    }
+}
+
+// A condition on one lane says nothing about the others: lane y still overflows.
+// expect-exit: 101
+// expect-stderr: integer overflow on line 4

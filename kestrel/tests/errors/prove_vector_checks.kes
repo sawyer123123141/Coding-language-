@@ -1,0 +1,14 @@
+@prove(no_checks)
+pure f(a: ivec4, b: ivec4) -> ivec4 {
+    a * b
+}
+
+// A masked product and a shift by a known amount are proven, so `g` holds.
+@prove(no_checks, no_panic)
+pure g(h: ivec4) -> ivec4 {
+    ((h & 0xFFFF) * 3 + 1) >> 1
+}
+
+main() {}
+
+// error 1: `f` can't be proven `no_checks`: it has an overflow check on line 3: `a * b` may exceed `int` in a lane (the lanes of `a` can be any `int`; the lanes of `b` can be any `int`)

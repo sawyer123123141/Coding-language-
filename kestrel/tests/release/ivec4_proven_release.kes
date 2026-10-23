@@ -1,0 +1,15 @@
+// Built with `--release`: `ivec4_proven.kes`'s body, whose proven shifts are skipped.
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+
+main() {
+    let n = id(200, 3)
+    let h = ivec4(n & 255, -(n & 255), 7, -8)
+    print(-ivec4(n & 255), (h & 255) >> 1, h >> 1, ivec4(n & 255) * 3 + 1)
+}
+
+// expect: ivec4(x: -200, y: -200, z: -200, w: -200) ivec4(x: 100, y: 28, z: 3, w: 124) ivec4(x: 100, y: -100, z: 3, w: -4) ivec4(x: 601, y: 601, z: 601, w: 601)

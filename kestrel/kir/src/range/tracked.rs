@@ -23,8 +23,9 @@ pub(super) enum NodeKind {
 }
 
 /// The locals the analysis tracks, and the terms its facts are over. A tracked local is an
-/// integer local that holds its own value (`Value` or `Addressed`), with a slot in every `State`;
-/// a `RefParam` reads memory, so a load through one is "any other integer load".
+/// integer or `ivec4` local that holds its own value (`Value` or `Addressed`), with a slot in every
+/// `State`; only an integer one can be a term (have a node). A `RefParam` reads memory, so a load
+/// through one is "any other integer load".
 pub struct Tracked {
     slot: Vec<Option<u32>>,
     pub(super) tys: Vec<KTy>,
@@ -51,7 +52,8 @@ impl Tracked {
         let mut slot = Vec::with_capacity(f.locals.len());
         let mut tys = Vec::new();
         for l in &f.locals {
-            let tracked = l.ty.is_int() && matches!(l.kind, LocalKind::Value | LocalKind::Addressed);
+            // An `ivec4` has one range for its four lanes (`vector.rs`), but is never a term.
+            let tracked = (l.ty.is_int() || l.ty == KTy::I32X4) && matches!(l.kind, LocalKind::Value | LocalKind::Addressed);
             slot.push(tracked.then(|| {
                 tys.push(l.ty);
                 tys.len() as u32 - 1
@@ -62,11 +64,11 @@ impl Tracked {
             let n = t.kinds.len();
             let kind = match term {
                 Term::Local(l) => match t.slot(*l) {
-                    Some(s) => {
+                    Some(s) if t.tys[s].is_int() => {
                         t.node[l.0 as usize] = Some(n);
                         NodeKind::Local(s)
                     }
-                    None => continue,
+                    _ => continue,
                 },
                 Term::Len(k) => {
                     t.lens.push((k.clone(), n));

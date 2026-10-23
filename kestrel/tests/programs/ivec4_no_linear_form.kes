@@ -1,0 +1,19 @@
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+
+main() {
+    var out = [0, 0, 0]
+    let n = id(5, 3)
+    for i from 0 to out.len {
+        out[(ivec4(i, n, 0, 0) + 1).y - 1] = 1
+    }
+    print(out)
+}
+
+// A vector has no linear form (M13): lane y is `n`, not `i`, so the index is outside `out`.
+// expect-exit: 101
+// expect-stderr: index 5 out of bounds for length 3 on line 12

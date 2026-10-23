@@ -1,0 +1,16 @@
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+
+main() {
+    let h = ivec4(id(0x8000, 3))
+    print(((h & 0xFFFF) *% 0x10000) - 1)
+}
+
+// 0x8000 * 0x10000 wraps to the lowest `int`, so the `- 1` overflows: a wrapping result that may
+// have wrapped is any `int`, not its exact range clipped.
+// expect-exit: 101
+// expect-stderr: integer overflow on line 10

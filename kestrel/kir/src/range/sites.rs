@@ -1,7 +1,7 @@
 //! Which checks codegen emits for a KIR node: the sites range analysis decides. This mirrors
-//! codegen's `func/arith.rs`, `func/divide.rs` and `func/simd_check.rs` exactly; a site missing here would never be
-//! removed (sound), but one listed here that codegen doesn't emit would be counted wrongly. Also
-//! every site of a function, found by walking it (`sites_of`).
+//! codegen's `func/arith.rs`, `func/divide.rs` and `func/simd_check.rs` exactly; a site missing
+//! here would never be removed (sound), but one listed here that codegen doesn't emit would be
+//! counted wrongly. Also every site of a function, found by walking it (`sites_of`).
 
 use super::{expr_key, index_key, show, CheckLeft, Key};
 use crate::ir::*;

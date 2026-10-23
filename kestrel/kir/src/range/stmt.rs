@@ -230,6 +230,7 @@ impl Cx<'_> {
         match w {
             Write::Local(l) => self.assign(st, *l, value, rest),
             Write::Place(p, WriteKind::Whole) if p.path.is_empty() => self.assign(st, p.root, value, rest),
+            Write::Place(p, WriteKind::Whole) if super::vector::is_lane_place(p) && self.t.is_tracked(p.root) => self.lane_store(st, p.root, value),
             Write::Place(p, WriteKind::Whole) => {
                 self.forget(st, std::slice::from_ref(w));
                 if let Some(n) = self.list_node(p) {

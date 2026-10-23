@@ -242,12 +242,13 @@ fn list_change(s: &Stmt) -> Option<(&Place, WriteKind)> {
     })
 }
 
-/// The local a write gives a new value as a whole, when it is one: a `let`, or a place that is
-/// just a local (an integer local passed as `var`, for one).
+/// The local a write gives a new value as a whole, when it is one: a `let`, a place that is just
+/// a local (an integer local passed as `var`, for one), or a lane of a local (`v.x = 5`, `var v.y`:
+/// a vector's one range covers every lane, so writing one writes the vector).
 fn whole_local(w: &Write) -> Option<LocalIdx> {
     match w {
         Write::Local(l) => Some(*l),
-        Write::Place(p, _) if p.path.is_empty() => Some(p.root),
+        Write::Place(p, _) if p.path.is_empty() || super::vector::is_lane_place(p) => Some(p.root),
         Write::Place(..) => None,
     }
 }

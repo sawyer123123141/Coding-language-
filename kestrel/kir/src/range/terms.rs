@@ -53,7 +53,7 @@ pub enum Term {
 }
 
 /// Whether `l` holds its own integer value (a `Value` or `Addressed` integer local): only those
-/// have ranges and can be terms.
+/// can be terms (an `ivec4` local has a range but is never a term, nor is a `Lane` load its value).
 pub fn tracked(f: &Func, l: LocalIdx) -> bool {
     f.locals.get(l.0 as usize).is_some_and(|x| x.ty.is_int() && matches!(x.kind, LocalKind::Value | LocalKind::Addressed))
 }

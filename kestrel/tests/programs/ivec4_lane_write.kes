@@ -1,0 +1,16 @@
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+
+main() {
+    var v = ivec4(0)
+    v.y = id(2147483647, 3)
+    print(v + 1)
+}
+
+// Writing one lane widens the vector's range: lane y overflows.
+// expect-exit: 101
+// expect-stderr: integer overflow on line 11

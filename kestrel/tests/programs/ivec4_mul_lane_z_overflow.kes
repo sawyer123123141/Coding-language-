@@ -1,0 +1,16 @@
+// One lane of an `ivec4` product goes below the lowest `int` (lane z, the first lane of the high
+// pair): -65536 * 32769, through a call so nothing is known about it.
+id(v: ivec4, d: int) -> ivec4 {
+    if d == 0 {
+        return v
+    }
+    id(v, d - 1)
+}
+
+main() {
+    let a = id(ivec4(1, 1, -65536, 1), 2)
+    print(a * id(ivec4(1, 1, 32769, 1), 2))
+}
+
+// expect-exit: 101
+// expect-stderr: integer overflow on line 12

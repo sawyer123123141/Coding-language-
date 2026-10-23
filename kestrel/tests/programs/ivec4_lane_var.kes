@@ -1,0 +1,17 @@
+set_big(var x: int, d: int) {
+    if d == 0 {
+        x = 2147483647
+        return
+    }
+    set_big(var x, d - 1)
+}
+
+main() {
+    var v = ivec4(1)
+    set_big(var v.y, 3)
+    print(v + 1)
+}
+
+// A lane passed as `var` to a call that isn't inlined writes the vector: lane y overflows.
+// expect-exit: 101
+// expect-stderr: integer overflow on line 12

@@ -138,7 +138,7 @@ impl Cx<'_> {
 
     /// After a check on `e` passed, `e`'s value is in `range` (when there is one): a fact about
     /// the local `e` reads, if it reads one directly (or through a widening conversion).
-    fn learn(&mut self, e: &Expr, range: Option<Interval>) {
+    pub(super) fn learn(&mut self, e: &Expr, range: Option<Interval>) {
         if let (Some(l), Some(r)) = (self.local_of(e), range) {
             self.learned.push(Learn::Range(l, r));
         }

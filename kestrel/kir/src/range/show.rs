@@ -34,7 +34,7 @@ pub fn check_text(m: &Module, f: &Func, kind: CheckKind, e: &Expr, operands: &[(
     let lanes = if ty.is_vector() { " in a lane" } else { "" };
     let head = match kind {
         CheckKind::Overflow => format!("`{what}` may exceed `{}`{lanes}", type_name(e.ty.lane())),
-        CheckKind::Shift => format!("`{what}` may shift by less than 0 or more than {}", width(ty) - 1),
+        CheckKind::Shift => format!("`{what}` may shift by less than 0 or more than {}", width(ty.lane()) - 1),
         CheckKind::Division if operands.get(1).is_some_and(|(_, r)| !r.contains(0)) => {
             format!("`{what}` may divide the lowest `{}` by -1", type_name(ty))
         }

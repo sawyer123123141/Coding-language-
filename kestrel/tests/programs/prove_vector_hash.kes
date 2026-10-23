@@ -1,0 +1,13 @@
+@prove(no_alloc, no_checks, no_panic, inline)
+pure hash4(x: ivec4, y: ivec4, seed: int) -> ivec4 {
+    var h = x *% 0x27D4EB2D ^ y *% 0x165667B1 ^ seed *% 0x5BD1E995
+    h = (h ^ (h >> 15)) *% 0x2C1B3C6D
+    h = (h ^ (h >> 12)) *% 0x297A2D39
+    h ^ (h >> 15)
+}
+
+main() {
+    print(hash4(ivec4(0, 1, 0, 1), ivec4(0, 0, 1, 1), 7))
+}
+
+// expect: ivec4(x: 226841987, y: 1939458299, z: 504135051, w: 220676886)

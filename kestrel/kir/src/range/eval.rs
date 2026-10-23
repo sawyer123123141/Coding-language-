@@ -62,7 +62,9 @@ impl Cx<'_> {
             ExprKind::Binary(_, l, _) if l.ty.is_int() || l.ty == KTy::I32X4 => self.arith(st, e, sure, false),
             ExprKind::Proven(inner) => self.arith(st, inner, sure, true),
             ExprKind::VecLit(_) | ExprKind::Splat(_) | ExprKind::Shuffle(..) | ExprKind::LaneOf(..) => self.vector(st, e, sure),
+            ExprKind::Unary(UnOp::BitNot, _) if e.ty == KTy::I32X4 => self.vector_arith(st, e, sure, false),
             ExprKind::Unary(UnOp::BitNot, x) if e.ty.is_int() => Val::range(iv::bit_not(self.eval(st, x, sure), e.ty)),
+            ExprKind::Math(MathOp::Min | MathOp::Max, _) if e.ty == KTy::I32X4 => self.vector_math(st, e, sure),
             ExprKind::Unary(_, x)
             | ExprKind::Some(x)
             | ExprKind::EnvDup(x)
@@ -120,11 +122,15 @@ impl Cx<'_> {
         }
     }
 
-    /// A load: a tracked local's range (and the local itself, when it is a term), or a list or
-    /// array copied from a stable place (its length is that place's).
+    /// A load: a tracked local's range (and the local itself, when it is a term), a lane of a
+    /// tracked `ivec4` local (`vector.rs`), or a list or array copied from a stable place (its
+    /// length is that place's).
     #[inline(never)]
     fn load(&mut self, st: &State, p: &Place, ty: KTy, sure: bool) -> Val {
         self.place(st, p, sure);
+        if let Some(v) = self.lane_load(st, p) {
+            return v;
+        }
         if p.path.is_empty() {
             if let Some(r) = st.get(&self.t, p.root) {
                 return Val::exact(r, self.t.node(p.root).map(|node| Lin { node, c: 0 }));
