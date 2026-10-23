@@ -1,18 +1,20 @@
-// Every make and a swizzle are constant expressions, in constants and field defaults.
+// Every make, a component and a swizzle are constant expressions, in constants and field defaults.
 let HALF = vec3(0.5)
 let STEP = ivec3(1, ivec2(2, 3))
 let FLAT = STEP.zx
 let BACK = vec3(STEP)
+let LANE = STEP.y + FLAT.x
 
 struct Cell {
     at: ivec2 = FLAT.yx
     size: vec2 = vec2(1)
+    h: int = STEP.z
 }
 
 main() {
-    print(HALF, STEP, FLAT, BACK)
+    print(HALF, STEP, FLAT, BACK, LANE)
     print(Cell())
 }
 
-// expect: vec3(x: 0.5, y: 0.5, z: 0.5) ivec3(x: 1, y: 2, z: 3) ivec2(x: 3, y: 1) vec3(x: 1, y: 2, z: 3)
-// expect: Cell(at: ivec2(x: 1, y: 3), size: vec2(x: 1, y: 1))
+// expect: vec3(x: 0.5, y: 0.5, z: 0.5) ivec3(x: 1, y: 2, z: 3) ivec2(x: 3, y: 1) vec3(x: 1, y: 2, z: 3) 5
+// expect: Cell(at: ivec2(x: 1, y: 3), size: vec2(x: 1, y: 1), h: 3)

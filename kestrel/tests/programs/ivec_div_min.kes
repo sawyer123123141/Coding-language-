@@ -1,0 +1,15 @@
+// The smallest `int` divided by -1 overflows in a component, as for an `int`.
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+
+main() {
+    let m = id(-2147483647, 2) - 1
+    print(ivec2(7, m) / id(-1, 2))
+}
+
+// expect-exit: 101
+// expect-stderr: integer overflow on line 11

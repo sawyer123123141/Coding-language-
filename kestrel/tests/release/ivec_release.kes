@@ -1,0 +1,19 @@
+// Built with `--release`: each `ivec2` component wraps, divides and shifts as an `int` does
+// (the first line is the same operations on an `int`).
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+
+main() {
+    let m = id(-2147483647, 2) - 1
+    let s = id(-1, 2)
+    print(m / s, m % s, -m, abs(m), m + s, m << id(33, 1), m >> id(40, 1))
+    let v = ivec2(m, 7)
+    print(v / s, v % s, -v, abs(v), v.sum(), v << id(33, 1), v >> id(40, 1), ivec2(2147483647, 1).sum())
+}
+
+// expect: -2147483648 0 -2147483648 -2147483648 2147483647 0 -8388608
+// expect: ivec2(x: -2147483648, y: -7) ivec2(x: 0, y: 0) ivec2(x: -2147483648, y: -7) ivec2(x: -2147483648, y: 7) -2147483641 ivec2(x: 0, y: 14) ivec2(x: -8388608, y: 0) -2147483648

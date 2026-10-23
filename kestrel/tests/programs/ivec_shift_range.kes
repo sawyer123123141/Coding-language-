@@ -1,0 +1,15 @@
+// A vector shift's one amount is checked as an `int` shift's.
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+
+main() {
+    let m = id(-2147483647, 2) - 1
+    print(ivec2(1, m) << id(32, 2))
+}
+
+// expect-exit: 101
+// expect-stderr: shift amount out of range on line 11

@@ -122,7 +122,8 @@ pub fn number(n: i128) -> String {
 }
 
 /// A local's name as the source wrote it: the inliner's `callee.` prefix taken off; `(...)` for a
-/// value the compiler made (`tmp3`, `discard`, `index`, an empty name).
+/// value the compiler made (`tmp3`, `discard`, `index`, an empty name), or a field of one that
+/// scalar replacement split off (`tmp3.x`).
 fn local_name(m: &Module, f: &Func, l: LocalIdx) -> String {
     let name = &f.locals[l.0 as usize].name;
     let name = m
@@ -131,10 +132,11 @@ fn local_name(m: &Module, f: &Func, l: LocalIdx) -> String {
         .filter_map(|g| name.strip_prefix(g.name.as_str()).and_then(|rest| rest.strip_prefix('.')))
         .min_by_key(|rest| rest.len())
         .unwrap_or(name);
+    let root = name.split('.').next().unwrap_or(name);
     let made = name.is_empty()
         || name.starts_with("__")
         || matches!(name, "discard" | "index" | "result" | "env" | "copy")
-        || name.strip_prefix("tmp").is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()));
+        || root.strip_prefix("tmp").is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()));
     if made {
         "(...)".to_string()
     } else {

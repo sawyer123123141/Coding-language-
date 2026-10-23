@@ -97,6 +97,8 @@ impl<'a> Walk<'a> {
             }
             ExprKind::MethodCall { args, .. } | ExprKind::TypeCall { args, .. } => args.iter().for_each(|a| self.builds(&a.value, out)),
             ExprKind::Unary { expr, .. } => self.builds(expr, out),
+            // A component or swizzle of a constant vector builds that vector.
+            ExprKind::Field { base, .. } => self.builds(base, out),
             ExprKind::Binary { lhs, rhs, .. } => {
                 self.builds(lhs, out);
                 self.builds(rhs, out);

@@ -202,11 +202,18 @@ fn names_in_block(b: &Block, out: &mut Vec<(String, Span)>) {
 fn check_const(c: &ConstDecl, i: usize, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
     let mut bc = BodyChecker::new(t, diags, None, Ty::Unit, false);
     let want = c.ty.as_ref().map(|ty| resolve_type(ty, bc.t, bc.diags));
-    let ty = if is_const_expr(&c.value, bc.t) {
-        bc.check_value(&c.value, want)
-    } else {
-        bc.error(c.value.span, "constants can only use literals, operators, other constants, struct and enum values, and pure built-ins like `sqrt`");
+    let ty = if !is_const_expr(&c.value, bc.t) {
+        bc.error(c.value.span, CONST_EXPR);
         Ty::Error
+    } else {
+        let ty = bc.check_value(&c.value, want);
+        match struct_field_read(&c.value, bc.t) {
+            Some(span) if ty != Ty::Error => {
+                bc.error(span, CONST_EXPR);
+                Ty::Error
+            }
+            _ => ty,
+        }
     };
     t.consts[i].ty = ty;
     t.const_by_name.insert(c.bind.name.clone(), ConstId(i as u32));
@@ -229,8 +236,9 @@ pub(crate) fn is_const_expr(e: &Expr, t: &Tables) -> bool {
         // capitalised name that isn't a function is one meant to be (an unknown struct, an enum, a
         // constant): `check_call` says what's wrong with it.
         ExprKind::Call { name, args, .. } if t.struct_by_name.contains_key(name) || names_no_fn(name, t) => all(args),
-        // A swizzle of a constant vector (`ORIGIN.xy`) is a new vector, built like a make.
-        ExprKind::Field { base, name, .. } => names_enum(base) || (is_swizzle_name(name) && is_const_expr(base, t)),
+        // A component or swizzle of a constant vector (`ORIGIN.x`, `ORIGIN.xy`); the base's type
+        // decides it, once checked (`struct_field_read` refuses any other field).
+        ExprKind::Field { base, .. } => names_enum(base) || is_const_expr(base, t),
         ExprKind::MethodCall { receiver, args, .. } => names_enum(receiver) && all(args),
         ExprKind::Unary { expr, .. } => is_const_expr(expr, t),
         ExprKind::Binary { lhs, rhs, .. } => is_const_expr(lhs, t) && is_const_expr(rhs, t),
@@ -257,7 +265,30 @@ fn names_no_fn(name: &str, t: &Tables) -> bool {
     (capitalised || other) && !t.fn_by_name.contains_key(name)
 }
 
-/// Whether `name` could pick components of a vector (`xy`, `zyx`, `wzyx`): 2 to 4 of `x y z w`.
-fn is_swizzle_name(name: &str) -> bool {
-    (2..=4).contains(&name.len()) && name.chars().all(|c| "xyzw".contains(c))
+/// The error for a constant that isn't a constant expression.
+pub(crate) const CONST_EXPR: &str =
+    "constants can only use literals, operators, other constants, struct and enum values, and pure built-ins like `sqrt`";
+
+/// The first field read in the checked constant expression `e` that isn't a component or swizzle
+/// of a built-in vector (`ORIGIN.x`, `ORIGIN.xy`) or an enum value (`State.Idle`): a constant
+/// can't read a struct's field, as it never could (`P.x` with `P` a user struct is refused).
+pub(crate) fn struct_field_read(e: &Expr, t: &Tables) -> Option<Span> {
+    let in_args = |args: &[Arg]| args.iter().find_map(|a| struct_field_read(&a.value, t));
+    match &e.kind {
+        ExprKind::Field { base, .. } => {
+            if matches!(&base.kind, ExprKind::Ident(n) if t.enum_by_name.contains_key(n)) {
+                None
+            } else if t.vector(t.ty(base.id)).is_some() || t.ty(base.id) == Ty::Error {
+                struct_field_read(base, t)
+            } else {
+                Some(e.span)
+            }
+        }
+        ExprKind::Call { args, .. } | ExprKind::MethodCall { args, .. } | ExprKind::TypeCall { args, .. } => in_args(args),
+        ExprKind::Unary { expr, .. } => struct_field_read(expr, t),
+        ExprKind::Binary { lhs, rhs, .. } => struct_field_read(lhs, t).or_else(|| struct_field_read(rhs, t)),
+        ExprKind::ArrayLit(items) => items.iter().find_map(|i| struct_field_read(i, t)),
+        ExprKind::MapLit(entries) => entries.iter().find_map(|(k, v)| struct_field_read(k, t).or_else(|| struct_field_read(v, t))),
+        _ => None,
+    }
 }

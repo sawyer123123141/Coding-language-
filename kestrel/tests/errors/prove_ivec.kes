@@ -1,0 +1,9 @@
+// A component that may overflow keeps its check, so `no_checks` can't be proven.
+@prove(no_checks)
+pure step(p: ivec2) -> ivec2 {
+    ivec2(p.x & 255, p.y) + 1
+}
+
+main() {}
+
+// error 2: `step` can't be proven `no_checks`

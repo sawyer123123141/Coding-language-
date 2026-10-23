@@ -1,0 +1,15 @@
+// `sum` adds the components with `int` checks.
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+
+main() {
+    let m = id(-2147483647, 2) - 1
+    print(ivec3(1, 2147483647, m).sum(), ivec2(m, -1).sum())
+}
+
+// expect-exit: 101
+// expect-stderr: integer overflow on line 11

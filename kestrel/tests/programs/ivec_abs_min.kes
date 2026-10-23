@@ -1,0 +1,15 @@
+// `abs` of an `ivec3` whose component is the smallest `int` overflows, as `-v` does.
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+
+main() {
+    let m = id(-2147483647, 2) - 1
+    print(abs(ivec3(1, -2, m)))
+}
+
+// expect-exit: 101
+// expect-stderr: integer overflow on line 11

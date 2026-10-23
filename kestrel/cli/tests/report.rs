@@ -209,3 +209,22 @@ fn a_promised_interface_call_lists_no_allocation() {
 ";
     assert!(text.contains(want), "{text}");
 }
+
+#[test]
+fn int_vector_checks_read_like_the_scalar_ones() {
+    // Each component of an `ivec2` gets its own `int` check; the values the compiler made for
+    // `abs` read `(...)`, as for a number, not by their temporaries' names.
+    let src = "pub f(v: ivec2) -> ivec2 {\n    abs(v) + ivec2(1, 0)\n}\n\nmain() {}\n";
+    let dir = project("ivec", &[("ivec.kes", src)]);
+    let out = kestrel(&["check", "--report"], &dir.join("ivec.kes"));
+    assert!(out.status.success(), "{}", stderr(&out));
+    let want = "ivec.kes
+  function `f` (line 1): 3 checks left (1 removed), no allocations
+    line 2: overflow check: `-(...)` may exceed `int` (`(...)` is at most -1)
+    line 2: overflow check: `-(...)` may exceed `int` (`(...)` is at most -1)
+    line 2: overflow check: `(...) + (...)` may exceed `int` (`(...)` is 0 or more; `(...)` is exactly 1)
+  function `main` (line 5): no checks, no allocations
+total: 4 checks, 1 removed, 3 left; no allocations; no other ways to fail
+";
+    assert_eq!(stdout(&out), want);
+}

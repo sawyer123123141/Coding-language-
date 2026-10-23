@@ -1,0 +1,15 @@
+// Negating an `ivec2` whose component is the smallest `int` overflows.
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+
+main() {
+    let m = id(-2147483647, 2) - 1
+    print(-ivec2(1, m))
+}
+
+// expect-exit: 101
+// expect-stderr: integer overflow on line 11

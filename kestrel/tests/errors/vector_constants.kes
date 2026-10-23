@@ -1,0 +1,26 @@
+// A constant may read a component or swizzle of a constant vector, but not a struct's field
+// (that read builds the struct, and its defaults may build the constant: a loop).
+struct S {
+    xyz: vec3 = vec3(Q.xy, 1)
+}
+
+struct P {
+    xy: int
+}
+
+let Q = S().xyz
+let A = P(xy: 1)
+let B = A.xy
+let R = T.yx
+let T = R.yx
+
+struct D {
+    c: int = A.xy
+}
+
+main() {}
+
+// error 11: constants can only use literals, operators, other constants, struct and enum values, and pure built-ins like `sqrt`
+// error 13: constants can only use literals, operators, other constants, struct and enum values, and pure built-ins like `sqrt`
+// error 15: constants can't use each other in a loop: R -> T -> R; give one of them a value that doesn't use the others
+// error 18: field defaults can only use literals, operators, constants, struct and enum values, and pure built-ins like `sqrt`

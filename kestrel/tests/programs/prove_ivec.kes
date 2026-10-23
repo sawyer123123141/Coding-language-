@@ -1,0 +1,14 @@
+// Each component of an `ivec2` is an `int` after scalar replacement, so range analysis removes the
+// checks it can prove, and a contract that forbids checks holds.
+@prove(no_checks, no_panic)
+pure cell(p: ivec2) -> ivec2 {
+    let q = ivec2(p.x & 1023, p.y & 1023)
+    let h = q *% 0x9E3779B1
+    (q * 4 + 1) / 2 + (h >> 28)
+}
+
+main() {
+    print(cell(ivec2(5, 2000)))
+}
+
+// expect: ivec2(x: 11, y: 1955)

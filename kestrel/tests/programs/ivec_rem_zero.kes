@@ -1,0 +1,15 @@
+// Each component of an `ivec2` remainder is checked as an `int` one: by zero.
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+
+main() {
+    let m = id(-2147483647, 2) - 1
+    print(ivec2(m, 2) % ivec2(1, id(0, 3)))
+}
+
+// expect-exit: 101
+// expect-stderr: division by zero on line 11

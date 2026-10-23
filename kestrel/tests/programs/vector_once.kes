@@ -1,0 +1,31 @@
+// A fill, a lane-by-lane built-in and a mixed make run each value once, however many lanes read it.
+tick(var n: int) -> int {
+    n += 1
+    print(n)
+    n
+}
+
+ticks(var n: int) -> ivec2 {
+    n += 10
+    print(n)
+    ivec2(n, -n)
+}
+
+main() {
+    var n = 0
+    print(vec3(tick(var n)), ivec2(tick(var n)))
+    print(min(ivec3(5), tick(var n)), abs(ticks(var n)), clamp(ticks(var n), 0, tick(var n)))
+    print(ivec3(ticks(var n), tick(var n)), n)
+}
+
+// expect: 1
+// expect: 2
+// expect: vec3(x: 1, y: 1, z: 1) ivec2(x: 2, y: 2)
+// expect: 3
+// expect: 13
+// expect: 23
+// expect: 24
+// expect: ivec3(x: 3, y: 3, z: 3) ivec2(x: 13, y: 13) ivec2(x: 23, y: 0)
+// expect: 34
+// expect: 35
+// expect: ivec3(x: 34, y: -34, z: 35) 35

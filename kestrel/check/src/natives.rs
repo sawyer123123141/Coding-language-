@@ -11,7 +11,7 @@ const BAD_TYPE: &str = "native functions can only take numbers, bools, strings, 
 /// Rust can't read an interface value (a data pointer and a method table), however it is wrapped.
 const NO_IFACE: &str = "native functions can't take interface values";
 const BAD_TYPE_HELP: &str = concat!(
-    "a native can take int, i64, u8, float, f64, bool, string, vec2, vec3, an enum with no fields, ",
+    "a native can take int, i64, u8, float, f64, bool, string, vec2, vec3, ivec2, ivec3, an enum with no fields, ",
     "an array `[T]` of numbers, bools or structs of those, or a struct of all of these (a struct field ",
     "can also be a `list[T]` of those, but not an enum); it can return nothing, a number, a bool, a ",
     "vector, or a struct of numbers, bools and vectors"

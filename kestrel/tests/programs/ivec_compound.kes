@@ -1,0 +1,28 @@
+// The compound forms of the int-vector operators, with a vector or one number on the right.
+main() {
+    var a = ivec3(7, -9, 12)
+    a <<= 2
+    print(a)
+    a >>= 1
+    print(a)
+    a %= 5
+    print(a)
+    a %= ivec3(2, 3, 4)
+    print(a)
+    var h = ivec2(1, 2)
+    h *%= 0x9E3779B1
+    h +%= 0x7FFFFFFF
+    h -%= ivec2(1, 2)
+    print(h)
+    h &= 0xFFFF
+    h |= 1
+    h ^= ivec2(3, 5)
+    print(h)
+}
+
+// expect: ivec3(x: 28, y: -36, z: 48)
+// expect: ivec3(x: 14, y: -18, z: 24)
+// expect: ivec3(x: 4, y: -3, z: 4)
+// expect: ivec3(x: 0, y: 0, z: 0)
+// expect: ivec2(x: 506952111, y: -1133579425)
+// expect: ivec2(x: 31148, y: 62298)

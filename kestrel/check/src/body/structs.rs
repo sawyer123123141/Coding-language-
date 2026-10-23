@@ -4,10 +4,14 @@ use kestrel_syntax::Diagnostic;
 use super::args::Receiver;
 use super::lists::written;
 use super::place::Immutable;
+use super::consts::struct_field_read;
 use super::{is_const_expr, BodyChecker};
 use crate::builtins::Builtin;
 use crate::tables::{ListMethod, LocalId, Res, StructId, Tables, BUILTIN_STRUCTS};
 use crate::ty::Ty;
+
+/// The error for a field default that isn't a constant expression.
+const DEFAULT_EXPR: &str = "field defaults can only use literals, operators, constants, struct and enum values, and pure built-ins like `sqrt`";
 
 /// Field defaults are constant expressions of the field's type (see `is_const_expr`), built again
 /// at every construction that leaves the field out. They can't build a value that owns an arena or
@@ -25,8 +29,12 @@ pub(crate) fn check_field_defaults(program: &Program, t: &mut Tables, diags: &mu
             let ty = field.ty;
             let mut bc = BodyChecker::new(t, diags, None, Ty::Unit, false);
             if !is_const_expr(default, bc.t) {
-                bc.error(default.span, "field defaults can only use literals, operators, constants, struct and enum values, and pure built-ins like `sqrt`");
-            } else if bc.check_value(default, Some(ty)) != Ty::Error && builds_owning(default, bc.t) {
+                bc.error(default.span, DEFAULT_EXPR);
+            } else if bc.check_value(default, Some(ty)) == Ty::Error {
+                continue;
+            } else if let Some(span) = struct_field_read(default, bc.t) {
+                bc.error(span, DEFAULT_EXPR);
+            } else if builds_owning(default, bc.t) {
                 bc.error(default.span, "field defaults can't build a value that owns an `Arena` or a GPU object; set the field when you build it");
             }
         }

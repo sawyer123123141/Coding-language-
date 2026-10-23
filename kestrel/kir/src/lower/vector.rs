@@ -4,6 +4,7 @@ use kestrel_syntax::ast;
 use super::builtins::{binary, node, number, select};
 use super::{kty, shift_amount, FnLowerer};
 use crate::ir::*;
+use crate::visit::Node;
 
 /// One side of a vector operation, evaluated once.
 pub(super) enum Operand {
@@ -17,6 +18,18 @@ pub(super) enum Operand {
 /// index, a map key) is an expression that would be evaluated again.
 fn rereadable(p: &Place) -> bool {
     p.path.iter().all(|step| step.at().is_none())
+}
+
+/// Whether evaluating `e` may change a variable: it calls a function (which may change a `var`
+/// argument, or what a closure captured) or writes a place.
+fn may_write(e: &Expr) -> bool {
+    let mut writes = false;
+    crate::visit::walk_expr(e, &mut |n| match n {
+        Node::Expr(x) => writes |= matches!(x.kind, ExprKind::Call(..) | ExprKind::CallIndirect { .. } | ExprKind::CallVirtual { .. }),
+        Node::Place(_, written) => writes |= written,
+        Node::Stmt(_) => {}
+    });
+    writes
 }
 
 impl<'a> FnLowerer<'a> {
@@ -59,6 +72,9 @@ impl<'a> FnLowerer<'a> {
         let KTy::Struct(s) = ty else { unreachable!("vectors are structs") };
         let (dims, lane) = (self.dims(s), self.lane(s));
         let mut pre = Vec::new();
+        // The left side is read first, as for numbers: when the right side may change it
+        // (`n - g(var n)`), it is copied before the right side runs.
+        let l = if may_write(&r) && !matches!(l.kind, ExprKind::Int(_) | ExprKind::Float(_)) { self.spill(l, &mut pre) } else { l };
         let (lo, ro) = (self.operand(l, &mut pre), self.operand(r, &mut pre));
         let fields = (0..dims)
             .map(|i| {
