@@ -114,14 +114,32 @@ main() {
   with the SIMD vectors): `0x9E3779B1` is the `int` -1640531535 and
   `0xFFFFFFFFFFFFFFFF` is the `i64` -1, so hash constants can be written
   the way they are published. **A hex literal is read at the type it
-  meets:** `let x: i64 = 0xFFFFFFFF` and `i64(0xFFFFFFFF)` are
-  4294967295; `let x = 0xFFFFFFFF` is an `int`, -1, and stays -1 when it
-  is widened later; `w + 0xFFFFFFFF` and `0xFFFFFFFF + w` agree for
-  `w: i64` (4294967295 added), since both sides meet at `i64`; and next
-  to a float it is the float it spells, so `0xFFFFFFFF * 1.5` is
-  6442451000 and `0xFFFFFFFF < d` with `d = 1.5` is false (it compares
-  4294967295.0, not -1). A *variable* that holds a wrapped hex stays an
-  `int` (`x * 1.5` with `x = 0xFFFFFFFF` is -1.5). Decimal literals keep
+  meets**, when it is itself an operand (either side of an operator),
+  any argument of a built-in (`min`, `max`, `clamp`, `sqrt` ...) or a
+  value that is widened: `let x: i64 = 0xFFFFFFFF` and `i64(0xFFFFFFFF)`
+  are 4294967295; `let x = 0xFFFFFFFF` is an `int`, -1, and stays -1
+  when it is widened later; `w + 0xFFFFFFFF`, `0xFFFFFFFF + w`,
+  `max(0xFFFFFFFF, w)` and `max(w, 0xFFFFFFFF)` agree for `w: i64`
+  (4294967295), since the literal meets `i64`; and next to a float it is
+  the float it spells, so `0xFFFFFFFF * 1.5` is 6442451000 and
+  `0xFFFFFFFF < d` with `d = 1.5` is false (it compares 4294967295.0,
+  not -1). A *variable* that holds a wrapped hex stays an `int`
+  (`x * 1.5` with `x = 0xFFFFFFFF` is -1.5). **A hex expression meeting
+  a wider type needs a conversion** (decided 2026-10-24): a literal
+  inside a larger expression (`-0xFFFFFFFF`, `0xFFFFFFFF >> 4`,
+  `0xFFFFFFFF * 2`, an `if` branch) is read before that expression
+  meets the other side, so when it was read as a wrapped `int` and the
+  expression then meets an `i64` or a float, that is an error: "`0xFFFFFFFF`
+  is read as the `int` -1 here, so this changes when it is widened to
+  `i64`; write `i64(0xFFFFFFFF)` to mean 4294967295, or
+  `int(0xFFFFFFFF)` to keep -1". The other order, `w + (0xFFFFFFFF >> 4)`,
+  reads the literal at `i64` (268435455), as `w + -4294967295` is fine
+  where `-4294967295 + w` doesn't fit: one order may be an error, but
+  the two orders never give two values. The one asymmetry left is the
+  decimal one: next to a `u8` `c`, `0xFFFFFFFF + c` is the `int` -1 plus
+  `c` (the literal is read as an `int` and `c` widens) while
+  `c + 0xFFFFFFFF` is "doesn't fit in u8", as `300 + c` and `c + 300`
+  are. Decimal literals keep
   today's rule ("`2654435761` doesn't fit in int"), a hex literal wider
   than its type is still an error, and `-0x80000000` is an error that
   says to write `0x80000000` (the negation would overflow).
@@ -289,7 +307,7 @@ use {
     side fills every component (`2 * v`, `h & 0xFFFF`), but an int vector
     with a `float` is an error that says to convert with `vec4(...)`.
     Compound forms follow (`v *= 2.0`, `h >>= 1`).
-    - **Int vectors** also have `& | ^`, `~v`, `<< >>` and `%`. `<<` and
+    - **Int vectors** also have `& | ^`, `~v`, `<< >>` and `%` (not on `ivec4`). `<<` and
       `>>` shift every component by one plain `int` amount (checked like
       an `int` shift; `>>` is arithmetic): for different amounts shift each
       component on its own. `ivec4` has no `/` and no `%`, because the CPU
@@ -308,7 +326,7 @@ use {
     with "shift amount out of range"; `--release` wraps. `ivec2` and
     `ivec3` are structs of ints, so each component gets an ordinary
     `int` check; `ivec4` is checked with a few lane instructions (about 5
-    more than the bare `+`, about 12 for `*` of two vectors, about 30 for
+    more than the bare `+`, about 17 for `*` of two vectors, about 30 for
     `*` by a filled constant, about 3 for `-v`), and range analysis
     removes them where it can. **Range analysis tracks an `ivec4` as one
     range for its four components** (the widest), and a condition on one
