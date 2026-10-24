@@ -10,6 +10,7 @@ These are small loops from the particles demo, timed alone so that a change to t
 - `src/bin/rust.rs`: the same three kernels in Rust (`step`, `pow` and `copy`), one thread, same arithmetic.
 - `iface_hp.kes`, `iface_step.kes`: calls through a `list[Damageable]` (see "Interface calls" at the end), each with an `_direct.kes` version over a `list[Goblin]`, and `dyn_hp`, `dyn_step`, `direct_hp` and `direct_step` modes in `src/bin/rust.rs`.
 - `filter.kes`, `map.kes`, `sort_by.kes`: the list methods that take a closure (see "The list methods" at the end), each with a hand-written `_loop.kes` version doing the same work, and `filter`, `map` and `sort_by` modes in `src/bin/rust.rs`.
+- `noise_scalar.kes`, `noise_corners.kes`, `noise_wide.kes`: one 2D value noise written three ways (plain `int`s, the four corners in one `ivec4`, four samples in one `ivec4`/`vec4`; see "SIMD vectors" at the end), with `noise_scalar` and `noise_wide` (SSE4.1 intrinsics) modes in `src/bin/rust.rs` from `src/noise4.rs`. Here an item is one noise sample.
 
 ## How to run it
 
@@ -384,3 +385,56 @@ The old compiler's `iface_step_direct.kes` loop is faster as written (0.56) and 
 - **Nothing is slower beyond noise** (the largest difference among the 2a rows is 3%, with the ranges overlapping); the high ends of the ranges are single slow runs, on both compilers alike.
 - **The checked heightmap is 26% faster, 82 ms to 61**, and now equals the old `--release` build (61); its `--release` build is unchanged (61 to 58). `kestrel check --report` says 114 of its 127 checks are removed, and 7 of 7 under `--release`.
 - The analysis proves few of the 2a programs' checks, as the report shows: fib 2 of 3 removed, loop 1 of 2, collatz 0 of 3, mandelbrot 1 of 3, sieve 4 of 5, swarm 2 of 2. None of that moved their time.
+
+## SIMD vectors (2026-10-24)
+
+What `vec4` and `ivec4` (the SIMD vectors round, `docs/superpowers/specs/2026-10-21-simd-vectors-design.md`) buy on a 2D value noise: one noise written three ways in Kestrel, and twice in Rust. Compiler at b2b4535 (the last commit of the round's Task 5), Ryzen 7 5800X, Windows 11, one thread.
+
+**The kernels.** `hash(x, y, seed)` is the 32-bit wrapping hash of `tests/programs/prove_vector_hash.kes` (three wrapping multiplies, xors and arithmetic shifts after mixing the inputs), `lattice(h) = float(h & 0xFFFF) / 65535.0`, `smooth(t) = t * t * (3.0 - 2.0 * t)`. A sample at `(x, y)` hashes the four lattice corners around `(x >> 4, y >> 4)` and blends them by the smoothed fractions of `x & 15` and `y & 15`. `bench(n, iters)` sums `n * iters` samples (`x = i & 1023`, `y = (i >> 10) + k`) into an `f64` in sample order, so all versions give the same sum to the last bit (8383.914960693568 for `n` 4096, `iters` 4, and 393774.1092315486 for 262,144 and 3; checked, `--release` and both Rust modes alike). Timed at `n` 262,144 (256 rows of 1,024), `iters` 10.
+
+- `noise_scalar.kes`: plain `int`s and `float`s, four `hash` calls per sample.
+- `noise_corners.kes`: the four corners at once: one `hash4` over `ivec4(cx) + ivec4(0, 1, 0, 1)` and `ivec4(cy) + ivec4(0, 0, 1, 1)`, one `vec4` of lattice values, the blend from its lanes.
+- `noise_wide.kes`: four samples at once (`x .. x + 3` of one row in the lanes): four `hash4` calls, one per corner, and the blend lane by lane in `vec4`s; the four lanes are added to the sum one by one.
+- Rust (`src/noise4.rs`): `noise_scalar` is the scalar kernel in `i32` (`wrapping_mul`) and `f32`; `noise_wide` is `noise_wide.kes` with SSE4.1 intrinsics (`_mm_mullo_epi32`, `_mm_srai_epi32`, `_mm_cvtepi32_ps`, `_mm_div_ps` ...). Both are the default `--release` target (SSE2 baseline, SSE4.1 only inside the `#[target_feature]` function); the Kestrel JIT uses the host's AVX encodings.
+
+**The machine was busy.** Every timing below ran while another program (a Python job at about five cores) and a game (about three cores) kept the system at 60-90% CPU; I could not get a quiet window. The kernels are one thread and ran one at a time, in turns within each round, so the ratios are fair, but each cell's range is wide (often 20-30%) and the absolute times are probably 20-40% above a quiet machine's: a first look in a calmer moment gave 2.70 ns for `noise_wide.kes` and 2.46-3.00 for Rust's `noise_wide`. **A quiet rerun is owed** (`py measure.py --rounds 9 --only noise --threads 1`).
+
+**Times** (ns per sample, median of 15 rounds, range in brackets; `py measure.py --rounds 15 --only noise --threads 1`, run twice; run 1 also had the `--keep-checks` column):
+
+| Kernel | Checked | `--release` | Checked (run 1) | `--release` (run 1) | `--keep-checks`, checked (run 1) |
+|---|---:|---:|---:|---:|---:|
+| `noise_scalar.kes` | 11.86 (10.47-13.25) | 11.57 (10.26-13.57) | 11.58 (10.00-13.84) | 11.78 (10.74-13.19) | 16.23 (14.19-18.62) |
+| `noise_corners.kes` | 8.10 (6.53-9.03) | 7.89 (7.29-9.11) | 8.11 (6.89-9.02) | 8.24 (6.78-9.14) | 9.57 (7.80-10.72) |
+| `noise_wide.kes` | 3.76 (3.13-3.96) | **3.67** (3.14-3.96) | 3.74 (3.19-4.20) | 3.67 (3.26-4.11) | 5.01 (3.72-6.54) |
+| Rust `noise_scalar` | | 10.29 (9.31-11.51) | | 10.48 (8.86-12.92) | |
+| Rust `noise_wide` (SSE4.1) | | **3.58** (2.90-3.89) | | 3.47 (2.87-3.82) | |
+
+Two 9-round runs earlier the same afternoon agree (`--release`: scalar 10.86 and 11.04, corners 6.37 and 7.71, wide 3.37 and 3.49, Rust scalar 9.82 and 9.26, Rust wide 3.03 and 3.24). Code layout (7 rounds, `--release`, as written / one unused function added / two): scalar 10.21 / 11.00 / 10.16, corners 6.47 / 7.18 / 6.81, wide 3.39 / 3.31 / 3.45, so nothing here is a layout effect beyond the noise.
+
+**Speedups** (from the medians of both runs):
+
+- **Four samples at once: 3.15-3.2 times scalar Kestrel**, checked or `--release` (11.57 to 3.67). The guess was 2-3 times; it is a little over.
+- **Four corners at once: 1.43-1.47 times scalar.** Below the guess: see below.
+- **`noise_wide.kes` against Rust's hand-written SSE4.1: 1.03-1.06 times its time**, within the noise (the cells' ranges overlap almost entirely). It is 2.8 times faster than Rust's scalar loop (10.29 against 3.67).
+- **`noise_scalar.kes` against Rust's scalar: 1.12 times its time** in both runs.
+- Rust's own wide over scalar: 2.9-3.0 times. Kestrel's gain from `vec4`/`ivec4` (3.15-3.2) is the same size.
+
+**The checked build costs nothing measurable on this vector code:** checked over `--release` is 0.98-1.03 for every kernel. The range analysis removes every lane check (`kestrel check --report`: `noise_wide.kes` 46 checks, 45 removed; `noise_corners.kes` 18 and 17; `noise_scalar.kes` 40 and 39); the one left in each is the scalar `(i >> 10) + k` in the loop head (`k` is unknown). Even `noise4` compiled on its own, not inlined, keeps no check: `x >> 4` is at most 2^27, so `cx + 1` can't overflow a lane. With every check kept (`--keep-checks`), the checked wide kernel takes 1.34 times as long (5.01 against 3.74) and scalar 1.40 times (16.23 against 11.58): the per-lane checks cost about what scalar checks cost, in proportion. That column overstates the lane checks, though: of about 20 compare-and-branches in the wide loop under `--keep-checks`, only 3 are lane checks (`vpxor`, `vpxor`, `vpand`, `vmovmskps`, `test`, `jnz`, six instructions each) and one a scalar `seto`; the rest are checks whose condition Cranelift folded to a constant false but whose branch it kept (`xorl %esi, %esi; testb %sil, %sil; jnz`).
+
+**What the dump shows** (`target/release/kernels.exe noise_wide.kes --release --dump bench`; `hash4` and `noise4` are inlined into `bench`; the inner loop's machine code, not counting its three-instruction loop head):
+
+| Loop | Instructions per sample | Integer multiplies | Divides | Notes |
+|---|---:|---:|---:|---|
+| `noise_scalar.kes` | 123 | 12 `imull` | 6 `vdivss` | |
+| `noise_corners.kes` | 68 | 4 `vpmulld` | 1 `vdivps`, 2 `vdivss` | lanes 1-3 read with `vpshufd` |
+| `noise_wide.kes` | 30.8 (123 per 4) | 10 `vpmulld`, 2 `imull` per 4 | 6 `vdivps` per 4 | 3 constants reloaded from the stack |
+| Rust `noise_scalar` | 113 (with loop control) | 10 `imull` | 2 `divps` (two lanes each) | |
+| Rust `noise_wide` | 35.2 (141 per 4) | 10 `pmulld` per 4 | 4 `divps` per 4 | 36 register copies (two-operand SSE) |
+
+- **The wide loop is what was wanted:** `vpmulld`, `vpxor`, `vpsrad` on whole registers, no `explicit_slot`, no lane extract in the hash; the only lane reads are the three `vpshufd` that feed the `f64` sum (which the in-order sum needs). Cranelift did two good things unasked: the corners that share `cx` (and `cx + 1`) share the `x` products (10 `vpmulld` instead of 12), and because `y` is the same in every lane it multiplies `cy` as a scalar `imull` and broadcasts it.
+- **The corners loop reads its lanes where expected:** lane 0 straight from the register, lanes 1-3 by one `vpshufd` each, right after the one `vdivps`.
+- **Why the corners only gain 1.45 times:** it has 55% of the scalar loop's instructions but one hash chain instead of four independent ones, so each sample waits on one long chain (multiply, shift, xor, multiply ... convert, divide, then a scalar blend that waits on the lane reads). The scalar loop's four chains overlap. Doing four samples at once keeps the chains independent and wide, hence 3.2 times.
+- **Where Kestrel loses to Rust, a little:** (1) the e-graph rewrites `h = a ^ C; h ^ (h >> 15)` into `a ^ (((a ^ C) >> 15) ^ C)`, one `xor` more per hash (4 per iteration of the wide loop, 4 per sample in the scalar one); (2) `/ 16.0` stays a divide (LLVM multiplies by 0.0625), 2 divides more per iteration or sample: replacing it by hand with `* 0.0625` changed nothing measurable (wide 3.43 against 3.69, scalar 11.34 against 11.13, 9 rounds in turns); (3) in the wide loop 3 vector constants don't fit in the 16 `xmm` registers and are reloaded from the stack each iteration, and in the scalar and corners loops the `float` constants 2.0 and 3.0 are rebuilt (`movl`, `vmovd`) each sample; (4) for the scalar loop, LLVM turns `(cx + 1) * C` into `cx * C + C` (10 multiplies against Kestrel's 12) and pairs two of the lattice divides into one two-lane `divps` (SLP vectorising). None of these is large: the wide loop is level with Rust's within the noise, and the scalar one 12% behind.
+- **Rust's scalar loop is slower than its instruction count suggests:** LLVM converts three of the four lattice values with `cvtsi2ss` into registers it doesn't clear first (`xmm9`, `xmm10`, `xmm11`), a false dependency on the previous iteration's divide. Kestrel clears each target with `vxorps` first. I did not confirm that this is what costs Rust's loop its time.
+
+**In short:** four samples at once in `vec4`/`ivec4` are 3.2 times scalar Kestrel and level with hand-written SSE4.1 Rust; four corners at once are 1.45 times. The checked build costs nothing on this code because the analysis proves every lane check. The small gaps to Rust (an extra `xor` per hash, a divide by 16, spilled constants) are in `docs/superpowers/plans/2026-10-09-core-2a-followups.md` under "Found while measuring SIMD vectors".

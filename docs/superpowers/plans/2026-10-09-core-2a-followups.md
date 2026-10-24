@@ -419,6 +419,16 @@ From `docs/superpowers/specs/2026-10-18-at-annotations-design.md` (its "As built
 - *Runtime:* `panic.rs` strips `" of "` from `of_file`'s output for the assumption message; use a bare-file-name helper.
 - *Tests:* a false trusted assumption's divide fault under `--release` isn't exercised end to end (documented in the syntax spec; the proof check reports it as the user's assumption).
 
+## Found while measuring SIMD vectors (2026-10-24)
+
+`kestrel/bench/kernels/results.md`, "SIMD vectors": four noise samples at once in `vec4`/`ivec4` are 3.2 times scalar Kestrel and level with hand-written SSE4.1 Rust (within the noise of a busy machine); the scalar noise is 1.12 times Rust's scalar. The gaps, all small (a quiet rerun of `py measure.py --rounds 9 --only noise --threads 1` is owed):
+- **The e-graph adds an `xor` to the hash mix.** `h = a ^ C; h ^ (h >> 15)` comes out as `a ^ (((a ^ C) >> 15) ^ C)`: five operations instead of four, once per hash (scalar and vector alike). Found while measuring SIMD vectors.
+- **Float division by a power-of-two constant** stays a divide (`/ 16.0`: 2 more divides per sample or per four samples than Rust, which multiplies by 0.0625). Already listed under "Found by the tuned voxel copy"; here a hand `* 0.0625` changed nothing measurable. Found while measuring SIMD vectors.
+- **Constants reloaded in a hot loop.** In `noise_wide.kes` three vector constants don't fit in the 16 `xmm` registers and are reloaded from the stack every iteration; in the scalar and corners loops the `float` constants 2.0 and 3.0 are rebuilt with `movl` + `vmovd` every sample (a constant-pool load, or keeping them in a register, would do). Found while measuring SIMD vectors.
+- **`(x + 1) * C` is not strength-reduced to `x * C + C`** when `x * C` is also needed (LLVM does: 10 multiplies per scalar sample against Kestrel's 12). Found while measuring SIMD vectors.
+- **Branches on a constant false are kept.** Under `--keep-checks`, about 16 of the wide loop's 20 checks have a condition Cranelift folded to false, yet each still emits `xorl; testb; jnz` (Cranelift 0.116 doesn't fold `brif` on a constant). It only shows with checks kept, but it makes `--keep-checks` overstate what checks cost, and any check codegen emits with a foldable condition pays it. Found while measuring SIMD vectors.
+- **An `ivec4` lane check on a splat** (`cy + 1` where every lane of `cy` is the same) is done on the scalar, then broadcast and tested with `vmovmskps`; a scalar `seto` would do. Only under `--keep-checks` here (the analysis proves it otherwise). Found while measuring SIMD vectors.
+
 ## Found by the tuned voxel copy (2026-10-20)
 
 `kestrel/bench/voxels3d/voxels3d_tuned.kes` makes the same world as `voxels3d.kes` 24-29% faster (level with a straight Rust port) by hand; each line is a hand change the compiler should make itself. Measurements and details: `kestrel/bench/voxels3d/results.md`, "Tuned copy".

@@ -1,0 +1,43 @@
+// `noise_scalar.kes` with the four lattice corners hashed at once: one `hash4` over
+// `ivec4(cx, cx + 1, cx, cx + 1)` and `ivec4(cy, cy, cy + 1, cy + 1)`, one `vec4` for the four
+// lattice values, and the blend from its lanes. Same checksum as `noise_scalar.kes`.
+let SEED = 1337
+
+pure hash4(x: ivec4, y: ivec4, seed: int) -> ivec4 {
+    var h = x *% 0x27D4EB2D ^ y *% 0x165667B1 ^ seed *% 0x5BD1E995
+    h = (h ^ (h >> 15)) *% 0x2C1B3C6D
+    h = (h ^ (h >> 12)) *% 0x297A2D39
+    h ^ (h >> 15)
+}
+
+pure smooth(t: float) -> float {
+    t * t * (3.0 - 2.0 * t)
+}
+
+pure noise(x: int, y: int) -> float {
+    let cx = x >> 4
+    let cy = y >> 4
+    let fx = smooth(float(x & 15) / 16.0)
+    let fy = smooth(float(y & 15) / 16.0)
+    let h = hash4(ivec4(cx) + ivec4(0, 1, 0, 1), ivec4(cy) + ivec4(0, 0, 1, 1), SEED)
+    let v = vec4(h & 0xFFFF) / 65535.0
+    let top = v.x + (v.y - v.x) * fx
+    let bottom = v.z + (v.w - v.z) * fx
+    top + (bottom - top) * fy
+}
+
+pub bench(n: int, iters: int) -> float {
+    var sum: f64 = 0.0
+    for k from 0 to iters {
+        for i from 0 to n {
+            let x = i & 1023
+            let y = (i >> 10) + k
+            sum += f64(noise(x, y))
+        }
+    }
+    float(sum)
+}
+
+main() {
+    print(bench(4096, 4))
+}

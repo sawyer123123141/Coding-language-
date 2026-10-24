@@ -9,10 +9,17 @@
 //! modes `dyn_hp`, `dyn_step` (a `Vec<Box<dyn Trait>>` of two types, in the generator's order) and
 //! `direct_hp`, `direct_step` (a `Vec<Goblin>`).
 //!
-//!   rust <step|pow|copy|filter|map|sort_by|dyn_hp|dyn_step|direct_hp|direct_step> [--n N] [--iters K] [--reps R]
+//! The value-noise kernels (`noise_scalar.kes`, `noise_corners.kes`, `noise_wide.kes`) are the
+//! modes `noise_scalar` (one sample at a time) and `noise_wide` (four at once, SSE4.1), in
+//! `src/noise4.rs`.
+//!
+//!   rust <step|pow|copy|filter|map|sort_by|dyn_hp|dyn_step|direct_hp|direct_step|noise_scalar|noise_wide> [--n N] [--iters K] [--reps R]
 
 use std::hint::black_box;
 use std::time::Instant;
+
+#[path = "../noise4.rs"]
+mod noise4;
 
 const WIDTH: f32 = 1280.0;
 const HEIGHT: f32 = 720.0;
@@ -261,6 +268,25 @@ fn list_kernel(mode: &str, n: usize, iters: usize, reps: usize) {
     println!("rust {mode}: {:.2} ns per item (median; {:.2}-{:.2}), n {n}, iters {iters}, reps {reps}, checksum {sum}", per[per.len() / 2], per[0], per[per.len() - 1]);
 }
 
+/// The noise kernels: `n * iters` samples per timed call, like the Kestrel `bench(n, iters)`.
+fn noise_kernel(mode: &str, n: usize, iters: usize, reps: usize) {
+    let (mut per, mut sum) = (Vec::new(), 0.0f64);
+    for rep in 0..=reps {
+        let start = Instant::now();
+        sum = match mode {
+            "noise_scalar" => noise4::bench_scalar(black_box(n as i32), black_box(iters as i32)),
+            _ => noise4::bench_wide(black_box(n as i32), black_box(iters as i32)),
+        };
+        let t = start.elapsed().as_secs_f64();
+        // The first pass warms up.
+        if rep > 0 {
+            per.push(t / (n * iters) as f64 * 1e9);
+        }
+    }
+    per.sort_by(f64::total_cmp);
+    println!("rust {mode}: {:.2} ns per item (median; {:.2}-{:.2}), n {n}, iters {iters}, reps {reps}, checksum {} (f64 {sum})", per[per.len() / 2], per[0], per[per.len() - 1], sum as f32);
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mode = args.first().cloned().unwrap_or_else(|| "step".into());
@@ -271,6 +297,9 @@ fn main() {
     }
     if matches!(mode.as_str(), "dyn_hp" | "dyn_step" | "direct_hp" | "direct_step") {
         return iface_kernel(&mode, n, iters, reps);
+    }
+    if matches!(mode.as_str(), "noise_scalar" | "noise_wide") {
+        return noise_kernel(&mode, n, iters, reps);
     }
     let dt = black_box(1.0f32 / 60.0);
     let target = black_box(V2 { x: 640.0, y: 360.0 });

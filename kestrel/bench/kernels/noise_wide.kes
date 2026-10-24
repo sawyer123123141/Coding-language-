@@ -1,0 +1,55 @@
+// `noise_scalar.kes` four samples at once: the lanes are the samples `x .. x + 3` of one row, each
+// corner is one `hash4` over those lanes, and the blend runs lane by lane in `vec4`s. The four
+// lanes are added to the `f64` sum one by one, in sample order, so the checksum is the same as
+// `noise_scalar.kes`'s. `n` must be a multiple of 4.
+let SEED = 1337
+
+pure hash4(x: ivec4, y: ivec4, seed: int) -> ivec4 {
+    var h = x *% 0x27D4EB2D ^ y *% 0x165667B1 ^ seed *% 0x5BD1E995
+    h = (h ^ (h >> 15)) *% 0x2C1B3C6D
+    h = (h ^ (h >> 12)) *% 0x297A2D39
+    h ^ (h >> 15)
+}
+
+pure lattice4(h: ivec4) -> vec4 {
+    vec4(h & 0xFFFF) / 65535.0
+}
+
+pure smooth4(t: vec4) -> vec4 {
+    t * t * (3.0 - 2.0 * t)
+}
+
+pure noise4(x: ivec4, y: ivec4) -> vec4 {
+    let cx = x >> 4
+    let cy = y >> 4
+    let fx = smooth4(vec4(x & 15) / 16.0)
+    let fy = smooth4(vec4(y & 15) / 16.0)
+    let a = lattice4(hash4(cx, cy, SEED))
+    let b = lattice4(hash4(cx + 1, cy, SEED))
+    let c = lattice4(hash4(cx, cy + 1, SEED))
+    let d = lattice4(hash4(cx + 1, cy + 1, SEED))
+    let top = a + (b - a) * fx
+    let bottom = c + (d - c) * fx
+    top + (bottom - top) * fy
+}
+
+pub bench(n: int, iters: int) -> float {
+    var sum: f64 = 0.0
+    for k from 0 to iters {
+        for j from 0 to n >> 2 {
+            let i = j << 2
+            let x = ivec4(i & 1023) + ivec4(0, 1, 2, 3)
+            let y = ivec4((i >> 10) + k)
+            let v = noise4(x, y)
+            sum += f64(v.x)
+            sum += f64(v.y)
+            sum += f64(v.z)
+            sum += f64(v.w)
+        }
+    }
+    float(sum)
+}
+
+main() {
+    print(bench(4096, 4))
+}

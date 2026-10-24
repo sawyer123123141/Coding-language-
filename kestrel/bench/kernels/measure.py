@@ -36,6 +36,13 @@ KERNELS = [
     ("iface_hp_direct.kes (list[Goblin])", ["kernels", "iface_hp_direct.kes", "--release", "--n", "1000000"], 20),
     ("iface_step.kes (step(var self) through list[Damageable])", ["kernels", "iface_step.kes", "--release", "--n", "1000000"], 20),
     ("iface_step_direct.kes (list[Goblin])", ["kernels", "iface_step_direct.kes", "--release", "--n", "1000000"], 20),
+    # The value noise, 262,144 samples (256 rows of 1,024) per pass; checked and `--release`.
+    ("noise_scalar.kes checked (four hash calls)", ["kernels", "noise_scalar.kes", "--n", "262144"], 10),
+    ("noise_scalar.kes --release", ["kernels", "noise_scalar.kes", "--release", "--n", "262144"], 10),
+    ("noise_corners.kes checked (one hash4 for the corners)", ["kernels", "noise_corners.kes", "--n", "262144"], 10),
+    ("noise_corners.kes --release", ["kernels", "noise_corners.kes", "--release", "--n", "262144"], 10),
+    ("noise_wide.kes checked (four samples at once)", ["kernels", "noise_wide.kes", "--n", "262144"], 10),
+    ("noise_wide.kes --release", ["kernels", "noise_wide.kes", "--release", "--n", "262144"], 10),
     ("Rust step", ["rust", "step"], 30),
     ("Rust pow", ["rust", "pow"], 15),
     ("Rust copy", ["rust", "copy"], 100),
@@ -46,6 +53,8 @@ KERNELS = [
     ("Rust iface direct hp (Vec<Goblin>)", ["rust", "direct_hp", "--n", "1000000"], 20),
     ("Rust iface dyn step (Vec<Box<dyn Trait>>)", ["rust", "dyn_step", "--n", "1000000"], 20),
     ("Rust iface direct step (Vec<Goblin>)", ["rust", "direct_step", "--n", "1000000"], 20),
+    ("Rust noise_scalar", ["rust", "noise_scalar", "--n", "262144"], 10),
+    ("Rust noise_wide (SSE4.1)", ["rust", "noise_wide", "--n", "262144"], 10),
 ]
 
 
