@@ -110,6 +110,21 @@ main() {
 - **Numbers:** `42`, `3.14`, `1_000_000`, `0xFF`. An integer literal is
   `int` unless context needs another integer type; a literal with `.`
   is `float` unless context needs `f64`.
+- **Hex literals use their type's whole bit width** (decided 2026-10-22,
+  with the SIMD vectors): `0x9E3779B1` is the `int` -1640531535 and
+  `0xFFFFFFFFFFFFFFFF` is the `i64` -1, so hash constants can be written
+  the way they are published. **A hex literal is read at the type it
+  meets:** `let x: i64 = 0xFFFFFFFF` and `i64(0xFFFFFFFF)` are
+  4294967295; `let x = 0xFFFFFFFF` is an `int`, -1, and stays -1 when it
+  is widened later; `w + 0xFFFFFFFF` and `0xFFFFFFFF + w` agree for
+  `w: i64` (4294967295 added), since both sides meet at `i64`; and next
+  to a float it is the float it spells, so `0xFFFFFFFF * 1.5` is
+  6442451000 and `0xFFFFFFFF < d` with `d = 1.5` is false (it compares
+  4294967295.0, not -1). A *variable* that holds a wrapped hex stays an
+  `int` (`x * 1.5` with `x = 0xFFFFFFFF` is -1.5). Decimal literals keep
+  today's rule ("`2654435761` doesn't fit in int"), a hex literal wider
+  than its type is still an error, and `-0x80000000` is an error that
+  says to write `0x80000000` (the negation would overflow).
 
 ## Declarations
 
@@ -232,8 +247,8 @@ use {
 | `i8 i16 i64 u8 u16 u32 u64` | sized integers |
 | `f64` | 64-bit float |
 | `string` | text, UTF-8, a heap value like an array: copying a string copies its bytes into the current arena (literals stay in read-only data and belong to no arena). `s.len` and `s[i]` count characters, not bytes. `+`, `join`, `split`, `slice`, `find`, `upper`, `trim`, `to_int` and the rest: see "Lists and strings" |
-| `vec2 vec3 vec4` | float vectors, SIMD-backed |
-| `ivec2 ivec3 ivec4` | int vectors (voxel coordinates) |
+| `vec2 vec3 vec4` | float vectors, 2, 3 or 4 `float`s (Godot's `Vector2`, `Vector3`, `Vector4`). `vec4` is one 16-byte SIMD value, aligned to 16, that the CPU adds, multiplies and compares four lanes at a time; `vec2` and `vec3` are plain structs of floats (8 and 12 bytes) that scalar replacement splits into registers. See "Vectors" below |
+| `ivec2 ivec3 ivec4` | int vectors, 2, 3 or 4 `int`s (`Vector2i`, `Vector3i`, `Vector4i`), laid out the same way (`ivec4` is one 16-byte SIMD value; `ivec2` and `ivec3` are structs of ints) |
 | `[T]` | array of `T`, fixed length once created (fast, arena/SIMD friendly) |
 | `list[T]` | growable list: `add`, `remove_at`, `pop`, `insert`, `clear`, `has`, `find`, `join`, `.len`; `remove b` in a `for b in xs` loop. See "Lists and strings" |
 | `map[K, V]` | hash map: `m[k] = v`; `m[k]` is a `V?` (so `let v = m[k] else { ... }`); `m.has(k)`, `m.remove(k)`, `m.len`, `for k, v in m` (decided 2026-10-10). Literal `{"a": 1, "b": 2}`, empty `{}`; `m.get(k, default)`; `for k in m` gives keys (decided 2026-10-09). Insertion order. Details: `2026-10-09-map-design.md` |
@@ -245,26 +260,103 @@ use {
   int]`.
 - **Creating generic values:** `list[vec3]()`, `array[int](n)`, or
   annotate and use a literal: `var tris: list[vec3] = []`.
-- **Vectors:** `vec3(1, 2, 3)`; `vec2()` and `vec3()` with no arguments are zero vectors (like Godot's `Vector3()`), and giving only some components is an error; operators `+ - * /` component-wise and
-  with scalars, swizzles `v.xz`, `v.zyx`.
+- **Vectors** (`vec2 vec3 vec4 ivec2 ivec3 ivec4`; the SIMD round of
+  2026-10-22, spec `2026-10-21-simd-vectors-design.md`). One set of rules
+  for all six, written in GDScript terms:
+  - **Making them.** `vec4(1, 2, 3, 4)` (ints convert to floats);
+    `vec4(0.5)` fills every component with one value (GDScript's
+    `Vector4(0.5, 0.5, 0.5, 0.5)`, shorter); `vec4()` is zeros;
+    giving some components but not all is an error. **Mixed:** the
+    values' components must add up, in order, as in a shader:
+    `vec4(v3, w)`, `vec4(v2, z, w)`, `vec4(a.xy, b.zw)`, `vec3(v2, z)`,
+    `ivec4(iv2, 0, 1)`. **Labelled**, when every value is a number:
+    `vec4(x: 1, y: 2, z: 3, w: 4)`, `vec4(w: 4, z: 3, y: 2, x: 1)`,
+    evaluated in the order written. One vector of the same type copies
+    it; one vector of the other kind and the same size converts it
+    (`vec4(iv)`, `ivec3(v)`): float to int truncates toward zero and
+    saturates, NaN gives 0 (exactly `int(x)`), and int to float rounds to
+    the nearest float. Neither is a checked narrowing. `ivec*` take
+    `int`, `u8` and int vectors only: `ivec4(1.5)` and `ivec4(n)` with
+    `n: i64` say to use `int(...)` first.
+  - **Components and swizzles.** `.x .y .z .w` read and write one
+    component (`.w` only on 4-component types): `v.x += 1`,
+    `p.vel.w = 0`, `vs[i].y = 7`. Swizzles of 2 to 4 letters, repeats
+    allowed, make a vector of that many components of the same kind:
+    `v.xy` is a `vec2`, `iv.zyx` an `ivec3`, `v.wzyx` and `v3.xyzz` a
+    `vec4`. Swizzles are read-only.
+  - **Operators.** `+ - *` and unary `-` are component by component on
+    every vector; `/` too, except on `ivec4`. A plain number on either
+    side fills every component (`2 * v`, `h & 0xFFFF`), but an int vector
+    with a `float` is an error that says to convert with `vec4(...)`.
+    Compound forms follow (`v *= 2.0`, `h >>= 1`).
+    - **Int vectors** also have `& | ^`, `~v`, `<< >>` and `%`. `<<` and
+      `>>` shift every component by one plain `int` amount (checked like
+      an `int` shift; `>>` is arithmetic): for different amounts shift each
+      component on its own. `ivec4` has no `/` and no `%`, because the CPU
+      can't divide integer lanes at once (use `>>` and `&` for a power of
+      two, or divide a component); `ivec2` and `ivec3` have both, each
+      component divided as `int` is. Float vectors have no `%`, `&`, `|`,
+      `^`, `~` or shifts.
+    - **`==` and `!=`** give one `bool`: `==` is true when every component
+      is equal (a NaN is unequal, as for floats), `!=` is its opposite.
+      `< > <= >=` don't exist on vectors: "`<` doesn't compare vectors;
+      compare components, like `a.x < b.x`" (GDScript orders `Vector2`
+      lexicographically, which almost never means what it looks like).
+  - **Overflow on int vectors follows `int`.** In a checked build, any
+    component of `+ - *`, `-v` or `abs` that overflows stops the program
+    with "integer overflow on line N", and a shift amount out of range
+    with "shift amount out of range"; `--release` wraps. `ivec2` and
+    `ivec3` are structs of ints, so each component gets an ordinary
+    `int` check; `ivec4` is checked with a few lane instructions (about 5
+    more than the bare `+`, about 12 for `*` of two vectors, about 30 for
+    `*` by a filled constant, about 3 for `-v`), and range analysis
+    removes them where it can. **Range analysis tracks an `ivec4` as one
+    range for its four components** (the widest), and a condition on one
+    component (`if v.x < 10`, `@assume(v.x < 10)`) teaches it nothing
+    about the vector; on an `ivec2` or `ivec3` component it does, as on
+    any `int` field.
+  - **Where they work.** In locals, parameters, results, struct fields,
+    `[T]`, `list[T]`, `T?`, map values, constants and field defaults; not
+    as map keys. They print as `vec4(x: 1.5, y: 3, z: 4.5, w: 6)`,
+    interpolation included. Natives can't take or return `vec4` or
+    `ivec4`, and exporting a function that takes or returns `vec4`,
+    `ivec4`, `ivec2` or `ivec3` to Godot is today's "can't export"
+    error. A `vec4` or `ivec4` is 16 bytes aligned to 16 in every layout
+    (a struct field after a `u8` pads to 16). A program that uses
+    `vec4` or `ivec4` needs a CPU with SSE4.1 (every x64 CPU since about
+    2011; the compiler says so at build time if it is missing).
 - **Conversions:** integer -> float and narrower -> wider integer are
   implicit. Float -> integer and wider -> narrower require an explicit
   call: `int(x)`, `u8(n)`.
 - **Overflow:** debug builds trap on integer overflow; release builds
   wrap. A check the compiler proves can't fail is left out (see "Checks
   the compiler leaves out"), so the trap is the same wherever it could
-  fire.
+  fire. **Int vectors are checked per component** the same way (see
+  "Vectors"). **The wrapping operators `*% +% -%`** never check, in any
+  build: see "Operators".
 
 ## Expressions
 
 - **Operators**, highest to lowest precedence: unary `-`, `not` and
-  `~`; `* / %`; `+ -`; `<< >>`; `&`; `^`; `|`; `== != < > <= >=`;
+  `~`; `* / % *%`; `+ - +% -%`; `<< >>`; `&`; `^`; `|`; `== != < > <= >=`;
   `and`; `or`. Comparisons don't chain. Logic is words only: `&&`,
   `||` and `!` don't exist (`!=` stays). Bit operators are symbols, as
   in GDScript, and work on integers (decided 2026-10-10): `& | ^` and
   `~x`, shifts `<<` and `>>` (arithmetic for signed types). A shift by
   a negative amount or by the type's width or more panics when checks
   are on. Compound forms: `&= |= ^= <<= >>=`.
+  **Wrapping operators** (decided 2026-10-22): `a *% b`, `a +% b`,
+  `a -% b` wrap around the type's width and are **never checked, in any
+  build**; `*%` binds like `*` and `+% -%` like `+ -`, all left to right,
+  and the compound forms are `*%= +%= -%=`. They work on `int`, `i64`,
+  `u8` (`a +% 100` wraps at 256) and every int vector; a float is an error
+  ("`*%` wraps integers; for floats use `*`"). Both sides meet at one type
+  as `*` does (`int *% i64` is `i64`). In GDScript terms: GDScript's `int`
+  is 64-bit and wraps silently, so `h * 31` just wraps there; Kestrel's
+  `*` stops on overflow in a checked build, so a hash writes
+  `h = (h ^ (h >> 13)) *% 0x5BD1E995`. Range analysis gives a wrapping
+  result its wrapped range (exact when the true result fits, else the
+  whole type).
 - **Calls:** `f(a, b)`. Any argument may be labelled with its
   parameter name: `f(a, seed: 1337)`. Labelled arguments come after
   positional ones.
@@ -290,9 +382,19 @@ them is an error ("`min` is a built-in name; pick another").
 
 - **Math:** `sqrt sin cos tan asin acos atan atan2 exp log pow floor ceil
   round abs sign min max clamp lerp`, and the constants `PI` and `TAU`.
-  All are `pure`.
-- **Vector methods** (`vec2`, `vec3`): `v.length()`, `v.normalized()`,
-  `a.dot(b)`, `a.distance_to(b)`. These names are not reserved.
+  All are `pure`. **On vectors, `min max clamp abs` work component by
+  component on every vector, `floor ceil round sqrt` on float vectors,
+  and `lerp(a, b, t)` takes two float vectors and a number `t`;** a plain
+  number in any argument fills every component (`clamp(v, 0.0, 1.0)`),
+  `round` rounds halves away from zero as the scalar one does, and `abs`
+  of an int vector is checked like `-v`. `sign` takes numbers only, and
+  the rest (`sin`, `pow`, ...) take numbers only.
+- **Vector methods:** `v.sum()` on every vector (components add left to
+  right, `((x + y) + z) + w`, so float results equal the written-out sum;
+  an int vector's sum is checked like `+`); on float vectors `v.length()`,
+  `v.normalized()` (a zero vector stays zero), `a.dot(b)`,
+  `a.distance_to(b)`, and `a.cross(b)` on `vec3` only. These names are not
+  reserved.
 - **Random numbers:** `randf()`, `randf_range(lo, hi)`,
   `randi_range(lo, hi)`, `rand_seed(n)`. Not `pure`: each call changes the
   generator.
@@ -303,7 +405,7 @@ The full table of argument and result types is in
 ## Statements
 
 - Assignment: `x = v`, `p.x = v`, `a[i] = v`, compound `+= -= *= /=
-  %=`. Target must be a `var`, a `var` parameter, or reached through
+  %=` (and `*%= +%= -%=`). Target must be a `var`, a `var` parameter, or reached through
   `var self`.
 - `print(...)` is an ordinary (effectful) function, usable anywhere.
 - **No-effect statements are errors.** An expression statement whose
@@ -658,7 +760,7 @@ pure at(xs: [int], i: int) -> int {
   - **It covers what it calls** (through the call graph, with the chain in the error) **and every copy the inliner made of it**: a function's contract holds in its own compiled code and in each place it was inlined, and an error in a copy says where ("where it is inlined into `step` (line 40)"). A loop's contract covers its header (`for x in xs.filter(...)` builds a list) and every iteration. A function value (a parameter, a field, a stored closure) breaks all four contracts, because its body isn't known there; contracts on function types wait. A call through an interface keeps exactly what its interface method promises, and every implementation is checked against the interface method's contract ("`Goblin.area` can't be proven `no_alloc`, which `Shape.area` requires: ..."). Natives break `no_alloc` and `no_panic`. A function range analysis gave up on, or ran out of depth in, fails every contract that reaches it.
 - **What `no_panic` doesn't count:** running out of memory; a list or map growing past its item limit (2,147,483,647: `add`, `insert`, a map key set; use `no_alloc` to rule growth out); and, under `--release`, a false trusted assumption's divide fault (a trusted `@assume` that is false can remove a division's zero check, and the division then crashes the process instead of ending with a clean error; it can never make a program read outside a list). **Recursion fails `no_panic`** (the stack may run out; but printing or copying a value of a recursive type, such as `struct Node { kids: list[Node] }`, recurses in code the compiler generates, which no contract sees, so a deep enough value can overflow the stack in a `no_panic` function), and so does an `@assume` that is checked: a function-level `@prove(no_panic)` and an `@assume` in that function can't both hold in a checked build. Put the contract on a loop and the assumption before it. Moving the assumption to the caller doesn't help: facts don't cross calls, so the function's own copy is still checked with its parameters anywhere in their types' ranges.
 - **`@assume(cond)`** is a statement, anywhere a statement may go inside a function, a method or a closure. It covers the rest of its block, up to the `}` (like a `let`); the code outside the block is analysed as if it weren't there. Several in a row, with no statement between them, are one assumption (`@assume(a) @assume(b)` is `@assume(a and b)`).
-  - **The condition** is comparisons (`<`, `<=`, `>`, `>=`, `==`, `!=`) of integers, joined with `and`. Each side is made of names (locals, parameters, constants), fields of them, integer literals, `.len`, `+`, `-`, `*`, unary `-` and parentheses; no calls and no indexing. **(An open syntax pick: the user hasn't ruled on how narrow the sides are. The cost: `grid[y].len` can't be assumed.)** Anything else is an error that says so.
+  - **The condition** is comparisons (`<`, `<=`, `>`, `>=`, `==`, `!=`) of integers, joined with `and`. Each side is made of names (locals, parameters, constants), fields of them, integer literals, `.len`, `+`, `-`, `*`, unary `-` and parentheses; no calls and no indexing. **(An open syntax pick: the user hasn't ruled on how narrow the sides are. The cost: `grid[y].len` can't be assumed.)** Anything else is an error that says so. **A component of an `ivec4` is allowed but teaches nothing:** `@assume(v.x < 10)` on an `ivec4` gets the "removes no check" warning below, because range analysis keeps one range for all four components; on an `ivec2` or `ivec3` component it teaches as on any `int`.
   - **In a checked build** each condition is checked where it is written, every time it runs; a false one ends the program: "assumption `n <= xs.len` is false on line 9 of f.kes" (exit 101).
   - **Under `--release`** an assumption that only removes overflow, shift or division checks is trusted and not evaluated. One that removes a bounds check stays one check where it is written (one check instead of one per iteration), so `@assume` can't make a program read outside a list.
   - **`kestrel check` warns** when an assumption removes nothing in either build: "`@assume(n <= grid.len)` removes no check; delete it". The warning never fails anything.

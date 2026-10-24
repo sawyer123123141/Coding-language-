@@ -419,6 +419,28 @@ From `docs/superpowers/specs/2026-10-18-at-annotations-design.md` (its "As built
 - *Runtime:* `panic.rs` strips `" of "` from `of_file`'s output for the assumption message; use a bare-file-name helper.
 - *Tests:* a false trusted assumption's divide fault under `--release` isn't exercised end to end (documented in the syntax spec; the proof check reports it as the user's assumption).
 
+## Found while building SIMD vectors (2026-10-24)
+
+Spec `docs/superpowers/specs/2026-10-21-simd-vectors-design.md` ("As built" has the rulings and what the reviews found). The five syntax picks are confirmed (the user's "lets continue" was taken as yes), so none waits for the user. What the round left out or found:
+
+**Not built (the spec's "Not this round"):**
+- **Godot exports of `vec4`, `ivec4`, `ivec2`, `ivec3`** (`Vector4`, `Vector4i`, `Vector2i`, `Vector3i`). A function that takes or returns one is today's "can't export" error (`ExportTy::Other`).
+- **Natives taking or returning `vec4`/`ivec4`.** Refused by the existing rule (not a simple or plain type). Natives can take `ivec2` and `ivec3` already (the rule accepts any struct of numbers), which the spec didn't intend to promise: decide it with the Godot exports.
+- **Lane-by-lane comparisons and `select`.** `a == b` gives one `bool` and `<` is refused (V8); a mask type and `select(mask, a, b)` are what branch-free vector code needs (`cmpltps` and `blendvps` exist). Design with a mask type before adding `<`.
+- **Per-lane shift amounts.** A vector shift takes one plain `int` (V9); `vpsllvd`/`vpsravd` need AVX2 and Cranelift 0.116 has no rule for them. Revisit with the Cranelift upgrade or an AVX2 option.
+- **`/` and `%` on `ivec4`** (V5, V6): the CPU has no integer lane divide, so they would be four scalar divides. A divide by a constant (shifts or magic multiplies per lane) is the useful part.
+- **A cheaper `*` check for a constant multiplier** (R28): `h * 3` costs about 30 instructions, not the 16 the spec estimated, because the mid-end folds the widened splat and misses the `pmuldq` rule. Checking `a * c` by comparing the lanes of `a` with `MIN / c` and `MAX / c` would be a few instructions (not measured). Range analysis removes most constant products (masked hash values), so it matters only for an unmasked `h * 3`.
+- **Also left out:** 8-wide vectors (`AVX2`; the JIT already emits AVX encodings, the Rust yardstick used SSE), `f64` and `i64` vectors, auto-vectorisation, `sign` on vectors.
+
+**To recheck after the Cranelift upgrade** (branch `claude/xenodochial-ardinghelli-291b23`, commit 8ab1f60): the nine items of the spec's "Recheck after a Cranelift upgrade" (the `pmuldq` rule for the `*` check and the mid-end rewrite behind R28; the Windows implicit pointer for vector arguments; "slower, not a fault" without `aligned`; `fcvt_to_sint_sat` on `F32X4`; the libcall fallback behind C1 and `has_sse41`; the verifier's rule for a lane-count-changing `bitcast`; hoisting of check values out of loops; text-matching dump tests (`trap user2`, `explicit_slot`, `f32x4`, `pmulld`/`psrad`); spill-slot size and alignment for XMM vectors). The "Branches on a constant false are kept" item under "Found while measuring SIMD vectors" will date with it too (a newer Cranelift may fold `brif` on a constant).
+
+**Deferred review findings (small):**
+- **Final fix wave** (from Task 5's review): a program `ivec4_sum_overflow.kes` and a `range_simd` test (`h.sum()` has 3 sites; `(h & 255).sum() * 2000000` has none left); an order-sensitive float `sum`/`dot` test (`vec4(100000000.0, 1, -100000000.0, 1)` sums to 1); `simd_method`'s `once(v)` spills plain locals, so the report prints `(...).x` for them (and `vec4(x)` with `x` a variable goes through the fill path, which copies `x` into a temporary the same way): skip the spill for a local read; the round case of `vector_math_makes_no_calls` asserts only `f32x4`, which is vacuous.
+- **Hex literals:** `s +%= t` on a string reports two errors (inherited from the bit compound forms); a hex literal wider than 32 bits on the left of an `i64` operation (`0x9E3779B97F4A7C15 *% w`) errors with no hint, as a decimal does; `c + 0xFFFFFFFF` with `c: u8` errors "doesn't fit in u8" but `0xFFFFFFFF + c` gives 2 (order dependence); `0xFFFFFFFF < d` reads the literal as the float it spells (documented in the syntax spec; add an `// expect:` line to a program).
+- **Vector checker:** a vector-valued `if` or `match` written directly inside a mixed make (`vec3(if c { a } else { b }, 1)`) is refused with "expected float, found vec2" (a `let` first works); V7's advice (convert with `vec4(...)`) still doesn't fix the case where the other operand is an `f64` (found in Task 2's review, left open).
+- **Range analysis precision:** the range of `abs(h)` has a low end of -2,147,483,647, not 0; the lanes of an `ivec4` loaded from memory are any `int` (as other loads).
+- **Test gap:** no test can catch a vector access that wrongly carries `aligned` on an AVX host such as this one (VEX forms fold unaligned loads, so nothing faults); the argument is Task 3a's list of every load and store site, and `vector_memory_access_is_never_aligned` reads the CLIF for the common shapes. A CPU without AVX would catch a missed one.
+
 ## Found while measuring SIMD vectors (2026-10-24)
 
 `kestrel/bench/kernels/results.md`, "SIMD vectors": four noise samples at once in `vec4`/`ivec4` are 3.2 times scalar Kestrel and level with hand-written SSE4.1 Rust (within the noise of a busy machine); the scalar noise is 1.12 times Rust's scalar. The gaps, all small (a quiet rerun of `py measure.py --rounds 9 --only noise --threads 1` is owed):

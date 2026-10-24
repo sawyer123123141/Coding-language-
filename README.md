@@ -161,6 +161,28 @@ pure at(xs: [int], i: int) -> int {
 - `@assume(cond)` holds to the end of its block. A checked build checks it and a false one stops the program ("assumption `i < xs.len` is false on line 3 of f.kes"); under `--release` one that only removes arithmetic checks is trusted, and one that removes a bounds check stays one check. `kestrel check` warns when an assumption removes nothing.
 - `@prove` and `@assume` make `kestrel check` run the whole analysis, so it takes about 50-80 ms longer on the voxel world, and about 250 ms longer with an `@assume` around a big block (the inlined noise code: `check` then analyses both builds, running the block twice in each); that assumption makes the build itself 65-70% slower there, so put one near what it helps. `kestrel/bench/voxels3d/results.md` has the numbers.
 
+**Vectors and wrapping operators.** `vec2`, `vec3`, `vec4` and `ivec2`, `ivec3`, `ivec4` are Godot's `Vector2`/`Vector3`/`Vector4` and `Vector2i`/`Vector3i`/`Vector4i`, with one set of rules. `vec4` and `ivec4` are real SIMD values: one 16-byte register, and `+`, `*`, `^`, `>>` and the rest do all four lanes in one instruction (the CPU needs SSE4.1, which every x64 CPU since about 2011 has). `vec4(0.5)` fills all four components, `vec4(v3, w)` and `vec4(a.xy, b.zw)` join parts, `v.wzyx` swizzles, `v.sum()` adds the lanes, and `min`, `max`, `clamp`, `abs` and `sqrt` work lane by lane. `==` gives one `bool` (every lane equal), and `<` doesn't exist on vectors. An `ivec4` is checked per lane like an `int`: a checked build stops on an overflowing lane, `--release` wraps, and range analysis removes the checks it can prove. **`*% +% -%` wrap and are never checked**, in any build, which is what a hash wants (GDScript's `int` is 64-bit and wraps silently; Kestrel's `*` stops on overflow, so `*%` is how you ask for the wrap). Hex literals may use their type's whole width, so `0x9E3779B1` is an `int`:
+
+```kestrel
+hash(h: ivec4) -> ivec4 {
+    let a = (h ^ (h >> 15)) *% 0x2C1B3C6D
+    (a ^ (a >> 12)) *% 0x297A2D39
+}
+
+main() {
+    let pos = vec4(1, 2, 3, 4)
+    let moved = pos + vec4(0.5) * 2.0
+    print(moved, moved.sum(), moved.wzyx)   // vec4(x: 2, y: 3, z: 4, w: 5) 14 vec4(x: 5, y: 4, z: 3, w: 2)
+    let h = hash(ivec4(10, 20, 30, 40))     // four hashes at once
+    print(h.x != 0)                         // true
+    var n = 1_000_003
+    n *%= 0x9E3779B1                        // wraps, never checked
+    print(n)                                // -683443373
+}
+```
+
+On a 2D value noise, four samples at once in `vec4`/`ivec4` take 3.2 times the time of the scalar version's one, and are level with a hand-written Rust SSE4.1 version (SSE, not AVX; measured on a busy machine, so a quiet rerun is owed), and a checked build costs nothing measurable because the analysis proves every lane check (`kestrel/bench/kernels/results.md`, "SIMD vectors"). Four corners of one sample at once gain only about 1.4-1.7 times. Natives can't take `vec4` or `ivec4` yet, and Godot exports of them aren't built. The rules are in the "Vectors" bullet of the syntax file.
+
 ## A window
 
 Four modules are built into the compiler (raylib underneath), and work under both `kestrel run` and `kestrel build`. Windows only for now.
@@ -234,6 +256,6 @@ The core language works: functions, structs with methods, enums and `match`, vec
 
 It also runs inside Godot 4: see [`kestrel/godot`](kestrel/godot/README.md). GDScript calls Kestrel functions, and edits hot-reload.
 
-Also built: closures and function values with the list methods that take them, interfaces (checked method sets with dynamic dispatch), `map` (the hash map), `par for` (loops that run on every core over `pure` code), range analysis (checks the compiler proves can't fail are left out, and `kestrel check --report` lists the rest), `@prove` performance contracts and `@assume`, global math and random numbers, and the window above with textures, 3D and the voxel viewer. Small structs now stay in registers. Next: explicit SIMD vector types (`vec4`, `ivec4`) and a no-rules engine version of the voxel world, after the loop-hoisting codegen fix is merged.
+Also built: closures and function values with the list methods that take them, interfaces (checked method sets with dynamic dispatch), `map` (the hash map), `par for` (loops that run on every core over `pure` code), range analysis (checks the compiler proves can't fail are left out, and `kestrel check --report` lists the rest), `@prove` performance contracts and `@assume`, global math and random numbers, and the window above with textures, 3D and the voxel viewer. Small structs now stay in registers, and `vec4`/`ivec4` are SIMD values with the wrapping operators `*% +% -%` (built 2026-10-24). Next: a whole-round review of that work, the Cranelift upgrade, and a no-rules engine version of the voxel world.
 
 Speed versus Rust is between 1.0x and 1.5x on loops and structs, and about 3x on the voxel heightmap milestone. The particle demo's update step is close now that small structs stay in registers: on one thread it takes 1.07 times Rust's time (1.15 times with the `pow` hoisted out, down from 1.5 and 3.4), but its copy loop is still about 4 times behind, and a whole frame with bulk drawing was only 2-7% behind before that change. Leaving out the checks the compiler proves can't fail makes the 3D voxel world with checks on 2.2 times faster (1.4 s to 0.64 s, now 1.09 times its `--release` time, was 2.4 times) and a `for i` loop over `parts[i]` 26% faster; it adds 40-70 ms to the build of a big program like that one. The numbers are in `kestrel/bench/*/results.md`.
