@@ -15,7 +15,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         for (k, a) in args.iter().enumerate() {
             let kir::Arg::Ref(p) = a else { unreachable!("par for passes captures by pointer") };
             let addr = self.place_addr(p)?;
-            self.b.ins().stack_store(addr, env, (k as u32 * word) as i32);
+            self.b.ins().stack_store(self.ptr, addr, env, (k as u32 * word) as i32);
         }
         let n = self.expr(count)?;
         let thunk = self.shared.par_thunks[&func.0];

@@ -1,4 +1,4 @@
-use cranelift_codegen::ir::{types, InstBuilder, MemFlags, TrapCode, Value};
+use cranelift_codegen::ir::{types, InstBuilder, MemFlagsData, TrapCode, Value};
 use cranelift_module::Module;
 use kestrel_kir::{self as kir, EnvKind, ExprKind, KTy};
 
@@ -21,7 +21,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             ExprKind::VariantLit(en, v, fields) => {
                 let kir = self.shared.kir;
                 let tag = self.b.ins().iconst(types::I8, *v as i64);
-                self.b.ins().store(MemFlags::trusted(), tag, dest, 0);
+                self.b.ins().store(MemFlagsData::trusted(), tag, dest, 0);
                 for (f, layout) in fields.iter().zip(&kir.enum_layout(*en).variants[*v as usize].fields) {
                     self.store_at(f, dest, layout.offset as i32)?;
                 }
@@ -36,26 +36,26 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             ExprKind::Some(v) => {
                 let KTy::Optional(el) = e.ty else { unreachable!("`Some` builds an optional") };
                 let one = self.b.ins().iconst(types::I8, 1);
-                self.b.ins().store(MemFlags::trusted(), one, dest, 0);
+                self.b.ins().store(MemFlagsData::trusted(), one, dest, 0);
                 let at = self.shared.kir.payload_offset(el) as i32;
                 self.store_at(v, dest, at)?;
             }
             ExprKind::NoneLit => {
                 let zero = self.b.ins().iconst(types::I8, 0);
-                self.b.ins().store(MemFlags::trusted(), zero, dest, 0);
+                self.b.ins().store(MemFlagsData::trusted(), zero, dest, 0);
             }
             ExprKind::NewArena => {
                 let a = self.new_arena();
-                self.b.ins().store(MemFlags::trusted(), a, dest, 0);
+                self.b.ins().store(MemFlagsData::trusted(), a, dest, 0);
             }
             ExprKind::StaticArena => {
                 let a = self.call_id(self.shared.rt.arena_new_static, &[]).expect("returns an arena");
-                self.b.ins().store(MemFlags::trusted(), a, dest, 0);
+                self.b.ins().store(MemFlagsData::trusted(), a, dest, 0);
             }
             ExprKind::StrLit(s) => {
                 let (p, n) = self.string(s)?;
-                self.b.ins().store(MemFlags::trusted(), p, dest, 0);
-                self.b.ins().store(MemFlags::trusted(), n, dest, 8);
+                self.b.ins().store(MemFlagsData::trusted(), p, dest, 0);
+                self.b.ins().store(MemFlagsData::trusted(), n, dest, 8);
             }
             ExprKind::Format(parts) => self.format(parts, dest)?,
             ExprKind::FieldOf(base, i) => {
@@ -109,7 +109,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// Stores `e` (a scalar or a struct) at `base + offset`.
     pub(crate) fn store_at(&mut self, e: &kir::Expr, base: Value, offset: i32) -> Result<(), String> {
         if e.ty.is_aggregate() {
-            let dest = if offset == 0 { base } else { self.b.ins().iadd_imm(base, offset as i64) };
+            let dest = if offset == 0 { base } else { self.b.ins().iadd_imm_s(base, offset as i64) };
             self.lower_into(e, dest)
         } else {
             let v = self.expr(e)?;
@@ -134,6 +134,6 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let KTy::Struct(s) = base.ty else { unreachable!("field of a non-struct") };
         let offset = self.shared.kir.layout(s).fields[i as usize].offset;
         let addr = self.materialize(base)?;
-        Ok(if offset == 0 { addr } else { self.b.ins().iadd_imm(addr, offset as i64) })
+        Ok(if offset == 0 { addr } else { self.b.ins().iadd_imm_s(addr, offset as i64) })
     }
 }

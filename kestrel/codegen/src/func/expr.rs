@@ -1,4 +1,4 @@
-use cranelift_codegen::ir::{types, InstBuilder, MemFlags, TrapCode, Value};
+use cranelift_codegen::ir::{types, InstBuilder, MemFlagsData, TrapCode, Value};
 use cranelift_module::Module;
 use kestrel_kir::{self as kir, ExprKind, KTy, UnOp};
 
@@ -36,7 +36,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             ExprKind::VecLit(_) | ExprKind::Splat(_) | ExprKind::Shuffle(..) | ExprKind::LaneOf(..) => self.simd_expr(e)?,
             ExprKind::Tag(p) => {
                 let addr = self.place_addr(p)?;
-                self.b.ins().load(types::I8, MemFlags::trusted(), addr, 0)
+                self.b.ins().load(types::I8, MemFlagsData::trusted(), addr, 0)
             }
             ExprKind::StructLit(..)
             | ExprKind::VariantLit(..)
@@ -56,7 +56,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             | ExprKind::Move(_) => unreachable!("aggregate values are built in memory"),
             ExprKind::Unary(UnOp::Not, inner) => {
                 let v = self.expr(inner)?;
-                self.b.ins().bxor_imm(v, 1)
+                self.b.ins().bxor_imm_s(v, 1)
             }
             ExprKind::Unary(UnOp::BitNot, inner) => {
                 let v = self.expr(inner)?;
@@ -87,7 +87,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                         match val {
                             Some(v) => {
                                 let x = self.expr(v)?;
-                                self.b.ins().jump(merge, &[x]);
+                                self.b.ins().jump(merge, &[x.into()]);
                             }
                             None => {
                                 self.b.ins().trap(TrapCode::unwrap_user(1));
@@ -146,13 +146,13 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let (rhs_b, merge) = (self.b.create_block(), self.b.create_block());
         let result = self.b.append_block_param(merge, types::I8);
         if is_and {
-            self.b.ins().brif(a, rhs_b, &[], merge, &[a]);
+            self.b.ins().brif(a, rhs_b, &[], merge, &[a.into()]);
         } else {
-            self.b.ins().brif(a, merge, &[a], rhs_b, &[]);
+            self.b.ins().brif(a, merge, &[a.into()], rhs_b, &[]);
         }
         self.b.switch_to_block(rhs_b);
         let b = self.expr(r)?;
-        self.b.ins().jump(merge, &[b]);
+        self.b.ins().jump(merge, &[b.into()]);
         self.b.switch_to_block(merge);
         Ok(result)
     }

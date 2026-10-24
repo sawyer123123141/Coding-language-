@@ -124,6 +124,15 @@ fn an_ivec4_add_has_one_check() {
     assert_eq!(traps(more, release()), 0);
 }
 
+/// The `*` check widens the lanes and multiplies them in pairs: Cranelift's `pmuldq` rule for
+/// `imul(swiden_low, swiden_low)`, which a Cranelift upgrade could drop (R6).
+#[test]
+fn an_ivec4_product_check_uses_pmuldq() {
+    let m = common::optimized("pure g(a: ivec4, b: ivec4) -> ivec4 {\n a * b\n}\nmain() {}\n");
+    let code = dump(&m, Options::default(), "g").unwrap();
+    assert!(code.contains("pmuldq"), "{code}");
+}
+
 #[test]
 fn ivec4_shift_right_is_arithmetic() {
     let m = common::optimized("pure g(h: ivec4) -> ivec4 {\n h >> 1\n}\nmain() {}\n");

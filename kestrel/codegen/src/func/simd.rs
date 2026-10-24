@@ -10,7 +10,7 @@
 //! and aligned by `size_align` and keeps Cranelift's own flags.
 
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
-use cranelift_codegen::ir::{types, ConstantData, Endianness, InstBuilder, MemFlags, Value};
+use cranelift_codegen::ir::{types, ConstantData, Endianness, InstBuilder, MemFlagsData, Value};
 use cranelift_module::Module;
 use kestrel_kir::{self as kir, BinOp, ExprKind, KTy};
 
@@ -20,23 +20,23 @@ use super::{cl_type, Check, FuncLowerer};
 const LANES: [&str; 4] = ["x", "y", "z", "w"];
 
 /// The flags of a load or store of a value of type `ty`: without `aligned` for a vector,
-/// `MemFlags::trusted()` for anything else.
-pub(crate) fn mem_flags(ty: KTy) -> MemFlags {
+/// `MemFlagsData::trusted()` for anything else.
+pub(crate) fn mem_flags(ty: KTy) -> MemFlagsData {
     flags(ty.is_vector())
 }
 
 /// The flags of a load or store of a vector (`vector`) or of anything else.
-fn flags(vector: bool) -> MemFlags {
+fn flags(vector: bool) -> MemFlagsData {
     if vector {
-        MemFlags::new().with_notrap()
+        MemFlagsData::new().with_notrap()
     } else {
-        MemFlags::trusted()
+        MemFlagsData::trusted()
     }
 }
 
 impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// The flags of a store of `v`: by its Cranelift type, as `mem_flags` gives them.
-    pub(crate) fn value_flags(&self, v: Value) -> MemFlags {
+    pub(crate) fn value_flags(&self, v: Value) -> MemFlagsData {
         flags(self.b.func.dfg.value_type(v).is_vector())
     }
 
@@ -83,7 +83,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// bytes (little-endian, so lane `l` is bytes `4 * l` to `4 * l + 3`).
     fn shuffle(&mut self, v: Value, lanes: [u8; 4]) -> Value {
         let ty = self.b.func.dfg.value_type(v);
-        let little = MemFlags::new().with_endianness(Endianness::Little);
+        let little = MemFlagsData::new().with_endianness(Endianness::Little);
         let bytes = self.b.ins().bitcast(types::I8X16, little, v);
         let mask: Vec<u8> = lanes.iter().flat_map(|&l| (0..4).map(move |k| 4 * l + k)).collect();
         let mask = self.b.func.dfg.immediates.push(ConstantData::from(mask));
@@ -114,7 +114,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 let same = if t == KTy::F32X4 { self.b.ins().fcmp(FloatCC::Equal, a, b) } else { self.b.ins().icmp(IntCC::Equal, a, b) };
                 let all = self.b.ins().vall_true(same);
                 if op == BinOp::Ne {
-                    self.b.ins().bxor_imm(all, 1)
+                    self.b.ins().bxor_imm_s(all, 1)
                 } else {
                     all
                 }

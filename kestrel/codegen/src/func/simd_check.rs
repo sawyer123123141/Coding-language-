@@ -48,7 +48,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     fn any_sign(&mut self, x: Value, y: Value) -> Value {
         let both = self.b.ins().band(x, y);
         let signs = self.b.ins().vhigh_bits(types::I32, both);
-        self.b.ins().icmp_imm(IntCC::NotEqual, signs, 0)
+        self.b.ins().icmp_imm_s(IntCC::NotEqual, signs, 0)
     }
 
     /// Whether some lane of `a * b` doesn't fit `int`: the exact 64-bit products of the low and the
@@ -66,7 +66,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             };
             let product = self.b.ins().imul(x, y);
             let shifted = self.b.ins().iadd(product, half);
-            let above = self.b.ins().ushr_imm(shifted, 32);
+            let above = self.b.ins().ushr_imm_s(shifted, 32);
             high = Some(match high {
                 Some(h) => self.b.ins().bor(h, above),
                 None => above,
@@ -94,7 +94,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     pub(super) fn ivec4_shift(&mut self, op: BinOp, v: Value, n: Value, line: u32, check: Check) -> Value {
         if check.arith(self.shared.opts.checked_arith) {
             // Unsigned compare: a negative amount looks huge.
-            let bad = self.b.ins().icmp_imm(IntCC::UnsignedGreaterThanOrEqual, n, 32);
+            let bad = self.b.ins().icmp_imm_s(IntCC::UnsignedGreaterThanOrEqual, n, 32);
             self.fail_if(bad, PANIC_SHIFT, line, check);
         }
         if op == BinOp::Shl {

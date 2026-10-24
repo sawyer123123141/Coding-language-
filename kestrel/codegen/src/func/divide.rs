@@ -63,9 +63,9 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// Unsigned `a / 2^k` and `a % 2^k` (k >= 1).
     fn unsigned_pow2(&mut self, is_div: bool, a: Value, k: i64) -> Value {
         if is_div {
-            self.b.ins().ushr_imm(a, k)
+            self.b.ins().ushr_imm_s(a, k)
         } else {
-            self.b.ins().band_imm(a, (1i64 << k) - 1)
+            self.b.ins().band_imm_s(a, (1i64 << k) - 1)
         }
     }
 
@@ -76,15 +76,15 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// overflow: it is only added to negative values.
     fn signed_pow2(&mut self, is_div: bool, a: Value, t: KTy, k: i64) -> Value {
         let bits = if t == KTy::I32 { 32 } else { 64 };
-        let sign = self.b.ins().sshr_imm(a, bits - 1);
-        let bias = self.b.ins().ushr_imm(sign, bits - k);
+        let sign = self.b.ins().sshr_imm_s(a, bits - 1);
+        let bias = self.b.ins().ushr_imm_s(sign, bits - k);
         let biased = self.b.ins().iadd(a, bias);
-        let q = self.b.ins().sshr_imm(biased, k);
+        let q = self.b.ins().sshr_imm_s(biased, k);
         if is_div {
             return q;
         }
         // Remainder is what's left after removing the truncated quotient.
-        let back = self.b.ins().ishl_imm(q, k);
+        let back = self.b.ins().ishl_imm_s(q, k);
         self.b.ins().isub(a, back)
     }
 
@@ -95,7 +95,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         if check == Check::Skip {
             return self.plain_div(op, a, b, t);
         }
-        let is_zero = self.b.ins().icmp_imm(IntCC::Equal, b, 0);
+        let is_zero = self.b.ins().icmp_imm_s(IntCC::Equal, b, 0);
         self.fail_if(is_zero, PANIC_DIV_ZERO, line, check);
         if !t.is_signed() {
             return self.plain_div(op, a, b, t);

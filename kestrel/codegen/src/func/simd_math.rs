@@ -4,7 +4,7 @@
 //! `max` on `I32X4` (`smin`, `smax`), and `round`, the scalar formula done on every lane at once.
 
 use cranelift_codegen::ir::condcodes::FloatCC;
-use cranelift_codegen::ir::{types, ConstantData, Endianness, InstBuilder, MemFlags, Type, Value};
+use cranelift_codegen::ir::{types, ConstantData, Endianness, InstBuilder, MemFlagsData, Type, Value};
 use cranelift_module::Module;
 use kestrel_kir::{KTy, MathOp};
 
@@ -36,7 +36,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// it is at least that, one with the sign of `x` is added to the truncated value. A NaN or
     /// infinite lane compares false and stays as `trunc` leaves it.
     fn simd_round(&mut self, x: Value) -> Value {
-        let little = MemFlags::new().with_endianness(Endianness::Little);
+        let little = MemFlagsData::new().with_endianness(Endianness::Little);
         let t = self.b.ins().trunc(x);
         let d = self.b.ins().fsub(x, t);
         let ad = self.b.ins().fabs(d);

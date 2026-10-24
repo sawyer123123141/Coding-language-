@@ -3,7 +3,7 @@
 //! it; `len`, loops and values read the header and entries directly.
 
 use cranelift_codegen::ir::condcodes::IntCC;
-use cranelift_codegen::ir::{types, InstBuilder, MemFlags, TrapCode, Value};
+use cranelift_codegen::ir::{types, InstBuilder, MemFlagsData, TrapCode, Value};
 use cranelift_module::Module;
 use kestrel_kir::{self as kir, KTy, MapLayout, MapOp, Place};
 use kestrel_runtime::PANIC_MAP_CHANGED;
@@ -26,17 +26,17 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     }
 
     fn load_i64(&mut self, addr: Value, offset: i32) -> Value {
-        self.b.ins().load(types::I64, MemFlags::trusted(), addr, offset)
+        self.b.ins().load(types::I64, MemFlagsData::trusted(), addr, offset)
     }
 
     /// `map[K, V]()`: empty; it will grow in the current arena.
     pub(crate) fn map_new(&mut self, dest: Value) {
         let zero = self.b.ins().iconst(types::I64, 0);
         for offset in (0..ARENA).step_by(8) {
-            self.b.ins().store(MemFlags::trusted(), zero, dest, offset);
+            self.b.ins().store(MemFlagsData::trusted(), zero, dest, offset);
         }
         let arena = self.call_id(self.shared.rt.current_arena, &[]).expect("returns the arena");
-        self.b.ins().store(MemFlags::trusted(), arena, dest, ARENA);
+        self.b.ins().store(MemFlagsData::trusted(), arena, dest, ARENA);
     }
 
     /// Evaluates a key into a stack slot, whose address the runtime reads.
@@ -67,7 +67,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         Ok(match op {
             MapOp::Has => {
                 let (entry, _) = self.map_find(map, &args[0])?;
-                self.b.ins().icmp_imm(IntCC::NotEqual, entry, 0)
+                self.b.ins().icmp_imm_s(IntCC::NotEqual, entry, 0)
             }
             MapOp::Remove => {
                 let l = self.map_layout_of(self.place_ty(map));
@@ -91,8 +91,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             MapOp::Lock => {
                 let header = self.place_addr(map)?;
                 let old = self.load_i64(header, LOCKS);
-                let new = self.b.ins().iadd_imm(old, 1);
-                self.b.ins().store(MemFlags::trusted(), new, header, LOCKS);
+                let new = self.b.ins().iadd_imm_s(old, 1);
+                self.b.ins().store(MemFlagsData::trusted(), new, header, LOCKS);
                 old
             }
             MapOp::Get => unreachable!("`Get` builds an optional in memory"),
@@ -106,19 +106,19 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let (check, done) = (self.b.create_block(), self.b.create_block());
         self.b.append_block_param(done, types::I8);
         let no = self.b.ins().iconst(types::I8, 0);
-        self.b.ins().brif(in_range, check, &[], done, &[no]);
+        self.b.ins().brif(in_range, check, &[], done, &[no.into()]);
         self.b.switch_to_block(check);
         let entry = self.entry_ptr(header, i, entry_size);
-        let live = self.b.ins().load(types::I8, MemFlags::trusted(), entry, LIVE);
-        let live = self.b.ins().icmp_imm(IntCC::NotEqual, live, 0);
-        self.b.ins().jump(done, &[live]);
+        let live = self.b.ins().load(types::I8, MemFlagsData::trusted(), entry, LIVE);
+        let live = self.b.ins().icmp_imm_s(IntCC::NotEqual, live, 0);
+        self.b.ins().jump(done, &[live.into()]);
         self.b.switch_to_block(done);
         self.b.block_params(done)[0]
     }
 
     fn entry_ptr(&mut self, header: Value, i: Value, entry_size: u32) -> Value {
-        let entries = self.b.ins().load(self.ptr, MemFlags::trusted(), header, ENTRIES);
-        let at = self.b.ins().imul_imm(i, entry_size as i64);
+        let entries = self.b.ins().load(self.ptr, MemFlagsData::trusted(), header, ENTRIES);
+        let at = self.b.ins().imul_imm_s(i, entry_size as i64);
         self.b.ins().iadd(entries, at)
     }
 
@@ -130,13 +130,13 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         self.b.ins().brif(entry, found, &[], missing, &[]);
         self.b.switch_to_block(missing);
         let zero = self.b.ins().iconst(types::I8, 0);
-        self.b.ins().store(MemFlags::trusted(), zero, dest, 0);
+        self.b.ins().store(MemFlagsData::trusted(), zero, dest, 0);
         self.b.ins().jump(done, &[]);
         self.b.switch_to_block(found);
         let one = self.b.ins().iconst(types::I8, 1);
-        self.b.ins().store(MemFlags::trusted(), one, dest, 0);
+        self.b.ins().store(MemFlagsData::trusted(), one, dest, 0);
         let payload = self.offset(dest, self.shared.kir.payload_offset(v) as i32);
-        let value = self.b.ins().iadd_imm(entry, l.val_off as i64);
+        let value = self.b.ins().iadd_imm_s(entry, l.val_off as i64);
         self.copy_value(payload, value, self.shared.kir.elem(v));
         self.b.ins().jump(done, &[]);
         self.b.switch_to_block(done);
@@ -178,7 +178,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         if let Some(before) = count {
             self.own_new_key(header, entry, before);
         }
-        let slot = self.b.ins().iadd_imm(entry, l.val_off as i64);
+        let slot = self.b.ins().iadd_imm_s(entry, l.val_off as i64);
         if value.ty.is_aggregate() {
             self.copy_aggregate(slot, v, value.ty);
         } else {
@@ -195,12 +195,12 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let (copy, done) = (self.b.create_block(), self.b.create_block());
         self.b.ins().brif(added, copy, &[], done, &[]);
         self.b.switch_to_block(copy);
-        let key = self.b.ins().iadd_imm(entry, KEY);
-        let ptr = self.b.ins().load(self.ptr, MemFlags::trusted(), key, 0);
+        let key = self.b.ins().iadd_imm_s(entry, KEY);
+        let ptr = self.b.ins().load(self.ptr, MemFlagsData::trusted(), key, 0);
         let len = self.load_i64(key, 8);
         let one = self.b.ins().iconst(types::I64, 1);
         let own = self.call_id(self.shared.rt.dup, &[ptr, len, one]).expect("returns a pointer");
-        self.b.ins().store(MemFlags::trusted(), own, key, 0);
+        self.b.ins().store(MemFlagsData::trusted(), own, key, 0);
         self.b.ins().jump(done, &[]);
         self.b.switch_to_block(done);
     }
@@ -209,7 +209,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     pub(crate) fn map_unlock(&mut self, map: &Place, saved: &kir::Expr) -> Result<(), String> {
         let v = self.expr(saved)?;
         let header = self.place_addr(map)?;
-        self.b.ins().store(MemFlags::trusted(), v, header, LOCKS);
+        self.b.ins().store(MemFlagsData::trusted(), v, header, LOCKS);
         Ok(())
     }
 
@@ -233,7 +233,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             self.b.switch_to_block(ok);
         }
         let entry = self.entry_ptr(header, i, l.entry_size);
-        Ok(self.b.ins().iadd_imm(entry, if value { l.val_off as i64 } else { KEY }))
+        Ok(self.b.ins().iadd_imm_s(entry, if value { l.val_off as i64 } else { KEY }))
     }
 
     /// Gives the map at `p` its own compact copy of its entries.
@@ -253,12 +253,12 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         self.lower_into(b, y)?;
         let mut args = Vec::new();
         for s in [x, y] {
-            args.push(self.b.ins().load(self.ptr, MemFlags::trusted(), s, 0));
+            args.push(self.b.ins().load(self.ptr, MemFlagsData::trusted(), s, 0));
             args.push(self.load_i64(s, 8));
         }
         let eq = self.call_id(self.shared.rt.str_eq, &args).expect("returns a bool");
         Ok(match op {
-            kir::BinOp::Ne => self.b.ins().bxor_imm(eq, 1),
+            kir::BinOp::Ne => self.b.ins().bxor_imm_s(eq, 1),
             _ => eq,
         })
     }

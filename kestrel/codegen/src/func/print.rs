@@ -1,5 +1,5 @@
 use cranelift_codegen::ir::condcodes::IntCC;
-use cranelift_codegen::ir::{types, InstBuilder, MemFlags, Value};
+use cranelift_codegen::ir::{types, InstBuilder, MemFlagsData, Value};
 use cranelift_module::{DataDescription, Module};
 use kestrel_kir::{self as kir, FieldLayout, KTy};
 
@@ -120,12 +120,12 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 Ok(())
             }
             KTy::Gpu => {
-                let id = self.b.ins().load(types::I64, MemFlags::trusted(), addr, offset);
+                let id = self.b.ins().load(types::I64, MemFlagsData::trusted(), addr, offset);
                 self.call_id(self.shared.rt.print_i64, &[id]);
                 Ok(())
             }
             KTy::Optional(el) => {
-                let tag = self.b.ins().load(types::I8, MemFlags::trusted(), addr, offset);
+                let tag = self.b.ins().load(types::I8, MemFlagsData::trusted(), addr, offset);
                 let (some, none, done) = (self.b.create_block(), self.b.create_block(), self.b.create_block());
                 self.b.ins().brif(tag, some, &[], none, &[]);
                 self.b.switch_to_block(none);
@@ -150,8 +150,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 Ok(())
             }
             KTy::Str => {
-                let p = self.b.ins().load(self.ptr, MemFlags::trusted(), addr, offset);
-                let n = self.b.ins().load(types::I64, MemFlags::trusted(), addr, offset + 8);
+                let p = self.b.ins().load(self.ptr, MemFlagsData::trusted(), addr, offset);
+                let n = self.b.ins().load(types::I64, MemFlagsData::trusted(), addr, offset + 8);
                 self.call_id(self.shared.rt.print_str, &[p, n]);
                 Ok(())
             }
@@ -163,11 +163,11 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             }
             KTy::Enum(e) => {
                 let layout = kir.enum_layout(e);
-                let tag = self.b.ins().load(types::I8, MemFlags::trusted(), addr, offset);
+                let tag = self.b.ins().load(types::I8, MemFlagsData::trusted(), addr, offset);
                 let done = self.b.create_block();
                 for (vi, variant) in layout.variants.iter().enumerate() {
                     let (yes, next) = (self.b.create_block(), self.b.create_block());
-                    let is = self.b.ins().icmp_imm(IntCC::Equal, tag, vi as i64);
+                    let is = self.b.ins().icmp_imm_s(IntCC::Equal, tag, vi as i64);
                     self.b.ins().brif(is, yes, &[], next, &[]);
                     self.b.switch_to_block(yes);
                     let name = format!("{}.{}", layout.name, variant.name);

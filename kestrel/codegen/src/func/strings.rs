@@ -1,7 +1,7 @@
 //! String operations (`ExprKind::Str`): the runtime (`runtime/src/string.rs`) counts and cuts
 //! characters; a string is a pointer and a byte length, like an array of bytes.
 
-use cranelift_codegen::ir::{types, InstBuilder, MemFlags, Value};
+use cranelift_codegen::ir::{types, InstBuilder, MemFlagsData, Value};
 use cranelift_module::Module;
 use kestrel_kir::{self as kir, KTy, StrOp};
 
@@ -13,8 +13,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// is evaluated, which could change the place it came from).
     fn str_parts(&mut self, e: &kir::Expr) -> Result<(Value, Value), String> {
         let addr = self.materialize(e)?;
-        let ptr = self.b.ins().load(self.ptr, MemFlags::trusted(), addr, 0);
-        let len = self.b.ins().load(types::I64, MemFlags::trusted(), addr, LEN);
+        let ptr = self.b.ins().load(self.ptr, MemFlagsData::trusted(), addr, 0);
+        let len = self.b.ins().load(types::I64, MemFlagsData::trusted(), addr, LEN);
         Ok((ptr, len))
     }
 
@@ -97,12 +97,12 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 };
                 let slot = self.temp_addr(slot_ty);
                 let zero = self.b.ins().iconst(types::I32, 0);
-                self.b.ins().store(MemFlags::trusted(), zero, slot, 0);
+                self.b.ins().store(MemFlagsData::trusted(), zero, slot, 0);
                 let ok = self.call_id(parse, &[ptr, len, slot]).expect("returns whether it parsed");
-                let value = self.b.ins().load(num_ty, MemFlags::trusted(), slot, 0);
-                self.b.ins().store(MemFlags::trusted(), ok, dest, 0);
+                let value = self.b.ins().load(num_ty, MemFlagsData::trusted(), slot, 0);
+                self.b.ins().store(MemFlagsData::trusted(), ok, dest, 0);
                 let at = self.shared.kir.payload_offset(el) as i32;
-                self.b.ins().store(MemFlags::trusted(), value, dest, at);
+                self.b.ins().store(MemFlagsData::trusted(), value, dest, at);
             }
             StrOp::Chars | StrOp::CharLen | StrOp::Find | StrOp::Starts | StrOp::Ends | StrOp::Cmp => unreachable!("{op:?} is a number"),
         }

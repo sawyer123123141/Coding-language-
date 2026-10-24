@@ -302,3 +302,56 @@ Session 1's new compiler had causes 1 and 2 fixed but not cause 3; session 2 had
 - The two `_direct` interface loops (0.34 and 0.58 ns against 0.53 and 0.89) are sub-nanosecond loops that moved by 0.3 ns with code layout before (the "Range analysis" section of `kestrel/bench/kernels/results.md`), so I don't count them as a gain.
 
 **Compile time:** no measurable cost. Compiling the voxel world to object code (`kernels.exe main.kes --release --dump voxels3d.mesh`, 7 runs each in turns) takes 89 ms with both compilers. `kestrel build main.kes --release` (9 runs each, alternating which goes first) gave 225 ms old and 252 new as medians, but 170 and 167 as minimums, with ranges of 170-293 and 167-326: noise from the link and the busy machine.
+
+## Cranelift 0.137 (2026-10-22)
+
+Kestrel moved from Cranelift 0.116 (wasmtime 29) to 0.137 (wasmtime 50), which has the elaborator fix for cause 1 above (wasmtime PR #14383). The API changes were mechanical: `MemFlags` is now `MemFlagsData` at the builder, block arguments are `BlockArg`s, `FunctionBuilder::declare_var` makes the variable and `finalize` takes the target's frontend config, `stack_store` takes the pointer type, branch destinations take the exception tables, and the `*_imm` helpers became `*_imm_s` (the same code; they differ from `*_imm_u` only for `i128`).
+
+**What each workaround does now** (`codegen/tests/licm.rs`):
+
+- `loop_exits.rs` is no longer needed for hoisting: without it every hoisting test passes, including two new ones that 0.116 failed even with it, code after an `if` whose branch holds a `break` and code after an `if` whose branch holds a check. **It stays, for block layout.** Cranelift lays blocks out in reverse postorder, which puts a `brif`'s first target last, so `brif more, body, exit` puts the body after the exit and every iteration of a small loop takes two jumps instead of one. Without the swap, `iface_hp_direct` went from 0.55 to 0.88 ns per item and `iface_step_direct` from 0.45 to 0.84; with it they are back (table below).
+- `phis.rs` is still needed: without it the inner-loop test fails (the outer loop's work stays in the inner loop).
+- `arith.rs`'s plain value for checked arithmetic is still needed: 0.137's egraph still treats every instruction with two results (`sadd_overflow` and the others) as a side effect (`is_pure_for_egraph` in `inst_predicates.rs`).
+
+**Cranelift dropped its tree-rebalancing rules.** 0.116 rewrote `((a ^ b) ^ c) ^ d` to `(a ^ b) ^ (c ^ d)` (and the same for `iadd`, `imul` and `band`); 0.137 has no such rule. For the frozen copy's hashes that rule happened to put the two invariant parts together (`z * C ^ seed * D`), which the old compiler then hoisted. With 0.137 the sample block of `voxels3d.mesh` has 108 xors where it had 84, one more per hash, and is 535 machine instructions where it was 504 (`--release`; the whole function is 2,311 against 2,449). The follow-up "reassociate xor/add chains" now has this to win back as well.
+
+**World build, one thread** (whole runs, about 9-10 ms of startup included; each exe built by its compiler, all print 463,749; the old compiler is `main` at 0f44771; rounds take old and new in turn; medians with ranges; the machine was busy with the SIMD build on `main`):
+
+| | Session 1 old | Session 1 new | Session 2 old | Session 2 new | New over old |
+|---|---:|---:|---:|---:|---:|
+| Frozen, checks on | 602 (532-661) | 603 (583-728) | 564 (494-904) | 567 (522-701) | 1.00, 1.01 |
+| Frozen, `--release` | 525 (483-635) | 532 (507-560) | 472 (425-593) | 479 (454-600) | 1.01, 1.01 |
+| Tuned, checks on | 463 (408-524) | **443** (392-459) | 410 (389-461) | **381** (357-459) | 0.96, 0.93 |
+| Tuned, `--release` | 463 (442-554) | **432** (415-515) | 404 (386-474) | **394** (362-485) | 0.93, 0.98 |
+
+Before `loop_exits` went back in, two sessions gave the frozen copy 1.04 and 1.02 checked and 1.07 and 1.03 `--release`, and the tuned copy 0.95-0.98.
+
+- **The frozen copy is level** (1.00-1.01): the extra xor per hash costs about what the upgrade gains elsewhere.
+- **The tuned copy is 2-7% faster.** Its hashes are already rebalanced by hand, so it loses nothing to the dropped rule.
+
+**Kernels** (`py measure.py --rounds 5 --threads 1 --old DIR`, `--release`, ns per item, median of 5 rounds with ranges; old is `bench/kernels` built at 0f44771):
+
+| Kernel | New | Old | New over old |
+|---|---:|---:|---:|
+| `step.kes` | 5.44 (5.29-5.52) | 5.31 (5.23-5.66) | 1.02 |
+| `step_index.kes` | 7.20 (7.15-7.45) | 7.63 (7.34-7.83) | 0.94 |
+| `step_scalar.kes` | 5.42 | 5.45 | 0.99 |
+| `step_pow.kes` | 21.45 | 21.85 | 0.98 |
+| `copy.kes` | 0.86 (0.83-0.89) | 0.79 (0.74-0.94) | 1.09 |
+| `filter.kes` | **3.97** (3.91-4.16) | 4.86 (4.84-5.07) | **0.82** |
+| `filter_loop.kes` | **3.98** (3.87-4.10) | 4.80 (4.70-4.99) | **0.83** |
+| `map.kes` | 1.98 | 2.03 | 0.98 |
+| `map_loop.kes` | 1.98 | 1.97 | 1.01 |
+| `sort_by.kes` | 173.96 | 183.47 | 0.95 |
+| `sort_by_loop.kes` | **104.43** (102.65-113.56) | 116.39 (111.17-120.90) | **0.90** |
+| `iface_hp.kes` | 5.15 | 5.08 | 1.01 |
+| `iface_hp_direct.kes` | 0.57 (0.52-0.65) | 0.59 (0.53-0.66) | 0.97 |
+| `iface_step.kes` | 5.64 (5.27-6.06) | 5.24 (4.97-5.37) | 1.08 |
+| `iface_step_direct.kes` | 0.57 (0.53-0.63) | 0.44 (0.42-0.46) | 1.30 |
+
+- `filter`, `filter_loop` and `sort_by_loop` are 10-18% faster; an earlier run without `loop_exits` agreed (0.87-0.93).
+- `iface_step_direct` is layout: its loop is the same instructions (0.137 even adds the immediate straight to memory), and with one unused function added to the file the new build is faster (0.40-0.46 ns against 0.57-0.66, three runs each).
+- `iface_step` is 2-7% slower whatever the padding (three paddings, three runs each). The call site has one more register move before the indirect call (the new register allocator, regalloc2 0.15); not chased further.
+- `copy.kes` (+9%) is a sub-nanosecond loop with overlapping ranges.
+
+**Compile time:** no measurable change. `kestrel build main.kes --release`, 9 runs each in turns, took 2.49 s in all with the old compiler and 2.42 s with the new.

@@ -2,7 +2,7 @@
 //! some, and sorting (`Stmt::List`); and setting a list's length (`Stmt::SetLen`).
 //! The runtime moves the items; the list's header is `{ptr, len, cap, arena}` (see `collections`).
 
-use cranelift_codegen::ir::{types, InstBuilder, MemFlags};
+use cranelift_codegen::ir::{types, InstBuilder, MemFlagsData};
 use cranelift_module::Module;
 use kestrel_kir::{self as kir, ExprKind, KTy, Place};
 
@@ -81,8 +81,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             None => self.b.ins().iconst(self.ptr, 0),
         };
         let header = self.place_addr(list)?;
-        let items = self.b.ins().load(self.ptr, MemFlags::trusted(), header, 0);
-        let len = self.b.ins().load(types::I64, MemFlags::trusted(), header, LEN);
+        let items = self.b.ins().load(self.ptr, MemFlagsData::trusted(), header, 0);
+        let len = self.b.ins().load(types::I64, MemFlagsData::trusted(), header, LEN);
         let size = self.b.ins().iconst(types::I64, size);
         self.call_id(self.shared.rt.sort, &[items, len, size, compare, env]);
         Ok(())

@@ -1,7 +1,6 @@
-//! Loop-invariant work is computed once, before the loop: the code generator puts each loop's exit
-//! first in its branch (`loop_exits`), drops the block parameters that never change (`phis`) and
-//! takes a checked operation's value from a plain instruction (`int_arith`), so Cranelift's
-//! elaborator hoists out of the body.
+//! Loop-invariant work is computed once, before the loop: the code generator drops the block
+//! parameters that never change (`phis`) and takes a checked operation's value from a plain
+//! instruction (`int_arith`), so Cranelift's elaborator hoists out of the body.
 
 mod common;
 
@@ -12,33 +11,50 @@ fn release() -> Options {
 }
 
 /// The lines of the optimised IR's blocks other than the entry block that multiply by `k`'s
-/// constant (`0x6000_0005`, 1610612741).
-fn multiplies_after_entry(src: &str, func: &str) -> Vec<String> {
+/// constant (`0x6000_0005`, 1610612741), compiled with `opts`.
+fn multiplies_after_entry(src: &str, func: &str, opts: Options) -> Vec<String> {
     let m = common::optimized(src);
-    let code = dump(&m, release(), func).unwrap();
-    // The IR comes first; its blocks are separated by blank lines, the entry block first.
+    let code = dump(&m, opts, func).unwrap();
+    // The IR comes first; its blocks are separated by blank lines, the entry block first, after
+    // the signatures of any calls.
     let ir = code.split("\n}\n").next().unwrap();
-    let rest: Vec<&str> = ir.split("\n\n").skip(1).collect();
-    assert!(!rest.is_empty() && ir.split("\n\n").next().unwrap().contains("imul"), "{code}");
+    let blocks: Vec<&str> = ir.split("\n\n").filter(|b| b.lines().any(|l| l.starts_with("block"))).collect();
+    let rest = &blocks[1..];
+    assert!(!rest.is_empty() && blocks[0].contains("imul"), "{code}");
     rest.iter().flat_map(|b| b.lines()).filter(|l| l.contains("imul") && l.contains("0x6000_0005")).map(String::from).collect()
 }
 
 #[test]
 fn a_value_made_before_a_while_loop_stays_out_of_it() {
     let src = "pure f(seed: int, n: int) -> int {\n var acc: i64 = 0\n let k = i64(seed) * 1610612741\n var i = 0\n while i < n {\n  acc = acc ^ (i64(i) * 3 ^ k)\n  i += 1\n }\n int(acc & 0xFFFF)\n}\nmain() {}\n";
-    assert_eq!(multiplies_after_entry(src, "f"), Vec::<String>::new());
+    assert_eq!(multiplies_after_entry(src, "f", release()), Vec::<String>::new());
 }
 
 #[test]
 fn a_loop_invariant_value_used_in_a_for_loop_is_hoisted() {
     let src = "pure f(seed: int, n: int) -> int {\n var acc: i64 = 0\n for i from 0 to n {\n  acc = acc ^ (i64(i) * 3 ^ i64(seed) * 1610612741)\n }\n int(acc & 0xFFFF)\n}\nmain() {}\n";
-    assert_eq!(multiplies_after_entry(src, "f"), Vec::<String>::new());
+    assert_eq!(multiplies_after_entry(src, "f", release()), Vec::<String>::new());
 }
 
 #[test]
 fn a_loop_left_by_an_else_break_is_hoisted_out_of() {
     let src = "pure f(seed: int, n: int) -> int {\n var acc: i64 = 0\n var i = 0\n while true {\n  if i < n {\n   acc = acc ^ (i64(i) * 3 ^ i64(seed) * 1610612741)\n   i += 1\n  } else {\n   break\n  }\n }\n int(acc & 0xFFFF)\n}\nmain() {}\n";
-    assert_eq!(multiplies_after_entry(src, "f"), Vec::<String>::new());
+    assert_eq!(multiplies_after_entry(src, "f", release()), Vec::<String>::new());
+}
+
+#[test]
+fn code_after_an_if_whose_branch_breaks_is_hoisted_out_of() {
+    // Cranelift before wasmtime 50 (PR #14383) lost the loop when its walk of the `if`'s branch
+    // reached the `break`'s block, outside the loop, before the code after the `if`.
+    let src = "pure f(seed: int, n: int) -> int {\n var acc: i64 = 0\n var i = 0\n while i < n {\n  if i > 5 {\n   if acc == 12345 {\n    break\n   }\n  }\n  acc = acc ^ (i64(i) * 3 ^ i64(seed) * 1610612741)\n  i += 1\n }\n int(acc & 0xFFFF)\n}\nmain() {}\n";
+    assert_eq!(multiplies_after_entry(src, "f", release()), Vec::<String>::new());
+}
+
+#[test]
+fn code_after_an_if_whose_branch_holds_a_check_is_hoisted_out_of() {
+    // The check's failure block is outside the loop, like a `break`'s.
+    let src = "pure f(seed: int, n: int) -> int {\n var acc: i64 = 0\n var c = 0\n for i from 0 to n {\n  if i > 5 {\n   c = c + i\n  }\n  acc = acc ^ (i64(i) * 3 ^ i64(seed) * 1610612741)\n }\n int(acc & 0xFFFF) + c\n}\nmain() {}\n";
+    assert_eq!(multiplies_after_entry(src, "f", Options::default()), Vec::<String>::new());
 }
 
 #[test]
@@ -70,8 +86,8 @@ fn a_checked_value_is_hoisted_and_its_check_stays() {
 
 #[test]
 fn a_negated_loop_test_keeps_its_meaning() {
-    // A float test is negated to its exact opposite, so NaN still fails `x < 10.0`; a test that
-    // isn't a comparison is compared with zero.
+    // `loop_exits` negates a loop's test. A float test is negated to its exact opposite, so NaN
+    // still fails `x < 10.0`; a test that isn't a comparison is compared with zero.
     let p = common::jit("pure count(x: float) -> int {\n var y = x\n var n = 0\n while y < 10.0 {\n  y += 1.0\n  n += 1\n }\n n\n}\npure steps(n: int) -> int {\n var i = 0\n var go = n > 0\n while go {\n  i += 1\n  go = i < n\n }\n i\n}\npure ne(x: float) -> int {\n var y = x\n var n = 0\n while y != 3.0 {\n  y = 3.0\n  n += 1\n }\n n\n}\npure below(n: int) -> int {\n var i = n\n var k = 0\n while i < 10 {\n  i += 1\n  k += 1\n }\n k\n}\npure small(n: u8) -> int {\n var i = n\n var k = 0\n while i < 200 {\n  i += 50\n  k += 1\n }\n k\n}");
     let count: extern "C" fn(f32) -> i32 = unsafe { std::mem::transmute(p.fn_ptr("count").unwrap()) };
     assert_eq!((count(7.5), count(10.0), count(f32::NAN)), (3, 0, 0));

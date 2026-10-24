@@ -151,6 +151,8 @@ Another branch is moving Cranelift to the wasmtime 50+ line (about 0.137). After
 - Text-matching dump tests: `trap user2`, `explicit_slot`, `f32x4`, and mnemonics like `pmulld`/`psrad`.
 - Spill-slot size and alignment for XMM vectors (Cranelift-internal; watch frame layout).
 
+**Rechecked 2026-10-24, after merging the 0.137 upgrade: every item holds.** The `pmuldq` rule now has its own test (`an_ivec4_product_check_uses_pmuldq`); the aligned rule was read in the 0.137 source; the rest are covered by tests that pass. The vector code needed only the API renames (`MemFlagsData`, `*_imm_s`).
+
 ## Not this round
 
 Lane-by-lane comparisons and `select`; 8-wide vectors; `f64`/`i64` vectors; auto-vectorisation; `/` and `%` on `ivec4`; per-lane shift amounts; Godot exports of `vec4`, `ivec4`, `ivec2`, `ivec3` (`Vector4`, `Vector4i`, `Vector2i`, `Vector3i`); natives taking `vec4`/`ivec4`; `sign` on vectors; a cheaper `*` check for a constant (R28).

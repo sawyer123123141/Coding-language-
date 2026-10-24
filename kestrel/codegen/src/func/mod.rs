@@ -147,17 +147,13 @@ pub(crate) fn lower_func<M: Module>(
     let sret = if f.ret.is_some_and(|r| r.is_aggregate()) { Some(params.remove(0)) } else { None };
 
     let mut slots = Vec::with_capacity(f.locals.len());
-    for (i, local) in f.locals.iter().enumerate() {
+    for local in &f.locals {
         let slot = match local.kind {
             LocalKind::Value => {
-                let v = Variable::from_u32(i as u32);
-                b.declare_var(v, cl_type(local.ty));
-                Slot::Var(v)
+                Slot::Var(b.declare_var(cl_type(local.ty)))
             }
             LocalKind::RefParam => {
-                let v = Variable::from_u32(i as u32);
-                b.declare_var(v, ptr);
-                Slot::Ptr(v)
+                Slot::Ptr(b.declare_var(ptr))
             }
             LocalKind::Addressed => Slot::Stack(stack_slot(&mut b, shared.kir, local.ty)),
             LocalKind::Unused => Slot::Unused,
@@ -168,7 +164,7 @@ pub(crate) fn lower_func<M: Module>(
         match slots[p.0 as usize] {
             Slot::Var(v) | Slot::Ptr(v) => b.def_var(v, val),
             Slot::Stack(ss) => {
-                b.ins().stack_store(val, ss, 0);
+                b.ins().stack_store(ptr, val, ss, 0);
             }
             Slot::Unused => unreachable!("a parameter is used"),
         }
@@ -184,8 +180,9 @@ pub(crate) fn lower_func<M: Module>(
         }
     }
     fl.b.seal_all_blocks();
-    fl.b.finalize();
-    // Shape the IR so Cranelift hoists loop-invariant code out of loops (see each module).
+    let config = fl.module.target_config();
+    fl.b.finalize(config);
+    // Shape the IR so Cranelift hoists loop-invariant code and lays loops out well (see each module).
     crate::phis::remove_redundant_params(func);
     crate::loop_exits::put_loop_exits_first(func);
     Ok(())
