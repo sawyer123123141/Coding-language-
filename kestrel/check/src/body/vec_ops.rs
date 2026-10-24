@@ -102,9 +102,7 @@ impl<'a> BodyChecker<'a> {
             self.error(span, msg);
             return false;
         }
-        if !self.retype_hex(scalar, scalar_ty, kind.lane()) {
-            self.coerce(scalar, scalar_ty, kind.lane());
-        }
+        self.coerce(scalar, scalar_ty, kind.lane());
         true
     }
 

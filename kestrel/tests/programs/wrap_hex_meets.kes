@@ -1,0 +1,27 @@
+// A hex literal is read at the type it meets wherever it meets it: as an operand on either side
+// and as a built-in's argument in any position. `int(...)` keeps the wrapped `int`.
+main() {
+    let w: i64 = 10
+    let z: i64 = 0
+    let d = 0.5
+    print(max(0xFFFFFFFF, z), max(z, 0xFFFFFFFF))
+    print(min(0xFFFFFFFF, w), min(w, 0xFFFFFFFF))
+    print(clamp(0xFFFFFFFF, z, w), clamp(w, 0xFFFFFFFF, 0xFFFFFFFF))
+    print(sqrt(0xFFFFFFFF) > 65535.0, abs(0xFFFFFFFF))
+    print(max(0xFFFFFFFF, d), max(d, 0xFFFFFFFF))
+    // A wrapped hex inside a larger expression needs a conversion to meet a wider type.
+    print(i64(0xFFFFFFFF) * 2 + w, w + 0xFFFFFFFF * 2)
+    print(int(0xFFFFFFFF) * 2 + w, (i64(0xFFFFFFFF) >> 4) + z, z + (0xFFFFFFFF >> 4))
+    // On their own, or with an `int`, the wrapped values stay.
+    let x = 0xFFFFFFFF
+    print(x * 2 + w, 0xFFFFFFFF * 2 + 1, -0xFFFFFFFF + 1)
+}
+
+// expect: 4294967295 4294967295
+// expect: 10 10
+// expect: 10 4294967295
+// expect: true 1
+// expect: 4294967300 4294967300
+// expect: 8589934600 8589934600
+// expect: 8 268435455 268435455
+// expect: 8 -1 2

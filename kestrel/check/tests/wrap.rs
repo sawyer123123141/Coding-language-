@@ -132,3 +132,47 @@ fn the_smallest_integer_written_in_hex_cannot_be_negated() {
     assert_eq!(errs, vec!["`-0x80000000` negates -2147483648, which overflows; write `0x80000000`".to_string()]);
     ok("main() {\n    let a: i64 = -0x80000000\n    let b = -0xFFFFFFFF\n    print(a, b)\n}\n");
 }
+
+#[test]
+fn a_hex_expression_never_gives_two_values_by_order() {
+    // Each pair is the same operation written both ways round. The right one reads the literal at
+    // the wider type; the left one read it as a wrapped `int` before meeting that type, which
+    // would be another value, so it is an error that says what to write.
+    let pairs = [
+        ("-0xFFFFFFFF + w", "w + -0xFFFFFFFF"),
+        ("(0xFFFFFFFF >> 4) + z", "z + (0xFFFFFFFF >> 4)"),
+        ("0xFFFFFFFF * 2 + d", "d + 0xFFFFFFFF * 2"),
+        ("0xFFFFFFFF * 2 + w", "w + 0xFFFFFFFF * 2"),
+        ("-0xFFFFFFFF * 1.5", "1.5 * -0xFFFFFFFF"),
+        ("max(0xFFFFFFFF * 2, z)", "max(z, 0xFFFFFFFF * 2)"),
+        ("(if w > 0 { 0xFFFFFFFF } else { 0 }) + w", "w + (if w > 0 { 0xFFFFFFFF } else { 0 })"),
+    ];
+    let src = |e: &str| format!("main() {{\n    let w: i64 = 10\n    let z: i64 = 0\n    let d = 0.5\n    print({e})\n}}\n");
+    for (left, right) in pairs {
+        let (_, errs) = run(&src(left));
+        assert_eq!(errs.len(), 1, "{left}: {errs:?}");
+        assert!(errs[0].starts_with("`0xFFFFFFFF` is read as the `int` -1 here, so this changes when it is widened to"), "{left}: {errs:?}");
+        assert!(errs[0].contains("write `i64(0xFFFFFFFF)` to mean 4294967295, or `int(0xFFFFFFFF)` to keep -1"), "{left}: {errs:?}");
+        let t = ok(&src(right));
+        assert!(t.wrapped_literals.is_empty(), "{right}");
+    }
+    // A bare literal agrees in every position of a built-in.
+    for e in ["max(0xFFFFFFFF, z)", "max(z, 0xFFFFFFFF)", "clamp(0xFFFFFFFF, z, w)", "sqrt(0xFFFFFFFF)", "min(d, 0xFFFFFFFF)"] {
+        let t = ok(&src(e));
+        assert!(t.wrapped_literals.is_empty(), "{e}");
+    }
+    // Explicit conversions, variables and `int`-only expressions keep the wrapped `int`.
+    for e in ["int(0xFFFFFFFF) * 2 + w", "i64(0xFFFFFFFF) * 2 + w", "0xFFFFFFFF * 2 + 1", "abs(-0xFFFFFFFF)"] {
+        ok(&src(e));
+    }
+    ok("main() {\n    let x = 0xFFFFFFFF * 2\n    let w: i64 = 1\n    print(x + w, x * 1.5)\n}\n");
+}
+
+#[test]
+fn an_int_vector_and_a_float_get_advice_that_works() {
+    let (_, errs) = run("main() {\n    let h = ivec4(1)\n    let z = h +% 1.5\n}\n");
+    let want = "`+%` can't mix ivec4 and float; convert the float with `int(...)` to wrap, or the ivec4 with `vec4(...)` and use `+`";
+    assert_eq!(errs, vec![want.to_string()]);
+    // Both ways the advice gives compile.
+    ok("main() {\n    let h = ivec4(1)\n    print(h +% int(1.5), vec4(h) + 1.5)\n}\n");
+}

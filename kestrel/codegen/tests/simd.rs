@@ -223,7 +223,7 @@ main() {}\n";
 #[test]
 fn vector_math_makes_no_calls() {
     let cases = [
-        ("round", "pure f(a: vec4) -> vec4 {\n round(a)\n}\n", "f32x4"),
+        ("round", "pure f(a: vec4) -> vec4 {\n round(a)\n}\n", "trunc"),
         ("floor", "pure f(a: vec4) -> vec4 {\n floor(a)\n}\n", "floor"),
         ("min", "pure f(a: vec4, b: vec4) -> vec4 {\n min(a, b)\n}\n", "fmin"),
         ("clamp", "pure f(a: vec4) -> vec4 {\n clamp(a, 0, 1)\n}\n", "fmax"),

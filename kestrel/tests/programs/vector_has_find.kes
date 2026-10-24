@@ -1,0 +1,25 @@
+// `has` and `find` work on lists and arrays of every vector type: items compare as `==` does,
+// component by component (a NaN component is never equal).
+main() {
+    var a: list[vec2] = [vec2(1, 2), vec2(3, 4)]
+    print(a.has(vec2(3, 4)), a.has(vec2(4, 3)), a.find(vec2(3, 4)), a.find(vec2(0, 0)))
+    let b: list[vec3] = [vec3(1, 2, 3), vec3(1, 2, 4)]
+    print(b.has(vec3(1, 2, 4)), b.find(vec3(1, 2, 4)), b.has(vec3(1, 2, 5)))
+    let c: list[ivec2] = [ivec2(5, 6), ivec2(-1, 7), ivec2(-1, 7)]
+    print(c.has(ivec2(-1, 7)), c.find(ivec2(-1, 7)), c.has(ivec2(7, -1)))
+    let d = [ivec3(1, 1, 1), ivec3(2, 2, 2)]
+    print(d.has(ivec3(2, 2, 2)), d.find(ivec3(2, 2, 2)), d.find(ivec3(2, 2, 3)))
+    let e: list[vec4] = [vec4(1, 2, 3, 4)]
+    let f: list[ivec4] = [ivec4(0), ivec4(9, 8, 7, 6)]
+    print(e.has(vec4(1, 2, 3, 4)), f.find(ivec4(9, 8, 7, 6)))
+    let nan = vec2(sqrt(-1.0), 1)
+    a.add(nan)
+    print(a.has(nan), a.find(nan))
+}
+
+// expect: true false 1 none
+// expect: true 1 false
+// expect: true 1 false
+// expect: true 1 none
+// expect: true 1
+// expect: false none

@@ -10,6 +10,7 @@ use kestrel_check::Builtin;
 use kestrel_syntax::ast;
 
 use super::builtins::{binary, node, number, select};
+use super::vector::{may_write, rereadable};
 use super::FnLowerer;
 use crate::ir::*;
 use crate::leaves::zero;
@@ -58,22 +59,27 @@ impl<'a> FnLowerer<'a> {
     }
 
     /// A vector method (`sum`, `length`, `normalized`, `dot`, `distance_to`) of a SIMD vector: the
-    /// receiver, then the argument, are evaluated once, in that order.
+    /// receiver, then the argument, are evaluated once, in that order. A receiver that is a local
+    /// (a place that can be read again) is read where it is used, unless the argument may write
+    /// something: then it is copied first, so the argument can't change what it reads.
     pub(crate) fn simd_method(&mut self, b: Builtin, v: Expr, args: &[ast::Arg], ty: KTy, line: u32) -> ExprKind {
         let mut pre = Vec::new();
         let vty = v.ty;
         let lane = vty.lane();
-        let v = self.once(v, &mut pre);
+        let arg = args.first().map(|a| self.expr(&a.value));
+        let plain = matches!(&v.kind, ExprKind::Load(p) if rereadable(p)) && !arg.as_ref().is_some_and(may_write);
+        let v = if plain { v } else { self.once(v, &mut pre) };
+        let mut arg = arg.into_iter();
         let kind = match b {
             Builtin::Sum => Self::lane_sum(&v, lane, line).kind,
             Builtin::Length => self.simd_length(&v, &v, &mut pre, line),
             Builtin::Dot => {
-                let w = self.expr(&args[0].value);
+                let w = arg.next().expect("`dot` takes a vector");
                 let w = self.once(w, &mut pre);
                 self.simd_dot(&v, &w, &mut pre, line).kind
             }
             Builtin::DistanceTo => {
-                let w = self.expr(&args[0].value);
+                let w = arg.next().expect("`distance_to` takes a vector");
                 let diff = self.spill(node(ExprKind::Binary(BinOp::Sub, Box::new(v), Box::new(w)), vty, line), &mut pre);
                 self.simd_length(&diff, &diff, &mut pre, line)
             }

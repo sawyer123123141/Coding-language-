@@ -14,6 +14,7 @@ main() {
     let d: f64 = 1.5
     print(y * 1.5, 0xFFFFFFFF * 1.5, 1.5 * 0xFFFFFFFF)
     print(0xFFFFFFFF * d, d * 0xFFFFFFFF)
+    print(0xFFFFFFFF < d, d < 0xFFFFFFFF)
     // Meeting an `i64`, a hex literal is read as an `i64`, whichever side it is on.
     print(0xFFFFFFFF + w, w + 0xFFFFFFFF, 0xFFFFFFFF *% w, w *% 0xFFFFFFFF)
     print(0xFFFFFFFF < w, w < 0xFFFFFFFF, 0xFFFFFFFF & w, w & 0xFFFFFFFF)
@@ -32,6 +33,7 @@ main() {
 // expect: 4294967295 4294967295 -1
 // expect: -1.5 6442451000 6442451000
 // expect: 6442450942.5 6442450942.5
+// expect: false true
 // expect: 4294967298 4294967298 12884901885 12884901885
 // expect: false true 3 3
 // expect: 2 21

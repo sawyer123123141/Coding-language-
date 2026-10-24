@@ -12,6 +12,7 @@ mod enums;
 mod exclusive;
 mod expr;
 mod fnvalue;
+mod hex;
 mod iface;
 mod let_else;
 mod in_block;
@@ -290,7 +291,9 @@ impl<'a> BodyChecker<'a> {
             return;
         }
         if from.coerces_to(to) {
-            self.t.coerce.insert(e.id, to);
+            if !self.widen_hex(e, from, to) {
+                self.t.coerce.insert(e.id, to);
+            }
             return;
         }
         // A struct or enum goes where an interface it lists is expected (or that interface's optional).

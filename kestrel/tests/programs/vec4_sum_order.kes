@@ -1,0 +1,20 @@
+// `sum` and `dot` add the lanes left to right, `((x + y) + z) + w`, so float rounding is the same
+// as the scalar code written that way: 100000000 + 1 rounds back to 100000000.
+twice(v: vec4) -> vec4 {
+    v * 2
+}
+
+main() {
+    let v = vec4(100000000.0, 1, -100000000.0, 1)
+    print(v.sum(), v.dot(vec4(1)), vec4(1).dot(v))
+    print(((v.x + v.y) + v.z) + v.w)
+    print(vec3(100000000.0, 1, -100000000.0).sum())
+    // A method whose argument is a call: the receiver is read first, the argument after.
+    let u = vec4(1, 2, 3, 4)
+    print(u.dot(twice(u)), u.distance_to(twice(u)), twice(u).dot(u))
+}
+
+// expect: 1 1 1
+// expect: 1
+// expect: 0
+// expect: 60 5.477226 60

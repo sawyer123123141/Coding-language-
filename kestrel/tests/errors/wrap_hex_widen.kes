@@ -1,0 +1,26 @@
+// A hex literal read as a wrapped `int` inside a larger expression can't be read again when that
+// value meets an `i64` or a float, so the other order would give another value: write `i64(...)`.
+main() {
+    let w: i64 = 10
+    let d = 0.5
+    let z: i64 = 0
+    let a = -0xFFFFFFFF + w
+    let b = (0xFFFFFFFF >> 4) + z
+    let c = 0xFFFFFFFF * 2 + d
+    let e = -0xFFFFFFFF * 1.5
+    let f = max(0xFFFFFFFF * 2, z)
+    let g = sqrt(~0xFFFFFFFF)
+    let h = (if d > 0.0 { 0xFFFFFFFF } else { 0 }) + w
+    let k = 0xFFFFFFFF * 2 + vec4(1)
+    let m: f64 = (0xFFFFFFFF >> 4) + z
+}
+
+// error 7: `0xFFFFFFFF` is read as the `int` -1 here, so this changes when it is widened to `i64`; write `i64(0xFFFFFFFF)` to mean 4294967295, or `int(0xFFFFFFFF)` to keep -1
+// error 8: `0xFFFFFFFF` is read as the `int` -1 here, so this changes when it is widened to `i64`; write `i64(0xFFFFFFFF)` to mean 4294967295, or `int(0xFFFFFFFF)` to keep -1
+// error 9: `0xFFFFFFFF` is read as the `int` -1 here, so this changes when it is widened to `float`; write `i64(0xFFFFFFFF)` to mean 4294967295, or `int(0xFFFFFFFF)` to keep -1
+// error 10: `0xFFFFFFFF` is read as the `int` -1 here, so this changes when it is widened to `float`; write `i64(0xFFFFFFFF)` to mean 4294967295, or `int(0xFFFFFFFF)` to keep -1
+// error 11: `0xFFFFFFFF` is read as the `int` -1 here, so this changes when it is widened to `i64`; write `i64(0xFFFFFFFF)` to mean 4294967295, or `int(0xFFFFFFFF)` to keep -1
+// error 12: `0xFFFFFFFF` is read as the `int` -1 here, so this changes when it is widened to `float`; write `i64(0xFFFFFFFF)` to mean 4294967295, or `int(0xFFFFFFFF)` to keep -1
+// error 13: `0xFFFFFFFF` is read as the `int` -1 here, so this changes when it is widened to `i64`; write `i64(0xFFFFFFFF)` to mean 4294967295, or `int(0xFFFFFFFF)` to keep -1
+// error 14: `0xFFFFFFFF` is read as the `int` -1 here, so this changes when it is widened to `float`; write `i64(0xFFFFFFFF)` to mean 4294967295, or `int(0xFFFFFFFF)` to keep -1
+// error 15: `0xFFFFFFFF` is read as the `int` -1 here, so this changes when it is widened to `i64`; write `i64(0xFFFFFFFF)` to mean 4294967295, or `int(0xFFFFFFFF)` to keep -1

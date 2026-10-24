@@ -141,21 +141,6 @@ impl<'a> BodyChecker<'a> {
         lt.is_int() && rt.is_int()
     }
 
-    /// A hex literal is read at the type it meets, whichever side it is on: next to an `i64` `w`,
-    /// `0xFFFFFFFF + w` and `w + 0xFFFFFFFF` both use 4294967295 (not -1), and next to a float it is
-    /// the float it spells (4294967295.0 times an `f64` 1.5, whichever side it is on). Returns
-    /// whether `e` was one and is now typed `to`. (A variable that holds a wrapped hex literal is an
-    /// `int`: `x * 1.5` is -1.5.)
-    pub(super) fn retype_hex(&mut self, e: &Expr, from: Ty, to: Ty) -> bool {
-        let ExprKind::Int(n) = e.kind else { return false };
-        if !to.is_numeric() || from == to || !self.t.hex_literals.contains(&e.id) {
-            return false;
-        }
-        let ty = self.int_literal(e, n, Some(to));
-        self.t.expr_ty[e.id.0 as usize] = ty;
-        true
-    }
-
     /// Both operands must be numbers that meet at a common type.
     pub(super) fn operands(&mut self, e: &Expr, op: BinaryOp, lhs: &Expr, lt: Ty, rhs: &Expr, rt: Ty) -> Ty {
         if lt == Ty::Error || rt == Ty::Error {
@@ -169,11 +154,9 @@ impl<'a> BodyChecker<'a> {
         }
         match Ty::common(lt, rt) {
             Some(c) => {
-                for (side, t) in [(lhs, lt), (rhs, rt)] {
-                    if !self.retype_hex(side, t, c) {
-                        self.coerce(side, t, c);
-                    }
-                }
+                // (A hex literal is read at `c`: see `widen_hex`.)
+                self.coerce(lhs, lt, c);
+                self.coerce(rhs, rt, c);
                 c
             }
             None => {

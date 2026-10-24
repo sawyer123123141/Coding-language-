@@ -222,3 +222,13 @@ fn a_negated_fill_loses_its_check() {
     let (m, a) = analysed("pure f(n: int) -> ivec4 {\n -ivec4(n & 255)\n}", Checked);
     assert_eq!(counts(&m, &a, "f"), (1, 0), "{:#?}", checks(&m, &a, "f").left);
 }
+
+#[test]
+fn a_sum_checks_each_add() {
+    // `h.sum()` is `((x + y) + z) + w`: three checked adds, all kept for any `int`.
+    let (m, a) = analysed("pure f(h: ivec4) -> int {\n h.sum()\n}", Checked);
+    assert_eq!(counts(&m, &a, "f"), (0, 3), "{:#?}", checks(&m, &a, "f").left);
+    // Masked lanes add to at most 1020, so neither the adds nor the product can overflow.
+    let (m, a) = analysed("pure f(h: ivec4) -> int {\n (h & 255).sum() * 2000000\n}", Checked);
+    assert_eq!(checks(&m, &a, "f").left.len(), 0, "{:#?}", checks(&m, &a, "f").left);
+}

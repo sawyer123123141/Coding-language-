@@ -21,6 +21,9 @@ impl<'a> BodyChecker<'a> {
         if lt == Ty::Error || rt == Ty::Error {
             return Ty::Error;
         }
+        if self.wrap_mixed_vector(e.span, op, lt, rt) {
+            return Ty::Error;
+        }
         if [lt, rt].iter().any(|&t| self.no_wrap(t)) {
             let plain = op.plain().expect("a wrapping operator");
             self.wrap_float_error(e.span, op.symbol(), plain.symbol());
@@ -50,6 +53,21 @@ impl<'a> BodyChecker<'a> {
         let span = target.span.to(value.span);
         self.wrap_float_error(span, op.symbol(), &plain);
         self.check_expr(value, None);
+        true
+    }
+
+    /// An int vector next to a float or a float vector: neither `+%` nor `+` takes both, so the
+    /// advice converts one side. Returns whether it reported that.
+    fn wrap_mixed_vector(&mut self, span: Span, op: BinaryOp, lt: Ty, rt: Ty) -> bool {
+        let int_vec = [lt, rt].into_iter().find(|&t| self.t.vector(t).is_some_and(|k| k.has_bits()));
+        let other = [lt, rt].into_iter().find(|&t| self.no_wrap(t));
+        let (Some(iv), Some(other)) = (int_vec, other) else { return false };
+        let kind = self.t.vector(iv).expect("an int vector");
+        let (sym, plain) = (op.symbol(), op.plain().expect("a wrapping operator").symbol());
+        let (ivn, on, fvn) = (self.tn(iv), self.tn(other), self.tn(kind.as_float()));
+        let to_int = if other.is_float() { "int".to_string() } else { ivn.clone() };
+        let msg = format!("`{sym}` can't mix {ivn} and {on}; convert the {on} with `{to_int}(...)` to wrap, or the {ivn} with `{fvn}(...)` and use `{plain}`");
+        self.error(span, msg);
         true
     }
 

@@ -35,6 +35,6 @@ main() {
 // error 16: `<` doesn't compare vectors; compare components, like `a.x < b.x`
 // error 17: `==` can't mix ivec4 and ivec3
 // error 18: `ivec4` has no field `q`
-// error 19: `*%` wraps integers; for floats use `*`
+// error 19: `*%` can't mix ivec4 and float; convert the float with `int(...)` to wrap, or the ivec4 with `vec4(...)` and use `*`
 // error 21: `ivec3` has 3 components, but these values give 4; give 3, one value for all of them, or none for zeros
 // error 22: map keys must be integers, bools or strings, not `ivec4`

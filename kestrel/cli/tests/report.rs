@@ -291,3 +291,15 @@ fn a_proven_ivec4_program_has_no_vector_checks_left() {
     assert!(text.contains("function `main` (line 10): no checks left (7 removed), no allocations"), "{text}");
     assert!(text.contains("total: 8 checks, 7 removed, 1 left"), "{text}");
 }
+
+#[test]
+fn a_vector_sum_names_its_lanes() {
+    // `h` is a parameter, read where it is used: the report names `h.x`, not a temporary.
+    let src = "pub total(h: ivec4) -> int {\n    h.sum()\n}\n\nmain() {}\n";
+    let dir = project("vector_sum", &[("sum.kes", src)]);
+    let out = kestrel(&["check", "--report"], &dir.join("sum.kes"));
+    assert!(out.status.success(), "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(text.contains("    line 2: overflow check: `h.x + h.y` may exceed `int` (`h.x` can be any `int`; `h.y` can be any `int`)\n"), "{text}");
+    assert!(text.contains("`((h.x + h.y) + h.z) + h.w` may exceed `int`"), "{text}");
+}

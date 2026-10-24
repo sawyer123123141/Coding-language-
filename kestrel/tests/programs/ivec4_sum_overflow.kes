@@ -1,0 +1,19 @@
+// `sum` adds an `ivec4`'s lanes left to right with `int` checks: `(x + y) + z` overflows here
+// although the whole sum, with `w`, would fit.
+id(x: int, d: int) -> int {
+    if d == 0 {
+        return x
+    }
+    id(x, d - 1)
+}
+
+main() {
+    let big = id(2147483647, 2)
+    let h = ivec4(big, 0, 1, -5)
+    print(ivec4(1, 2, 3, 4).sum())
+    print(h.sum())
+}
+
+// expect: 10
+// expect-exit: 101
+// expect-stderr: integer overflow on line 14

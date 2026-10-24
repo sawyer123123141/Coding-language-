@@ -16,13 +16,13 @@ pub(super) enum Operand {
 
 /// Whether a place can be read again and again: nothing in its path (an
 /// index, a map key) is an expression that would be evaluated again.
-fn rereadable(p: &Place) -> bool {
+pub(super) fn rereadable(p: &Place) -> bool {
     p.path.iter().all(|step| step.at().is_none())
 }
 
 /// Whether evaluating `e` may change a variable: it calls a function (which may change a `var`
 /// argument, or what a closure captured) or writes a place.
-fn may_write(e: &Expr) -> bool {
+pub(super) fn may_write(e: &Expr) -> bool {
     let mut writes = false;
     crate::visit::walk_expr(e, &mut |n| match n {
         Node::Expr(x) => writes |= matches!(x.kind, ExprKind::Call(..) | ExprKind::CallIndirect { .. } | ExprKind::CallVirtual { .. }),
