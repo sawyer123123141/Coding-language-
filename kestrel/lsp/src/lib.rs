@@ -13,6 +13,7 @@ mod nav;
 pub mod pos;
 pub mod resolve;
 mod server;
+mod shift;
 mod work;
 
 pub use server::run;

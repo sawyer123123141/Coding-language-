@@ -137,3 +137,27 @@ fn definition_opens_a_built_in_module() {
     assert!(text.lines().nth(line).unwrap().contains("clear("), "{d}");
     c.stop();
 }
+
+#[test]
+fn the_lens_follows_edits_and_waits_for_a_clean_check() {
+    let broken = LENS.replace("print(get(xs, 0))", "print(get(xs, true))");
+    let dir = project("lens_edits", &[("lens.kes", &broken)]);
+    let file = url(&dir.join("lens.kes"));
+    let mut c = Client::start(json!({"costLens": {"enabled": true, "show": "both"}}));
+    let is_bounds = |d: &Value| d["message"].as_str().unwrap().starts_with("bounds check");
+    // Opened with an error: no lens yet; once the error is fixed (unsaved), it is lowered.
+    c.open(&file, &broken);
+    c.diagnostics(&file, |d| d.iter().any(|d| d["severity"] == json!(1)));
+    c.change(&file, 2, LENS);
+    let diags = c.diagnostics(&file, |d| d.iter().any(is_bounds));
+    assert_eq!(diags.iter().find(|d| is_bounds(d)).unwrap()["range"]["start"]["line"], json!(1));
+    // A line added above: the lens's diagnostic and hint move down with the code.
+    c.change(&file, 3, &format!("// a note\n{LENS}"));
+    let diags = c.diagnostics(&file, |d| d.iter().any(|d| is_bounds(d) && d["range"]["start"]["line"] == json!(2)));
+    assert!(diags.iter().filter(|d| is_bounds(d)).count() == 1, "{diags:?}");
+    let range = json!({"start": {"line": 0, "character": 0}, "end": {"line": 20, "character": 0}});
+    let hints = c.request("textDocument/inlayHint", json!({"textDocument": {"uri": file}, "range": range}));
+    let lines: Vec<&Value> = hints.as_array().unwrap().iter().filter(|h| h["label"].as_str().unwrap().starts_with("bounds")).map(|h| &h["position"]["line"]).collect();
+    assert_eq!(lines, [&json!(2)]);
+    c.stop();
+}

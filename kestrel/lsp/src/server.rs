@@ -15,6 +15,7 @@ use serde_json::Value;
 use crate::config::Config;
 use crate::diagnostics::{merged, Found};
 use crate::docs::{key, Docs};
+use crate::shift::LineShift;
 use crate::{hints, nav, work};
 
 pub struct Server {
@@ -96,6 +97,8 @@ impl Server {
                     let response = self.request(r);
                     self.send(Message::Response(response));
                 }
+                // `exit` without `shutdown` first: stop anyway.
+                Message::Notification(n) if n.method == note::Exit::METHOD => return Ok(()),
                 Message::Notification(n) => self.notification(n),
                 Message::Response(_) => {}
             }
@@ -153,7 +156,17 @@ impl Server {
                 if let Ok(p) = serde_json::from_value::<DidChangeTextDocumentParams>(n.params) {
                     // Full sync: the last change is the whole text.
                     if let (Some(doc), Some(change)) = (self.docs.get_mut(&p.text_document.uri), p.content_changes.into_iter().last()) {
-                        doc.text = kestrel_driver::without_bom(&change.text).to_string();
+                        let text = kestrel_driver::without_bom(&change.text).to_string();
+                        // What lowering found follows the edit until the next save.
+                        let lines = LineShift::new(&doc.text, &text);
+                        lines.lens(&mut doc.lens);
+                        let k = key(&doc.path);
+                        doc.text = text;
+                        for found in self.lowered.values_mut() {
+                            if let Some((_, diags)) = found.get_mut(&k) {
+                                lines.diagnostics(diags);
+                            }
+                        }
                     }
                     self.docs.touch_all(false);
                 }

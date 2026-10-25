@@ -41,7 +41,8 @@ struct Finder<'p> {
 
 impl<'p> Finder<'p> {
     fn hit(&mut self, span: Span, hit: Hit<'p>) {
-        if span.start <= self.offset && self.offset <= span.end {
+        // An empty default span is a node the parser made up, written nowhere.
+        if span != Span::default() && span.start <= self.offset && self.offset <= span.end {
             let len = span.end - span.start;
             if self.best.as_ref().is_none_or(|(b, _)| len <= *b) {
                 self.best = Some((len, hit));

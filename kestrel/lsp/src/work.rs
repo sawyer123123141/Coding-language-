@@ -3,6 +3,7 @@
 
 use std::any::Any;
 use std::collections::HashMap;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use kestrel_syntax::ast::Item;
 use kestrel_syntax::Diagnostic;
@@ -27,13 +28,11 @@ pub fn analyse(s: &mut Server, uri: &Url, lower_it: bool) -> bool {
     let mut found = Found::new();
     by_file(&s.docs, &a.sources, &a.diags, &mut found);
     let clean = !a.diags.iter().any(Diagnostic::is_error);
-    let mut lowered = None;
-    if lower_it && clean {
-        lowered = Some(lower(&path, &text, needs_main, &read, s.config.checked, s.config.lens));
-    }
+    // The analysis is kept before lowering, so a panic there leaves it matching the text.
     let doc = s.docs.get_mut(uri).expect("still open");
     doc.dirty = false;
-    doc.lower = false;
+    // A file opened or saved with errors is lowered once they are fixed.
+    doc.lower = lower_it && !clean;
     let has_tables = a.tables.is_some();
     let old = doc.analysis.replace(a);
     // Keep the last analysis with tables for while the text doesn't parse.
@@ -46,14 +45,25 @@ pub fn analyse(s: &mut Server, uri: &Url, lower_it: bool) -> bool {
     if !clean {
         // What lowering found no longer holds.
         s.lowered.remove(&k);
+        s.docs.get_mut(uri).expect("still open").lens.clear();
         return false;
     }
-    let Some(lowered) = lowered else { return false };
+    if !lower_it {
+        return false;
+    }
+    let read = |p: &std::path::Path| s.docs.read(p);
+    let lowered = catch_unwind(AssertUnwindSafe(|| lower(&path, &text, needs_main, &read, s.config.checked, s.config.lens)));
     let mut found = Found::new();
     let mut lens = Vec::new();
-    if let Some(l) = lowered {
-        by_file(&s.docs, &l.sources, &l.diags, &mut found);
-        lens = l.lens;
+    match lowered {
+        Ok(Some(l)) => {
+            by_file(&s.docs, &l.sources, &l.diags, &mut found);
+            lens = l.lens;
+        }
+        Ok(None) => {}
+        Err(panic) => {
+            found.insert(k.clone(), (uri.clone(), vec![ice(&*panic)]));
+        }
     }
     if s.config.diagnostics() {
         let lens_diags = lens_diagnostics(&text, &lens);
@@ -66,24 +76,33 @@ pub fn analyse(s: &mut Server, uri: &Url, lower_it: bool) -> bool {
     true
 }
 
-/// When analysing panicked: the document gets one error saying so.
-pub fn crashed(s: &mut Server, uri: &Url, panic: Box<dyn Any + Send>) -> bool {
+/// The error for a compiler panic.
+fn ice(panic: &(dyn Any + Send)) -> LspDiagnostic {
     let why = panic
         .downcast_ref::<String>()
         .cloned()
         .or_else(|| panic.downcast_ref::<&str>().map(|s| s.to_string()))
         .unwrap_or_else(|| "a panic".to_string());
-    let Some(doc) = s.docs.get_mut(uri) else { return false };
-    doc.dirty = false;
-    doc.lower = false;
-    let k = key(&doc.path);
-    let d = LspDiagnostic {
+    LspDiagnostic {
         severity: Some(DiagnosticSeverity::ERROR),
         source: Some("kestrel".into()),
         message: format!("internal compiler error: {why}; please report it with this file"),
         ..LspDiagnostic::default()
-    };
-    s.checked.insert(k.clone(), HashMap::from([(k.clone(), (uri.clone(), vec![d]))]));
+    }
+}
+
+/// When checking panicked: the document gets one error saying so, and hover answers from the
+/// last analysis that had tables (moved past the edits since).
+pub fn crashed(s: &mut Server, uri: &Url, panic: Box<dyn Any + Send>) -> bool {
+    let Some(doc) = s.docs.get_mut(uri) else { return false };
+    doc.dirty = false;
+    doc.lower = false;
+    if let Some(old) = doc.analysis.take().filter(|o| o.tables.is_some()) {
+        doc.good = Some((old.sources[0].src.clone(), old));
+    }
+    doc.lens.clear();
+    let k = key(&doc.path);
+    s.checked.insert(k.clone(), HashMap::from([(k.clone(), (uri.clone(), vec![ice(&*panic)]))]));
     s.lowered.remove(&k);
     false
 }

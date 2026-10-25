@@ -17,8 +17,11 @@ pub type Found = HashMap<String, (Url, Vec<LspDiagnostic>)>;
 /// Every diagnostic of `diags` (spans in the shared space of `sources`), by file. Built-in
 /// modules' files are left out. `code` names what found it ("kestrel" for the checker).
 pub fn by_file(docs: &Docs, sources: &[Source], diags: &[Diagnostic], out: &mut Found) {
+    // Each file's line map, made once (a file may have many diagnostics).
+    let mut maps: HashMap<usize, LineMap> = HashMap::new();
     for d in diags {
-        let Some(s) = sources.iter().rev().find(|s| s.base <= d.span.start) else { continue };
+        let Some(i) = sources.iter().rposition(|s| s.base <= d.span.start) else { continue };
+        let s = &sources[i];
         if s.builtin {
             continue;
         }
@@ -26,13 +29,13 @@ pub fn by_file(docs: &Docs, sources: &[Source], diags: &[Diagnostic], out: &mut 
         let Some(url) = url_of(docs, path) else { continue };
         let local = Span { start: d.span.start - s.base, end: d.span.end.saturating_sub(s.base).max(d.span.start - s.base) };
         let entry = out.entry(key(path)).or_insert_with(|| (url, Vec::new()));
-        entry.1.push(to_lsp(&s.src, local, d));
+        let lines = maps.entry(i).or_insert_with(|| LineMap::new(&s.src));
+        entry.1.push(to_lsp(lines, local, d));
     }
 }
 
-/// One diagnostic, its span local to the file with text `src`. The help line follows the message.
-pub fn to_lsp(src: &str, span: Span, d: &Diagnostic) -> LspDiagnostic {
-    let lines = LineMap::new(src);
+/// One diagnostic, its span local to the file `lines` maps. The help line follows the message.
+pub fn to_lsp(lines: &LineMap, span: Span, d: &Diagnostic) -> LspDiagnostic {
     let severity = match d.severity {
         Severity::Error => DiagnosticSeverity::ERROR,
         Severity::Warning => DiagnosticSeverity::WARNING,
@@ -78,13 +81,14 @@ mod tests {
     use lsp_types::{DiagnosticSeverity, Position};
 
     use super::to_lsp;
+    use crate::pos::LineMap;
 
     #[test]
     fn a_diagnostic_keeps_its_range_and_help() {
         let src = "main() {\n    let é = true + 1\n}\n";
         let start = src.find("true").unwrap() as u32;
         let d = Diagnostic::error(Span { start, end: start + 8 }, "can't add").with_help("write a number");
-        let l = to_lsp(src, d.span, &d);
+        let l = to_lsp(&LineMap::new(src), d.span, &d);
         assert_eq!(l.range.start, Position::new(1, 12));
         assert_eq!(l.range.end, Position::new(1, 20));
         assert_eq!(l.severity, Some(DiagnosticSeverity::ERROR));

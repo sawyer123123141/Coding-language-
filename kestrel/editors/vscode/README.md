@@ -38,4 +38,4 @@ Each open file is checked as the entry file of a program, with the modules it us
 
 ## Not built yet
 
-Completion, rename, find references, signature help, formatting, semantic highlighting, and code actions that insert the lens's `@assume` for you. The lens's lines are from the last save: edits move them until the next save.
+Completion, rename, find references, signature help, formatting, semantic highlighting, and code actions that insert the lens's `@assume` for you. The lens is from the last save: until the next one its items move with the lines around an edit, and an edited line has none.

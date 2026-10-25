@@ -227,6 +227,10 @@ impl Resolver<'_> {
 
     /// The declaration whose name is at `span`.
     fn decl(&self, span: Span) -> Option<Symbol> {
+        // The built-in vectors' structs and fields have no span.
+        if span == Span::default() {
+            return None;
+        }
         let t = self.t;
         if let Some(f) = t.fns.iter().position(|f| f.span == span) {
             return Some(self.func(FnId(f as u32)));
