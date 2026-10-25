@@ -28,8 +28,8 @@ enum Mark {
 pub(crate) fn check_default_cycles(program: &Program, t: &Tables, diags: &mut Vec<Diagnostic>) {
     let mut walk = Walk { program, t, marks: HashMap::new(), stack: Vec::new() };
     for (sid, s) in t.structs.iter().enumerate() {
-        // An instance builds its declaration's defaults, which recorded their `res` once (a
-        // loop through a generic is the declaration's, reported once, not again per instance).
+        // An instance's edges are its declaration's, so every loop through it is found from the
+        // declaration (and reported once there, not again per instance).
         if s.instance.is_some() {
             continue;
         }

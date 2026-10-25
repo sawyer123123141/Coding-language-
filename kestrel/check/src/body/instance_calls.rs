@@ -22,12 +22,12 @@ impl<'a> BodyChecker<'a> {
         let args = match (receiver_ty, owner) {
             (Ty::Struct(s), GenericOwner::Struct(def)) => {
                 let (found, args) = self.t.struct_parts(s);
-                assert_eq!(found, def, "a method of one generic type called on another");
+                assert_eq!(found, def, "a method of one generic type called on another; this is a compiler bug");
                 args
             }
             (Ty::Enum(id) | Ty::Variant(id, _), GenericOwner::Enum(def)) => {
                 let (found, args) = self.t.enum_parts(id);
-                assert_eq!(found, def, "a method of one generic type called on another");
+                assert_eq!(found, def, "a method of one generic type called on another; this is a compiler bug");
                 args
             }
             _ => return plain,

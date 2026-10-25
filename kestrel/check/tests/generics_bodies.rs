@@ -266,3 +266,28 @@ fn a_rule_call_through_an_enum_method_and_a_generic_enums_own_name() {
     assert_eq!(args.len(), 1);
     assert_eq!(t.ty_name(args[0]), "T");
 }
+
+#[test]
+fn replacing_a_whole_var_placeholder_is_refused_like_an_interface() {
+    // A `T` may be an interface type in some copy, where the caller's concrete place is lent to
+    // `a` and a replacement of another type would not fit. The refusal comes from
+    // `check_iface_replace` and stands in for the arena message: nothing else is reported.
+    let plain = "can't replace `a`: it may be the caller's a different type; change it through its methods";
+    for body in [
+        "f[T](var a: T, b: T) { a = b }",
+        "f[T](var a: T, xs: list[T]) { a = xs[0] }",
+        "f[T](var a: T, b: T, c: bool) { a = if c { a } else { b } }",
+    ] {
+        let (_, _, errs) = run(&format!("{body}\nmain() {{}}\n"));
+        assert_eq!(errs, [plain], "{body}");
+    }
+    // With a rule, the example is a type that has it.
+    let src = "interface D {\n    pure hp(self) -> int\n}\nstruct G: D {\n    pure hp(self) -> int { 1 }\n}\nf[T: D](var a: T, b: T) { a = b }\nmain() {}\n";
+    let (_, _, errs) = run(src);
+    assert_eq!(errs, ["can't replace `a`: it may be the caller's `G`; change it through its methods"]);
+    // Changing a field or calling a method of it is not a replacement.
+    clean("interface D {\n    hit(var self)\n}\nf[T: D](var a: T) { a.hit() }\nmain() {}\n");
+    // The same replacement of a plain interface is refused as before.
+    let (_, _, errs) = run("interface D {\n    pure hp(self) -> int\n}\ng(var a: D, b: D) { a = b }\nmain() {}\n");
+    assert_eq!(errs.len(), 1, "{errs:?}");
+}

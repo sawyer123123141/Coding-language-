@@ -161,9 +161,17 @@ impl<'a> BodyChecker<'a> {
 
     /// `d = value` where `d` is a `var` parameter of interface type: the caller's place may hold
     /// a different type than the one assigned, which wouldn't fit. Reported after `value` is
-    /// checked; returns whether it was refused.
+    /// checked; returns whether it was refused. A `T` counts too (R4: it holds an interface): in
+    /// a copy where `T` is an interface type, the caller's concrete place is lent to the `var`
+    /// parameter, and writing another type into it would corrupt it. The target's type decides,
+    /// whatever the value's expression is (`a = b`, `a = xs.pop()`, an `if`).
     pub(super) fn check_iface_replace(&mut self, target: &Expr, value: &Expr, target_ty: Ty) -> bool {
-        let Ty::Iface(i) = target_ty else { return false };
+        let iface = match target_ty {
+            Ty::Iface(i) => Some(i),
+            // Any `T` may be an interface in some copy; its first interface rule gives the example.
+            Ty::Param(p) => self.t.generic.param(p).ifaces.first().copied(),
+            _ => return false,
+        };
         if !matches!(target.kind, ExprKind::Ident(_)) {
             return false;
         }
@@ -173,7 +181,7 @@ impl<'a> BodyChecker<'a> {
         }
         // A type other than the one being assigned, as the example of what the caller may hold.
         let assigned = self.t.ty(value.id);
-        let all = self.t.implementors(i);
+        let all = iface.map(|i| self.t.implementors(i)).unwrap_or_default();
         let example = match all.iter().find(|&&t| t != assigned).or(all.first()) {
             Some(&t) => format!("`{}`", self.tn(t)),
             None => "a different type".to_string(),
