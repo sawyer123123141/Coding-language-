@@ -184,6 +184,58 @@ fn an_exact_conflict_says_what_to_write() {
 }
 
 #[test]
+fn closure_results_come_after_the_expected_type() {
+    let convert = "pure convert[T, U](xs: list[T], f: pure (T) -> U) -> list[U] { list[U]() }\n";
+    let (p, t) = clean(&format!(
+        "{DECLS}{convert}main() {{\n    let xs: list[int] = [1]\n    let b: list[float] = convert(xs, (x: int) {{ x }})\n    let c: list[float] = convert(xs, (x) {{ x }})\n    let x: float = make(() {{ 3 }})\n}}\n"
+    ));
+    let converts = find_where(&p, call("convert"));
+    assert_eq!(type_args(&t, converts[0]), ["int", "float"]);
+    assert_eq!(type_args(&t, converts[1]), ["int", "float"]);
+    assert_eq!(type_args(&t, the(&p, call("make"))), ["float"]);
+}
+
+#[test]
+fn the_exact_meeting_is_named() {
+    let src = format!("{DECLS}pure m3[T](a: T, b: list[T], c: T) -> int {{ 1 }}\nmain() {{\n    let x = m3(1, [2], 2.5)\n}}\n");
+    assert_eq!(errors(&src), ["`T` in `m3` can't be both `int` (from `b`, which must match exactly) and `float` (from `c`)"]);
+}
+
+#[test]
+fn a_missing_argument_is_the_only_error() {
+    assert_eq!(errors(&format!("{DECLS}main() {{\n    let a = apply(f: (x) {{ 1 }})\n}}\n")), ["missing argument `x` for `apply`"]);
+    assert_eq!(errors(&format!("{DECLS}main() {{\n    let s = Stack(item: [])\n}}\n")), ["`Stack` has no field named `item`"]);
+}
+
+/// The errors of `body` in a program where `Pool` owns an arena.
+fn move_errors(body: &str) -> Vec<String> {
+    let decls = "struct Pool {\n    mem: Arena\n    n: int\n}\nstruct Two[T] {\n    a: Pool\n    b: Pool\n    tag: T\n}\nstruct Box3[T] {\n    f: pure (int) -> int\n    a: Pool\n    tag: T\n}\nenum Held[T] {\n    Both { a: Pool, b: Pool, tag: T }\n}\n";
+    errors(&format!("{decls}main() {{\n    let p = Pool(mem: Arena(), n: 1)\n    {body}\n}}\n"))
+}
+
+#[test]
+fn inferred_constructions_move_in_source_order() {
+    // Each inferred form gives exactly what the written form gives.
+    let pairs = [
+        ("let t = Two(a: p, b: p, tag: 1)", "let t = Two[int](a: p, b: p, tag: 1)"),
+        ("let h = Held.Both(a: p, b: p, tag: 1)", "let h = Held[int].Both(a: p, b: p, tag: 1)"),
+        ("let t = Two(a: p, b: Pool(mem: Arena(), n: p.n), tag: 1)", "let t = Two[int](a: p, b: Pool(mem: Arena(), n: p.n), tag: 1)"),
+        // A deferred closure before the move sees nothing moved; one after it sees the move.
+        ("let b = Box3(f: (x) { x + p.n }, a: p, tag: 1)", "let b = Box3[int](f: (x) { x + p.n }, a: p, tag: 1)"),
+        ("let b = Box3(a: p, f: (x) { x + p.n }, tag: 1)", "let b = Box3[int](a: p, f: (x) { x + p.n }, tag: 1)"),
+        ("let b = Box3(tag: 1, f: (x) { x }, a: p)", "let b = Box3[int](tag: 1, f: (x) { x }, a: p)"),
+    ];
+    for (inferred, written) in pairs {
+        assert_eq!(move_errors(inferred), move_errors(written), "{inferred}");
+    }
+    let moved = ["`p` was moved earlier, so it can't be used here"];
+    assert_eq!(move_errors(pairs[0].0), moved);
+    assert_eq!(move_errors(pairs[1].0), moved);
+    assert_eq!(move_errors(pairs[2].0), moved);
+    assert!(move_errors(pairs[5].0).is_empty());
+}
+
+#[test]
 fn recursion_binds_the_callers_placeholder() {
     let src = format!("{DECLS}pure walk[T](x: T, n: int) -> int {{\n    if n == 0 {{ return 0 }}\n    walk(x, n - 1)\n}}\nmain() {{\n    let w = walk(\"a\", 3)\n}}\n");
     let (p, t) = clean(&src);

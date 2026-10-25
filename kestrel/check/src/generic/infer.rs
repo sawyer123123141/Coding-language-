@@ -167,8 +167,9 @@ impl Bindings {
             return Ok(());
         };
         if fill || old.ty == value {
-            if !fill && exact {
-                self.slots[i] = Some(Binding { exact: true, ..old });
+            // A loose binding met again exactly is now exact, decided by the exact meeting.
+            if !fill && exact && !old.exact {
+                self.slots[i] = Some(new);
             }
             return Ok(());
         }

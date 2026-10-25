@@ -21,6 +21,7 @@
 use kestrel_syntax::ast::{Arg, Expr, ExprKind};
 use kestrel_syntax::Span;
 
+use super::moves::Moved;
 use super::BodyChecker;
 use crate::collect_ty::TypeScope;
 use crate::generic::infer::{Binding, Bindings, Conflict};
@@ -58,8 +59,9 @@ pub(crate) struct Callee<'n> {
     pub(crate) ret: Ty,
 }
 
-/// Whether an argument waits for step 3.
-fn deferred(e: &Expr) -> bool {
+/// Whether an argument waits for step 3 whatever the parameter: a closure literal with an untyped
+/// parameter, `none`, `[]` or `{}`. (A closure whose result is still open waits too, `waits`.)
+pub(super) fn deferred(e: &Expr) -> bool {
     match &e.kind {
         ExprKind::Closure(lit) => lit.params.iter().any(|p| p.ty.is_none()),
         ExprKind::None => true,
@@ -79,16 +81,23 @@ impl<'a> BodyChecker<'a> {
         let mut found = vec![Ty::Error; args.len()];
         // An argument that failed to check was reported: nothing more is said about the use.
         let mut quiet = false;
+        // A construction or variant moves each argument once it is checked, in source order, as
+        // the written form does: a later argument may not use what an earlier one moved. A
+        // deferred argument is checked with the moves made before it in source order.
+        let moves = matches!(callee.form, Form::Construct | Form::Variant(_));
         let mut waiting = Vec::new();
         for (ai, a) in args.iter().enumerate() {
             let Some(pi) = param_of[ai] else { continue };
             let p = &callee.params[pi];
-            if !p.is_var && deferred(&a.value) {
-                waiting.push(ai);
+            if self.waits(&b, &a.value, p) {
+                waiting.push((ai, moves.then(|| self.moved.clone())));
                 continue;
             }
             let ty = self.infer_arg(&b, &a.value, p);
             (found[ai], quiet) = (ty, quiet || ty == Ty::Error);
+            if moves {
+                self.consume(&a.value);
+            }
             if let Err(c) = b.meet(self.t, p.ty, ty, p.is_var, Some(ai)) {
                 self.report_conflict(callee, &b, c, args, &param_of);
                 // The rest are checked as written; the deferred ones aren't (P10).
@@ -102,13 +111,13 @@ impl<'a> BodyChecker<'a> {
             b.fill(self.t, callee.ret, x);
         }
         let mut later = Vec::new();
-        for ai in waiting {
+        for (ai, before) in waiting {
             let (value, p) = (&args[ai].value, &callee.params[param_of[ai].expect("bound")]);
             if b.known(self.t, p.ty) {
-                found[ai] = self.check_hinted(&b, value, p);
+                found[ai] = self.as_if_before(before, |this| this.check_hinted(&b, value, p));
             } else if !matches!(value.kind, ExprKind::Closure(_)) {
-                later.push(ai);
-            } else if let Some(ty) = self.infer_closure(&b, value, p) {
+                later.push((ai, before));
+            } else if let Some(ty) = self.as_if_before(before, |this| this.infer_closure(&b, value, p)) {
                 (found[ai], quiet) = (ty, quiet || ty == Ty::Error);
                 if let Err(c) = b.meet(self.t, p.ty, ty, false, Some(ai)) {
                     self.report_conflict(callee, &b, c, args, &param_of);
@@ -127,11 +136,31 @@ impl<'a> BodyChecker<'a> {
             return Err(Reported);
         }
         self.check_worked_out(callee, &b, args)?;
-        for ai in later {
+        for (ai, before) in later {
             let p = &callee.params[param_of[ai].expect("bound")];
-            found[ai] = self.check_hinted(&b, &args[ai].value, p);
+            found[ai] = self.as_if_before(before, |this| this.check_hinted(&b, &args[ai].value, p));
         }
         Ok((b.list(self.t), found))
+    }
+
+    /// Whether the argument `value` for `p` waits for step 3: it is `deferred`, or it is a closure
+    /// literal whose result is still open (closure results come after the expected type, G7).
+    fn waits(&self, b: &Bindings, value: &Expr, p: &ParamSig) -> bool {
+        if p.is_var {
+            return false;
+        }
+        let open_result = matches!(p.ty, Ty::Fn(s) if !b.known(self.t, self.t.sig(s).ret));
+        deferred(value) || (open_result && matches!(value.kind, ExprKind::Closure(_)))
+    }
+
+    /// `check` run with the moves as they were at `before` (a deferred argument's place in source
+    /// order), then the moves put back as they are now. A deferred argument moves nothing itself.
+    fn as_if_before<R>(&mut self, before: Option<Moved>, check: impl FnOnce(&mut Self) -> R) -> R {
+        let Some(before) = before else { return check(self) };
+        let now = std::mem::replace(&mut self.moved, before);
+        let r = check(self);
+        self.moved = now;
+        r
     }
 
     /// Step 1 for one argument.
@@ -141,7 +170,8 @@ impl<'a> BodyChecker<'a> {
             return self.check_expr(value, None);
         }
         if matches!(value.kind, ExprKind::Closure(_)) {
-            // Every parameter type is written (others are deferred), so it can always be checked.
+            // Every parameter type is written and the result known (others wait), so it can
+            // always be checked.
             return self.infer_closure(b, value, p).unwrap_or(Ty::Error);
         }
         if b.known(self.t, p.ty) {

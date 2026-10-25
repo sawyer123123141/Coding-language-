@@ -9,7 +9,7 @@ use kestrel_syntax::ast::{Arg, Expr};
 use kestrel_syntax::Span;
 
 use super::args::CallSig;
-use super::infer::{Callee, Form};
+use super::infer::{deferred, Callee, Form};
 use super::BodyChecker;
 use crate::generic::{GenericOwner, Subst};
 use crate::tables::{EnumId, FnId, ParamSig, Res, StructId};
@@ -29,7 +29,7 @@ impl<'a> BodyChecker<'a> {
             }
         }
         if !ok || !missing.is_empty() {
-            self.check_loose_args(args);
+            self.check_undeferred_args(args);
             return Ty::Error;
         }
         self.check_callee_purity(name_span, fid);
@@ -50,7 +50,7 @@ impl<'a> BodyChecker<'a> {
         let missing: Vec<String> =
             slots.iter().zip(&info.fields).filter(|(s, f)| s.is_none() && !f.has_default).map(|(_, f)| format!("`{}`", f.name)).collect();
         if !ok || !self.missing_fields(e, &info.name, &missing, false) {
-            self.check_loose_args(args);
+            self.check_undeferred_args(args);
             return Ty::Error;
         }
         let params = info.fields.iter().map(|f| ParamSig { name: f.name.clone(), ty: f.ty, is_var: false }).collect();
@@ -92,7 +92,7 @@ impl<'a> BodyChecker<'a> {
             }
         }
         if !ok || !missing.is_empty() {
-            self.check_loose_args(args);
+            self.check_undeferred_args(args);
             return Ty::Error;
         }
         let params = fields.iter().map(|f| ParamSig { name: f.name.clone(), ty: f.ty, is_var: false }).collect();
@@ -108,10 +108,19 @@ impl<'a> BodyChecker<'a> {
             if a.is_var {
                 self.error(a.span, "constructor arguments can't be `var`");
             }
+            // (`infer` moved it as it checked it, in source order.)
             self.finish_value(&a.value, tys[ai], Some(fields[fi].ty));
-            self.consume(&a.value);
         }
         self.t.ctor_args.insert(e.id, slots);
         Ty::Enum(instance)
+    }
+
+    /// The arguments of a use refused before inference (a missing or unknown argument), checked
+    /// as written, except the deferred ones: without their parameter's type they would only add
+    /// follow-on errors (P10).
+    fn check_undeferred_args(&mut self, args: &[Arg]) {
+        for a in args.iter().filter(|a| !deferred(&a.value)) {
+            self.check_expr(&a.value, None);
+        }
     }
 }

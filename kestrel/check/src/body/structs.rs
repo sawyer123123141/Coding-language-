@@ -75,7 +75,8 @@ impl<'a> BodyChecker<'a> {
     }
 
     /// `check_construct`, where `checked` (when given) holds the type each argument was already
-    /// checked to (a vector make checks its values first, to tell its forms apart).
+    /// checked to (a vector make checks its values first, to tell its forms apart; inference
+    /// checks and moves them in source order, `infer`), so they are only finished here.
     pub(crate) fn check_construct_with(&mut self, e: &Expr, sid: StructId, args: &[Arg], checked: Option<&[Ty]>) -> Ty {
         self.t.res.insert(e.id, Res::Construct(sid));
         let info = self.t.strukt(sid).clone();
@@ -97,7 +98,11 @@ impl<'a> BodyChecker<'a> {
                 Some(tys) => self.finish_value(&a.value, tys[ai], Some(info.fields[fi].ty)),
                 None => self.check_value(&a.value, Some(info.fields[fi].ty)),
             };
-            self.consume(&a.value);
+            // Pre-checked arguments were moved as they were checked (`infer`; a vector make's
+            // numbers move nothing).
+            if checked.is_none() {
+                self.consume(&a.value);
+            }
         }
         // `vec2()` and `ivec3()` are zero vectors, like Godot's `Vector2()`.
         let vector = self.t.vector(Ty::Struct(sid)).is_some();

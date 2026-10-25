@@ -1,0 +1,32 @@
+struct Pool {
+    mem: Arena
+    n: int
+}
+struct Two[T] {
+    a: Pool
+    b: Pool
+    tag: T
+}
+struct One[T] {
+    a: Pool
+    tag: T
+}
+enum Held[T] {
+    Both { a: Pool, b: Pool, tag: T }
+}
+twice() {
+    let p = Pool(mem: Arena(), n: 1)
+    let t = Two(a: p, b: p, tag: 1)
+}
+variant_twice() {
+    let p = Pool(mem: Arena(), n: 1)
+    let h = Held.Both(a: p, b: p, tag: 1)
+}
+read_after() {
+    let p = Pool(mem: Arena(), n: 1)
+    let o = One(a: p, tag: p.n)
+}
+main() {}
+// error 19: `p` was moved earlier, so it can't be used here
+// error 23: `p` was moved earlier, so it can't be used here
+// error 27: `p` was moved earlier, so it can't be used here
