@@ -37,6 +37,15 @@ pub fn check(program: &Program) -> (Option<Tables>, Vec<Diagnostic>) {
 /// Like `check`; with `needs_main` false the program is a library (code a
 /// host calls, like the Godot add-on), which doesn't need a `main`.
 pub fn check_with(program: &Program, needs_main: bool) -> (Option<Tables>, Vec<Diagnostic>) {
+    let (t, diags) = check_keeping_tables(program, needs_main);
+    let ok = !diags.iter().any(|d| d.is_error());
+    (ok.then_some(t), diags)
+}
+
+/// Like `check_with`, but the tables come back even when there are errors, for an editor: the
+/// code with no errors still has its types and names resolved; an expression with an error has
+/// the type `Ty::Error`. Nothing may be lowered from tables that came with errors.
+pub fn check_keeping_tables(program: &Program, needs_main: bool) -> (Tables, Vec<Diagnostic>) {
     let mut t = Tables {
         expr_ty: vec![Ty::Error; program.expr_count as usize],
         builtin_ranges: program.builtin_ranges.clone(),
@@ -59,6 +68,5 @@ pub fn check_with(program: &Program, needs_main: bool) -> (Option<Tables>, Vec<D
         body::check_fn(program, FnId(f as u32), &mut t, &mut diags);
     }
     collect_ty::check_map_values(&t, &mut diags);
-    let ok = !diags.iter().any(|d| d.is_error());
-    (ok.then_some(t), diags)
+    (t, diags)
 }

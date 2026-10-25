@@ -2,6 +2,7 @@
 //! checks, lowers and inlines. Shared by the `kestrel` command and the Godot
 //! add-on.
 
+mod analysis;
 mod builtin;
 mod prove;
 
@@ -13,6 +14,7 @@ use kestrel_syntax::ast::Item;
 use kestrel_syntax::link::{link, Module};
 use kestrel_syntax::{parse_at, render, render_short, Diagnostic, LineIndex, Span};
 
+pub use analysis::{analyze, Analysis};
 pub use prove::{prove, Proved};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -68,21 +70,38 @@ pub struct Compiled {
     pub builtins: Vec<&'static str>,
     /// Every file's path, text and place in the shared span space, to render diagnostics found
     /// after compiling (see `prove`).
-    sources: Vec<File>,
+    sources: Vec<Source>,
+}
+
+impl Compiled {
+    /// Every file's path, text and place in the shared span space: the entry file first.
+    pub fn sources(&self) -> &[Source] {
+        &self.sources
+    }
 }
 
 /// One source file of the program, laid out at `base` in a shared span space.
-struct File {
-    path: String,
-    src: String,
-    base: u32,
+#[derive(Clone, Debug)]
+pub struct Source {
+    pub path: String,
+    pub src: String,
+    pub base: u32,
     /// Embedded in the compiler (see `builtin`), not written by the user.
-    builtin: bool,
+    pub builtin: bool,
+}
+
+/// Reads the module file at a path, without a byte order mark; `None` when it can't be read. The
+/// compiler reads the disk; an editor reads its open buffers first.
+pub type Read<'a> = &'a dyn Fn(&Path) -> Option<String>;
+
+/// Reads a module file from the disk.
+fn disk(path: &Path) -> Option<String> {
+    std::fs::read_to_string(path).ok().map(|text| without_bom(&text).to_string())
 }
 
 /// What `load` read: every file, and the modules parsed from them.
 struct Loaded {
-    files: Vec<File>,
+    files: Vec<Source>,
     modules: Vec<Module>,
     diags: Vec<Diagnostic>,
     builtins: Vec<&'static str>,
@@ -96,7 +115,17 @@ pub fn compile(path: &str, src: &str, style: DiagStyle) -> (Option<Compiled>, St
 
 /// Like `compile`; with `needs_main` false it compiles a library (no `main`).
 pub fn compile_as(path: &str, src: &str, style: DiagStyle, needs_main: bool) -> (Option<Compiled>, String) {
-    let (compiled, text) = compile_unoptimized(path, src, style, needs_main);
+    compile_as_reading(path, src, style, needs_main, &disk)
+}
+
+/// Like `compile_as`, with the KIR as lowering left it: before `kestrel_kir::optimize`.
+pub fn compile_unoptimized(path: &str, src: &str, style: DiagStyle, needs_main: bool) -> (Option<Compiled>, String) {
+    compile_reading(path, src, style, needs_main, &disk)
+}
+
+/// Like `compile_as`, reading each module file with `read` (an editor's unsaved buffers).
+pub fn compile_as_reading(path: &str, src: &str, style: DiagStyle, needs_main: bool, read: Read) -> (Option<Compiled>, String) {
+    let (compiled, text) = compile_reading(path, src, style, needs_main, read);
     let compiled = compiled.map(|mut c| {
         kestrel_kir::optimize(&mut c.module);
         c
@@ -104,9 +133,8 @@ pub fn compile_as(path: &str, src: &str, style: DiagStyle, needs_main: bool) -> 
     (compiled, text)
 }
 
-/// Like `compile_as`, with the KIR as lowering left it: before `kestrel_kir::optimize`.
-pub fn compile_unoptimized(path: &str, src: &str, style: DiagStyle, needs_main: bool) -> (Option<Compiled>, String) {
-    let Loaded { files, modules, mut diags, builtins } = load(path, src);
+fn compile_reading(path: &str, src: &str, style: DiagStyle, needs_main: bool, read: Read) -> (Option<Compiled>, String) {
+    let Loaded { files, modules, mut diags, builtins } = load(path, src, read);
     if diags.iter().any(Diagnostic::is_error) {
         return (None, report(&files, &diags, style));
     }
@@ -142,8 +170,8 @@ pub fn compile_file(path: &Path, style: DiagStyle, needs_main: bool) -> (Option<
 /// Parses the entry file and, transitively, every module it uses. A module
 /// `m` is `m.kes` next to the file that uses it, unless `m` is a built-in
 /// module; each file is parsed once.
-fn load(path: &str, src: &str) -> Loaded {
-    let mut files = vec![File { path: path.to_string(), src: src.to_string(), base: 0, builtin: false }];
+fn load(path: &str, src: &str, read: Read) -> Loaded {
+    let mut files = vec![Source { path: path.to_string(), src: src.to_string(), base: 0, builtin: false }];
     let mut by_name: HashMap<String, usize> = HashMap::from([(stem(path), 0)]);
     let (mut modules, mut diags, mut builtins) = (Vec::new(), Vec::new(), Vec::new());
     let (mut next_expr, mut next_bind) = (0, 0);
@@ -178,9 +206,9 @@ fn load(path: &str, src: &str) -> Loaded {
                 }
                 // A missing file is reported by `link`, which knows where it was named.
                 let file = dir.join(format!("{}.kes", c.module));
-                if let Ok(text) = std::fs::read_to_string(&file) {
+                if let Some(text) = read(&file) {
                     by_name.insert(c.module.clone(), files.len());
-                    push_file(&mut files, file.to_string_lossy().into_owned(), without_bom(&text).to_string(), false);
+                    push_file(&mut files, file.to_string_lossy().into_owned(), text, false);
                 }
             }
         }
@@ -197,15 +225,15 @@ fn same_file(a: &Path, b: &Path) -> bool {
 
 /// The span offsets of the built-in modules' source, which may name types (like `GpuHandle`)
 /// that the user's own files can't.
-fn builtin_ranges(files: &[File]) -> Vec<std::ops::Range<u32>> {
+fn builtin_ranges(files: &[Source]) -> Vec<std::ops::Range<u32>> {
     files.iter().filter(|f| f.builtin).map(|f| f.base..f.base + f.src.len() as u32).collect()
 }
 
 /// Adds a file after the last one in the shared span space.
-fn push_file(files: &mut Vec<File>, path: String, src: String, builtin: bool) {
+fn push_file(files: &mut Vec<Source>, path: String, src: String, builtin: bool) {
     let last = files.last().expect("the entry file");
     let base = last.base + last.src.len() as u32 + 1;
-    files.push(File { path, src, base, builtin });
+    files.push(Source { path, src, base, builtin });
 }
 
 /// An error for each `native` declaration: only built-in modules have them.
@@ -226,7 +254,7 @@ fn stem(path: &str) -> String {
 }
 
 /// Renders each diagnostic against the file its span falls in.
-fn report(files: &[File], diags: &[Diagnostic], style: DiagStyle) -> String {
+fn report(files: &[Source], diags: &[Diagnostic], style: DiagStyle) -> String {
     let mut out = String::new();
     for d in diags {
         let f = files.iter().rev().find(|f| f.base <= d.span.start).unwrap_or(&files[0]);
@@ -254,11 +282,11 @@ fn base_name(path: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{builtin_ranges, push_file, File};
+    use super::{builtin_ranges, push_file, Source};
 
     #[test]
     fn built_in_ranges_cover_exactly_the_built_in_files_source() {
-        let mut files = vec![File { path: "main.kes".into(), src: "use draw\n".into(), base: 0, builtin: false }];
+        let mut files = vec![Source { path: "main.kes".into(), src: "use draw\n".into(), base: 0, builtin: false }];
         push_file(&mut files, "<builtin>/draw.kes".into(), "pub f()\n".into(), true);
         push_file(&mut files, "geom.kes".into(), "pub g()\n".into(), false);
         push_file(&mut files, "<builtin>/input.kes".into(), "pub h()\n".into(), true);
