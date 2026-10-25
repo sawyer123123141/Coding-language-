@@ -183,6 +183,28 @@ main() {
 
 On a 2D value noise, four samples at once in `vec4`/`ivec4` run 2.5 times faster per sample than the scalar version, and take 1.08 times as long as a hand-written Rust SSE4.1 version (SSE, not AVX; Rust's own four-at-once version is 2.6 times its scalar one), and a checked build costs nothing measurable because the analysis proves every lane check (`kestrel/bench/kernels/results.md`, "SIMD vectors"). Four corners of one sample at once gain only about 1.25 times. Natives can't take `vec4` or `ivec4` yet, and Godot exports of them aren't built. The rules are in the "Vectors" bullet of the syntax file.
 
+## Editor
+
+VS Code (or any editor that speaks the Language Server Protocol) gets Kestrel's real errors as you type, the type of what is under the cursor, go to definition (into module files and the built-in modules too), and the **cost lens**: every check, allocation and other way to fail that the compiler leaves in a line, shown on that line with the reason, and the `@assume` or wrapping operator that removes it when there is a simple one. It is `kestrel check --report` in the editor, and runs when a file is opened or saved.
+
+```text
+pub get(xs: list[int], k: int) -> int {
+    xs[k]    bounds check: `xs[k]` may be outside `xs` (`k` can be any `int`)
+}
+```
+
+To install it locally (it isn't on the marketplace), from `kestrel/`:
+
+```bash
+cargo build --release -p kestrel-lsp
+cd editors/vscode
+npm install
+npx @vscode/vsce package --skip-license --allow-missing-repository
+code --install-extension kestrel-0.1.0.vsix
+```
+
+Then set `kestrel.server.path` to the built `kestrel/target/release/kestrel-lsp.exe` (or put that folder on `PATH`) and reload VS Code. The settings `kestrel.costLens.enabled`, `kestrel.costLens.build` (`checked` or `release`) and `kestrel.costLens.show` (`hints`, `diagnostics` or `both`) control the lens. A file with `pub` items and no `main` is checked as a module. [`kestrel/editors/vscode/README.md`](kestrel/editors/vscode/README.md) has the details and what isn't built yet.
+
 ## A window
 
 Four modules are built into the compiler (raylib underneath), and work under both `kestrel run` and `kestrel build`. Windows only for now.
@@ -242,6 +264,8 @@ The API is in `docs/superpowers/specs/2026-10-10-window-design.md` (window, shap
   - `window`: the window, drawing and input natives (raylib, vendored in `window/raylib`).
   - `driver`: loading modules and compiling a program, shared by the CLI and the Godot add-on. The built-in `window`, `draw`, `draw3d` and `input` modules are in `driver/std`.
   - `cli`: the `kestrel` command.
+  - `lsp`: the language server, `kestrel-lsp`.
+  - `editors/vscode`: the VS Code extension (highlighting, and the client that starts `kestrel-lsp`).
   - `godot`: the Godot add-on and its demo project (built separately).
 - `kestrel/demos/particles/`: the particles demo and its measured times.
 - `kestrel/demos/voxels/`: the voxel viewer (`voxels.kes`, `world.kes`, `fly.kes`) and its measured times.

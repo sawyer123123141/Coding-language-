@@ -1,0 +1,178 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Kestrel",
+  "scopeName": "source.kestrel",
+  "fileTypes": ["kes"],
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#annotation" },
+    { "include": "#string" },
+    { "include": "#number" },
+    { "include": "#declaration" },
+    { "include": "#keyword" },
+    { "include": "#type" },
+    { "include": "#call" },
+    { "include": "#operator" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comment": {
+      "name": "comment.line.double-slash.kestrel",
+      "match": "//.*$"
+    },
+    "annotation": {
+      "patterns": [
+        {
+          "comment": "@prove(no_alloc, no_checks, no_panic, inline)",
+          "begin": "(@)(prove)\\s*(\\()",
+          "beginCaptures": {
+            "1": { "name": "punctuation.definition.annotation.kestrel" },
+            "2": { "name": "storage.type.annotation.kestrel" },
+            "3": { "name": "punctuation.parenthesis.begin.kestrel" }
+          },
+          "end": "\\)",
+          "endCaptures": { "0": { "name": "punctuation.parenthesis.end.kestrel" } },
+          "name": "meta.annotation.prove.kestrel",
+          "patterns": [
+            { "match": "\\b(no_alloc|no_checks|no_panic|inline)\\b", "name": "support.constant.contract.kestrel" },
+            { "include": "#comment" },
+            { "match": ",", "name": "punctuation.separator.comma.kestrel" }
+          ]
+        },
+        {
+          "comment": "@assume(condition): an expression",
+          "begin": "(@)(assume)\\s*(\\()",
+          "beginCaptures": {
+            "1": { "name": "punctuation.definition.annotation.kestrel" },
+            "2": { "name": "storage.type.annotation.kestrel" },
+            "3": { "name": "punctuation.parenthesis.begin.kestrel" }
+          },
+          "end": "\\)",
+          "endCaptures": { "0": { "name": "punctuation.parenthesis.end.kestrel" } },
+          "name": "meta.annotation.assume.kestrel",
+          "patterns": [{ "include": "#parens" }, { "include": "$self" }]
+        },
+        {
+          "match": "(@)([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "punctuation.definition.annotation.kestrel" },
+            "2": { "name": "storage.type.annotation.kestrel" }
+          }
+        }
+      ]
+    },
+    "parens": {
+      "begin": "\\(",
+      "end": "\\)",
+      "patterns": [{ "include": "#parens" }, { "include": "$self" }]
+    },
+    "string": {
+      "name": "string.quoted.double.kestrel",
+      "begin": "\"",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.kestrel" } },
+      "end": "\"|$",
+      "endCaptures": { "0": { "name": "punctuation.definition.string.end.kestrel" } },
+      "patterns": [
+        { "match": "\\\\[nt\"\\\\{}]", "name": "constant.character.escape.kestrel" },
+        { "match": "\\\\.", "name": "invalid.illegal.escape.kestrel" },
+        {
+          "name": "meta.interpolation.kestrel",
+          "begin": "\\{",
+          "beginCaptures": { "0": { "name": "punctuation.section.interpolation.begin.kestrel" } },
+          "end": "\\}",
+          "endCaptures": { "0": { "name": "punctuation.section.interpolation.end.kestrel" } },
+          "contentName": "source.kestrel.embedded",
+          "patterns": [{ "include": "#braces" }, { "include": "$self" }]
+        }
+      ]
+    },
+    "braces": {
+      "begin": "\\{",
+      "end": "\\}",
+      "patterns": [{ "include": "#braces" }, { "include": "$self" }]
+    },
+    "number": {
+      "patterns": [
+        { "match": "\\b0[xX][0-9A-Fa-f_]+\\b", "name": "constant.numeric.hex.kestrel" },
+        { "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*\\b", "name": "constant.numeric.float.kestrel" },
+        { "match": "\\b[0-9][0-9_]*\\b", "name": "constant.numeric.integer.kestrel" }
+      ]
+    },
+    "declaration": {
+      "patterns": [
+        {
+          "comment": "struct Name, enum Name, interface Name",
+          "match": "\\b(struct|enum|interface)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.type.kestrel" },
+            "2": { "name": "entity.name.type.kestrel" }
+          }
+        },
+        {
+          "comment": "A function or method: a name at the start of a line, its parameters, and a body or a result type.",
+          "match": "^\\s*((?:(?:pub|pure|native)\\s+)*)([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\(.*\\)\\s*(?:->[^{]*)?\\{\\s*(?://.*)?$|\\(.*\\)\\s*->)",
+          "captures": {
+            "1": { "patterns": [{ "include": "#keyword" }] },
+            "2": { "name": "entity.name.function.kestrel" }
+          }
+        },
+        {
+          "comment": "A native function: no body.",
+          "match": "\\b(native)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.modifier.kestrel" },
+            "2": { "name": "entity.name.function.kestrel" }
+          }
+        },
+        {
+          "comment": "use { a, b from m }, use m",
+          "match": "\\b(use)\\b",
+          "name": "keyword.control.import.kestrel"
+        }
+      ]
+    },
+    "keyword": {
+      "patterns": [
+        { "match": "\\b(if|else|while|for|from|to|in|par|match|return|break|continue|arena)\\b", "name": "keyword.control.kestrel" },
+        { "match": "\\b(let|var)\\b", "name": "storage.type.kestrel" },
+        { "match": "\\b(pub|pure|native)\\b", "name": "storage.modifier.kestrel" },
+        { "match": "\\b(struct|enum|interface)\\b", "name": "storage.type.kestrel" },
+        { "match": "\\b(use)\\b", "name": "keyword.control.import.kestrel" },
+        { "match": "\\b(and|or|not)\\b", "name": "keyword.operator.logical.kestrel" },
+        { "match": "\\b(true|false)\\b", "name": "constant.language.boolean.kestrel" },
+        { "match": "\\bnone\\b", "name": "constant.language.none.kestrel" },
+        { "match": "\\bself\\b", "name": "variable.language.self.kestrel" }
+      ]
+    },
+    "type": {
+      "patterns": [
+        { "match": "\\b(int|i64|u8|float|f64|bool|string|vec2|vec3|vec4|ivec2|ivec3|ivec4|list|map|array|Arena|GpuHandle)\\b", "name": "support.type.primitive.kestrel" },
+        { "match": "\\b[A-Z][A-Za-z0-9_]*\\b", "name": "entity.name.type.kestrel" }
+      ]
+    },
+    "call": {
+      "match": "\\b([a-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+      "captures": { "1": { "name": "entity.name.function.call.kestrel" } }
+    },
+    "operator": {
+      "patterns": [
+        { "match": "->", "name": "keyword.operator.arrow.kestrel" },
+        { "match": "(\\*%|\\+%|-%)=?", "name": "keyword.operator.arithmetic.wrapping.kestrel" },
+        { "match": "<<=|>>=|&=|\\|=|\\^=|\\+=|-=|\\*=|/=|%=", "name": "keyword.operator.assignment.compound.kestrel" },
+        { "match": "==|!=|<=|>=|<|>", "name": "keyword.operator.comparison.kestrel" },
+        { "match": "<<|>>|&|\\||\\^|~", "name": "keyword.operator.bitwise.kestrel" },
+        { "match": "\\+|-|\\*|/|%", "name": "keyword.operator.arithmetic.kestrel" },
+        { "match": "=", "name": "keyword.operator.assignment.kestrel" },
+        { "match": "\\?", "name": "keyword.operator.optional.kestrel" }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        { "match": ",", "name": "punctuation.separator.comma.kestrel" },
+        { "match": ":", "name": "punctuation.separator.colon.kestrel" },
+        { "match": ";", "name": "punctuation.terminator.kestrel" },
+        { "match": "\\.", "name": "punctuation.accessor.kestrel" }
+      ]
+    }
+  }
+}
