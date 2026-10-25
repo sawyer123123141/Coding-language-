@@ -496,6 +496,12 @@ Spec `docs/superpowers/specs/2026-10-24-generics-design.md` ("As built"), plan `
 **Test gaps**
 - No test for: a non-owning `if` case for P40; the enum paths of instances (`intern_enum`, `fill_enum`, `subst` of a variant); a refused argument in a method or interface signature (one error); a multi-placeholder growing cycle; a default walk's own copy requests; a conversion from `T` inside a copy; an optional-interface conversion; a rule call reaching an enum instance method; `every_type_a_copy_reads_is_interned` doesn't prove new interning; the `subst_discipline` test should also look for field patterns (`t.expr_ty[`, `t.locals[`, `t.sigs[`, `t.closures.get(`, `t.res.contains_key(`, `t.coerce.contains_key(`). No RED run for Task 7 on the programs target. The hex-literal half of `a_failed_attempt_leaves_nothing` can't fail (an index attempt runs only once types parsed, and types hold no hex literal or `@prove`), so those rollbacks are unreachable today; the spec's "ids unused" after a rollback isn't asserted (Task 12's review).
 
+**Left by the fix wave's re-review (Task 12, minor)**
+- The interface-replace example (`body/iface.rs:191`) picks from `implementors`, which includes generic declarations, so since the `ty_name` change it says "the caller's `Box[T]`" outside `Box`'s body (inside `g[T: Shelf]` it reads like `g`'s own `T`). Use the declaration's bare name there, or skip declarations and instances.
+- A duplicate P42 error after a walk cap: `Box[T] { v: T, p: Pair[T, T]? = none }` built in `g[T]` and called as `g(x8)` gives the walk's cap error and a second P42 error at `Pair`'s declaration. Clear `t.generic.grew` when `collect_copies` reports.
+- When an oversized instance comes from a call signature's parameter (`subst_call_sig`), the P42 error lands on the first argument (`b.take(2, 5)` reports at `2`), followed by "expected Pair[...]?, found int". Report at the call instead.
+- A plain struct written with brackets (`Enemy[i]`) gets "`Enemy` takes no types" without the "call it first" help the function case has; fine for a struct, but say what to write.
+
 ## Found by the tuned voxel copy (2026-10-20)
 
 `kestrel/bench/voxels3d/voxels3d_tuned.kes` makes the same world as `voxels3d.kes` 24-29% faster (level with a straight Rust port) by hand; each line is a hand change the compiler should make itself. Measurements and details: `kestrel/bench/voxels3d/results.md`, "Tuned copy".
