@@ -19,7 +19,7 @@
 use kestrel_check::{Capture, Tables};
 use kestrel_syntax::ast::ExprId;
 
-use super::helpers::{expr, Helpers};
+use super::helpers::{expr, Helpers, LiteralKey};
 use super::{kty, layout, FnLowerer};
 use crate::ir::*;
 
@@ -49,21 +49,22 @@ fn bind_captures(env: LocalIdx, locals: &[LocalIdx], layout: &EnvLayout) -> Vec<
 }
 
 impl Helpers {
-    /// Where the captures of closure literal `id` go in its environment, worked out once.
-    /// `captures` are the locals that point at them (see `capture_locals`).
-    pub(crate) fn env_layout(&mut self, t: &Tables, id: ExprId, captures: &[Local]) -> EnvLayout {
-        self.env_layouts.entry(id).or_insert_with(|| layout_of(t, captures)).clone()
+    /// Where the captures of closure literal `key` go in its environment, worked out once per
+    /// literal and substitution. `captures` are the locals that point at them (see
+    /// `capture_locals`).
+    pub(crate) fn env_layout(&mut self, t: &Tables, key: LiteralKey, captures: &[Local]) -> EnvLayout {
+        self.env_layouts.entry(key).or_insert_with(|| layout_of(t, captures)).clone()
     }
 
-    /// The copy function of closure literal `id`'s environment, made at the first use:
+    /// The copy function of closure literal `key`'s environment, made at the first use:
     /// `(env: i64) -> i64`, which copies the block and then each capture's own memory into the
-    /// current arena, and returns the copy. One per literal.
-    pub(crate) fn env_copy_fn(&mut self, id: ExprId, captures: &[Local], t: &Tables) -> FuncIdx {
-        if let Some(&f) = self.env_copies.get(&id) {
+    /// current arena, and returns the copy. One per literal and substitution.
+    pub(crate) fn env_copy_fn(&mut self, key: LiteralKey, captures: &[Local], t: &Tables) -> FuncIdx {
+        if let Some(&f) = self.env_copies.get(&key) {
             return f;
         }
         let idx = self.reserve();
-        self.env_copies.insert(id, idx);
+        self.env_copies.insert(key, idx);
         let (env, copy) = (LocalIdx(0), LocalIdx(1));
         let mut locals = vec![
             Local { name: "env".into(), ty: KTy::I64, kind: LocalKind::Value },
@@ -76,7 +77,7 @@ impl Helpers {
                 LocalIdx(locals.len() as u32 - 1)
             })
             .collect();
-        let layout = self.env_layout(t, id, captures);
+        let layout = self.env_layout(t, key, captures);
         let dup = expr(ExprKind::EnvDup(Box::new(expr(ExprKind::Load(Place::local(env)), KTy::I64))), KTy::I64);
         let mut body = vec![Stmt::Let(copy, dup)];
         body.extend(bind_captures(copy, &refs, &layout));
@@ -124,7 +125,7 @@ impl FnLowerer<'_> {
             self.locals.push(c.clone());
         }
         // The environment word is the code's first parameter.
-        let layout = self.helpers.env_layout(t, id, &captures);
+        let layout = self.helpers.env_layout(t, (id, self.active_subst()), &captures);
         let binds = bind_captures(LocalIdx(0), &locals, &layout);
         self.captured = Some(Captured { id, locals });
         binds
@@ -188,7 +189,8 @@ impl FnLowerer<'_> {
     fn env_of(&mut self, id: ExprId, line: u32, deep: bool) -> Env {
         let t = self.t;
         let captures = self.capture_locals(id);
-        let copy = self.helpers.env_copy_fn(id, &captures, t);
+        let key = (id, self.active_subst());
+        let copy = self.helpers.env_copy_fn(key, &captures, t);
         let values = self
             .closure(id)
             .captures
@@ -203,7 +205,7 @@ impl FnLowerer<'_> {
                 }
             })
             .collect();
-        let layout = self.helpers.env_layout(t, id, &captures);
+        let layout = self.helpers.env_layout(t, key, &captures);
         Env { copy, layout, values }
     }
 }

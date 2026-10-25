@@ -45,14 +45,17 @@ impl<'a> FnLowerer<'a> {
     /// The substitution the code being lowered is under: the innermost field default's, else the
     /// copy's; `None` in plain code.
     pub(crate) fn active_subst(&self) -> Option<Subst> {
-        self.default_substs.last().copied().or(self.subst)
+        match self.default_substs.last() {
+            Some(&default) => default,
+            None => self.subst,
+        }
     }
 
     /// The name a missed type is reported in: the instance whose field default is being lowered
     /// (`Stack[int]`), else the function being lowered.
     fn copy_name(&self) -> &'a str {
         let t = self.t;
-        if let Some(&Subst { owner: GenericOwner::Struct(def), args }) = self.default_substs.last() {
+        if let Some(&Some(Subst { owner: GenericOwner::Struct(def), args })) = self.default_substs.last() {
             if let Some(&inst) = t.generic.struct_instances.get(&(def, args)) {
                 return &t.strukt(inst).name;
             }
@@ -224,9 +227,9 @@ impl<'a> FnLowerer<'a> {
         &self.t.closures[&e]
     }
 
-    /// Runs `f` under substitution `s` (a field default of an instance, lowered at a
-    /// construction).
-    pub(crate) fn with_subst<R>(&mut self, s: Subst, f: impl FnOnce(&mut Self) -> R) -> R {
+    /// Runs `f` under substitution `s` (a field default lowered at a construction: its instance's,
+    /// or `None` for a plain struct's, which means the same in every copy it is built in).
+    pub(crate) fn with_subst<R>(&mut self, s: Option<Subst>, f: impl FnOnce(&mut Self) -> R) -> R {
         self.default_substs.push(s);
         let out = f(self);
         self.default_substs.pop();

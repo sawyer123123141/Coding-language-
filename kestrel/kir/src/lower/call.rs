@@ -208,11 +208,11 @@ impl<'a> FnLowerer<'a> {
                 None => match program.items.get(t.strukt(sid).item) {
                     Some(ast::Item::Struct(decl)) => {
                         let default = decl.fields[fi].default.as_ref().expect("checker requires a default for a missing field");
-                        // An instance's default is its declaration's, in the instance's types.
-                        match t.strukt(sid).instance {
-                            Some(i) => self.with_subst(Subst { owner: GenericOwner::Struct(i.def), args: i.args }, |cx| cx.value(default)),
-                            None => self.value(default),
-                        }
+                        // An instance's default is its declaration's, in the instance's types; a
+                        // plain struct's has no placeholders, so it is lowered in no substitution
+                        // even inside a copy (its closures are then shared by every copy).
+                        let subst = t.strukt(sid).instance.map(|i| Subst { owner: GenericOwner::Struct(i.def), args: i.args });
+                        self.with_subst(subst, |cx| cx.value(default))
                     }
                     // `vec2()` and `ivec3()`: a built-in vector's components start at zero.
                     _ => super::builtins::number(0, super::kty(t.strukt(sid).fields[fi].ty), self.line(e.span)),

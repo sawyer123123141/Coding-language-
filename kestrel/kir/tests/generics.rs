@@ -221,3 +221,90 @@ fn written_type_calls_are_calls_and_constructions() {
     assert!(direct.contains(&idx(&m, "fill[int]")) && direct.contains(&idx(&m, "fill[string]")));
     assert!(direct.contains(&idx(&m, "first[int]")));
 }
+
+/// The functions named `__kestrel_closure_*`.
+fn closure_codes(m: &Module) -> Vec<&Func> {
+    m.funcs.iter().filter(|f| f.name.starts_with("__kestrel_closure_")).collect()
+}
+
+#[test]
+fn one_closure_code_per_copy() {
+    let src = "pure tag_all[T](xs: list[T], t: T) -> list[T] { xs.map((x) { t }) }
+main() {
+    let a: list[int] = [1]
+    let b: list[string] = [\"a\"]
+    print(tag_all(a, 2), tag_all(b, \"z\"))
+}
+";
+    let m = lowered(src);
+    let mut rets: Vec<Option<KTy>> = closure_codes(&m).iter().map(|f| f.ret).collect();
+    rets.sort_by_key(|r| format!("{r:?}"));
+    assert_eq!(rets, [Some(KTy::I32), Some(KTy::Str)], "one closure code per copy, each in its copy's types");
+}
+
+const CLOSURES: &str = include_str!("../../tests/programs/generic_closures.kes");
+
+#[test]
+fn a_default_closure_per_instance() {
+    let src = CLOSURES.replace(
+        "main() {",
+        "main() {\n    let first = Box[int]()\n    let second = Box[string]()\n    print(first.rate(1), second.rate(\"s\"))",
+    );
+    let m = lowered(&src);
+    // The `rate` defaults are the closures whose body is the constant 1.
+    let defaults: Vec<&Func> = closure_codes(&m)
+        .into_iter()
+        .filter(|f| f.params.len() == 2 && matches!(f.body.as_slice(), [Stmt::Return(Some(Expr { kind: ExprKind::Int(1), .. }))]))
+        .collect();
+    let mut items: Vec<KTy> = defaults.iter().map(|f| f.locals[1].ty).collect();
+    items.sort_by_key(|t| format!("{t:?}"));
+    assert_eq!(items, [KTy::I32, KTy::Str], "one `rate` default for `Box[int]`, one for `Box[string]`");
+}
+
+#[test]
+fn a_plain_default_closure_is_shared_by_every_copy() {
+    // `Cfg` isn't generic, so its default means the same thing in every copy: one code.
+    let src = "struct Cfg {
+    rate: pure (int) -> int = (x) { x + 1 }
+}
+pure make[T](v: T) -> int {
+    let c = Cfg()
+    c.rate(1)
+}
+main() {
+    let c = Cfg()
+    print(make(1), make(\"a\"), c.rate(2))
+}
+";
+    let m = lowered(src);
+    assert_eq!(closure_codes(&m).len(), 1, "the plain default is lowered once");
+}
+
+#[test]
+fn a_loop_site_per_copy() {
+    let src = "pure count[T](xs: list[T]) -> int {
+    var n = 0
+    @prove(no_alloc)
+    for i from 0 to xs.len {
+        n += 1
+    }
+    n
+}
+main() {
+    let a: list[int] = [1, 2]
+    let b: list[string] = [\"a\"]
+    print(count(a), count(b))
+}
+";
+    let m = lowered(src);
+    let mut homes: Vec<FuncIdx> = m
+        .contracts
+        .iter()
+        .map(|s| match s.target {
+            ProveTarget::Loop { func, .. } => func,
+            other => panic!("not a loop site: {other:?}"),
+        })
+        .collect();
+    homes.sort_by_key(|f| f.0);
+    assert_eq!(homes, [idx(&m, "count[int]"), idx(&m, "count[string]")], "each copy has a loop site of its own");
+}

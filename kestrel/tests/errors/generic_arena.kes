@@ -1,0 +1,16 @@
+struct Stack[T] {
+    items: list[T] = []
+}
+main() {
+    var s = Stack[string]()
+    arena {
+        s = Stack(items: ["x"])
+    }
+}
+keep[T](var xs: list[T], v: T) {
+    arena {
+        xs.add(v)
+    }
+}
+// error 7: this memory is freed at the end of the `arena { }` block, but `s` lives longer
+// error 12: this memory is freed at the end of the `arena { }` block, but `xs` lives longer

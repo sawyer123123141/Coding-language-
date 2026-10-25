@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use kestrel_check::{ListMethod, Tables};
+use kestrel_check::{ListMethod, Subst, Tables};
 use kestrel_syntax::ast::ExprId;
 
 use super::consts::ConstGlobals;
@@ -46,6 +46,10 @@ pub(super) fn with(place: &Place, proj: Proj) -> Place {
     p
 }
 
+/// A closure literal under the substitution it is lowered under (P4): a copy of a generic, or an
+/// instance's field default, gets its own code, environment and layout; plain code has `None`.
+pub(crate) type LiteralKey = (ExprId, Option<Subst>);
+
 pub(crate) struct Helpers {
     /// The index of the first helper: helpers follow the user's functions.
     pub(super) base: u32,
@@ -67,11 +71,11 @@ pub(crate) struct Helpers {
     /// The thunk of each function used as a value (see `thunk_for`).
     pub(super) thunks: HashMap<FuncIdx, FuncIdx>,
     /// The code of each closure literal (see `closure_code`).
-    pub(super) closures: HashMap<ExprId, FuncIdx>,
+    pub(super) closures: HashMap<LiteralKey, FuncIdx>,
     /// The copy function of each closure literal's environment (see `env_copy_fn`).
-    pub(super) env_copies: HashMap<ExprId, FuncIdx>,
+    pub(super) env_copies: HashMap<LiteralKey, FuncIdx>,
     /// The layout of each closure literal's environment (see `env_layout`).
-    pub(super) env_layouts: HashMap<ExprId, EnvLayout>,
+    pub(super) env_layouts: HashMap<LiteralKey, EnvLayout>,
     pub(crate) par_bodies: Vec<FuncIdx>,
     /// The heap constants the functions use, and their globals.
     pub(super) consts: ConstGlobals,

@@ -1,0 +1,82 @@
+interface Named {
+    pure label(self) -> string
+}
+
+struct Dog: Named {
+    name: string
+    pure label(self) -> string { self.name }
+}
+
+struct Cat: Named {
+    name: string
+    pure label(self) -> string { "cat {self.name}" }
+}
+
+pure ident[T](x: T) -> T { x }
+
+pure twice(x: int) -> int { x * 2 }
+
+pure nest[T](xs: list[T], pad: T) -> list[list[T]] {
+    xs.map((x) { [x].map((y) { pad }) })
+}
+
+pure getter[T](v: T) -> pure () -> T {
+    () { v }
+}
+
+pure by_label[T: Named](xs: list[T]) -> list[T] {
+    var ys = xs
+    ys.sort_by((x) { x.label() })
+    ys
+}
+
+pure keyed[T](xs: list[T], key: pure (T) -> int) -> list[T] {
+    var ys = xs
+    ys.sort_by(key)
+    ys
+}
+
+pure through[T](xs: list[T]) -> list[T] {
+    xs.map(ident[T])
+}
+
+struct Slot[T] {
+    keep: pure (T) -> bool = (x) { true }
+    mark: pure (T) -> T = (x) { x }
+}
+
+pure run[T](s: Slot[T], xs: list[T]) -> list[T] {
+    xs.filter(s.keep).map(s.mark)
+}
+
+pure total[T](xs: list[T]) -> int {
+    let size = (x: T) { 1 }
+    var n = 0
+    for x in xs { n += size(x) }
+    n
+}
+
+main() {
+    let dogs: list[Dog] = [Dog(name: "rex"), Dog(name: "ace")]
+    let cats: list[Cat] = [Cat(name: "tom"), Cat(name: "kit")]
+    print(by_label(dogs), by_label(cats))
+    print(nest([1, 2], 7), nest(["a"], "z"))
+    let gi = getter(5)
+    let gs = getter("held")
+    print(gi(), gs(), gs())
+    print(keyed([3, 1, 2], twice), keyed(["bb", "a"], (s) { s.len }))
+    print(through([1, 2]), through(["x"]))
+    print(run(Slot[int](), [1, 2]), run(Slot[string](mark: (s) { s + "!" }), ["a", "b"]))
+    print(total([1, 2, 3]), total(["a"]))
+    let f = ident[int]
+    let g = ident[string]
+    print(f(4), g("five"))
+}
+// expect: [Dog(name: "ace"), Dog(name: "rex")] [Cat(name: "kit"), Cat(name: "tom")]
+// expect: [[7], [7]] [["z"]]
+// expect: 5 held held
+// expect: [1, 2, 3] ["a", "bb"]
+// expect: [1, 2] ["x"]
+// expect: [1, 2] ["a!", "b!"]
+// expect: 3 1
+// expect: 4 five

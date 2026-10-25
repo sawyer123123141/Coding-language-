@@ -172,9 +172,10 @@ pub(crate) struct FnLowerer<'a> {
     captured: Option<env::Captured>,
     /// A copy's substitution: its generic's placeholders and the copy's types for them.
     subst: Option<Subst>,
-    /// The substitutions of the field defaults being lowered, innermost last; the active one is
-    /// the top, else `subst` (see `subst.rs`).
-    default_substs: Vec<Subst>,
+    /// The substitutions of the field defaults being lowered, innermost last (`None` for a plain
+    /// struct's, whose types hold no placeholders); the active one is the top, else `subst` (see
+    /// `subst.rs`).
+    default_substs: Vec<Option<Subst>>,
     helpers: &'a mut Helpers,
 }
 

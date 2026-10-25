@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use kestrel_check::{FnId, Tables};
+use kestrel_check::{FnId, Subst, Tables};
 use kestrel_syntax::ast::{self, Program};
 use kestrel_syntax::Span;
 
@@ -22,7 +22,7 @@ use crate::visit::{walk, Node};
 #[derive(Default)]
 pub(crate) struct Proves {
     by_target: HashMap<Span, usize>,
-    loops: HashMap<usize, u32>,
+    loops: HashMap<(usize, Option<Subst>), u32>,
     pub(crate) sites: Vec<ContractSite>,
 }
 
@@ -113,12 +113,9 @@ impl FnLowerer<'_> {
             return false;
         }
         let Some(&k) = self.helpers.proves.by_target.get(&s.span()) else { return false };
-        // Temporary (P12, until Task 7): loop sites are keyed by annotation only, so copies would
-        // share one site.
-        if self.active_subst().is_some() {
-            panic!("`@prove` on a loop in generic code isn't supported yet");
-        }
-        let id = match self.helpers.proves.loops.get(&k) {
+        // One site per annotation and substitution: each copy of a generic judges its own loop.
+        let key = (k, self.active_subst());
+        let id = match self.helpers.proves.loops.get(&key) {
             Some(&id) => id,
             None => {
                 let id = u32::try_from(self.helpers.proves.sites.len()).expect("fewer than 2^32 contracts");
@@ -127,7 +124,7 @@ impl FnLowerer<'_> {
                 let target = ProveTarget::Loop { func, line: self.line(s.span()) };
                 let contracts = self.program.proves[k].contracts.clone();
                 self.helpers.proves.sites.push(ContractSite { target, contracts, required_by: None });
-                self.helpers.proves.loops.insert(k, id);
+                self.helpers.proves.loops.insert(key, id);
                 id
             }
         };

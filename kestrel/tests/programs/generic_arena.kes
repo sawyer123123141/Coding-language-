@@ -1,0 +1,30 @@
+struct Stack[T] {
+    items: list[T] = []
+    push(var self, v: T) { self.items.add(v) }
+}
+
+struct World {
+    mem: Arena = Arena()
+    names: Stack[string] = Stack[string]()
+}
+
+fill[T](var s: Stack[T], v: T, n: int) {
+    for i from 0 to n { s.push(v) }
+}
+
+main() {
+    var w = World()
+    in w.mem {
+        fill(var w.names, "spark", 3)
+    }
+    print(w.names.items.len, w.names.items)
+    arena {
+        var local = Stack[string]()
+        fill(var local, "tmp {w.names.items.len}", 2)
+        print(local.items)
+    }
+    print(w.names.items[0])
+}
+// expect: 3 ["spark", "spark", "spark"]
+// expect: ["tmp 3", "tmp 3"]
+// expect: spark

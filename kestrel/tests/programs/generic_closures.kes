@@ -1,0 +1,92 @@
+interface Weighed {
+    pure weight(self) -> int
+    pure grow(var self, by: int)
+}
+
+struct Rock: Weighed {
+    kg: int
+    pure weight(self) -> int { self.kg }
+    pure grow(var self, by: int) { self.kg += by }
+}
+
+struct Box[T] {
+    items: list[T] = []
+    rate: pure (T) -> int = (x) { 1 }
+
+    pure score(self) -> int {
+        var sum = 0
+        for x in self.items { sum += self.rate(x) }
+        sum
+    }
+}
+
+pure total[T](xs: list[T], f: pure (T) -> int) -> int {
+    var sum = 0
+    for x in xs { sum += f(x) }
+    sum
+}
+
+pure heavier[T: Weighed](xs: list[T], least: int) -> list[T] {
+    xs.filter((x) { x.weight() > least })
+}
+
+pure weights[T: Weighed](xs: list[T]) -> list[int] {
+    xs.map((x) { x.weight() })
+}
+
+pure checks[T: Weighed](xs: list[T], limit: int) -> bool {
+    xs.any((x) { x.weight() > limit }) and xs.all((x) { x.weight() > 0 })
+}
+
+pure sum_plus[T: Weighed](xs: list[T], extra: T) -> int {
+    total(xs, (x) { x.weight() + extra.weight() })
+}
+
+pure sorted[T: Weighed](xs: list[T]) -> list[T] {
+    var ys = xs
+    ys.sort_by((x) { x.weight() })
+    ys
+}
+
+pure pairs[T](xs: list[T], tag: T) -> list[T] {
+    let stamp = (x: T) { tag }
+    var out: list[T] = []
+    for x in xs {
+        out.add(x)
+        out.add(stamp(x))
+    }
+    out
+}
+
+grow_all[T: Weighed](var xs: list[T], by: int) {
+    par for x in xs { x.grow(by) }
+}
+
+main() {
+    var rocks: list[Rock] = [Rock(kg: 3), Rock(kg: 8), Rock(kg: 5)]
+    print(heavier(rocks, 4), weights(rocks), checks(rocks, 7), checks(rocks, 9))
+    print(sum_plus(rocks, Rock(kg: 1)))
+    print(sorted(rocks))
+    grow_all(var rocks, 10)
+    print(weights(rocks))
+    let ws: list[Weighed] = [Rock(kg: 2), Rock(kg: 1)]
+    print(weights(ws), sorted(ws))
+    let ns: list[int] = [1, 2]
+    let ss: list[string] = ["a"]
+    print(pairs(ns, 0), pairs(ss, "z"))
+    var b = Box[int](items: [4, 5])
+    print(b.score())
+    b.rate = (x) { x * 10 }
+    print(b.score())
+    let s = Box[string](items: ["p", "q", "r"])
+    print(s.score())
+}
+// expect: [Rock(kg: 8), Rock(kg: 5)] [3, 8, 5] true false
+// expect: 19
+// expect: [Rock(kg: 3), Rock(kg: 5), Rock(kg: 8)]
+// expect: [13, 18, 15]
+// expect: [2, 1] [Rock(kg: 1), Rock(kg: 2)]
+// expect: [1, 0, 2, 0] ["a", "z"]
+// expect: 2
+// expect: 90
+// expect: 3

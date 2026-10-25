@@ -1,0 +1,19 @@
+pure count[T](xs: list[T]) -> int {
+    var n = 0
+    @prove(no_alloc)
+    for i from 0 to xs.len {
+        n += 1
+    }
+    n
+}
+
+pure firsts[T](xs: list[T]) -> list[T] {
+    xs.filter((x) { true })
+}
+
+main() {
+    let a: list[int] = [1, 2, 3]
+    let b: list[string] = ["a", "b"]
+    print(count(a), count(b), firsts(b))
+}
+// expect: 3 2 ["a", "b"]
