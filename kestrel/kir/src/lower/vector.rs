@@ -106,7 +106,7 @@ impl<'a> FnLowerer<'a> {
 
     /// `v.xz`: picked components as a new vector (of the same kind as `base`'s).
     pub(crate) fn swizzle(&mut self, base: &ast::Expr, comps: &[u32], ty: KTy, line: u32) -> ExprKind {
-        if ty.is_vector() || kty(self.t.ty(base.id)).is_vector() {
+        if ty.is_vector() || kty(self.ty(base.id)).is_vector() {
             return self.simd_swizzle(base, comps, ty, line);
         }
         let KTy::Struct(s) = ty else { unreachable!("vectors are structs") };
@@ -201,7 +201,7 @@ impl<'a> FnLowerer<'a> {
 
     /// The vector type of an AST expression, if it is one.
     pub(crate) fn vec_ty(&self, e: &ast::Expr) -> Option<KTy> {
-        let ty = self.t.ty(e.id);
+        let ty = self.ty(e.id);
         self.t.vector(ty).map(|_| kty(ty))
     }
 }

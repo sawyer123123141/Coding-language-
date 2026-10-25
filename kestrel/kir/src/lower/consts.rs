@@ -17,6 +17,7 @@ use kestrel_syntax::ast::{self, Program};
 use kestrel_syntax::LineIndex;
 
 use super::helpers::Helpers;
+use super::subst::plain_res;
 use super::{kty, FnLowerer};
 use crate::ir::*;
 
@@ -202,13 +203,13 @@ fn uses_in(program: &Program, t: &Tables, e: &ast::Expr, out: &mut Vec<ConstId>)
     let all = |args: &[ast::Arg], out: &mut Vec<ConstId>| args.iter().for_each(|a| uses_in(program, t, &a.value, out));
     match &e.kind {
         ast::ExprKind::Ident(_) => {
-            if let Some(&Res::Const(c)) = t.res.get(&e.id) {
+            if let Some(Res::Const(c)) = plain_res(t, e.id) {
                 out.push(c);
             }
         }
         ast::ExprKind::Call { args, .. } => {
             all(args, out);
-            if let Some(&Res::Construct(sid)) = t.res.get(&e.id) {
+            if let Some(Res::Construct(sid)) = plain_res(t, e.id) {
                 // Built-in structs (the vectors) have no declaration, and no defaults.
                 if let Some(ast::Item::Struct(decl)) = program.items.get(t.strukt(sid).item) {
                     let slots = &t.ctor_args[&e.id];

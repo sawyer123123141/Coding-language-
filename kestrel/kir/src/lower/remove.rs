@@ -57,7 +57,7 @@ impl<'a> FnLowerer<'a> {
         slot.path.push(Proj::Index { at: load(i, KTy::I32, line), check: IndexCheck::Checked });
         let item = self.t.bind_local[&var.id];
         self.elems.insert(item, slot.clone());
-        let ty = super::kty(self.t.local(item).ty);
+        let ty = super::kty(self.local_ty(item));
         let compact = Stmt::List(ListOp::Compact, list.clone(), vec![load(kept, KTy::I64, line), load(next, KTy::I64, line)]);
         let keep = keep_step(&list, &slot, ty, [i, kept, next, removed], line);
         self.removing.push(RemoveLoop { item, slot, removed });
@@ -79,7 +79,7 @@ impl<'a> FnLowerer<'a> {
         let item = self.t.removes[&span];
         let lp = self.removing.iter().rev().find(|l| l.item == item).expect("`remove` is inside its item's loop");
         let (slot, removed) = (lp.slot.clone(), lp.removed);
-        let ty = super::kty(self.t.local(item).ty);
+        let ty = super::kty(self.local_ty(item));
         let line = self.line(span);
         if ty.is_aggregate() {
             let tmp = self.temp(ty);

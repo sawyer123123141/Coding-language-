@@ -29,22 +29,17 @@ pub(crate) struct Captured {
     pub(crate) locals: Vec<LocalIdx>,
 }
 
-/// Where the captures of closure literal `id` go in its environment.
-fn layout_of(t: &Tables, id: ExprId) -> EnvLayout {
+/// Where captures held by `captures` (their locals, in order) go in an environment.
+fn layout_of(t: &Tables, captures: &[Local]) -> EnvLayout {
     let mut offsets = Vec::new();
     let mut end = ENV_HEADER;
-    for c in &t.closures[&id].captures {
-        let (size, align) = layout::size_align(t, kty(c.ty));
+    for c in captures {
+        let (size, align) = layout::size_align(t, c.ty);
         end = end.next_multiple_of(align);
         offsets.push(end);
         end += size;
     }
     EnvLayout { offsets, size: end.next_multiple_of(8) }
-}
-
-/// A local of type `ty` that points at a capture, named for the captured variable.
-fn capture_local(t: &Tables, c: &Capture) -> Local {
-    Local { name: format!("{}_capture", t.local(c.root).name), ty: kty(c.ty), kind: LocalKind::RefParam }
 }
 
 /// `BindEnv` of each local in `locals` to its capture's offset in the environment at `env`.
@@ -55,14 +50,15 @@ fn bind_captures(env: LocalIdx, locals: &[LocalIdx], layout: &EnvLayout) -> Vec<
 
 impl Helpers {
     /// Where the captures of closure literal `id` go in its environment, worked out once.
-    pub(crate) fn env_layout(&mut self, t: &Tables, id: ExprId) -> EnvLayout {
-        self.env_layouts.entry(id).or_insert_with(|| layout_of(t, id)).clone()
+    /// `captures` are the locals that point at them (see `capture_locals`).
+    pub(crate) fn env_layout(&mut self, t: &Tables, id: ExprId, captures: &[Local]) -> EnvLayout {
+        self.env_layouts.entry(id).or_insert_with(|| layout_of(t, captures)).clone()
     }
 
     /// The copy function of closure literal `id`'s environment, made at the first use:
     /// `(env: i64) -> i64`, which copies the block and then each capture's own memory into the
     /// current arena, and returns the copy. One per literal.
-    pub(crate) fn env_copy_fn(&mut self, id: ExprId, t: &Tables) -> FuncIdx {
+    pub(crate) fn env_copy_fn(&mut self, id: ExprId, captures: &[Local], t: &Tables) -> FuncIdx {
         if let Some(&f) = self.env_copies.get(&id) {
             return f;
         }
@@ -73,20 +69,19 @@ impl Helpers {
             Local { name: "env".into(), ty: KTy::I64, kind: LocalKind::Value },
             Local { name: "copy".into(), ty: KTy::I64, kind: LocalKind::Value },
         ];
-        let captures = &t.closures[&id].captures;
         let refs: Vec<LocalIdx> = captures
             .iter()
             .map(|c| {
-                locals.push(capture_local(t, c));
+                locals.push(c.clone());
                 LocalIdx(locals.len() as u32 - 1)
             })
             .collect();
-        let layout = self.env_layout(t, id);
+        let layout = self.env_layout(t, id, captures);
         let dup = expr(ExprKind::EnvDup(Box::new(expr(ExprKind::Load(Place::local(env)), KTy::I64))), KTy::I64);
         let mut body = vec![Stmt::Let(copy, dup)];
         body.extend(bind_captures(copy, &refs, &layout));
         for (c, &r) in captures.iter().zip(&refs) {
-            body.extend(self.fixup(Place::local(r), kty(c.ty), t));
+            body.extend(self.fixup(Place::local(r), c.ty, t));
         }
         body.push(Stmt::Return(Some(expr(ExprKind::Load(Place::local(copy)), KTy::I64))));
         self.funcs[(idx.0 - self.base) as usize] = Func {
@@ -107,17 +102,29 @@ impl Helpers {
 }
 
 impl FnLowerer<'_> {
+    /// A local that points at each capture of closure literal `id`, of the captured value's type,
+    /// named for the captured variable.
+    fn capture_locals(&self, id: ExprId) -> Vec<Local> {
+        let local = |c: &Capture| Local {
+            name: format!("{}_capture", self.local(c.root).name),
+            ty: kty(self.sub(c.ty)),
+            kind: LocalKind::RefParam,
+        };
+        self.closure(id).captures.iter().map(local).collect()
+    }
+
     /// Gives the closure being lowered (literal `id`) a reference local for each capture, and
     /// returns the statements that bind them, which start its body.
     pub(crate) fn bind_closure_captures(&mut self, id: ExprId) -> Vec<Stmt> {
         let t = self.t;
+        let captures = self.capture_locals(id);
         let mut locals = Vec::new();
-        for c in &t.closures[&id].captures {
+        for c in &captures {
             locals.push(LocalIdx(self.locals.len() as u32));
-            self.locals.push(capture_local(t, c));
+            self.locals.push(c.clone());
         }
         // The environment word is the code's first parameter.
-        let layout = self.helpers.env_layout(t, id);
+        let layout = self.helpers.env_layout(t, id, &captures);
         let binds = bind_captures(LocalIdx(0), &locals, &layout);
         self.captured = Some(Captured { id, locals });
         binds
@@ -139,7 +146,7 @@ impl FnLowerer<'_> {
     fn capture_source(&self, c: &Capture) -> Place {
         let fields = |p: &mut Place, path: &[u32]| p.path.extend(path.iter().map(|&f| Proj::Field(f)));
         if let Some(cap) = &self.captured {
-            let outer = &self.t.closures[&cap.id].captures;
+            let outer = &self.closure(cap.id).captures;
             if let Some(k) = outer.iter().position(|o| o.root == c.root && c.path.starts_with(&o.path)) {
                 let mut p = Place::local(cap.locals[k]);
                 fields(&mut p, &c.path[outer[k].path.len()..]);
@@ -180,12 +187,15 @@ impl FnLowerer<'_> {
     /// copies (`owned`) when `deep`, else plain reads.
     fn env_of(&mut self, id: ExprId, line: u32, deep: bool) -> Env {
         let t = self.t;
-        let copy = self.helpers.env_copy_fn(id, t);
-        let values = t.closures[&id]
+        let captures = self.capture_locals(id);
+        let copy = self.helpers.env_copy_fn(id, &captures, t);
+        let values = self
+            .closure(id)
             .captures
             .iter()
-            .map(|c| {
-                let v = Expr { kind: ExprKind::Load(self.capture_source(c)), ty: kty(c.ty), line };
+            .zip(&captures)
+            .map(|(c, local)| {
+                let v = Expr { kind: ExprKind::Load(self.capture_source(c)), ty: local.ty, line };
                 if deep {
                     self.owned(v, false)
                 } else {
@@ -193,7 +203,7 @@ impl FnLowerer<'_> {
                 }
             })
             .collect();
-        let layout = self.helpers.env_layout(t, id);
+        let layout = self.helpers.env_layout(t, id, &captures);
         Env { copy, layout, values }
     }
 }

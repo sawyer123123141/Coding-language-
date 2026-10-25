@@ -27,16 +27,16 @@ impl<'a> FnLowerer<'a> {
                 return self.declared(idx);
             }
             ast::Stmt::Assign { target: ast::Expr { kind: ast::ExprKind::Index { base, index }, .. }, value, .. }
-                if matches!(self.t.ty(base.id), Ty::Map(..)) =>
+                if matches!(self.ty(base.id), Ty::Map(..)) =>
             {
                 return self.map_set(base, index, value, out);
             }
-            ast::Stmt::Assign { target, value, .. } if helpers::owning(kty(self.t.ty(target.id)), self.t) => {
+            ast::Stmt::Assign { target, value, .. } if helpers::owning(kty(self.ty(target.id)), self.t) => {
                 return self.assign_owning(target, value, out);
             }
             ast::Stmt::Assign { target, op, value, .. } => {
                 let mut place = self.place(target).expect("checker requires an assignable place");
-                let ty = kty(self.t.ty(target.id));
+                let ty = kty(self.ty(target.id));
                 let rhs = self.expr(value);
                 let value = match op.binary() {
                     None => self.owned(rhs, false),
@@ -95,7 +95,7 @@ impl<'a> FnLowerer<'a> {
 
     /// An expression whose value is discarded.
     fn expr_stmt(&mut self, e: &ast::Expr, out: &mut Vec<Stmt>) {
-        if matches!(self.t.res.get(&e.id), Some(Res::CallValue(_))) {
+        if matches!(self.res(e.id), Some(Res::CallValue(_))) {
             return self.call_value_stmt(e, out);
         }
         let (receiver, args) = match &e.kind {
@@ -114,7 +114,7 @@ impl<'a> FnLowerer<'a> {
             ast::ExprKind::MethodCall { receiver, args, .. } => (Some(&**receiver), args),
             _ => unreachable!("checker rejects statements with no effect"),
         };
-        match self.t.res[&e.id] {
+        match self.resolved(e.id) {
             Res::Print => out.push(Stmt::Print(args.iter().map(|a| self.print_arg(&a.value)).collect())),
             Res::Builtin(b) => self.builtin_stmt(b, e, args, out),
             Res::MapRemove => {

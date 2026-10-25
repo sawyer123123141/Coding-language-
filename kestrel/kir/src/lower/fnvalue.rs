@@ -4,27 +4,13 @@
 //! the parameters. A named function has no environment, so its value points at a generated thunk
 //! with that shape, which ignores the environment and calls the function.
 
-use kestrel_check::{ConstId, FnId, LocalId, Res, SigId, Tables, Ty};
+use kestrel_check::{ConstId, FnId, LocalId, Res, Tables, Ty};
 use kestrel_syntax::ast;
 
 use super::consts::hoisted;
 use super::helpers::{expr, Helpers};
 use super::{kty, FnLowerer};
 use crate::ir::*;
-
-/// The signature of a call through a value of the checker's function type `sig`.
-pub(super) fn ksig(t: &Tables, sig: SigId) -> KSig {
-    let sig = t.sig(sig);
-    let params = sig
-        .params
-        .iter()
-        .map(|p| {
-            let ty = kty(p.ty);
-            (ty, p.is_var || ty.is_aggregate())
-        })
-        .collect();
-    KSig { params, ret: (sig.ret != Ty::Unit).then(|| kty(sig.ret)) }
-}
 
 impl Helpers {
     /// The thunk of function `f`, made at the first use: `(env: i64, params...) -> ret`, which
@@ -147,14 +133,14 @@ impl FnLowerer<'_> {
     /// The parts of a call through a function value: the statements to run first, the callee,
     /// the arguments (positional; `var` ones by place) and the signature.
     fn call_value_parts(&mut self, e: &ast::Expr) -> (Vec<Stmt>, Place, Vec<Arg>, KSig) {
-        let Some(&Res::CallValue(sig)) = self.t.res.get(&e.id) else { unreachable!("not a call through a function value") };
+        let Some(Res::CallValue(sig)) = self.res(e.id) else { unreachable!("not a call through a function value") };
         let (ast::ExprKind::Call { args, .. } | ast::ExprKind::MethodCall { args, .. } | ast::ExprKind::CallValue { args, .. }) = &e.kind
         else {
             unreachable!("not a call through a function value")
         };
         let mut pre = Vec::new();
         let callee = self.callee_place(e, &mut pre);
-        let params = &self.t.sig(sig).params;
+        let params = &self.sig(sig).params;
         let lowered = args
             .iter()
             .zip(params)
@@ -168,7 +154,7 @@ impl FnLowerer<'_> {
                 }
             })
             .collect();
-        (pre, callee, lowered, ksig(self.t, sig))
+        (pre, callee, lowered, self.ksig(sig))
     }
 
     /// A call through a function value, as a value of type `ty`.
@@ -183,7 +169,7 @@ impl FnLowerer<'_> {
         let (pre, callee, args, sig) = self.call_value_parts(e);
         out.extend(pre);
         match sig.ret {
-            Some(ret) if self.t.is_owning(self.t.ty(e.id)) => {
+            Some(ret) if self.t.is_owning(self.ty(e.id)) => {
                 let call = Expr { kind: ExprKind::CallIndirect { callee, args, sig }, ty: ret, line: self.line(e.span) };
                 self.keep(call, out);
             }

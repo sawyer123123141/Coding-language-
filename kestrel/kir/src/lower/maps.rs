@@ -76,7 +76,7 @@ impl<'a> FnLowerer<'a> {
             "has" => MapOp::Has,
             "remove" => MapOp::Remove,
             _ => {
-                let KTy::Map(_, v) = kty(self.t.ty(receiver.id)) else { unreachable!("`get` on a map") };
+                let KTy::Map(_, v) = kty(self.ty(receiver.id)) else { unreachable!("`get` on a map") };
                 return self.map_get_or(map, key, &args[1].value, KTy::Optional(v), line, pre);
             }
         };
@@ -150,8 +150,8 @@ impl<'a> FnLowerer<'a> {
         let value_ref = value.map(|var| {
             let var = self.t.bind_local[&var.id];
             let ptr = LocalIdx(self.locals.len() as u32);
-            let ty = kty(self.t.local(var).ty);
-            self.locals.push(Local { name: format!("{}_ref", self.t.local(var).name), ty, kind: LocalKind::RefParam });
+            let ty = kty(self.local_ty(var));
+            self.locals.push(Local { name: format!("{}_ref", self.local(var).name), ty, kind: LocalKind::RefParam });
             let checked = with(&map, Proj::MapValue { at: at.clone(), checked: true });
             self.origins.insert(ptr, checked.clone());
             self.elems.insert(var, Place::local(ptr));

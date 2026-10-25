@@ -69,10 +69,10 @@ impl<'a> FnLowerer<'a> {
         body: &ast::Block,
         out: &mut Vec<Stmt>,
     ) {
-        if let kestrel_check::Ty::Map(..) = self.t.ty(iter.id) {
+        if let kestrel_check::Ty::Map(..) = self.ty(iter.id) {
             return self.map_for_in(index, var, iter, body, out);
         }
-        if self.t.ty(iter.id) == kestrel_check::Ty::Str {
+        if self.ty(iter.id) == kestrel_check::Ty::Str {
             return self.str_for_in(index, var, iter, body, out);
         }
         if par {
@@ -110,8 +110,8 @@ impl<'a> FnLowerer<'a> {
         elem.path.push(Proj::Index { at: at.clone(), check: IndexCheck::Checked });
         let var = self.t.bind_local[&var.id];
         let ptr = LocalIdx(self.locals.len() as u32);
-        let ty = super::kty(self.t.local(var).ty);
-        self.locals.push(Local { name: format!("{}_ref", self.t.local(var).name), ty, kind: LocalKind::RefParam });
+        let ty = super::kty(self.local_ty(var));
+        self.locals.push(Local { name: format!("{}_ref", self.local(var).name), ty, kind: LocalKind::RefParam });
         self.origins.insert(ptr, elem.clone());
         self.elems.insert(var, Place::local(ptr));
         // `i < xs.len` holds throughout, since the body can't change `xs` itself.

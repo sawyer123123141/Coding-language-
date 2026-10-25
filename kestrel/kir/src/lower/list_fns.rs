@@ -19,7 +19,7 @@
 use kestrel_check::{ListMethod, SigId, Tables, Ty};
 use kestrel_syntax::ast;
 
-use super::fnvalue::ksig;
+use super::subst::known_ksig;
 use super::helpers::{elem_of, expr, has_heap, with, Helpers};
 use super::{kty, FnLowerer};
 use crate::ir::*;
@@ -29,8 +29,9 @@ use crate::ir::*;
 pub(crate) enum Callee {
     /// A closure literal's code, called with the environment word of the loop's function value.
     Code { code: FuncIdx, pure: bool },
-    /// Any function value of this type, called through the loop's function value.
-    Value(SigId),
+    /// Any function value of this type (in the terms of the code calling the loop), called
+    /// through the loop's function value; `pure` is the type's.
+    Value { sig: SigId, pure: bool },
 }
 
 fn local(name: &str, ty: KTy, kind: LocalKind) -> Local {
@@ -67,7 +68,7 @@ impl Helpers {
                 let env = expr(ExprKind::FnEnv(f.clone()), KTy::I64);
                 ExprKind::Call(code, vec![Arg::Value(env), Arg::Value(item)])
             }
-            Callee::Value(sig) => ExprKind::CallIndirect { callee: f.clone(), args: vec![Arg::Value(item)], sig: ksig(t, sig) },
+            Callee::Value { sig, .. } => ExprKind::CallIndirect { callee: f.clone(), args: vec![Arg::Value(item)], sig: known_ksig(t, sig) },
         };
         let call = call_on(expr(ExprKind::Load(item_at.clone()), elem));
         let result_of = |ty: KTy| expr(call.clone(), ty);
@@ -128,7 +129,7 @@ impl Helpers {
         });
         let pure = match callee {
             Callee::Code { pure, .. } => pure,
-            Callee::Value(sig) => t.sig(sig).is_pure,
+            Callee::Value { pure, .. } => pure,
         };
         self.funcs[(idx.0 - self.base) as usize] = Func {
             name: format!("__kestrel_list_fn_{}_{}", format!("{method:?}").to_lowercase(), idx.0),
@@ -153,13 +154,13 @@ impl FnLowerer<'_> {
     /// (see the module comment).
     pub(crate) fn list_fn_call(&mut self, method: ListMethod, receiver: &ast::Expr, f: &ast::Expr, ty: KTy, line: u32) -> ExprKind {
         let mut pre = Vec::new();
-        let list_ty = kty(self.t.ty(receiver.id));
+        let list_ty = kty(self.ty(receiver.id));
         let list = self.place_or_temp(receiver, &mut pre, true);
         let value = self.expr(f);
         let callee = match (&f.kind, &value.kind) {
-            (ast::ExprKind::Closure(_), ExprKind::MakeFn { code, .. }) => Callee::Code { code: *code, pure: self.t.closures[&f.id].is_pure },
-            _ => match self.t.ty(f.id) {
-                Ty::Fn(sig) => Callee::Value(sig),
+            (ast::ExprKind::Closure(_), ExprKind::MakeFn { code, .. }) => Callee::Code { code: *code, pure: self.closure(f.id).is_pure },
+            _ => match self.ty(f.id) {
+                Ty::Fn(sig) => Callee::Value { sig, pure: self.sig(sig).is_pure },
                 other => unreachable!("the checker gives `{other:?}` to a function argument"),
             },
         };

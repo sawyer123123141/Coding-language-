@@ -28,7 +28,7 @@ impl<'a> FnLowerer<'a> {
     /// A list method call whose result is thrown away.
     pub(crate) fn list_stmt(&mut self, method: ListMethod, e: &ast::Expr, receiver: &ast::Expr, args: &[ast::Arg], out: &mut Vec<Stmt>) {
         let line = self.line(e.span);
-        let list_ty = kty(self.t.ty(receiver.id));
+        let list_ty = kty(self.ty(receiver.id));
         let elem = self.elem_ty(list_ty);
         match method {
             ListMethod::RemoveAt => {
@@ -123,7 +123,7 @@ impl<'a> FnLowerer<'a> {
     fn pop(&mut self, receiver: &ast::Expr, ty: KTy, line: u32) -> ExprKind {
         let mut pre = Vec::new();
         let list = self.place_or_temp(receiver, &mut pre, true);
-        let elem = self.elem_ty(kty(self.t.ty(receiver.id)));
+        let elem = self.elem_ty(kty(self.ty(receiver.id)));
         let (result, n) = (self.temp(ty), self.temp(KTy::I64));
         pre.push(Stmt::Let(result, Expr { kind: ExprKind::NoneLit, ty, line }));
         let len = Expr { kind: ExprKind::Len(list.clone()), ty: KTy::I64, line };
@@ -156,7 +156,7 @@ impl<'a> FnLowerer<'a> {
     /// `xs.find(v)`: a call of the search generated for the list's type.
     fn find(&mut self, receiver: &ast::Expr, needle: &ast::Expr, ty: KTy, line: u32) -> ExprKind {
         let mut pre = Vec::new();
-        let list_ty = kty(self.t.ty(receiver.id));
+        let list_ty = kty(self.ty(receiver.id));
         let list = self.place_or_temp(receiver, &mut pre, true);
         let needle = self.expr(needle);
         let f = self.helpers.find_fn(list_ty, ty, self.t);

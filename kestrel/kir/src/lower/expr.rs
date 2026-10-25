@@ -1,4 +1,4 @@
-use kestrel_check::{ConstId, Res, StrMethod, Tables, Ty};
+use kestrel_check::{ConstId, Res, StrMethod, Ty};
 use kestrel_syntax::ast;
 
 use super::builtins::constant_value;
@@ -9,7 +9,7 @@ use crate::ir::*;
 impl<'a> FnLowerer<'a> {
     /// Lowers `e` and applies any implicit conversion the checker recorded.
     pub(crate) fn expr(&mut self, e: &ast::Expr) -> Expr {
-        let Some(&to) = self.t.coerce.get(&e.id) else { return self.expr_raw(e) };
+        let Some(to) = self.coerce(e.id) else { return self.expr_raw(e) };
         // A struct or enum value used as an interface value (or an optional of one).
         if let Some(v) = self.iface_coercion(e, to) {
             return v;
@@ -17,7 +17,7 @@ impl<'a> FnLowerer<'a> {
         // A `T` used as a `T?`: wrap it (converting it to the inner type first).
         if let Ty::Optional(inner) = to {
             let inner = kty(self.t.elem(inner));
-            let v = if kty(self.t.ty(e.id)) == inner { self.expr_raw(e) } else { self.converted(e, inner) };
+            let v = if kty(self.ty(e.id)) == inner { self.expr_raw(e) } else { self.converted(e, inner) };
             let line = v.line;
             return Expr { kind: ExprKind::Some(Box::new(v)), ty: kty(to), line };
         }
@@ -29,7 +29,7 @@ impl<'a> FnLowerer<'a> {
         // A literal (or `PI` / `TAU`) converted to a float is emitted at the target type,
         // read from the source, so an f64 never inherits the rounding of an f32 value.
         if to.is_float() {
-            if let Some(v) = literal_as(self.t, e, to) {
+            if let Some(v) = literal_as(self, e, to) {
                 return Expr { kind: ExprKind::Float(v), ty: to, line: self.line(e.span) };
             }
         }
@@ -38,7 +38,7 @@ impl<'a> FnLowerer<'a> {
     }
 
     pub(crate) fn expr_raw(&mut self, e: &ast::Expr) -> Expr {
-        let ty = kty(self.t.ty(e.id));
+        let ty = kty(self.ty(e.id));
         let line = self.line(e.span);
         let kind = match &e.kind {
             ast::ExprKind::Int(n) => {
@@ -54,7 +54,7 @@ impl<'a> FnLowerer<'a> {
             ast::ExprKind::None => ExprKind::NoneLit,
             ast::ExprKind::Str(s) => ExprKind::StrLit(s.clone()),
             ast::ExprKind::Interp(parts) => ExprKind::Format(self.interp_parts(parts)),
-            ast::ExprKind::Ident(_) => match self.t.res[&e.id] {
+            ast::ExprKind::Ident(_) => match self.resolved(e.id) {
                 Res::Local(_) if self.t.moves.contains(&e.id) => ExprKind::Move(self.place(e).expect("a local is a place")),
                 Res::Local(_) => ExprKind::Load(self.place(e).expect("a local is a place")),
                 // Built once, before `main`: a use reads the global in place (see `consts`).
@@ -103,11 +103,11 @@ impl<'a> FnLowerer<'a> {
             }
             // A call through a function value: a local or constant by name, a field, or any expression.
             ast::ExprKind::Call { .. } | ast::ExprKind::MethodCall { .. } | ast::ExprKind::CallValue { .. }
-                if matches!(self.t.res.get(&e.id), Some(Res::CallValue(_))) =>
+                if matches!(self.res(e.id), Some(Res::CallValue(_))) =>
             {
                 self.call_value(e, ty, line)
             }
-            ast::ExprKind::Call { args, .. } => match self.t.res[&e.id] {
+            ast::ExprKind::Call { args, .. } => match self.resolved(e.id) {
                 Res::Convert(_) => ExprKind::Cast(Box::new(self.expr(&args[0].value))),
                 Res::Construct(sid) if self.t.vec_makes.contains(&e.id) => self.vec_make(sid, args, ty, line),
                 Res::SimdMake(_) => self.simd_make(e, args, ty, line),
@@ -125,11 +125,11 @@ impl<'a> FnLowerer<'a> {
                 other => unreachable!("{other:?} used as a value"),
             },
             ast::ExprKind::MethodCall { receiver, name, args, .. }
-                if matches!(self.t.res.get(&e.id), Some(Res::MapRead | Res::MapRemove)) =>
+                if matches!(self.res(e.id), Some(Res::MapRead | Res::MapRemove)) =>
             {
                 self.map_method(receiver, name, args, ty, line)
             }
-            ast::ExprKind::MethodCall { receiver, args, .. } => match self.t.res[&e.id] {
+            ast::ExprKind::MethodCall { receiver, args, .. } => match self.resolved(e.id) {
                 Res::Fn(f) => {
                     let (pre, fi, a) = self.call_parts(e, f, args, Some(receiver));
                     Self::with_pre(pre, ExprKind::Call(fi, a), ty, line)
@@ -144,16 +144,16 @@ impl<'a> FnLowerer<'a> {
                 Res::Str(method) => self.str_method(method, receiver, args, ty, line),
                 other => unreachable!("method call resolved to {other:?}"),
             },
-            ast::ExprKind::Field { base, .. } if matches!(self.t.ty(base.id), Ty::Array(_) | Ty::List(_) | Ty::Map(..)) => {
+            ast::ExprKind::Field { base, .. } if matches!(self.ty(base.id), Ty::Array(_) | Ty::List(_) | Ty::Map(..)) => {
                 self.len_value(base, line)
             }
-            ast::ExprKind::Field { base, .. } if matches!(self.t.res.get(&e.id), Some(Res::Str(StrMethod::Len))) => {
+            ast::ExprKind::Field { base, .. } if matches!(self.res(e.id), Some(Res::Str(StrMethod::Len))) => {
                 self.str_len(base, line)
             }
-            ast::ExprKind::Index { base, index } if matches!(self.t.ty(base.id), Ty::Map(..)) => {
+            ast::ExprKind::Index { base, index } if matches!(self.ty(base.id), Ty::Map(..)) => {
                 self.map_get(base, index, ty, line)
             }
-            ast::ExprKind::Index { base, index } if matches!(self.t.res.get(&e.id), Some(Res::Str(StrMethod::At))) => {
+            ast::ExprKind::Index { base, index } if matches!(self.res(e.id), Some(Res::Str(StrMethod::At))) => {
                 self.str_at(base, index)
             }
             ast::ExprKind::Index { base, index } => self.index_value(e, base, index, ty, line),
@@ -168,8 +168,8 @@ impl<'a> FnLowerer<'a> {
                 let comps = self.t.swizzles[&e.id].clone();
                 self.swizzle(base, &comps, ty, line)
             }
-            ast::ExprKind::Field { base, .. } => match (self.t.res.get(&e.id), self.place(e)) {
-                (Some(Res::Variant(id, v)), _) => ExprKind::VariantLit(EnumIdx(id.0), *v, Vec::new()),
+            ast::ExprKind::Field { base, .. } => match (self.res(e.id), self.place(e)) {
+                (Some(Res::Variant(id, v)), _) => ExprKind::VariantLit(EnumIdx(id.0), v, Vec::new()),
                 (_, Some(place)) => ExprKind::Load(place),
                 (_, None) => {
                     let base = self.expr(base);
@@ -208,11 +208,11 @@ impl<'a> FnLowerer<'a> {
 
 /// The value of a numeric literal or `PI` / `TAU` (possibly negated) as float type `to`,
 /// or `None` if `e` is anything else.
-fn literal_as(t: &Tables, e: &ast::Expr, to: KTy) -> Option<f64> {
+fn literal_as(cx: &FnLowerer, e: &ast::Expr, to: KTy) -> Option<f64> {
     match &e.kind {
         // A hex literal above its type's positive range is its bit pattern (`0xFFFFFFFF` is -1).
         ast::ExprKind::Int(n) => {
-            let v = t.wrapped_literals.get(&e.id).copied();
+            let v = cx.t.wrapped_literals.get(&e.id).copied();
             Some(match (v, to) {
                 (Some(w), KTy::F32) => w as f32 as f64,
                 (Some(w), _) => w as f64,
@@ -221,11 +221,11 @@ fn literal_as(t: &Tables, e: &ast::Expr, to: KTy) -> Option<f64> {
             })
         }
         ast::ExprKind::Float(f) => Some(*f),
-        ast::ExprKind::Ident(_) => match t.res.get(&e.id) {
-            Some(Res::Builtin(b)) => constant_value(*b),
+        ast::ExprKind::Ident(_) => match cx.res(e.id) {
+            Some(Res::Builtin(b)) => constant_value(b),
             _ => None,
         },
-        ast::ExprKind::Unary { op: ast::UnaryOp::Neg, expr } => literal_as(t, expr, to).map(|v| -v),
+        ast::ExprKind::Unary { op: ast::UnaryOp::Neg, expr } => literal_as(cx, expr, to).map(|v| -v),
         _ => None,
     }
 }

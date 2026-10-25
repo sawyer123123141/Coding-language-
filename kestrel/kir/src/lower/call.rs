@@ -15,17 +15,17 @@ impl<'a> FnLowerer<'a> {
             return Some(p);
         }
         match &e.kind {
-            ast::ExprKind::Ident(_) => match self.t.res.get(&e.id) {
-                Some(Res::Local(l)) => Some(match self.elems.get(l) {
+            ast::ExprKind::Ident(_) => match self.res(e.id) {
+                Some(Res::Local(l)) => Some(match self.elems.get(&l) {
                     Some(p) => p.clone(),
-                    None => Place::local(self.local_map[l]),
+                    None => Place::local(self.local_map[&l]),
                 }),
                 // A heap constant is a place that is only read: never moved, so storing it copies.
-                Some(&Res::Const(c)) if hoisted(self.t, c) => Some(Place::local(self.const_local(c))),
+                Some(Res::Const(c)) if hoisted(self.t, c) => Some(Place::local(self.const_local(c))),
                 _ => None,
             },
             // `m[k]` is a lookup, and `s[i]` builds a new string: neither is a place.
-            ast::ExprKind::Index { base, .. } if matches!(self.t.ty(base.id), kestrel_check::Ty::Map(..) | kestrel_check::Ty::Str) => None,
+            ast::ExprKind::Index { base, .. } if matches!(self.ty(base.id), kestrel_check::Ty::Map(..) | kestrel_check::Ty::Str) => None,
             ast::ExprKind::Index { base, index } => {
                 let mut p = self.place(base)?;
                 p.path.push(Proj::Index { at: self.expr(index), check: IndexCheck::Checked });
@@ -40,8 +40,8 @@ impl<'a> FnLowerer<'a> {
             ast::ExprKind::Field { base, .. } => {
                 // `Enum.Variant` parses as a field access but isn't a place.
                 let field = *self.t.field_index.get(&e.id)?;
-                if let Some(Res::Local(l)) = self.t.res.get(&base.id) {
-                    if let Some((p, variant)) = self.bindings.get(l) {
+                if let Some(Res::Local(l)) = self.res(base.id) {
+                    if let Some((p, variant)) = self.bindings.get(&l) {
                         let mut p = p.clone();
                         p.path.push(Proj::Variant(*variant, field));
                         return Some(p);

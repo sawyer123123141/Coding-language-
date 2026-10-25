@@ -51,9 +51,14 @@ impl Layouts<'_> {
                 if self.structs[i].is_none() {
                     let t = self.t;
                     let info = &t.structs[i];
-                    let (fields, end, align) = self.fields(&info.fields, 0);
-                    let size = end.next_multiple_of(align);
-                    self.structs[i] = Some(StructLayout { name: shown(&info.name), fields, size, align });
+                    // A struct holding a placeholder is never a value (see `placeholders`).
+                    self.structs[i] = Some(if info.concrete {
+                        let (fields, end, align) = self.fields(&info.fields, 0);
+                        let size = end.next_multiple_of(align);
+                        StructLayout { name: shown(&info.name), fields, size, align }
+                    } else {
+                        super::placeholders::struct_placeholder(shown(&info.name))
+                    });
                 }
                 let l = self.structs[i].as_ref().expect("just laid out");
                 (l.size, l.align)
@@ -88,6 +93,9 @@ impl Layouts<'_> {
     fn enum_layout(&mut self, i: usize) -> EnumLayout {
         let t = self.t;
         let info = &t.enums[i];
+        if !info.concrete {
+            return super::placeholders::enum_placeholder(shown(&info.name));
+        }
         // Every variant's payload starts at the same offset: just past the
         // tag, rounded up for the most-aligned field of any variant.
         let mut payload_align = 1;

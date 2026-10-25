@@ -21,6 +21,7 @@ mod map_helpers;
 mod maps;
 mod matching;
 mod par;
+mod placeholders;
 mod prove;
 mod remove;
 mod scopes;
@@ -30,6 +31,8 @@ mod simd_builtins;
 mod sort;
 mod stmt;
 mod strings;
+mod stubs;
+mod subst;
 mod tables;
 mod temps;
 mod vec_builtins;
@@ -38,7 +41,7 @@ mod vector;
 
 use std::collections::{HashMap, HashSet};
 
-use kestrel_check::{ConstId, FnId, LocalId, Tables, Ty};
+use kestrel_check::{ConstId, FnId, LocalId, Subst, Tables, Ty};
 use kestrel_syntax::ast::{self, Program};
 use kestrel_syntax::{LineIndex, Span};
 
@@ -51,12 +54,11 @@ pub fn lower(program: &Program, t: &Tables, lines: &LineIndex) -> Module {
     let (structs, enums) = layout::layouts(t);
     let mut helpers = Helpers::new(t.fns.len() as u32);
     helpers.proves = prove::Proves::new(program, t);
-    let mut funcs: Vec<Func> =
-        (0..t.fns.len()).map(|i| FnLowerer::new(program, t, lines, Some(FnId(i as u32)), &mut helpers).lower()).collect();
+    let mut funcs: Vec<Func> = (0..t.fns.len()).map(|i| lower_fn(program, t, lines, FnId(i as u32), &mut helpers)).collect();
     let init = consts::lower_init(program, t, lines, &mut helpers);
     funcs.append(&mut helpers.funcs);
     scratch::strip_idle_scratch(&mut funcs, &helpers.sort_idle);
-    let elems = t.elems.iter().map(|&e| kty(e)).collect();
+    let elems = placeholders::elems(t);
     let main = t.main.map(|m| FuncIdx(m.0));
     if let (Some(init), Some(main)) = (init, main) {
         funcs[main.0 as usize].body.insert(0, Stmt::Call(init, Vec::new(), 0));
@@ -89,7 +91,27 @@ pub fn lower(program: &Program, t: &Tables, lines: &LineIndex) -> Module {
         }
         prove::check_homes(&m);
     }
+    placeholders::check_concrete(&m, t);
     m
+}
+
+/// The function for `FnInfo` `f`: a stub for an interface's abstract method or a generic
+/// original, else its body lowered (a copy's from its generic's declaration, under the copy's
+/// substitution).
+fn lower_fn(program: &Program, t: &Tables, lines: &LineIndex, f: FnId, helpers: &mut Helpers) -> Func {
+    let info = t.func(f);
+    if info.is_abstract {
+        return stubs::abstract_stub(info);
+    }
+    let subst = match (info.generic, info.copy) {
+        (Some(_), None) => return stubs::generic_stub(info),
+        (Some(owner), Some(copy)) => Some(Subst { owner, args: copy.args }),
+        (None, None) => None,
+        (None, Some(_)) => unreachable!("a copy keeps its generic's owner"),
+    };
+    let mut cx = FnLowerer::new(program, t, lines, Some(f), helpers);
+    cx.subst = subst;
+    cx.lower()
 }
 
 pub(crate) fn kty(ty: Ty) -> KTy {
@@ -113,6 +135,8 @@ pub(crate) fn kty(ty: Ty) -> KTy {
         Ty::Map(k, v) => KTy::Map(ElemIdx(k.0), ElemIdx(v.0)),
         Ty::Fn(_) => KTy::Fn,
         Ty::Iface(_) => KTy::Iface,
+        // Written by hand: the catch-all below would take it with another message.
+        Ty::Param(_) => panic!("a generic type reached KIR unsubstituted; this is a compiler bug"),
         other => panic!("type {other:?} has no runtime representation"),
     }
 }
@@ -146,6 +170,11 @@ pub(crate) struct FnLowerer<'a> {
     removing: Vec<remove::RemoveLoop>,
     /// When the code is a closure's: the closure, and the local bound to each of its captures.
     captured: Option<env::Captured>,
+    /// A copy's substitution: its generic's placeholders and the copy's types for them.
+    subst: Option<Subst>,
+    /// The substitutions of the field defaults being lowered, innermost last; the active one is
+    /// the top, else `subst` (see `subst.rs`).
+    default_substs: Vec<Subst>,
     helpers: &'a mut Helpers,
 }
 
@@ -172,21 +201,22 @@ impl<'a> FnLowerer<'a> {
             const_locals,
             removing,
             captured: None,
+            subst: None,
+            default_substs: Vec::new(),
             helpers,
         }
     }
 
+    /// A function's (or a copy's) body. A copy's declaration is its generic's.
     fn lower(mut self) -> Func {
         // Copy the shared references out so borrows of them don't hold `self`.
         let (t, program) = (self.t, self.program);
         let info = t.func(self.fn_id.expect("a function is lowered with its id"));
         let decl = info.decl(program);
-        if info.is_abstract {
-            return Self::abstract_stub(info);
-        }
         self.declare_locals(&info.locals);
         let params = (0..info.params.len()).map(|i| LocalIdx(i as u32)).collect();
-        let ret = if info.ret == Ty::Unit { None } else { Some(kty(info.ret)) };
+        let ret = self.sub(info.ret);
+        let ret = if ret == Ty::Unit { None } else { Some(kty(ret)) };
         let body = if info.is_native { Vec::new() } else { self.lower_body(&decl.body, ret) };
         let lines = self.lines_of(decl.span);
         Func {
@@ -198,8 +228,8 @@ impl<'a> FnLowerer<'a> {
             is_pure: info.is_pure,
             io: info.io,
             mutates_params: info.mutates_params,
-            // Items of other modules are named `module.name`.
-            exported: decl.is_pub && info.method.is_none() && !info.name.contains('.') && !info.is_native,
+            // Items of other modules are named `module.name`. A copy is never exported.
+            exported: decl.is_pub && info.method.is_none() && !info.name.contains('.') && !info.is_native && info.copy.is_none(),
             lines,
             native: info.is_native.then(|| native_symbol(&info.name)),
         }
@@ -210,43 +240,16 @@ impl<'a> FnLowerer<'a> {
         (self.line(span), self.line(Span { start: span.end.saturating_sub(1).max(span.start), end: span.end }))
     }
 
-    /// The function standing for an interface's method, so that `FuncIdx == FnId` holds for
-    /// every `FnInfo`. Nothing calls it (calls go to the implementing type's own method); its
-    /// parameters follow the signature and its body stops the program, so a stray call fails loudly.
-    fn abstract_stub(info: &kestrel_check::FnInfo) -> Func {
-        let mut locals = Vec::new();
-        for p in &info.params {
-            let ty = kty(p.ty);
-            let kind = if p.is_var || ty.is_aggregate() { LocalKind::RefParam } else { LocalKind::Value };
-            locals.push(Local { name: p.name.clone(), ty, kind });
-        }
-        let params = (0..locals.len()).map(|i| LocalIdx(i as u32)).collect();
-        let ret = if info.ret == Ty::Unit { None } else { Some(kty(info.ret)) };
-        Func {
-            name: info.name.clone(),
-            params,
-            ret,
-            locals,
-            body: vec![Stmt::Trap],
-            is_pure: false,
-            io: false,
-            mutates_params: false,
-            exported: false,
-            lines: (0, 0),
-            native: None,
-        }
-    }
-
     /// Gives each of the checker's locals `ids` (parameters first) a KIR local.
     pub(crate) fn declare_locals(&mut self, ids: &[LocalId]) {
-        let t = self.t;
         for &lid in ids {
-            let l = t.local(lid);
+            let l = self.local(lid);
+            let ty = self.local_ty(lid);
             // `match` bindings aren't storage; they name fields of the matched place.
-            if let Ty::Variant(..) = l.ty {
+            if let Ty::Variant(..) = ty {
                 continue;
             }
-            let ty = kty(l.ty);
+            let ty = kty(ty);
             let kind = if l.is_param && (l.is_var_param || ty.is_aggregate()) {
                 LocalKind::RefParam
             } else if l.addressed || ty.is_aggregate() {
@@ -295,7 +298,7 @@ impl<'a> FnLowerer<'a> {
     /// Whether `e` as a block's last expression can never yield a value: it
     /// is typed `Never`, or an `if` whose branches all end that way.
     pub(crate) fn leaves_early(&self, e: &ast::Expr) -> bool {
-        if self.t.ty(e.id) == Ty::Never {
+        if self.ty(e.id) == Ty::Never {
             return true;
         }
         match &e.kind {

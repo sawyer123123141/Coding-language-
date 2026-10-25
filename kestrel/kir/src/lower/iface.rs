@@ -42,7 +42,7 @@ impl FnLowerer<'_> {
     /// or enum: an interface value, or an optional holding a boxed one. `None` otherwise.
     pub(crate) fn iface_coercion(&mut self, e: &ast::Expr, to: Ty) -> Option<Expr> {
         let t = self.t;
-        let from = t.ty(e.id);
+        let from = self.ty(e.id);
         if !matches!(from, Ty::Struct(_) | Ty::Enum(_)) {
             return None;
         }
@@ -62,7 +62,7 @@ impl FnLowerer<'_> {
     /// The interface value of `e` (a struct or enum value) as interface `i`: borrowed when the
     /// checker lent it, else boxed.
     fn iface_value(&mut self, e: &ast::Expr, i: IfaceId) -> Expr {
-        if self.t.iface_borrows.contains(&e.id) {
+        if self.lent(e.id) {
             match self.place(e) {
                 Some(p) => return self.borrowed_iface(e, i, p),
                 // The checker's `is_kir_place` mirrors `place`; when they disagree, a read-only
@@ -76,7 +76,8 @@ impl FnLowerer<'_> {
     /// The table of `e`'s concrete type as interface `i`.
     fn table(&mut self, e: &ast::Expr, i: IfaceId) -> TableIdx {
         let (t, program) = (self.t, self.program);
-        self.helpers.table_for(t.ty(e.id), i, t, program)
+        let ty = self.ty(e.id);
+        self.helpers.table_for(ty, i, t, program)
     }
 
     /// An interface value pointing at place `p`, which holds `e`'s value.
@@ -96,10 +97,10 @@ impl FnLowerer<'_> {
     /// The argument for a `var` parameter, whose place is `p`: the place itself, or, when the
     /// checker lent the value to a `var` interface parameter, an interface value borrowing it.
     pub(crate) fn var_arg(&mut self, value: &ast::Expr, p: Place) -> Arg {
-        if !self.t.iface_borrows.contains(&value.id) {
+        if !self.lent(value.id) {
             return Arg::Ref(p);
         }
-        let Some(&Ty::Iface(i)) = self.t.coerce.get(&value.id) else {
+        let Some(Ty::Iface(i)) = self.coerce(value.id) else {
             unreachable!("a lent argument is converted to an interface")
         };
         Arg::Value(self.borrowed_iface(value, i, p))
@@ -163,7 +164,7 @@ impl FnLowerer<'_> {
         let (pre, recv, args, sig, keeps, method) = self.iface_call_parts(e, iface, slot);
         out.extend(pre);
         match sig.ret {
-            Some(ret) if self.t.is_owning(self.t.ty(e.id)) => {
+            Some(ret) if self.t.is_owning(self.ty(e.id)) => {
                 let call = Expr { kind: ExprKind::CallVirtual { recv, slot, args, sig, keeps, method }, ty: ret, line: self.line(e.span) };
                 self.keep(call, out);
             }

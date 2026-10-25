@@ -40,7 +40,7 @@ impl<'a> FnLowerer<'a> {
     /// needs no test: the checker made the arms exhaustive.
     pub(crate) fn match_value(&mut self, e: &ast::Expr) -> ExprKind {
         let ast::ExprKind::Match { scrutinee, .. } = &e.kind else { unreachable!("not a match") };
-        let (ty, line) = (kty(self.t.ty(e.id)), self.line(e.span));
+        let (ty, line) = (kty(self.ty(e.id)), self.line(e.span));
         let mut pre = Vec::new();
         let place = self.scrutinee(scrutinee, &mut pre);
         let mut arms = self.arms(e, &place, true);

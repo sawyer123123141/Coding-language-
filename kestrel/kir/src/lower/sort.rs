@@ -28,7 +28,7 @@
 use kestrel_check::{ListMethod, Tables, Ty};
 use kestrel_syntax::ast;
 
-use super::fnvalue::ksig;
+use super::subst::known_ksig;
 use super::helpers::{elem_of, expr, Helpers};
 use super::list_fns::Callee;
 use super::{kty, FnLowerer};
@@ -244,7 +244,7 @@ fn key_call(callee: Callee, f: &Place, item: Expr, key: KTy, t: &Tables) -> Expr
     let arg = Arg::Value(item);
     match callee {
         Callee::Code { code, .. } => expr(ExprKind::Call(code, vec![Arg::Value(expr(ExprKind::FnEnv(f.clone()), KTy::I64)), arg]), key),
-        Callee::Value(sig) => expr(ExprKind::CallIndirect { callee: f.clone(), args: vec![arg], sig: ksig(t, sig) }, key),
+        Callee::Value { sig, .. } => expr(ExprKind::CallIndirect { callee: f.clone(), args: vec![arg], sig: known_ksig(t, sig) }, key),
     }
 }
 
@@ -260,7 +260,7 @@ fn wide_key(key: KTy) -> KTy {
 impl FnLowerer<'_> {
     /// `xs.sort()` or `xs.sort_by(key)`, as a statement.
     pub(crate) fn sort_stmt(&mut self, method: ListMethod, receiver: &ast::Expr, args: &[ast::Arg], out: &mut Vec<Stmt>) {
-        let list_ty = kty(self.t.ty(receiver.id));
+        let list_ty = kty(self.ty(receiver.id));
         let list = self.place_or_temp(receiver, out, true);
         if method == ListMethod::Sort {
             let compare = self.helpers.sort_items_fn(elem_of(list_ty, self.t));
@@ -271,14 +271,14 @@ impl FnLowerer<'_> {
         }
         let f = &args[0].value;
         let value = self.expr(f);
-        let Ty::Fn(sig) = self.t.ty(f.id) else { unreachable!("the checker gives a function to `sort_by`") };
+        let Ty::Fn(sig) = self.ty(f.id) else { unreachable!("the checker gives a function to `sort_by`") };
         let callee = match (&f.kind, &value.kind) {
             (ast::ExprKind::Closure(_), ExprKind::MakeFn { code, .. }) => Callee::Code { code: *code, pure: true },
             // A named function's thunk has the shape of a closure's code (it ignores the environment).
             (_, ExprKind::FnRef(thunk)) => Callee::Code { code: *thunk, pure: true },
-            _ => Callee::Value(sig),
+            _ => Callee::Value { sig, pure: self.sig(sig).is_pure },
         };
-        let key = kty(self.t.sig(sig).ret);
+        let key = kty(self.sig(sig).ret);
         let helper = self.helpers.sort_by_call_fn(list_ty, key, callee, self.t);
         // The literal is directly the call's argument (see `check_stack_envs`).
         out.push(Stmt::Call(helper, vec![Arg::Ref(list), Arg::Value(value)], self.line(receiver.span)));

@@ -9,7 +9,7 @@
 //! environment of shallow copies when the literal is directly a call's argument, else a heap one
 //! of deep copies.
 
-use kestrel_check::{ClosureInfo, Tables, Ty};
+use kestrel_check::{ClosureInfo, FnId, Tables, Ty};
 use kestrel_syntax::ast::{self, ClosureLit, Program};
 use kestrel_syntax::LineIndex;
 
@@ -40,9 +40,10 @@ impl<'a> FnLowerer<'a> {
     /// A closure literal as a value.
     pub(crate) fn make_closure(&mut self, e: &ast::Expr, lit: &ClosureLit) -> ExprKind {
         let (program, t, lines) = (self.program, self.t, self.lines);
-        let code = self.helpers.closure_code(e.id, |helpers| lower_closure(program, t, lines, e, lit, helpers));
+        let encl_fn = self.closure(e.id).encl_fn;
+        let code = self.helpers.closure_code(e.id, |helpers| lower_closure(program, t, lines, encl_fn, e, lit, helpers));
         let line = self.line(e.span);
-        let env = if t.closures[&e.id].captures.is_empty() {
+        let env = if self.closure(e.id).captures.is_empty() {
             EnvKind::None
         } else if t.stack_closures.contains(&e.id) {
             self.stack_env(e.id, line)
@@ -55,13 +56,21 @@ impl<'a> FnLowerer<'a> {
 
 /// The function of closure literal `e`: the environment word, then the parameters. Its body
 /// starts by binding a reference local to each capture's place in the environment.
-fn lower_closure(program: &Program, t: &Tables, lines: &LineIndex, e: &ast::Expr, lit: &ClosureLit, helpers: &mut Helpers) -> Func {
-    let info: &ClosureInfo = &t.closures[&e.id];
-    let mut cx = FnLowerer::new(program, t, lines, info.encl_fn, helpers);
+fn lower_closure(
+    program: &Program,
+    t: &Tables,
+    lines: &LineIndex,
+    encl_fn: Option<FnId>,
+    e: &ast::Expr,
+    lit: &ClosureLit,
+    helpers: &mut Helpers,
+) -> Func {
+    let mut cx = FnLowerer::new(program, t, lines, encl_fn, helpers);
+    let info: &ClosureInfo = cx.closure(e.id);
     cx.in_builtin = t.in_builtin(e.span);
     cx.locals.push(Local { name: "env".into(), ty: KTy::I64, kind: LocalKind::Value });
     cx.declare_locals(&info.locals);
-    let sig = t.sig(info.sig);
+    let sig = cx.sig(info.sig);
     let params = (0..=sig.params.len() as u32).map(LocalIdx).collect();
     let ret = (sig.ret != Ty::Unit).then(|| kty(sig.ret));
     let binds = cx.bind_closure_captures(e.id);
