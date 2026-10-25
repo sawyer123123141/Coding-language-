@@ -214,6 +214,34 @@ fn the_copy_count_cap() {
 }
 
 #[test]
+fn the_width_cap_stops_a_doubling_default() {
+    // Each default walk builds an instance twice as wide: without the width cap the names alone
+    // would run out of memory long before 32 levels (P41).
+    let src = "struct Pair[A, B] {\n    a: A\n    b: B\n}\nstruct S[T] {\n    f: pure () -> int = () {\n        let inner = S[Pair[T, T]]()\n        1\n    }\n}\nmain() {\n    let s = S[int]()\n    print(s.f())\n}\n";
+    let (_, t, errs) = run(src);
+    assert_eq!(errs, ["making copies of `S` doesn't end: `S[int]` needs `S[Pair[int, int]]`, and so on (stopped after a type grew to 1,000 parts)"]);
+    assert!(t.structs.iter().all(|s| s.name.len() < 20_000), "an oversized name was built");
+}
+
+#[test]
+fn the_width_cap_stops_doubling_rule_calls() {
+    // The same growth through a rule call (no static cycle, P24): blamed on the copies that repeat.
+    let src = "interface Grow {\n    pure grow(self) -> int\n}\nstruct D[A, B]: Grow {\n    a: A\n    b: B\n    pure grow(self) -> int { walk(D[D[A, B], D[A, B]](a: self, b: self)) }\n}\npure walk[T: Grow](x: T) -> int { x.grow() }\nmain() {\n    print(walk(D(a: 1, b: 2)))\n}\n";
+    let (_, t, errs) = run(src);
+    assert_eq!(errs, ["making copies of `D.grow` doesn't end: `D[int, int].grow` needs `D[D[int, int], D[int, int]].grow`, and so on (stopped after a type grew to 1,000 parts)"]);
+    assert!(t.fns.iter().all(|f| f.name.len() < 20_000), "an oversized name was built");
+}
+
+#[test]
+fn a_deep_type_in_a_copy_blames_the_copies() {
+    // `walk`'s local `list[Wrap[list[T]]]` passes 32 levels first; `Wrap` is innocent, so the
+    // error names the copies that keep growing.
+    let src = "interface Grow {\n    pure grow(self) -> int\n}\nstruct Wrap[T] {\n    v: T\n}\nstruct Box[T]: Grow {\n    v: T\n    pure grow(self) -> int { walk(Box[Box[T]](v: self)) }\n}\npure walk[T: Grow](x: T) -> int {\n    let ws: list[Wrap[list[T]]] = []\n    x.grow()\n}\nmain() {\n    print(walk(Box(v: 1)))\n}\n";
+    let (_, _, errs) = run(src);
+    assert_eq!(errs, ["making copies of `walk` doesn't end: `walk[Box[int]]` needs `walk[Box[Box[int]]]`, and so on (stopped after 32 levels)"]);
+}
+
+#[test]
 fn enum_method_copies() {
     let src = "enum Maybe[T] {\n    Nothing\n    Just { value: T }\n    pure tag(self) -> int {\n        1\n    }\n}\nmain() {\n    let m = Maybe[int].Just(value: 1)\n    let n: Maybe[string] = Maybe.Nothing\n    print(m.tag() + n.tag())\n}\n";
     let (_, t) = clean(src);

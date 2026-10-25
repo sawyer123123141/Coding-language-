@@ -8,8 +8,10 @@
 //! instance's. A request with no copy yet appends a `FnInfo` and queues its body. Copies are
 //! never checked again: they share their generic's locals, store summaries and checks (G24, G25).
 //!
-//! The walk stops at the caps (G10, P9, P25): a type argument nested more than 32 levels in a
-//! copy or in any instance the walk interns, or more than 10,000 copies of one generic.
+//! The walk stops at the caps (G10, P9, P25, P41): a type argument nested more than 32 levels in
+//! a copy or in any instance the walk interns, a type list that would grow past 1,000 parts
+//! (checked before it is interned, so no oversized name is built), or more than 10,000 copies of
+//! one generic.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -18,13 +20,17 @@ use kestrel_syntax::visit::{each_expr, each_expr_in};
 use kestrel_syntax::{Diagnostic, Span};
 
 use crate::generic::{expand, CopyInfo, GenericOwner, Subst, TyListId};
-use crate::tables::{FnId, FnInfo, ParamSig, Res, StructId, Tables};
+use crate::tables::{EnumId, FnId, FnInfo, ParamSig, Res, StructId, Tables};
 use crate::ty::Ty;
 
 /// The most levels a type argument may nest (`int` is 0, `list[int]` 1).
 const MAX_LEVELS: u32 = 32;
 /// The most copies of one generic (and default walks of one generic struct's instances).
 const MAX_COPIES: u32 = 10_000;
+/// The most parts an interned type list may have (P41): a type that doubles in width at each copy
+/// would otherwise build names of billions of characters well before 32 levels.
+pub(super) const MAX_PARTS: u32 = 1_000;
+const WIDE: &str = "a type grew to 1,000 parts";
 
 /// Runs the static function expansion check, then, when it reports nothing, the walk. The check
 /// calls this only when there are no errors, so every instance and `type_args` entry is sound.
@@ -36,7 +42,7 @@ pub(crate) fn collect_copies(program: &Program, t: &mut Tables, diags: &mut Vec<
     if expand::check_fn_expansion(program, t, diags) {
         return;
     }
-    let mut walk = Walk { program, t, units: Vec::new(), queue: VecDeque::new(), copies: HashMap::new(), defaults: HashSet::new(), walked: HashMap::new(), nest: HashMap::new() };
+    let mut walk = Walk { program, t, units: Vec::new(), queue: VecDeque::new(), copies: HashMap::new(), defaults: HashSet::new(), walked: HashMap::new(), nest: HashMap::new(), size: HashMap::new() };
     if let Err(d) = walk.run() {
         diags.push(d);
     }
@@ -83,6 +89,8 @@ pub(super) struct Walk<'a> {
     walked: HashMap<StructId, HashSet<StructId>>,
     /// How many levels each type nests, as worked out so far.
     pub(super) nest: HashMap<Ty, u32>,
+    /// How many parts each concrete type has, as worked out so far.
+    pub(super) size: HashMap<Ty, u32>,
 }
 
 impl<'a> Walk<'a> {
@@ -286,6 +294,7 @@ impl<'a> Walk<'a> {
         Ok(())
     }
 
+
     /// Queues the default of instance `inst`'s field `field`, once.
     fn queue_default(&mut self, inst: StructId, field: usize, ctx: Ctx, at: Span) -> Result<(), Diagnostic> {
         if !self.defaults.insert((inst, field)) {
@@ -295,9 +304,9 @@ impl<'a> Walk<'a> {
         let walked = self.walked.entry(i.def).or_default();
         let full = !walked.contains(&inst) && walked.len() as u32 == MAX_COPIES;
         if full {
-            return Err(self.type_cap(GenericOwner::Struct(i.def), Ty::Struct(inst), ctx, "10,000 copies"));
+            return Err(self.walk_cap(ctx, (GenericOwner::Struct(i.def), Some(Ty::Struct(inst))), "10,000 copies"));
         }
-        self.walked.entry(i.def).or_default().insert(inst);
+        walked.insert(inst);
         let unit = self.units.len();
         let walk = Ctx { subst: Some(Subst { owner: GenericOwner::Struct(i.def), args: i.args }), made_by: ctx.made_by, made_at: Some(at), unit: Some(unit) };
         self.units.push(Unit { body: Body::Default(inst, field), ctx: walk, parent: ctx.unit });
@@ -305,10 +314,14 @@ impl<'a> Walk<'a> {
         Ok(())
     }
 
-    /// `ty` under `ctx`'s substitution, interned; an instance it interns whose type arguments
-    /// nest past the cap stops the walk (P25).
+    /// `ty` under `ctx`'s substitution, interned. A type that would grow past `MAX_PARTS` stops the
+    /// walk before anything is interned or named (P41); an instance it interns whose type
+    /// arguments nest past the cap stops it after (P25).
     fn sub(&mut self, ty: Ty, ctx: Ctx) -> Result<Ty, Diagnostic> {
         let Some(s) = ctx.subst else { return Ok(ty) };
+        if let Err(wide) = self.size_under(ty, s) {
+            return Err(self.walk_cap(ctx, (wide, None), WIDE));
+        }
         let before = (self.t.structs.len(), self.t.enums.len());
         let out = self.t.subst(ty, s);
         self.check_new(before, ctx)?;
@@ -317,6 +330,9 @@ impl<'a> Walk<'a> {
 
     fn sub_list(&mut self, l: TyListId, ctx: Ctx) -> Result<TyListId, Diagnostic> {
         let Some(s) = ctx.subst else { return Ok(l) };
+        if let Err(wide) = self.list_size_under(l, s) {
+            return Err(self.walk_cap(ctx, (wide, None), WIDE));
+        }
         let before = (self.t.structs.len(), self.t.enums.len());
         let out = self.t.subst_list(l, s);
         self.check_new(before, ctx)?;
@@ -325,17 +341,18 @@ impl<'a> Walk<'a> {
 
     /// The instances interned since `before` (struct and enum counts), each within the cap.
     fn check_new(&mut self, (structs, enums): (usize, usize), ctx: Ctx) -> Result<(), Diagnostic> {
-        for id in structs..self.t.structs.len() {
-            let Some(i) = self.t.structs[id].instance else { continue };
-            if self.list_nest(i.args) > MAX_LEVELS {
-                return Err(self.type_cap(GenericOwner::Struct(i.def), Ty::Struct(StructId(id as u32)), ctx, "32 levels"));
-            }
-        }
-        for id in enums..self.t.enums.len() {
-            let Some(i) = self.t.enums[id].instance else { continue };
-            if self.list_nest(i.args) > MAX_LEVELS {
-                let ty = Ty::Enum(crate::tables::EnumId(id as u32));
-                return Err(self.type_cap(GenericOwner::Enum(i.def), ty, ctx, "32 levels"));
+        let new_structs = (structs..self.t.structs.len()).filter_map(|id| {
+            let i = self.t.structs[id].instance?;
+            Some((GenericOwner::Struct(i.def), i.args, Ty::Struct(StructId(id as u32))))
+        });
+        let new_enums = (enums..self.t.enums.len()).filter_map(|id| {
+            let i = self.t.enums[id].instance?;
+            Some((GenericOwner::Enum(i.def), i.args, Ty::Enum(EnumId(id as u32))))
+        });
+        let new: Vec<(GenericOwner, TyListId, Ty)> = new_structs.chain(new_enums).collect();
+        for (def, args, ty) in new {
+            if self.list_nest(args) > MAX_LEVELS {
+                return Err(self.walk_cap(ctx, (def, Some(ty)), "32 levels"));
             }
         }
         Ok(())

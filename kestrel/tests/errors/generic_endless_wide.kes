@@ -1,0 +1,15 @@
+struct Pair[A, B] {
+    a: A
+    b: B
+}
+struct S[T] {
+    f: pure () -> int = () {
+        let inner = S[Pair[T, T]]()
+        1
+    }
+}
+main() {
+    let s = S[int]()
+    print(s.f())
+}
+// error 5: making copies of `S` doesn't end: `S[int]` needs `S[Pair[int, int]]`, and so on (stopped after a type grew to 1,000 parts)
