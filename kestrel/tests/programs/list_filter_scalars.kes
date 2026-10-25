@@ -1,0 +1,32 @@
+// expect: [2, 4, 6]
+// expect: [3000000000, 5]
+// expect: [200, 130]
+// expect: [true, true]
+// expect: [-1.5, 2]
+// expect: [vec4(x: 1, y: 2, z: 3, w: 4)]
+// expect: [ivec4(x: 5, y: 5, z: 5, w: 5)]
+// expect: [3, 4]
+// `filter` on lists of plain values, each item read once for the test and the copy: with and
+// without a capture, through a named function, and on vectors.
+pure big(n: int) -> bool { n > 2 }
+
+main() {
+    let ints: list[int] = [1, 2, 3, 4, 5, 6]
+    print(ints.filter((n) { n % 2 == 0 }))
+    let wide: list[i64] = [i64(3000000000), i64(-7), i64(5)]
+    let low = i64(0)
+    print(wide.filter((n) { n > low }))
+    let bytes: list[u8] = [u8(200), u8(5), u8(130)]
+    print(bytes.filter((b) { b > u8(100) }))
+    let flags: list[bool] = [true, false, true]
+    print(flags.filter((b) { b }))
+    var z = 0.0
+    let floats: list[float] = [z / z, -1.5, 2.0]
+    print(floats.filter((f) { f == f }))
+    let vs: list[vec4] = [vec4(1, 2, 3, 4), vec4(0)]
+    print(vs.filter((v) { v.sum() > 1 }))
+    let ivs: list[ivec4] = [ivec4(5), ivec4(1, 2, 3, 4)]
+    print(ivs.filter((v) { v.x == 5 }))
+    let small: list[int] = [1, 2, 3, 4]
+    print(small.filter(big))
+}

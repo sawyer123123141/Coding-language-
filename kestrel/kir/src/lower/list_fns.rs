@@ -4,7 +4,8 @@
 //! report names the built-in by it), a `ForRange` over `xs` with unchecked
 //! indexing (the loop's bound is the list's length, and `f` cannot change `xs`) that calls `f`
 //! for each item, read-only, in order:
-//! - `filter` copies each kept item into a new list (as an indexed read would);
+//! - `filter` copies each kept item into a new list (as an indexed read would); a scalar item is
+//!   read once, into a local, for both the test and the copy;
 //! - `map` adds each result, a fresh value, to a new list;
 //! - `any` and `all` return at the first item that decides.
 //!
@@ -61,17 +62,14 @@ impl Helpers {
         // The loop never changes the list, so `i < xs.len` holds throughout.
         let at = expr(ExprKind::Load(Place::local(i)), KTy::I64);
         let item_at = with(&xs, Proj::Index { at, check: IndexCheck::Known });
-        let item = expr(ExprKind::Load(item_at.clone()), elem);
-        let call = match callee {
+        let call_on = |item: Expr| match callee {
             Callee::Code { code, .. } => {
-                let env = expr(ExprKind::FnEnv(f), KTy::I64);
+                let env = expr(ExprKind::FnEnv(f.clone()), KTy::I64);
                 ExprKind::Call(code, vec![Arg::Value(env), Arg::Value(item)])
             }
-            Callee::Value(sig) => {
-                let sig = ksig(t, sig);
-                ExprKind::CallIndirect { callee: f, args: vec![Arg::Value(item)], sig }
-            }
+            Callee::Value(sig) => ExprKind::CallIndirect { callee: f.clone(), args: vec![Arg::Value(item)], sig: ksig(t, sig) },
         };
+        let call = call_on(expr(ExprKind::Load(item_at.clone()), elem));
         let result_of = |ty: KTy| expr(call.clone(), ty);
         let truth = |b: bool| Stmt::Return(Some(expr(ExprKind::Bool(b), KTy::Bool)));
         let mut body = Vec::new();
@@ -79,29 +77,41 @@ impl Helpers {
             ListMethod::Filter => {
                 locals.push(local("kept", ret, LocalKind::Addressed));
                 body.push(Stmt::Let(out, expr(ExprKind::ListNew, ret)));
-                let mut keep = Vec::new();
-                let value = if has_heap(elem, t) {
-                    // The item is copied byte for byte, then its strings and lists get their own.
-                    let copy = LocalIdx(locals.len() as u32);
-                    locals.push(local("copy", elem, LocalKind::Addressed));
-                    keep.push(Stmt::Let(copy, expr(ExprKind::Load(item_at.clone()), elem)));
-                    keep.extend(self.fixup(Place::local(copy), elem, t));
-                    expr(ExprKind::Load(Place::local(copy)), elem)
+                if !elem.is_aggregate() && !has_heap(elem, t) {
+                    // A scalar: read once, for the test and for `add`.
+                    let item = LocalIdx(locals.len() as u32);
+                    locals.push(local("item", elem, LocalKind::Value));
+                    let now = || expr(ExprKind::Load(Place::local(item)), elem);
+                    let keep = vec![Stmt::ListAdd(Place::local(out), now())];
+                    vec![
+                        Stmt::Let(item, expr(ExprKind::Load(item_at), elem)),
+                        Stmt::If { cond: expr(call_on(now()), KTy::Bool), then_body: keep, else_body: Vec::new() },
+                    ]
                 } else {
-                    expr(ExprKind::Load(item_at), elem)
-                };
-                keep.push(Stmt::ListAdd(Place::local(out), value));
-                Stmt::If { cond: result_of(KTy::Bool), then_body: keep, else_body: Vec::new() }
+                    let mut keep = Vec::new();
+                    let value = if has_heap(elem, t) {
+                        // The item is copied byte for byte, then its strings and lists get their own.
+                        let copy = LocalIdx(locals.len() as u32);
+                        locals.push(local("copy", elem, LocalKind::Addressed));
+                        keep.push(Stmt::Let(copy, expr(ExprKind::Load(item_at.clone()), elem)));
+                        keep.extend(self.fixup(Place::local(copy), elem, t));
+                        expr(ExprKind::Load(Place::local(copy)), elem)
+                    } else {
+                        expr(ExprKind::Load(item_at), elem)
+                    };
+                    keep.push(Stmt::ListAdd(Place::local(out), value));
+                    vec![Stmt::If { cond: result_of(KTy::Bool), then_body: keep, else_body: Vec::new() }]
+                }
             }
             ListMethod::Map => {
                 locals.push(local("mapped", ret, LocalKind::Addressed));
                 body.push(Stmt::Let(out, expr(ExprKind::ListNew, ret)));
-                Stmt::ListAdd(Place::local(out), result_of(elem_of(ret, t)))
+                vec![Stmt::ListAdd(Place::local(out), result_of(elem_of(ret, t)))]
             }
-            ListMethod::Any => Stmt::If { cond: result_of(KTy::Bool), then_body: vec![truth(true)], else_body: Vec::new() },
+            ListMethod::Any => vec![Stmt::If { cond: result_of(KTy::Bool), then_body: vec![truth(true)], else_body: Vec::new() }],
             ListMethod::All => {
                 let no = expr(ExprKind::Unary(UnOp::Not, Box::new(result_of(KTy::Bool))), KTy::Bool);
-                Stmt::If { cond: no, then_body: vec![truth(false)], else_body: Vec::new() }
+                vec![Stmt::If { cond: no, then_body: vec![truth(false)], else_body: Vec::new() }]
             }
             other => unreachable!("`{other:?}` takes no function"),
         };
@@ -109,7 +119,7 @@ impl Helpers {
             var: i,
             start: expr(ExprKind::Int(0), KTy::I64),
             end: expr(ExprKind::Len(xs), KTy::I64),
-            body: vec![per_item],
+            body: per_item,
         });
         body.push(match method {
             ListMethod::Filter | ListMethod::Map => Stmt::Return(Some(expr(ExprKind::Load(Place::local(out)), ret))),

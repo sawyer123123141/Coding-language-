@@ -7,7 +7,7 @@ pub use crate::contract::*;
 use crate::layout::{EnumLayout, StructLayout};
 pub use crate::ir_expr::*;
 pub use crate::ir_stmt::*;
-pub use crate::ops::{ListOp, MapOp, MathOp, StrOp};
+pub use crate::ops::{ListOp, MapOp, MathOp, SortKey, StrOp};
 
 /// Bits of a KIR line (`Expr::line`, `Stmt::SetLine`) that hold the line within its file; the
 /// bits above hold the file's index in `Module::files`. Bit 31 stays clear.

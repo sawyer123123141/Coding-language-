@@ -56,12 +56,27 @@ pub enum ListOp {
     /// zeroed, and the length becomes `kept` plus their count. When `next` is past the length (the
     /// list shrank meanwhile) the length becomes at most `kept`.
     Compact,
-    /// `[compare]` or `[compare, key]`: sorts the items stably, smallest first. `compare` is a
+    /// `[compare]` or `[compare, key]` (`sort`, and `sort_by` with a string key): sorts the items
+    /// stably, smallest first. `compare` is a
     /// `FnRef` to a generated function `(env, a, b) -> u8` that says how the item at the pointer
     /// `a` stands to the one at `b`: 0 for before, 1 for equal, 2 for after (a total order). Its
     /// environment word is the address of a copy of `key`, a function value, when there is one, else
     /// 0. The items move as bytes.
     Sort,
+    /// `[key_fn, key]`: sorts the items stably, smallest first, by a number or bool key, as `Sort`
+    /// does. `key_fn` is a `FnRef` to a generated function `(env, a) -> i64` (`SortKey::Int`) or
+    /// `-> f64` (`SortKey::Float`) that gives the key of the item at the pointer `a`, widened; the
+    /// runtime calls it once per item, in order. Its environment word is as for `Sort`.
+    SortBy(SortKey),
+}
+
+/// The widened type of a `ListOp::SortBy` key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SortKey {
+    /// An integer or bool key, as an `i64`.
+    Int,
+    /// A float key, as an `f64`: by value, with a NaN after every number.
+    Float,
 }
 
 /// What `ExprKind::Str` does with its string operand (`args[0]`, a string value; for `Join` a list

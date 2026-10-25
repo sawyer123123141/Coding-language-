@@ -133,10 +133,10 @@ impl Walk<'_> {
                 let tail = format!(" and fails if the index is outside it or the list would hold more than {limit} items");
                 self.fail_part(line, Some(direct), format!("inserts into {list}"), &tail, Part::Resource);
             }
-            ListOp::Sort => {
+            ListOp::Sort | ListOp::SortBy(_) => {
                 let name = if xs.len() > 1 { "sort_by" } else { "sort" };
                 self.alloc(line, Some(format!("`{name}` makes a buffer to sort {list} in")), format!("sorts {list} with `{name}`"), " and makes a buffer to sort in");
-                // The comparison runs the key function, which may allocate and fail.
+                // The comparison (or the key function) runs the key, which may allocate and fail.
                 if let Some(Expr { kind: ExprKind::FnRef(compare), .. }) = xs.first() {
                     self.push(line, What::Call(*compare));
                 }

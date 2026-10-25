@@ -145,6 +145,12 @@ pub fn is_generated(m: &Module, g: FuncIdx) -> bool {
     m.funcs[g.0 as usize].lines == (0, 0)
 }
 
+/// Whether the function named `name` is a sort's generated comparison or key function, which calls
+/// the program's key (both read as "the comparison for `sort`").
+pub fn is_sort_comparison(name: &str) -> bool {
+    name.starts_with("__kestrel_compare_") || name.starts_with("__kestrel_sort_key_")
+}
+
 /// The built-in a generated function (named `__kestrel_list_fn_filter_7`) implements.
 pub fn builtin_name(function_name: &str) -> Option<&'static str> {
     const NAMES: [(&str, &str); 5] = [
@@ -179,7 +185,7 @@ pub fn callee_name(m: &Module, g: FuncIdx) -> String {
     if m.par_bodies.contains(&g) {
         return "the `par for` body".to_string();
     }
-    if f.name.starts_with("__kestrel_compare_") {
+    if is_sort_comparison(&f.name) {
         return "the comparison for `sort`".to_string();
     }
     match builtin_name(&f.name) {

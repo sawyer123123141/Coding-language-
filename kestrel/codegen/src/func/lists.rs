@@ -3,7 +3,7 @@
 //! The runtime moves the items; the list's header is `{ptr, len, cap, arena}` (see `collections`).
 
 use cranelift_codegen::ir::{types, InstBuilder, MemFlagsData};
-use cranelift_module::Module;
+use cranelift_module::{FuncId, Module};
 use kestrel_kir::{self as kir, ExprKind, KTy, Place};
 
 use super::collections::LEN;
@@ -23,8 +23,11 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             self.call_id(self.shared.rt.list_clear, &[header, size_v]);
             return Ok(());
         }
-        if op == kir::ListOp::Sort {
-            return self.sort_items(list, args, size);
+        match op {
+            kir::ListOp::Sort => return self.sort_items(list, args, size, self.shared.rt.sort),
+            kir::ListOp::SortBy(kir::SortKey::Int) => return self.sort_items(list, args, size, self.shared.rt.sort_by_int),
+            kir::ListOp::SortBy(kir::SortKey::Float) => return self.sort_items(list, args, size, self.shared.rt.sort_by_float),
+            _ => {}
         }
         if op == kir::ListOp::Compact {
             let kept = self.expr(&args[0])?;
@@ -43,7 +46,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 let header = self.place_addr(list)?;
                 self.call_id(self.shared.rt.list_remove, &[header, at, size_v, l, f]);
             }
-            kir::ListOp::Clear | kir::ListOp::Compact | kir::ListOp::Sort => unreachable!("handled above"),
+            kir::ListOp::Clear | kir::ListOp::Compact | kir::ListOp::Sort | kir::ListOp::SortBy(_) => unreachable!("handled above"),
             kir::ListOp::Insert => {
                 let value = &args[1];
                 let v = if value.ty.is_aggregate() {
@@ -66,11 +69,12 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         Ok(())
     }
 
-    /// `Sort`: the runtime sorts the items in place by the generated compare function `args[0]`,
-    /// which gets as its environment word the address of a copy of the function value `args[1]`
-    /// (kept in this function's frame until the sort is done), or 0 without one.
-    fn sort_items(&mut self, list: &Place, args: &[kir::Expr], size: i64) -> Result<(), String> {
-        let ExprKind::FnRef(compare) = &args[0].kind else { unreachable!("the compare function is a `FnRef`") };
+    /// `Sort` and `SortBy`: the runtime function `sort` sorts the items in place by the generated
+    /// compare or key function `args[0]`, which gets as its environment word the address of a copy
+    /// of the function value `args[1]` (kept in this function's frame until the sort is done), or 0
+    /// without one.
+    fn sort_items(&mut self, list: &Place, args: &[kir::Expr], size: i64, sort: FuncId) -> Result<(), String> {
+        let ExprKind::FnRef(compare) = &args[0].kind else { unreachable!("the compare or key function is a `FnRef`") };
         let compare = self.func_address(*compare);
         let env = match args.get(1) {
             Some(key) => {
@@ -84,7 +88,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let items = self.b.ins().load(self.ptr, MemFlagsData::trusted(), header, 0);
         let len = self.b.ins().load(types::I64, MemFlagsData::trusted(), header, LEN);
         let size = self.b.ins().iconst(types::I64, size);
-        self.call_id(self.shared.rt.sort, &[items, len, size, compare, env]);
+        self.call_id(sort, &[items, len, size, compare, env]);
         Ok(())
     }
 

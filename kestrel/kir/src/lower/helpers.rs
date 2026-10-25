@@ -57,11 +57,12 @@ pub(crate) struct Helpers {
     pub(super) find: HashMap<KTy, FuncIdx>,
     /// The loop behind each `filter`, `map`, `any` and `all` (see `list_fn`).
     pub(super) list_fns: HashMap<(ListMethod, KTy, Callee), FuncIdx>,
-    /// The compare function behind each `sort` (no callee) and `sort_by`, per item type (see `sort`).
+    /// The compare function behind each `sort` (no callee) and string-key `sort_by`, or the key
+    /// function behind each other `sort_by`, per item type (see `sort`).
     pub(super) sort_less: HashMap<(KTy, Option<Callee>), FuncIdx>,
     /// The function a `sort_by` call site calls, per list type and key.
     pub(super) sort_calls: HashMap<(KTy, Callee), FuncIdx>,
-    /// Each `sort_by` compare function with the code of the literal key it calls.
+    /// Each `sort_by` compare or key function with the code of the literal key it calls.
     pub(super) sort_idle: Vec<(FuncIdx, FuncIdx)>,
     /// The thunk of each function used as a value (see `thunk_for`).
     pub(super) thunks: HashMap<FuncIdx, FuncIdx>,

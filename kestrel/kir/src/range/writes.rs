@@ -237,7 +237,7 @@ fn list_change(s: &Stmt) -> Option<(&Place, WriteKind)> {
         Stmt::List(ListOp::Clear, p, _) => (p, WriteKind::Length(LenChange::Set(Expr { kind: ExprKind::Int(0), ty: KTy::I64, line: 0 }))),
         Stmt::SetLen(p, n) => (p, WriteKind::Length(LenChange::Set(n.clone()))),
         Stmt::List(ListOp::Compact, p, _) => (p, WriteKind::Length(LenChange::Unknown)),
-        Stmt::List(ListOp::Sort, p, _) | Stmt::Dup(p) => (p, WriteKind::Items),
+        Stmt::List(ListOp::Sort | ListOp::SortBy(_), p, _) | Stmt::Dup(p) => (p, WriteKind::Items),
         _ => return None,
     })
 }

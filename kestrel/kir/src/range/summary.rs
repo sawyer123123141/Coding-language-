@@ -345,7 +345,7 @@ pub fn chain_text(m: &Module, callee: FuncIdx, chain: &Chain, line: u32) -> Stri
 /// Whether `callee` is a function the compiler made whose reasons read as the built-in's own (not
 /// a sort's comparison, which calls the program's key).
 pub fn is_builtin_body(m: &Module, callee: FuncIdx) -> bool {
-    super::report::is_generated(m, callee) && !m.funcs[callee.0 as usize].name.starts_with("__kestrel_compare_")
+    super::report::is_generated(m, callee) && !super::report::is_sort_comparison(&m.funcs[callee.0 as usize].name)
 }
 
 /// What a chain says after its first call, made at `line`: each further call, then the reason

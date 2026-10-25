@@ -2,7 +2,8 @@
 //! The runtime moves items for `remove_at` and `insert` and empties the list for `clear`
 //! (`Stmt::List`, after drops); `pop` is built from `SetLen` and a move, copy or drop of the last
 //! item; `has` and `find` call a generated search (see `list_helpers`); `filter`, `map`, `any` and
-//! `all` call a generated loop (see `list_fns`); `sort` and `sort_by` are `ListOp::Sort` (see `sort`).
+//! `all` call a generated loop (see `list_fns`); `sort` and `sort_by` are `ListOp::Sort` or, for a
+//! `sort_by` with a number or bool key, `ListOp::SortBy` (see `sort`).
 
 use kestrel_check::{ListMethod, Ty};
 use kestrel_syntax::ast;

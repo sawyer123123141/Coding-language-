@@ -209,3 +209,65 @@ native paint(a: int, b: int)
     let call = s.iter().position(|x| matches!(x, Step::Call(n) if n.starts_with("__kestrel_list_fn_"))).unwrap();
     assert!(line < call, "a closure that can't call a built-in function needs no care: {s:?}");
 }
+
+/// The reads of a list item (an indexed place) in `stmts`.
+fn item_reads(stmts: &[Stmt]) -> usize {
+    let mut n = 0;
+    visit::walk(stmts, &mut |node| {
+        if let visit::Node::Expr(Expr { kind: ExprKind::Load(p), .. }) = node {
+            if p.path.iter().any(|s| matches!(s, Proj::Index { .. })) {
+                n += 1;
+            }
+        }
+    });
+    n
+}
+
+#[test]
+fn filter_reads_a_scalar_item_once_and_an_unused_environment_word_not_at_all() {
+    let mut m = lower_src("main() {
+    let xs = [1, 2, 3]
+    print(xs.filter((e) { e % 2 == 0 }).len)
+}
+");
+    optimize(&mut m);
+    let hs = helpers(&m);
+    assert_eq!(hs.len(), 1);
+    assert_eq!(closure_calls(&m, hs[0]), 0, "{:#?}", hs[0].body);
+    // One read of `xs[i]` for the test and the copy.
+    assert_eq!(item_reads(&hs[0].body), 1, "{:#?}", hs[0].body);
+    // The literal captures nothing, so its inlined body never needs the environment word.
+    let mut env_reads = 0;
+    visit::walk(&hs[0].body, &mut |node| {
+        if let visit::Node::Expr(Expr { kind: ExprKind::FnEnv(_), .. }) = node {
+            env_reads += 1;
+        }
+    });
+    assert_eq!(env_reads, 0, "{:#?}", hs[0].body);
+}
+
+#[test]
+fn filter_of_structs_and_strings_still_copies_the_kept_item() {
+    let mut m = lower_src("struct P {
+    x: int
+    name: string
+}
+
+main() {
+    let ps = [P(x: 1, name: \"a\"), P(x: 2, name: \"b\")]
+    let k = 1
+    print(ps.filter((p) { p.x > k }).len)
+}
+");
+    optimize(&mut m);
+    let hs = helpers(&m);
+    // The captured `k` is read through the environment word, so it stays.
+    let mut env_reads = 0;
+    visit::walk(&hs[0].body, &mut |node| {
+        if let visit::Node::Expr(Expr { kind: ExprKind::FnEnv(_), .. }) = node {
+            env_reads += 1;
+        }
+    });
+    assert!(env_reads >= 1, "{:#?}", hs[0].body);
+    assert!(hs[0].locals.iter().any(|l| l.name == "copy"), "{:#?}", hs[0].locals);
+}

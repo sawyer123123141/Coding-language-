@@ -1,6 +1,7 @@
-//! `sort` and `sort_by`: `ListOp::Sort` with a generated compare function, a call site that passes
-//! a literal key as a stack environment, and a scratch arena around the keys only when they can
-//! build memory.
+//! `sort` and `sort_by`: `ListOp::Sort` with a generated compare function (`sort`, and `sort_by`
+//! with a string key) or `ListOp::SortBy` with a generated key function (a number or bool key), a
+//! call site that passes a literal key as a stack environment, and a scratch arena around the keys
+//! only when they can build memory.
 
 use kestrel_kir::*;
 use kestrel_syntax::{parse, LineIndex};
@@ -29,7 +30,7 @@ fn arenas(f: &Func) -> Vec<&Stmt> {
 fn sorts(f: &Func) -> Vec<usize> {
     let mut out = Vec::new();
     visit::walk(&f.body, &mut |n| {
-        if let visit::Node::Stmt(Stmt::List(ListOp::Sort, _, args)) = n {
+        if let visit::Node::Stmt(Stmt::List(ListOp::Sort | ListOp::SortBy(_), _, args)) = n {
             out.push(args.len());
         }
     });
@@ -84,7 +85,7 @@ fn a_literal_key_is_a_stack_environment_passed_straight_to_the_sorting_function(
     assert_eq!(check_stack_envs(&m), Ok(()));
     let calls = named(&m, "__kestrel_sort_by_");
     assert_eq!(calls.len(), 1);
-    assert_eq!(sorts(calls[0]), vec![2], "the compare function, then the key to pass on by address");
+    assert_eq!(sorts(calls[0]), vec![2], "the key function, then the key to pass on by address");
     // `main` calls it with the list by reference and the literal itself.
     let mut found = false;
     visit::walk(&func(&m, "main").body, &mut |n| {
@@ -113,9 +114,9 @@ pure hp(e: E) -> int {{ e.hp }}
 "
     ));
     // (A named function's thunk is the code, so it is judged like a literal.)
-    let compares = named(&m, "__kestrel_compare_");
-    assert_eq!(compares.len(), 3);
-    for c in compares {
+    let keys = named(&m, "__kestrel_sort_key_");
+    assert_eq!(keys.len(), 3);
+    for c in keys {
         assert!(arenas(c).is_empty(), "{c:?}");
     }
 }
@@ -133,12 +134,15 @@ fn a_key_that_builds_strings_is_run_in_a_scratch_arena_freed_before_the_answer()
 }}
 "
     ));
-    // The first builds a string itself, the second calls a function that does, the third is a
-    // named function that does, and the fourth is a stored closure (anything may be inside it,
-    // so it keeps the arena even though this one builds nothing).
+    // The first builds a string itself (a string key: a compare function), the second calls a
+    // function that does, the third is a named function that does, and the fourth is a stored
+    // closure (anything may be inside it, so it keeps the arena even though this one builds
+    // nothing); those three have number keys, so key functions.
     let compares = named(&m, "__kestrel_compare_");
-    assert_eq!(compares.len(), 4);
-    for c in compares {
+    assert_eq!(compares.len(), 1);
+    let keys = named(&m, "__kestrel_sort_key_");
+    assert_eq!(keys.len(), 3);
+    for c in compares.into_iter().chain(keys) {
         let a = arenas(c);
         assert_eq!(a.len(), 2, "{c:?}");
         assert!(matches!(a[0], Stmt::PushArena(None, _)));
@@ -162,7 +166,7 @@ fn a_function_value_key_is_called_indirectly_and_a_literal_directly() {
 "
     ));
     let mut counts = Vec::new();
-    for c in named(&m, "__kestrel_compare_") {
+    for c in named(&m, "__kestrel_sort_key_") {
         let (mut direct, mut indirect) = (0, 0);
         visit::walk(&c.body, &mut |n| match n {
             visit::Node::Expr(Expr { kind: ExprKind::Call(..), .. }) => direct += 1,
@@ -172,7 +176,60 @@ fn a_function_value_key_is_called_indirectly_and_a_literal_directly() {
         counts.push((direct, indirect));
     }
     counts.sort();
-    assert_eq!(counts, vec![(0, 2), (2, 0)]);
+    // One call each: the key function keys one item.
+    assert_eq!(counts, vec![(0, 1), (1, 0)]);
+}
+
+/// The kinds of sort in the `__kestrel_sort_by_*` functions of `m`, in order of the functions.
+fn sort_ops(m: &Module) -> Vec<ListOp> {
+    let mut out = Vec::new();
+    for f in named(m, "__kestrel_sort_by_") {
+        visit::walk(&f.body, &mut |n| {
+            if let visit::Node::Stmt(Stmt::List(op, _, _)) = n {
+                out.push(*op);
+            }
+        });
+    }
+    out
+}
+
+#[test]
+fn a_number_or_bool_key_is_a_key_function_and_a_string_key_a_compare_function() {
+    let m = lower_src(&format!(
+        "{PRELUDE}main() {{
+    var es: list[E] = []
+    es.sort_by((e) {{ e.hp }})
+    es.sort_by((e) {{ i64(e.hp) }})
+    es.sort_by((e) {{ u8(e.hp & 7) }})
+    es.sort_by((e) {{ e.hp > 3 }})
+    es.sort_by((e) {{ float(e.hp) }})
+    es.sort_by((e) {{ f64(e.hp) }})
+    es.sort_by((e) {{ e.name }})
+}}
+"
+    ));
+    use SortKey::{Float, Int};
+    let expected = [ListOp::SortBy(Int), ListOp::SortBy(Int), ListOp::SortBy(Int), ListOp::SortBy(Int), ListOp::SortBy(Float), ListOp::SortBy(Float), ListOp::Sort];
+    assert_eq!(sort_ops(&m), expected);
+    let keys = named(&m, "__kestrel_sort_key_");
+    assert_eq!(keys.len(), 6);
+    for k in &keys {
+        // (env, a) -> i64 or f64, `a` by pointer, pure.
+        assert_eq!(k.params.len(), 2);
+        assert_eq!(k.locals[1].kind, LocalKind::RefParam);
+        assert!(k.is_pure);
+        let Some(Stmt::Return(Some(v))) = k.body.last() else { panic!("{k:?}") };
+        assert_eq!(Some(v.ty), k.ret);
+        let wide = if k.locals[2].ty.is_float() { KTy::F64 } else { KTy::I64 };
+        assert_eq!(k.ret, Some(wide), "{k:?}");
+        // A bool key is 0 or 1; a narrower number is converted; an `i64` or `f64` is as it is.
+        match k.locals[2].ty {
+            KTy::Bool => assert!(matches!(v.kind, ExprKind::If { .. }), "{v:?}"),
+            KTy::I64 | KTy::F64 => assert!(matches!(v.kind, ExprKind::Load(_)), "{v:?}"),
+            _ => assert!(matches!(v.kind, ExprKind::Cast(_)), "{v:?}"),
+        }
+    }
+    assert_eq!(named(&m, "__kestrel_compare_").len(), 1);
 }
 
 #[test]

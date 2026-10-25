@@ -1,0 +1,95 @@
+// env: KESTREL_ARENA_COUNT=1
+// expect: ["b", "d", "a", "c"]
+// expect: ["d", "a", "b", "c"]
+// expect: ["a", "c", "b", "d"]
+// expect: [3, 0, 2, 6, 5, 1, 4]
+// expect: [5, 0, 2, 6, 3, 1, 4]
+// expect: ["a", "bb", "ccc"]
+// expect: true 1000
+// expect: true
+// expect-stderr: arenas alive at exit: 0
+// `sort_by` with every kind of number or bool key, each worked out once per item: `i64`, `u8`,
+// bool, `float` and `f64` keys, a NaN after every number and `-0.0` equal to `0.0`, a key that
+// builds strings, and a long list that must come out sorted with equal keys in their first order.
+struct Item {
+    name: string
+    v: int
+}
+
+struct P {
+    f: float
+    tag: int
+}
+
+struct Num {
+    v: int
+    at: int
+}
+
+names(xs: list[Item]) -> list[string] {
+    xs.map((e) { e.name })
+}
+
+tags(ps: list[P]) -> list[int] {
+    ps.map((p) { p.tag })
+}
+
+main() {
+    let items: list[Item] = [Item(name: "a", v: 5), Item(name: "b", v: -3), Item(name: "c", v: 5), Item(name: "d", v: 2)]
+    var xs = items
+    xs.sort_by((e) { i64(e.v) * 1000000000 })
+    print(names(xs))
+    // -3 & 7 is 5: three equal keys keep their order.
+    xs = items
+    xs.sort_by((e) { u8(e.v & 7) })
+    print(names(xs))
+    // A bool key: `false` first, each group in its first order.
+    xs = items
+    xs.sort_by((e) { e.v < 3 })
+    print(names(xs))
+
+    var z = 0.0
+    let floats: list[P] = [P(f: 0.0, tag: 0), P(f: z / z, tag: 1), P(f: -0.0, tag: 2), P(f: -1.5, tag: 3), P(f: z / z, tag: 4), P(f: 2.0, tag: 5), P(f: 0.0, tag: 6)]
+    var ps = floats
+    ps.sort_by((p) { p.f })
+    print(tags(ps))
+    ps = floats
+    ps.sort_by((p) { f64(p.f) * -1.0 })
+    print(tags(ps))
+
+    // A number key that builds a string for each item (freed as it goes).
+    var words: list[Item] = [Item(name: "ccc", v: 0), Item(name: "a", v: 0), Item(name: "bb", v: 0)]
+    words.sort_by((e) { e.name.upper().len })
+    print(names(words))
+
+    // A long list with many equal keys.
+    var nums: list[Num] = []
+    var x = 1
+    for i from 0 to 1000 {
+        x = (x * 75 + 74) % 65537
+        nums.add(Num(v: x, at: i))
+    }
+    nums.sort_by((n) { n.v % 100 })
+    var ok = true
+    for i from 1 to nums.len {
+        let a = nums[i - 1]
+        let b = nums[i]
+        if a.v % 100 > b.v % 100 or (a.v % 100 == b.v % 100 and a.at > b.at) {
+            ok = false
+        }
+    }
+    print(ok, nums.len)
+
+    // The same order as `sort` on the keys themselves.
+    var keyed: list[int] = nums.map((n) { n.v })
+    var plain = keyed
+    keyed.sort_by((n) { n })
+    plain.sort()
+    var same = true
+    for i from 0 to keyed.len {
+        if keyed[i] != plain[i] {
+            same = false
+        }
+    }
+    print(same)
+}

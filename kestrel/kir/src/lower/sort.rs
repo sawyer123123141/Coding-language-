@@ -6,20 +6,24 @@
 //! total: numbers by value with a float NaN after every number, strings by code point, `false`
 //! before `true`. Both parameters are by pointer (`RefParam`), whatever the item.
 //! - `sort()` has one per item type; `env` is unused.
-//! - `sort_by(key)` has one per (item type, key), and its `env` is the address of the key's
-//!   function value, so it calls `Call(code, [FnEnv(key), item])` for a literal's code or a named
-//!   function's thunk, or calls the value indirectly. It computes both keys inside a scratch arena
-//!   that is freed before it returns, since a key may build strings (`e.name.lower()`) and runs
-//!   about twice per comparison;
-//!   `strip_idle_scratch` takes the arena out again when the literal's code, or a named function's
-//!   thunk (and what it calls), can't build anything.
+//! - `sort_by(key)` with a string key has one per (item type, key), and its `env` is the address
+//!   of the key's function value, so it calls `Call(code, [FnEnv(key), item])` for a literal's code
+//!   or a named function's thunk, or calls the value indirectly. It computes both keys inside a
+//!   scratch arena that is freed before it returns, since a key may build strings
+//!   (`e.name.lower()`) and runs about twice per comparison.
+//!
+//! **The key function.** `sort_by(key)` with a number or bool key is `ListOp::SortBy` instead: a
+//! generated `(env, a) -> i64` (or `-> f64` for a float key) gives the key of one item, widened,
+//! and the runtime calls it once per item and sorts by the keys it keeps. It calls the key as the
+//! compare function does, in a scratch arena of its own per call.
+//!
+//! `strip_idle_scratch` (in `scratch`) takes the arena out again when the literal's code, or a
+//! named function's thunk (and what it calls), can't build anything.
 //!
 //! **The call site.** A literal key's `MakeFn` (with a stack environment) must be directly an
 //! argument of a call, so `sort_by` calls a generated function `(xs, key)` that holds the
-//! `ListOp::Sort`; `key` is passed on to the runtime by address. The key is `pure` (the checker
+//! `ListOp::Sort` or `ListOp::SortBy`; `key` is passed on to the runtime by address. The key is `pure` (the checker
 //! sees to that), so none of this calls into a built-in function that stores a line.
-
-use std::collections::HashSet;
 
 use kestrel_check::{ListMethod, Tables, Ty};
 use kestrel_syntax::ast;
@@ -29,7 +33,6 @@ use super::helpers::{elem_of, expr, Helpers};
 use super::list_fns::Callee;
 use super::{kty, FnLowerer};
 use crate::ir::*;
-use crate::visit::{walk, Node};
 
 fn local(name: &str, ty: KTy, kind: LocalKind) -> Local {
     Local { name: name.into(), ty, kind }
@@ -93,7 +96,7 @@ impl Helpers {
         idx
     }
 
-    /// The compare function for `sort_by` on items of type `item`, with keys of type `key` given by
+    /// The compare function for `sort_by` on items of type `item`, with string keys given by
     /// `callee`.
     fn sort_by_fn(&mut self, item: KTy, key: KTy, callee: Callee, t: &Tables) -> FuncIdx {
         if let Some(&f) = self.sort_less.get(&(item, Some(callee))) {
@@ -113,18 +116,66 @@ impl Helpers {
             local("kb", key, key_kind),
             local("r", KTy::U8, LocalKind::Value),
         ];
-        let call = |item: &Place| {
-            let arg = Arg::Value(load(item, item_ty(&locals, item)));
-            match callee {
-                Callee::Code { code, .. } => expr(ExprKind::Call(code, vec![Arg::Value(expr(ExprKind::FnEnv(f.clone()), KTy::I64)), arg]), key),
-                Callee::Value(sig) => expr(ExprKind::CallIndirect { callee: f.clone(), args: vec![arg], sig: ksig(t, sig) }, key),
-            }
-        };
+        let call = |item: &Place| key_call(callee, &f, load(item, item_ty(&locals, item)), key, t);
         let mut body = vec![Stmt::PushArena(None, 0), Stmt::Let(ka, call(&a)), Stmt::Let(kb, call(&b))];
         body.extend(order(key, &Place::local(ka), &Place::local(kb), r));
         body.push(Stmt::PopArena { free: true });
         body.push(Stmt::Return(Some(load(&Place::local(r), KTy::U8))));
         self.compare_fn(idx, locals, body);
+        if let Callee::Code { code, .. } = callee {
+            self.sort_idle.push((idx, code));
+        }
+        idx
+    }
+
+    /// The key function for `sort_by` on items of type `item`, with number or bool keys of type
+    /// `key` given by `callee`: `(env, a) -> i64` or `-> f64`, the key of the item at `a` widened
+    /// (see `ListOp::SortBy`).
+    fn sort_key_fn(&mut self, item: KTy, key: KTy, callee: Callee, t: &Tables) -> FuncIdx {
+        if let Some(&f) = self.sort_less.get(&(item, Some(callee))) {
+            return f;
+        }
+        let idx = self.reserve();
+        self.sort_less.insert((item, Some(callee)), idx);
+        // Locals: 0 the key function value, 1 the item, 2 its key.
+        let (f, a, k) = (Place::local(LocalIdx(0)), Place::local(LocalIdx(1)), LocalIdx(2));
+        let wide = wide_key(key);
+        let locals = vec![local("key", KTy::Fn, LocalKind::RefParam), local("a", item, LocalKind::RefParam), local("k", key, LocalKind::Value)];
+        let k_now = load(&Place::local(k), key);
+        // `false` is 0 and `true` 1; an integer or float widens (exactly).
+        let widened = match key {
+            KTy::Bool => expr(
+                ExprKind::If {
+                    cond: Box::new(k_now),
+                    then_body: Vec::new(),
+                    then_val: Some(Box::new(expr(ExprKind::Int(1), KTy::I64))),
+                    else_body: Vec::new(),
+                    else_val: Some(Box::new(expr(ExprKind::Int(0), KTy::I64))),
+                },
+                KTy::I64,
+            ),
+            _ if key == wide => k_now,
+            _ => expr(ExprKind::Cast(Box::new(k_now)), wide),
+        };
+        let body = vec![
+            Stmt::PushArena(None, 0),
+            Stmt::Let(k, key_call(callee, &f, load(&a, item), key, t)),
+            Stmt::PopArena { free: true },
+            Stmt::Return(Some(widened)),
+        ];
+        self.funcs[(idx.0 - self.base) as usize] = Func {
+            name: format!("__kestrel_sort_key_{}", idx.0),
+            params: vec![LocalIdx(0), LocalIdx(1)],
+            ret: Some(wide),
+            locals,
+            body,
+            is_pure: true,
+            io: false,
+            mutates_params: false,
+            exported: false,
+            lines: (0, 0),
+            native: None,
+        };
         if let Callee::Code { code, .. } = callee {
             self.sort_idle.push((idx, code));
         }
@@ -149,16 +200,22 @@ impl Helpers {
     }
 
     /// The function `sort_by(var xs, key)` calls for a list or array of type `list_ty`: it sorts
-    /// `xs` with the compare function for `callee`.
+    /// `xs` with the compare function (a string key) or the key function (any other) for `callee`.
     fn sort_by_call_fn(&mut self, list_ty: KTy, key: KTy, callee: Callee, t: &Tables) -> FuncIdx {
         if let Some(&f) = self.sort_calls.get(&(list_ty, callee)) {
             return f;
         }
         let idx = self.reserve();
         self.sort_calls.insert((list_ty, callee), idx);
-        let compare = self.sort_by_fn(elem_of(list_ty, t), key, callee, t);
+        let item = elem_of(list_ty, t);
+        let (op, f) = if key == KTy::Str {
+            (ListOp::Sort, self.sort_by_fn(item, key, callee, t))
+        } else {
+            let kind = if key.is_float() { SortKey::Float } else { SortKey::Int };
+            (ListOp::SortBy(kind), self.sort_key_fn(item, key, callee, t))
+        };
         let xs = Place::local(LocalIdx(0));
-        let sort = Stmt::List(ListOp::Sort, xs, vec![expr(ExprKind::FnRef(compare), KTy::Fn), load(&Place::local(LocalIdx(1)), KTy::Fn)]);
+        let sort = Stmt::List(op, xs, vec![expr(ExprKind::FnRef(f), KTy::Fn), load(&Place::local(LocalIdx(1)), KTy::Fn)]);
         self.funcs[(idx.0 - self.base) as usize] = Func {
             name: format!("__kestrel_sort_by_{}", idx.0),
             params: vec![LocalIdx(0), LocalIdx(1)],
@@ -179,6 +236,25 @@ impl Helpers {
 /// The type of the local `p` names (a plain local).
 fn item_ty(locals: &[Local], p: &Place) -> KTy {
     locals[p.root.0 as usize].ty
+}
+
+/// The key of `item` (a value of the item type), a `key`, given by `callee` through the function
+/// value at `f`: the literal's code or the thunk directly, any other value indirectly.
+fn key_call(callee: Callee, f: &Place, item: Expr, key: KTy, t: &Tables) -> Expr {
+    let arg = Arg::Value(item);
+    match callee {
+        Callee::Code { code, .. } => expr(ExprKind::Call(code, vec![Arg::Value(expr(ExprKind::FnEnv(f.clone()), KTy::I64)), arg]), key),
+        Callee::Value(sig) => expr(ExprKind::CallIndirect { callee: f.clone(), args: vec![arg], sig: ksig(t, sig) }, key),
+    }
+}
+
+/// The type a number or bool key of type `key` is widened to for the runtime.
+fn wide_key(key: KTy) -> KTy {
+    if key.is_float() {
+        KTy::F64
+    } else {
+        KTy::I64
+    }
 }
 
 impl FnLowerer<'_> {
@@ -206,144 +282,5 @@ impl FnLowerer<'_> {
         let helper = self.helpers.sort_by_call_fn(list_ty, key, callee, self.t);
         // The literal is directly the call's argument (see `check_stack_envs`).
         out.push(Stmt::Call(helper, vec![Arg::Ref(list), Arg::Value(value)], self.line(receiver.span)));
-    }
-}
-
-/// Takes the scratch arena out of each `sort_by` compare function whose key, a literal or a named
-/// function, can't build anything: `idle` pairs a compare function with the code it calls (the
-/// literal's code, or the function's thunk).
-pub(super) fn strip_idle_scratch(funcs: &mut [Func], idle: &[(FuncIdx, FuncIdx)]) {
-    for &(compare, code) in idle {
-        if !builds_memory(funcs, code, &mut HashSet::new()) {
-            funcs[compare.0 as usize].body.retain(|s| !matches!(s, Stmt::PushArena(None, _) | Stmt::PopArena { .. }));
-        }
-    }
-}
-
-/// Whether running function `f` may build memory in the current arena: it makes a string, array,
-/// list entry, map entry, copy or environment, or calls something that does (or something unknown,
-/// like a function value or a built-in function).
-fn builds_memory(funcs: &[Func], f: FuncIdx, seen: &mut HashSet<u32>) -> bool {
-    if !seen.insert(f.0) {
-        return false;
-    }
-    let func = &funcs[f.0 as usize];
-    if func.native.is_some() {
-        return true;
-    }
-    let mut calls = Vec::new();
-    let mut builds = false;
-    walk(&func.body, &mut |n| match n {
-        Node::Stmt(s) => builds |= stmt_builds(s, &mut calls),
-        Node::Expr(e) => builds |= expr_builds(e, &mut calls),
-        Node::Place(..) => {}
-    });
-    builds || calls.into_iter().any(|g| builds_memory(funcs, g, seen))
-}
-
-/// Whether the statement itself builds memory in the current arena (the statements and
-/// expressions inside it are walked on their own). A direct call goes into `calls`. Every kind is
-/// named, so a new one has to be sorted here.
-fn stmt_builds(s: &Stmt, calls: &mut Vec<FuncIdx>) -> bool {
-    match s {
-        Stmt::Dup(_) | Stmt::ListAdd(..) | Stmt::MapSet(..) | Stmt::CopyFnEnv(_) | Stmt::ParFor { .. } | Stmt::CallIndirect { .. } => true,
-        // A call through a table may run any method; a copy allocates the concrete value.
-        Stmt::CallVirtual { .. } | Stmt::CopyIface(_) => true,
-        Stmt::List(op, ..) => match op {
-            ListOp::Insert => true,
-            ListOp::RemoveAt | ListOp::Clear | ListOp::Compact | ListOp::Sort => false,
-        },
-        Stmt::Call(g, _, _) => {
-            calls.push(*g);
-            false
-        }
-        Stmt::Let(..)
-        | Stmt::Assign(..)
-        | Stmt::If { .. }
-        | Stmt::Assume { .. }
-        | Stmt::Prove { .. }
-        | Stmt::While { .. }
-        | Stmt::ForRange { .. }
-        | Stmt::Break
-        | Stmt::Continue
-        | Stmt::Return(_)
-        | Stmt::Print(_)
-        | Stmt::Write(_)
-        | Stmt::RandSeed(_)
-        | Stmt::SetLen(..)
-        | Stmt::Bind(..)
-        | Stmt::BindGlobal(..)
-        | Stmt::BindEnv { .. }
-        | Stmt::PushArena(..)
-        | Stmt::PopArena { .. }
-        | Stmt::FreeArena(_)
-        | Stmt::DropGpu(_)
-        | Stmt::MapUnlock(..)
-        | Stmt::SetLine(_)
-        | Stmt::Trap
-        | Stmt::Fail(_) => false,
-    }
-}
-
-/// Whether the expression itself builds memory in the current arena, as `stmt_builds` does for a
-/// statement.
-fn expr_builds(e: &Expr, calls: &mut Vec<FuncIdx>) -> bool {
-    match &e.kind {
-        ExprKind::Format(_) | ExprKind::ArrayNew(_) | ExprKind::ArrayLit(_) | ExprKind::NewArena | ExprKind::StaticArena | ExprKind::EnvDup(_) | ExprKind::BlockDup { .. } | ExprKind::CallIndirect { .. } => {
-            true
-        }
-        // Any method may build memory; a boxed value is allocated in the current arena.
-        ExprKind::CallVirtual { .. } => true,
-        ExprKind::MakeIface { data, .. } => match data {
-            IfaceData::Boxed(_) => true,
-            IfaceData::Borrowed(_) => false,
-        },
-        ExprKind::MakeFn { env, .. } => match env {
-            EnvKind::Heap(_) => true,
-            EnvKind::None | EnvKind::Stack(_) => false,
-        },
-        ExprKind::Str(op, _) => match op {
-            StrOp::At | StrOp::Piece | StrOp::Slice | StrOp::Trim | StrOp::Upper | StrOp::Lower | StrOp::Join | StrOp::Split => true,
-            StrOp::Chars | StrOp::CharLen | StrOp::Find | StrOp::Starts | StrOp::Cmp | StrOp::Ends | StrOp::ToInt | StrOp::ToFloat => false,
-        },
-        ExprKind::Map(op, ..) => match op {
-            MapOp::Get | MapOp::Has | MapOp::Remove | MapOp::Used | MapOp::Live | MapOp::Lock => false,
-        },
-        ExprKind::Call(g, _) => {
-            calls.push(*g);
-            false
-        }
-        ExprKind::Int(_)
-        | ExprKind::Float(_)
-        | ExprKind::Bool(_)
-        | ExprKind::StrLit(_)
-        | ExprKind::ListNew
-        | ExprKind::MapNew
-        | ExprKind::Len(_)
-        | ExprKind::Some(_)
-        | ExprKind::NoneLit
-        | ExprKind::Move(_)
-        | ExprKind::Load(_)
-        | ExprKind::Unary(..)
-        | ExprKind::Binary(..)
-        | ExprKind::And(..)
-        | ExprKind::Or(..)
-        | ExprKind::Cast(_)
-        | ExprKind::Proven(_)
-        | ExprKind::Math(..)
-        | ExprKind::RandFloat
-        | ExprKind::RandInt(..)
-        | ExprKind::FnRef(_)
-        | ExprKind::FnEnv(_)
-        | ExprKind::StructLit(..)
-        | ExprKind::VariantLit(..)
-        | ExprKind::Tag(_)
-        | ExprKind::FieldOf(..)
-        | ExprKind::VecLit(_)
-        | ExprKind::Splat(_)
-        | ExprKind::Shuffle(..)
-        | ExprKind::LaneOf(..)
-        | ExprKind::Seq(..)
-        | ExprKind::If { .. } => false,
     }
 }

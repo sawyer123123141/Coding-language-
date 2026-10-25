@@ -175,11 +175,19 @@ impl Inliner<'_> {
     }
 
     /// The callee's body, renamed into the caller, and its returned value.
-    /// Arguments are evaluated first, in order. `line` is the call's packed line.
+    /// Arguments are evaluated first, in order, except a by-value one the callee never mentions
+    /// whose evaluation has no effect (see `no_effect`): a closure body that reads no capture
+    /// doesn't load its environment word. `line` is the call's packed line.
     fn expand(&mut self, fi: FuncIdx, args: Vec<Arg>, depth: u32, line: u32) -> (Vec<Stmt>, Option<Expr>) {
         // As `take` notes a call with no line of its own.
         let at = if line == 0 { self.line } else { line };
         let callee = &self.originals[fi.0 as usize];
+        let mut mentioned = vec![false; callee.locals.len()];
+        walk(&callee.body, &mut |n| {
+            if let Node::Place(place, _) = n {
+                mentioned[place.root.0 as usize] = true;
+            }
+        });
         let mut pre = Vec::new();
         let mut subst: Vec<Option<Subst>> = vec![None; callee.locals.len()];
         for (&p, mut arg) in callee.params.iter().zip(args) {
@@ -200,6 +208,8 @@ impl Inliner<'_> {
                     pre.push(Stmt::Let(tmp, v));
                     Subst::Place(Place::local(tmp))
                 }
+                // Never read, and nothing to run: the parameter stays unset.
+                (_, Arg::Value(v)) if !mentioned[p.0 as usize] && no_effect(&v) => Subst::Local(self.temp(name, local.ty, local.kind)),
                 (_, Arg::Value(v)) => {
                     let tmp = self.temp(name, local.ty, local.kind);
                     pre.push(Stmt::Let(tmp, v));
@@ -276,6 +286,16 @@ impl Inliner<'_> {
             }
         }
         place
+    }
+}
+
+/// Whether evaluating `e` has no effect and can't fail: a constant, the environment word of a
+/// function value in a local, or a read of a whole local.
+fn no_effect(e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) => true,
+        ExprKind::FnEnv(p) | ExprKind::Load(p) => p.path.is_empty(),
+        _ => false,
     }
 }
 
