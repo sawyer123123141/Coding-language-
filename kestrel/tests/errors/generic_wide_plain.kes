@@ -1,0 +1,27 @@
+struct Pair[A, B] {
+    a: A
+    b: B
+}
+struct Box[T] {
+    v: T
+    dup(self) -> Box[Pair[T, T]] { Box[Pair[T, T]](v: Pair(a: self.v, b: self.v)) }
+}
+main() {
+    let x0 = 1
+    let x1 = Pair(a: x0, b: x0)
+    let x2 = Pair(a: x1, b: x1)
+    let x3 = Pair(a: x2, b: x2)
+    let x4 = Pair(a: x3, b: x3)
+    let x5 = Pair(a: x4, b: x4)
+    let x6 = Pair(a: x5, b: x5)
+    let x7 = Pair(a: x6, b: x6)
+    let x8 = Pair(a: x7, b: x7)
+    let x9 = Pair(a: x8, b: x8)
+    let x10 = Pair(a: x9, b: x9)
+    let x11 = Pair(a: x10, b: x10)
+    let x12 = Pair(a: x11, b: x11)
+    print(x12.a)
+    let b = Box(v: 1).dup().dup().dup().dup().dup().dup().dup().dup().dup().dup().dup().dup()
+}
+// error 19: making copies of `Pair` doesn't end: each use makes a bigger `Pair` (stopped after a type grew to 1,000 parts)
+// error 24: making copies of `Pair` doesn't end: each use makes a bigger `Pair` (stopped after a type grew to 1,000 parts)

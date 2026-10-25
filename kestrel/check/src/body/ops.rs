@@ -108,7 +108,16 @@ impl<'a> BodyChecker<'a> {
                 let against_none = matches!(lhs.kind, ExprKind::None) || matches!(rhs.kind, ExprKind::None);
                 let functions = [lt, rt].iter().any(|&t| self.t.holds_fn(t));
                 if matches!(op, BinaryOp::Eq | BinaryOp::Ne) && [lt, rt].iter().any(|&t| self.t.holds_uncomparable(t)) && (functions || !against_none) {
-                    let msg = if functions { "function values can't be compared" } else { "interface values can't be compared; compare what a method returns" };
+                    // A `T` without `equatable` in `T?`, `list[T]` or `Box[T]` needs the rule.
+                    let param = [lt, rt].iter().find_map(|&t| if self.t.holds_uncomparable(t) { self.t.uncomparable_param(t) } else { None });
+                    let msg = match param {
+                        _ if functions => "function values can't be compared".to_string(),
+                        Some(p) => {
+                            let pn = self.t.param_name(p);
+                            format!("`{}` on `{pn}` needs the rule `equatable`: write `[{pn}: equatable]`", op.symbol())
+                        }
+                        None => "interface values can't be compared; compare what a method returns".to_string(),
+                    };
                     self.error(e.span, msg);
                     return Ty::Bool;
                 }

@@ -252,11 +252,15 @@ impl Settler {
             }
             None => {
                 let tys: Vec<String> = types.iter().map(TypeExpr::to_sexpr).collect();
-                let msg = format!(
-                    "`[...]` after `{}` indexes it, but `{}` isn't a value; types go after a generic type or function",
-                    written(&base),
-                    tys.join(", ")
-                );
+                let after = match written(&base) {
+                    Some(path) => format!(" after `{path}`"),
+                    // `mk().items[...]`: the field alone, as the base isn't a path.
+                    None => match &base.kind {
+                        ExprKind::Field { name, .. } => format!(" after `{name}`"),
+                        _ => String::new(),
+                    },
+                };
+                let msg = format!("`[...]`{after} indexes it, but `{}` isn't a value; types go after a generic type or function", tys.join(", "));
                 // The node stays empty: the error stops the program before anything reads it.
                 self.diags.push(Diagnostic::error(e.span, msg));
             }
@@ -264,11 +268,11 @@ impl Settler {
     }
 }
 
-/// The base as the user wrote it, for a message.
-fn written(e: &Expr) -> String {
+/// The base as the user wrote it, for a message, when it is a path (`xs`, `game.items`).
+fn written(e: &Expr) -> Option<String> {
     match &e.kind {
-        ExprKind::Ident(n) => n.clone(),
-        ExprKind::Field { base, name, .. } => format!("{}.{name}", written(base)),
-        _ => "_".to_string(),
+        ExprKind::Ident(n) => Some(n.clone()),
+        ExprKind::Field { base, name, .. } => Some(format!("{}.{name}", written(base)?)),
+        _ => None,
     }
 }

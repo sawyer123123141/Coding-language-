@@ -166,10 +166,15 @@ fn counts_and_plain_names() {
 
 #[test]
 fn a_type_is_not_a_value() {
-    let errs = errors(&format!("{DECLS}main() {{\n    let a = Stack[int]\n    let b = Result[int, string]\n}}\n"));
+    let errs = errors(&format!("{DECLS}main() {{\n    let a = Stack[int]\n    let b = Result[int, string]\n    let c = Maybe[int]\n}}\n"));
+    // An enum is built from a variant: its first one is the example.
     assert_eq!(
         errs,
-        ["`Stack[int]` is a type; build one with `Stack[int](...)`", "`Result[int, string]` is a type; build one with `Result[int, string](...)`"]
+        [
+            "`Stack[int]` is a type; build one with `Stack[int](...)`",
+            "`Result[int, string]` is a type; build one with `Result[int, string].Ok(...)`",
+            "`Maybe[int]` is a type; build one with `Maybe[int].Nothing`",
+        ]
     );
 }
 
@@ -272,4 +277,21 @@ fn a_written_function_value_in_generic_code_and_as_an_argument() {
     let inner = the(&p, type_apply("size"));
     assert_eq!(type_args(&t, inner), ["U"]);
     assert_eq!(t.ty_name(t.ty(inner)), "pure (list[U]) -> int");
+}
+
+#[test]
+fn types_after_a_plain_function_suggest_calling_it() {
+    // `scores[i]` of a plain function settles as types (it names a function): the help says how
+    // to index what it returns.
+    let src = "pure scores() -> list[int] { [1] }\npure nth(n: int) -> list[int] { [n] }\nmain() {\n    let i = 0\n    let a = scores[i]\n    let b = nth[i]\n}\n";
+    let (p, _) = parse(src);
+    let (_, d) = check_keeping_tables(&p, true);
+    let got: Vec<(String, Option<String>)> = d.into_iter().map(|d| (d.message, d.help)).collect();
+    assert_eq!(
+        got,
+        [
+            ("`scores` takes no types".to_string(), Some("to index what `scores` returns, call it first: `scores()[...]`".to_string())),
+            ("`nth` takes no types".to_string(), Some("to index what `nth` returns, call it first: `nth(...)[...]`".to_string())),
+        ]
+    );
 }

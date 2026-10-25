@@ -25,12 +25,15 @@ impl Tables {
         if self.own_args(&decl.params, args) {
             return def;
         }
+        // Past the cap, the instance gets a short name and the checker reports it (P42).
+        let big = self.too_big(GenericOwner::Struct(def), args);
         if let Some(&id) = self.generic.struct_instances.get(&(def, args)) {
             return id;
         }
         let decl = self.strukt(def);
+        let name = if big { format!("{}[...]", decl.name) } else { self.instance_name(&decl.name, self.ty_list(args)) };
         let info = StructInfo {
-            name: self.instance_name(&decl.name, self.ty_list(args)),
+            name,
             item: decl.item,
             span: decl.span,
             fields: Vec::new(),
@@ -65,12 +68,15 @@ impl Tables {
         if self.own_args(&decl.params, args) {
             return def;
         }
+        // Past the cap, the instance gets a short name and the checker reports it (P42).
+        let big = self.too_big(GenericOwner::Enum(def), args);
         if let Some(&id) = self.generic.enum_instances.get(&(def, args)) {
             return id;
         }
         let decl = self.enm(def);
+        let name = if big { format!("{}[...]", decl.name) } else { self.instance_name(&decl.name, self.ty_list(args)) };
         let info = EnumInfo {
-            name: self.instance_name(&decl.name, self.ty_list(args)),
+            name,
             item: decl.item,
             span: decl.span,
             variants: Vec::new(),

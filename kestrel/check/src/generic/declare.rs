@@ -125,6 +125,8 @@ fn apply_rules(p: ParamId, rules: &[(String, Span)], t: &mut Tables, diags: &mut
                 None => {
                     let msg = format!("`{rule}` isn't an interface or a built-in rule (`equatable`, `ordered` or `key`)");
                     diags.push(Diagnostic::error(*span, msg));
+                    // Its methods are unknown: a call of one isn't reported again.
+                    t.generic.refused_rules.insert(p);
                 }
             },
         }

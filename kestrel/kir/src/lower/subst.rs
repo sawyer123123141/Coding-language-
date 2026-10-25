@@ -51,18 +51,22 @@ impl<'a> FnLowerer<'a> {
         }
     }
 
+    /// The instance whose field default is being lowered (`Stack[int]`), when the active
+    /// substitution is one's: in the default itself, or in a closure lowered for it.
+    pub(crate) fn subst_instance(&self) -> Option<&'a str> {
+        let t = self.t;
+        let Some(Subst { owner: GenericOwner::Struct(def), args }) = self.active_subst() else { return None };
+        t.generic.struct_instances.get(&(def, args)).map(|&inst| t.strukt(inst).name.as_str())
+    }
+
     /// The name a missed type is reported in: the instance whose field default is being lowered
     /// (`Stack[int]`), else the function being lowered.
     fn copy_name(&self) -> &'a str {
-        let t = self.t;
-        if let Some(&Some(Subst { owner: GenericOwner::Struct(def), args })) = self.default_substs.last() {
-            if let Some(&inst) = t.generic.struct_instances.get(&(def, args)) {
-                return &t.strukt(inst).name;
-            }
-        }
-        match self.fn_id {
-            Some(f) => &t.func(f).name,
-            None => "a field default",
+        let in_default = self.default_substs.last().is_some_and(|s| s.is_some()) || self.fn_id.is_none();
+        match (in_default.then(|| self.subst_instance()).flatten(), self.fn_id) {
+            (Some(inst), _) => inst,
+            (None, Some(f)) => &self.t.func(f).name,
+            (None, None) => "a field default",
         }
     }
 

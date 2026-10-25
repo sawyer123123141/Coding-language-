@@ -52,7 +52,27 @@ main() {
     let h = (var xs: list[string], v: string) { xs.add(v) }
     let k = (var xs: list[string]) { keep_name(var xs, "k") }
 }
-// error 28: can't replace `a`: it may be the caller's a different type; change it through its methods
+enum Tray: Shelf {
+    Empty
+    Full { items: list[string] }
+    put(var self, v: string) { self = Tray.Full(items: [v]) }
+}
+swap[T: equatable](var a: T, var b: T) {
+    let t = a
+    a = b
+    b = t
+}
+more() {
+    var a = "x"
+    var tray = Tray.Empty
+    arena {
+        var c = "y{a}"
+        swap[string](var a, var c)
+        tray.put("z{a}")
+    }
+    print(a, tray)
+}
+// error 28: can't replace `a`: it may be the caller's value of another type
 // error 29: can't replace `a`: it may be the caller's `Box`; change it through its methods
 // error 36: `keep_name` stores memory in `names` that is freed at the end of the `arena { }` block, but `names` lives longer
 // error 37: `relay_twice` stores memory in `names` that is freed at the end of the `arena { }` block, but `names` lives longer
@@ -66,3 +86,5 @@ main() {
 // error 51: `set_cell` stores memory from the caller's current arena in its `var` parameter `c`, so it can't be used as a value; call it by name instead
 // error 52: this memory is in the caller's current arena, which may not live as long as `xs`
 // error 53: `keep_name` stores memory in `xs` that is in the caller's current arena, which may not live as long as `xs`
+// error 70: `swap` stores memory in `a` that is freed at the end of the `arena { }` block, but `a` lives longer
+// error 71: `Tray.put` stores memory in `tray` that is freed at the end of the `arena { }` block, but `tray` lives longer

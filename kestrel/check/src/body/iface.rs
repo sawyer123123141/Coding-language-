@@ -191,18 +191,19 @@ impl<'a> BodyChecker<'a> {
         let all = iface.map(|i| self.t.implementors(i)).unwrap_or_default();
         let example = match all.iter().find(|&&t| t != assigned).or(all.first()) {
             Some(&t) => format!("`{}`", self.tn(t)),
-            None => "a different type".to_string(),
+            None => "value of another type".to_string(),
         };
         let name = self.t.local(root).name.clone();
-        let msg = format!("can't replace `{name}`: it may be the caller's {example}; change it through its methods");
+        let msg = format!("can't replace `{name}`: it may be the caller's {example}");
         match placeholder {
-            // With no interface rule, a built-in one rules interface types out. (With one, an
-            // `equatable` type couldn't meet it: the generic would be useless.)
+            // With no interface rule, a built-in one rules interface types out (and there are no
+            // methods to change it through). With one, an `equatable` type couldn't meet it: the
+            // generic would be useless.
             Some(p) if iface.is_none() => {
                 let pn = self.t.param_name(p).to_string();
                 self.error_help(target.span, msg, format!("if `{pn}` is never an interface type, give it a built-in rule, like `[{pn}: equatable]`"));
             }
-            _ => self.error(target.span, msg),
+            _ => self.error(target.span, format!("{msg}; change it through its methods")),
         }
         true
     }

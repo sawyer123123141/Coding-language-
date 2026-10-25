@@ -69,6 +69,18 @@ pub struct ContractSite {
     pub contracts: Vec<(Contract, Span)>,
     /// For a site made from an interface method's `@prove`: that method, as "`Shape.area`".
     pub required_by: Option<String>,
+    /// For a loop in a copy of a generic, or in a field default lowered for an instance: what it
+    /// was lowered for (the loop's `func` may be a closure's code, which has no `CopyNote`).
+    pub copy: Option<SiteCopy>,
+}
+
+/// What a loop site was lowered for (see `ContractSite::copy`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SiteCopy {
+    /// A copy of a generic function or method.
+    Func(FuncIdx),
+    /// An instance whose field default holds the loop, by name (`Box[string]`).
+    Instance(String),
 }
 
 /// One `Stmt::Prove` block around a check or an event: which copy of which site. Two inlined

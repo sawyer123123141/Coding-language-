@@ -13,8 +13,8 @@ use std::collections::HashSet;
 
 use kestrel_syntax::Diagnostic;
 
-use crate::generic::copies::{Body, Ctx, Walk, MAX_PARTS};
-use crate::generic::{GenericOwner, Subst, TyListId};
+use crate::generic::copies::{Body, Ctx, Walk};
+use crate::generic::{GenericOwner, Subst, TyListId, MAX_PARTS};
 use crate::tables::FnId;
 use crate::ty::Ty;
 
@@ -138,26 +138,9 @@ impl Walk<'_> {
         tys.into_iter().map(|a| self.nest(a)).max().unwrap_or(0)
     }
 
-    /// How many parts a concrete `ty` has: 1 plus its parts' (an instance's type arguments, an
-    /// element, a map's key and value, a function's parameters and result). Saturating.
+    /// How many parts a concrete `ty` has (`Tables::type_parts`).
     fn size(&mut self, ty: Ty) -> u32 {
-        if let Some(&n) = self.size.get(&ty) {
-            return n;
-        }
-        let parts = match ty {
-            Ty::Struct(s) => self.t.strukt(s).instance.map(|i| self.t.ty_list(i.args).to_vec()).unwrap_or_default(),
-            Ty::Enum(e) | Ty::Variant(e, _) => self.t.enm(e).instance.map(|i| self.t.ty_list(i.args).to_vec()).unwrap_or_default(),
-            Ty::Array(e) | Ty::List(e) | Ty::Optional(e) => vec![self.t.elem(e)],
-            Ty::Map(k, v) => vec![self.t.elem(k), self.t.elem(v)],
-            Ty::Fn(sig) => {
-                let sig = self.t.sig(sig);
-                sig.params.iter().map(|p| p.ty).chain([sig.ret]).collect()
-            }
-            _ => Vec::new(),
-        };
-        let n = parts.into_iter().fold(1u32, |n, p| n.saturating_add(self.size(p)));
-        self.size.insert(ty, n);
-        n
+        self.t.type_parts(ty)
     }
 
     /// The size `ty` will have under `s`, worked out without interning anything; `Err` with the
@@ -214,9 +197,11 @@ impl Walk<'_> {
 }
 
 /// "making copies of `walk` doesn't end: `walk[Box[int]]` needs `walk[Box[Box[int]]]`, and so on
-/// (stopped after 32 levels)", from the chain's first two (the first twice when it has one).
+/// (stopped after 32 levels)", from the chain's first two; with one, "`f[X]` needs a bigger one".
 fn cap_message(generic: &str, shown: &[String], stopped: &str) -> String {
     let first = &shown[0];
-    let second = shown.get(1).unwrap_or(first);
-    format!("making copies of `{generic}` doesn't end: `{first}` needs `{second}`, and so on (stopped after {stopped})")
+    match shown.get(1) {
+        Some(second) => format!("making copies of `{generic}` doesn't end: `{first}` needs `{second}`, and so on (stopped after {stopped})"),
+        None => format!("making copies of `{generic}` doesn't end: `{first}` needs a bigger one, and so on (stopped after {stopped})"),
+    }
 }

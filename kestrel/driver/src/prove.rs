@@ -43,14 +43,20 @@ pub fn prove(c: &mut Compiled, checked: bool, warn: bool, style: DiagStyle) -> P
         let other_analysis = remove_checks(&mut other, Arith::of(!checked));
         diags.extend(useless_assumptions(&c.module, &[&analysis, &other_analysis]));
     }
-    // Each contract that doesn't hold in this build is an error.
-    for e in contracts::check(&c.module, &analysis) {
-        let d = Diagnostic::error(e.span, e.message);
-        diags.push(match e.help {
-            Some(help) => d.with_help(help),
-            None => d,
-        });
-    }
+    // Each contract that doesn't hold in this build is an error, in source order (a copy's
+    // functions come after every plain one in the module).
+    let mut broken: Vec<Diagnostic> = contracts::check(&c.module, &analysis)
+        .into_iter()
+        .map(|e| {
+            let d = Diagnostic::error(e.span, e.message);
+            match e.help {
+                Some(help) => d.with_help(help),
+                None => d,
+            }
+        })
+        .collect();
+    broken.sort_by_key(|d| d.span.start);
+    diags.extend(broken);
     let text = if diags.is_empty() { String::new() } else { report(&c.sources, &diags, style) };
     let ok = !diags.iter().any(Diagnostic::is_error);
     Proved { ok, text, diags, analysis: Some(analysis) }

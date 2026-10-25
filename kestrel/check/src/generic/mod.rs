@@ -21,8 +21,13 @@ pub(crate) mod expand;
 pub(crate) mod graph;
 pub(crate) mod infer;
 mod instances;
+mod parts;
 pub(crate) mod rules;
 mod subst;
+
+/// The most parts an interned type list may have (P41, P42): a type that doubles in width at each
+/// step would otherwise build names of billions of characters.
+pub(crate) const MAX_PARTS: u32 = 1_000;
 
 /// A placeholder, an index into `Generics::params`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -106,6 +111,12 @@ pub struct Generics {
     /// While `collect` runs, the written type arguments waiting for their R3/R7 check (phase 7,
     /// after `compute_owning`); `None` before and after, when they are checked at once.
     pub(crate) queued_args: Option<Vec<rules::QueuedArg>>,
+    /// How many parts each type has, as worked out so far (`type_parts`).
+    pub(crate) parts: HashMap<Ty, u32>,
+    /// The generic of the first instance interned past `MAX_PARTS` since the last report (P42).
+    pub(crate) grew: Option<GenericOwner>,
+    /// The placeholders with a rule that isn't an interface or a built-in rule (reported).
+    pub(crate) refused_rules: HashSet<ParamId>,
 }
 
 impl Generics {

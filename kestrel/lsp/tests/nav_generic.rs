@@ -64,3 +64,14 @@ fn generics_of_another_module_lead_to_its_file() {
         assert_eq!(defined_in(&a, s.def.expect("a definition")), (1, name.to_string()));
     }
 }
+
+#[test]
+fn the_type_before_a_variant_leads_to_its_declaration() {
+    // `Maybe` in `Maybe[int].Nothing` has no resolution of its own: it is the declaration.
+    let src = "enum Maybe[T] {\n    Nothing\n    Just { v: T }\n}\nmain() {\n    let m = Maybe[int].Nothing\n    print(m)\n}\n";
+    let a = analyze("main.kes", src, true, &|_| None);
+    assert!(a.diags.is_empty(), "{:?}", a.diags);
+    let s = resolve(&a, src.find("Maybe[int]").unwrap() as u32 + 1).expect("something at the name");
+    assert!(s.code.starts_with("enum Maybe"), "{}", s.code);
+    assert_eq!(s.def.map(|d| d.start), Some(src.find("Maybe").unwrap() as u32));
+}

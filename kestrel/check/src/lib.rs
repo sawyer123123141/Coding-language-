@@ -59,6 +59,8 @@ pub fn check_keeping_tables(program: &Program, needs_main: bool) -> (Tables, Vec
     let mut diags = Vec::new();
     // `collect` ends with `compute_owning` and the queued R3/R7 checks (its phase 7).
     collect::collect(program, &mut t, &mut diags, needs_main);
+    // An instance past the size cap in a written type: reported at its generic (P42).
+    diags.extend(t.take_grown(None));
     body::check_consts(program, &mut t, &mut diags);
     body::check_field_defaults(program, &mut t, &mut diags);
     // Defaults that build each other would recurse forever in KIR; this needs a clean check so far.
@@ -72,6 +74,8 @@ pub fn check_keeping_tables(program: &Program, needs_main: bool) -> (Tables, Vec
         }
         body::check_fn(program, FnId(f as u32), &mut t, &mut diags);
     }
+    // One left by a type written outside any expression (a local's annotation).
+    diags.extend(t.take_grown(None));
     // Stores into `var` parameters are judged at their calls once every body has been read (P38).
     var_stores::resolve(&mut t, &mut diags);
     collect_ty::check_map_values(&t, &mut diags);
@@ -80,5 +84,7 @@ pub fn check_keeping_tables(program: &Program, needs_main: bool) -> (Tables, Vec
     if !diags.iter().any(|d| d.is_error()) {
         generic::copies::collect_copies(program, &mut t, &mut diags);
     }
+    // The walk measures every type before interning it (P41), so this only guards.
+    diags.extend(t.take_grown(None));
     (t, diags)
 }

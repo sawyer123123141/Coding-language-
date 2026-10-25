@@ -67,7 +67,7 @@ impl<'a> BodyChecker<'a> {
         true
     }
 
-    fn param_operator_error(&mut self, e: &Expr, sym: &str, p: crate::generic::ParamId) {
+    pub(super) fn param_operator_error(&mut self, e: &Expr, sym: &str, p: crate::generic::ParamId) {
         let pn = self.t.param_name(p);
         let msg = format!("`{sym}` doesn't work on `{pn}`, which can be any type; take a function that does it, like `add: ({pn}, {pn}) -> {pn}`");
         self.error(e.span, msg);

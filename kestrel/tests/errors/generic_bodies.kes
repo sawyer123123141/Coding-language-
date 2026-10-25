@@ -41,6 +41,14 @@ shout_all[T: Loud](xs: list[T]) {
     par for x in xs { x.shout() }
 }
 pure convert[T](x: T) -> float { float(x) }
+pure same_opt[T](a: T?, b: T?) -> bool { a == b }
+pure same_list[T](a: list[T], b: list[T]) -> bool { a != b }
+struct Held[T] {
+    v: T
+}
+pure same_held[T](a: Held[T], b: Held[T]) -> bool { a == b }
+add_to[T](var a: T, b: T) { a += b }
+pure missing_rule[T: Missing](x: T) -> int { x.hp() }
 main() {}
 // error 7: `x` is a `T`, which can be any type, so it has no field `hp`
 // error 8: `T` has no rules, so it has no methods; add one, like `[T: Damageable]`
@@ -58,3 +66,8 @@ main() {}
 // error 39: pure functions can only call pure functions; `Loud.shout` isn't pure
 // error 41: `par for` bodies can only call `pure` functions; `Loud.shout` isn't `pure`
 // error 43: can't convert T to float
+// error 44: `==` on `T` needs the rule `equatable`: write `[T: equatable]`
+// error 45: `!=` on `T` needs the rule `equatable`: write `[T: equatable]`
+// error 49: `==` on `T` needs the rule `equatable`: write `[T: equatable]`
+// error 50: `+=` doesn't work on `T`, which can be any type; take a function that does it, like `add: (T, T) -> T`
+// error 51: `Missing` isn't an interface or a built-in rule (`equatable`, `ordered` or `key`)

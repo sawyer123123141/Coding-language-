@@ -1,5 +1,11 @@
 main() {
     let xs: list[int] = [1, 2]
     let w = xs[int, string]
+    let v = mk().items[int, string]
 }
+struct Bag {
+    items: list[int]
+}
+pure mk() -> Bag { Bag(items: [1]) }
 // error 3: `[...]` after `xs` indexes it, but `int, string` isn't a value; types go after a generic type or function
+// error 4: `[...]` after `items` indexes it, but `int, string` isn't a value; types go after a generic type or function

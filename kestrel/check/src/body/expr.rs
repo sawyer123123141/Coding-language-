@@ -17,7 +17,12 @@ impl<'a> BodyChecker<'a> {
     /// Types `e`, using `want` only as a hint for literals and branches.
     /// Records the result in `Tables::expr_ty`.
     pub(crate) fn check_expr(&mut self, e: &Expr, want: Option<Ty>) -> Ty {
-        let ty = self.expr_inner(e, want);
+        let mut ty = self.expr_inner(e, want);
+        // An instance interned here past the size cap: reported once, here (P42).
+        if let Some(d) = self.t.take_grown(Some(e.span)) {
+            self.diags.push(d);
+            ty = Ty::Error;
+        }
         self.t.expr_ty[e.id.0 as usize] = ty;
         if matches!(e.kind, ExprKind::Ident(_) | ExprKind::Field { .. } | ExprKind::Index { .. }) {
             self.note_par_read(e);

@@ -154,3 +154,11 @@ fn types_after_a_local_are_an_error() {
     let msgs: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
     assert_eq!(msgs, ["`[...]` after `xs` indexes it, but `int, string` isn't a value; types go after a generic type or function"]);
 }
+
+#[test]
+fn types_after_a_field_of_a_value_name_the_field() {
+    // The base isn't a path: the message names the field alone, not `_.items`.
+    let (_, diags) = parse("main() {\n    let w = ps[0].items[int, string]\n}\n");
+    let msgs: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    assert_eq!(msgs, ["`[...]` after `items` indexes it, but `int, string` isn't a value; types go after a generic type or function"]);
+}

@@ -18,7 +18,11 @@ main() {
     let e = make_empty()
     let o = Stack[int?]()
     let x = Enemy[int](hp: 1)
+    let a = Result[int, string]
+    let i = 0
+    let y = top_scores[i]
 }
+pure top_scores() -> list[int] { [1] }
 // error 14: `best` is generic; give its types to use it as a value, like `best[int]`
 // error 15: `Stack[int]` is a type; build one with `Stack[int](...)`
 // error 16: `Result` takes 2 types, found 1
@@ -26,3 +30,5 @@ main() {
 // error 18: can't tell what `T` is in `make_empty`; write it, like `make_empty[int](...)`
 // error 19: `int?` is an optional, so it can't be `T` yet; hold it in a struct field instead
 // error 20: `Enemy` takes no types
+// error 21: `Result[int, string]` is a type; build one with `Result[int, string].Ok(...)`
+// error 23: `top_scores` takes no types

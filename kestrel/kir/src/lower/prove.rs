@@ -46,7 +46,7 @@ impl Proves {
             let contracts = &program.proves[k].contracts;
             if !info.is_abstract {
                 let target = ProveTarget::Func(FuncIdx(i as u32));
-                p.sites.push(ContractSite { target, contracts: contracts.clone(), required_by: None });
+                p.sites.push(ContractSite { target, contracts: contracts.clone(), required_by: None, copy: None });
                 continue;
             }
             for imp in iface::implementations(t, FnId(i as u32), &decl.name) {
@@ -55,6 +55,7 @@ impl Proves {
                     target: ProveTarget::Func(FuncIdx(imp.0)),
                     contracts: contracts.iter().map(|&(c, _)| (c, at)).collect(),
                     required_by: Some(format!("`{}`", info.name)),
+                    copy: None,
                 });
             }
         }
@@ -123,7 +124,12 @@ impl FnLowerer<'_> {
                 let func = self.fn_id.map_or(FuncIdx(u32::MAX), |f| FuncIdx(f.0));
                 let target = ProveTarget::Loop { func, line: self.line(s.span()) };
                 let contracts = self.program.proves[k].contracts.clone();
-                self.helpers.proves.sites.push(ContractSite { target, contracts, required_by: None });
+                // A copy's loop names the copy even after its code moves to a closure's.
+                let copy = match self.fn_id {
+                    Some(f) if self.t.func(f).copy.is_some() => Some(SiteCopy::Func(FuncIdx(f.0))),
+                    _ => self.subst_instance().map(|name| SiteCopy::Instance(name.to_string())),
+                };
+                self.helpers.proves.sites.push(ContractSite { target, contracts, required_by: None, copy });
                 self.helpers.proves.loops.insert(key, id);
                 id
             }

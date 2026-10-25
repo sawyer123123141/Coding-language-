@@ -240,7 +240,7 @@ impl<'a> BodyChecker<'a> {
             Ty::Param(p) => self.param_method(p, name).map(|(f, res)| {
                 rule_call = Some(res);
                 f
-            }).map_err(Some),
+            }),
             Ty::Struct(sid) => {
                 let info = self.t.strukt(sid);
                 info.methods.get(name).copied().ok_or_else(|| Some(format!("`{}` has no method `{name}`", info.name)))

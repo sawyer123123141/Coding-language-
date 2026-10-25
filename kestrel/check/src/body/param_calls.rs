@@ -20,7 +20,9 @@ impl<'a> BodyChecker<'a> {
     /// may differ in `pure`), the first whose method is `pure` is taken, else the first that has
     /// it: a type that meets every rule has a pure method when any rule's is, so `[T: A + B]` and
     /// `[T: B + A]` give the same answer (P26).
-    pub(super) fn param_method(&self, p: ParamId, name: &str) -> Result<(FnId, Res), String> {
+    /// `Err(None)` when a rule of `p` was refused, which may have been the one with the method
+    /// (its error is already reported).
+    pub(super) fn param_method(&self, p: ParamId, name: &str) -> Result<(FnId, Res), Option<String>> {
         let rules: Vec<(IfaceId, FnId, u32)> = self
             .t
             .generic
@@ -33,13 +35,16 @@ impl<'a> BodyChecker<'a> {
         if let Some(&(iface, f, slot)) = pick {
             return Ok((f, Res::ParamCall { param: p, iface, slot }));
         }
+        if self.t.generic.refused_rules.contains(&p) {
+            return Err(None);
+        }
         let pn = self.t.param_name(p);
         let known = self.t.rule_names(p);
         if known.is_empty() {
-            return Err(format!("`{pn}` has no rules, so it has no methods; add one, like `[{pn}: Damageable]`"));
+            return Err(Some(format!("`{pn}` has no rules, so it has no methods; add one, like `[{pn}: Damageable]`")));
         }
         let known: Vec<String> = known.iter().map(|r| format!("`{r}`")).collect();
-        Err(format!("`{pn}` has no method `{name}`: its rules ({}) don't have one", known.join(", ")))
+        Err(Some(format!("`{pn}` has no method `{name}`: its rules ({}) don't have one", known.join(", "))))
     }
 
     /// `x.hp` where `x` is a `T`.

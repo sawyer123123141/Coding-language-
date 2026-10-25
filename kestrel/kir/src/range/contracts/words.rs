@@ -11,16 +11,27 @@ use crate::range::sites::CheckKind;
 use crate::range::summary::{chain_rest, chain_text, check_words, is_builtin_body, line_ref, reason_text, Chain, Reason, Stop};
 
 /// What a site is on: "`step`", "`Goblin.area`" or "the loop at line 12". A copy of a generic adds
-/// where it came from: "`Stack[string].put` (made by `Stack[string]` on line 12)".
+/// where it came from: "`Stack[string].put` (made by `Stack[string]` on line 12)", "`best[int]`
+/// (made on line 12)" for a copy that made itself, "the loop at line 5 (made by `Box[string]`)"
+/// for a loop in an instance's field default (nothing in the code names a line for it).
 pub(super) fn target(m: &Module, site: &ContractSite) -> String {
     let (named, func, home) = match site.target {
         ProveTarget::Func(f) => (format!("`{}`", display_name(m, f)), f, m.funcs[f.0 as usize].lines.0),
         ProveTarget::Loop { func, line } => (format!("the loop at line {}", unpack_line(line).0), func, line),
     };
-    match m.copies.get(&func) {
-        Some(note) => format!("{named} (made by `{}` {})", plain_name(m, &note.made_by, home), on(m, note.made_at, unpack_line(home).1)),
-        None => named,
+    // A loop's code may have moved to a closure's: the site says which copy it was lowered for.
+    let copy = match &site.copy {
+        Some(SiteCopy::Instance(name)) => return format!("{named} (made by `{}`)", plain_name(m, name, home)),
+        Some(SiteCopy::Func(c)) => *c,
+        None => func,
+    };
+    let Some(note) = m.copies.get(&copy) else { return named };
+    let at = on(m, note.made_at, unpack_line(home).1);
+    let itself = matches!(site.target, ProveTarget::Func(f) if m.funcs[f.0 as usize].name == note.made_by);
+    if itself {
+        return format!("{named} (made {at})");
     }
+    format!("{named} (made by `{}` {at})", plain_name(m, &note.made_by, home))
 }
 
 /// Which copy an error is about, after the contract: nothing for the site's own, otherwise

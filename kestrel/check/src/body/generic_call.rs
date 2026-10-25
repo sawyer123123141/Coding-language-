@@ -12,7 +12,7 @@ use super::args::CallSig;
 use super::BodyChecker;
 use crate::collect_ty::TypeScope;
 use crate::generic::{GenericOwner, Subst, TyListId};
-use crate::tables::{FnId, Res};
+use crate::tables::{EnumId, FnId, Res};
 use crate::ty::Ty;
 
 /// Whether `e` is a `TypeCall` of a user name (`best[int](xs)`, `Stack[int]()`), not `array`,
@@ -48,13 +48,8 @@ impl<'a> BodyChecker<'a> {
             return self.check_args(e, sig, args, None, None);
         }
         if let Some(&eid) = self.t.enum_by_name.get(name) {
-            let ints = vec!["int"; self.t.enm(eid).params.len()].join(", ");
-            let types = if ints.is_empty() { String::new() } else { format!("[{ints}]") };
-            let example = match self.t.enm(eid).variants.first() {
-                Some(v) if v.fields.is_empty() => format!("`{name}{types}.{}`", v.name),
-                Some(v) => format!("`{name}{types}.{}(...)`", v.name),
-                None => format!("`{name}{types}.Variant` once it has a variant"),
-            };
+            let prefix = if self.t.enm(eid).params.is_empty() { name.to_string() } else { self.int_types(GenericOwner::Enum(eid), name) };
+            let example = self.variant_example(eid, &prefix);
             self.error_help(
                 *name_span,
                 format!("`{name}` is an enum, so it can't be called like a struct"),
@@ -75,6 +70,12 @@ impl<'a> BodyChecker<'a> {
         let ExprKind::TypeApply { name, name_span, type_args } = &e.kind else { unreachable!("not a type application") };
         if let Some(&fid) = self.t.fn_by_name.get(name) {
             let owner = GenericOwner::Fn(fid);
+            // `scores[i]` of a plain function was meant as an index of what it returns.
+            if self.t.func(fid).type_params.is_empty() {
+                let args = if self.t.func(fid).params.is_empty() { "" } else { "..." };
+                self.error_help(*name_span, format!("`{name}` takes no types"), format!("to index what `{name}` returns, call it first: `{name}({args})[...]`"));
+                return Ty::Error;
+            }
             let Some(list) = self.written_types(owner, name, *name_span, type_args) else { return Ty::Error };
             self.t.generic.type_args.insert(e.id, list);
             self.t.res.insert(e.id, Res::FnValue(fid));
@@ -93,8 +94,23 @@ impl<'a> BodyChecker<'a> {
         };
         let Some(list) = self.written_types(owner, name, *name_span, type_args) else { return Ty::Error };
         let shown = self.written_name(name, list);
-        self.error(e.span, format!("`{shown}` is a type; build one with `{shown}(...)`"));
+        // An enum is built from a variant, like the variant help says.
+        let example = match owner {
+            GenericOwner::Enum(eid) => self.variant_example(eid, &shown),
+            _ => format!("`{shown}(...)`"),
+        };
+        self.error(e.span, format!("`{shown}` is a type; build one with {example}"));
         Ty::Error
+    }
+
+    /// How to build a value of enum `eid` written `prefix` (`Maybe`, `Maybe[int]`): from its
+    /// first variant, "`Maybe[int].Nothing`" or "`Result[int, string].Ok(...)`".
+    pub(crate) fn variant_example(&self, eid: EnumId, prefix: &str) -> String {
+        match self.t.enm(eid).variants.first() {
+            Some(v) if v.fields.is_empty() => format!("`{prefix}.{}`", v.name),
+            Some(v) => format!("`{prefix}.{}(...)`", v.name),
+            None => format!("`{prefix}.Variant` once it has a variant"),
+        }
     }
 
     /// The types written for `owner` (`name`'s placeholders), once there are as many as it takes

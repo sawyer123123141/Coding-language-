@@ -27,9 +27,6 @@ use crate::ty::Ty;
 const MAX_LEVELS: u32 = 32;
 /// The most copies of one generic (and default walks of one generic struct's instances).
 const MAX_COPIES: u32 = 10_000;
-/// The most parts an interned type list may have (P41): a type that doubles in width at each copy
-/// would otherwise build names of billions of characters well before 32 levels.
-pub(super) const MAX_PARTS: u32 = 1_000;
 const WIDE: &str = "a type grew to 1,000 parts";
 
 /// Runs the static function expansion check, then, when it reports nothing, the walk. The check
@@ -42,7 +39,7 @@ pub(crate) fn collect_copies(program: &Program, t: &mut Tables, diags: &mut Vec<
     if expand::check_fn_expansion(program, t, diags) {
         return;
     }
-    let mut walk = Walk { program, t, units: Vec::new(), queue: VecDeque::new(), copies: HashMap::new(), defaults: HashSet::new(), walked: HashMap::new(), nest: HashMap::new(), size: HashMap::new() };
+    let mut walk = Walk { program, t, units: Vec::new(), queue: VecDeque::new(), copies: HashMap::new(), defaults: HashSet::new(), walked: HashMap::new(), nest: HashMap::new() };
     if let Err(d) = walk.run() {
         diags.push(d);
     }
@@ -89,8 +86,6 @@ pub(super) struct Walk<'a> {
     walked: HashMap<StructId, HashSet<StructId>>,
     /// How many levels each type nests, as worked out so far.
     pub(super) nest: HashMap<Ty, u32>,
-    /// How many parts each concrete type has, as worked out so far.
-    pub(super) size: HashMap<Ty, u32>,
 }
 
 impl<'a> Walk<'a> {
@@ -274,6 +269,10 @@ impl<'a> Walk<'a> {
         self.copies.insert(f, made + 1);
         let info = self.t.func(f).clone();
         let s = Subst { owner: info.generic.expect("a generic"), args };
+        // A signature too big for the cap is this copy's: blame its chain, naming the copy.
+        if self.size_under(Ty::Fn(info.sig), s).is_err() {
+            return Err(self.copy_cap(f, args, ctx, WIDE));
+        }
         // Instances the signature makes are the requester's (for the cap's chain).
         let here = Ctx { subst: Some(s), ..ctx };
         let mut params = Vec::with_capacity(info.params.len());

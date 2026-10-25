@@ -103,15 +103,28 @@ impl Owners {
 }
 
 /// A name as the report writes it: a module's function without the module's name (`geom.helper`
-/// is `helper` in `geom.kes`). `line` is where the function is declared.
+/// is `helper` in `geom.kes`), and the same for each of a copy's types (`geom.Stack[geom.Item].put`
+/// is `Stack[Item].put`). `line` is where the function is declared.
 pub(super) fn plain_name(m: &Module, name: &str, line: u32) -> String {
-    if let Some((prefix, rest)) = name.split_once('.') {
-        let file = m.files.get(unpack_line(line).1 as usize);
-        if file.is_some_and(|file| file.strip_suffix(".kes") == Some(prefix)) {
-            return rest.to_string();
+    let Some(module) = m.files.get(unpack_line(line).1 as usize).and_then(|f| f.strip_suffix(".kes")) else { return name.to_string() };
+    let prefix = format!("{module}.");
+    // Each run of name characters (a dotted path) loses a leading `module.`.
+    let mut out = String::with_capacity(name.len());
+    let mut word = String::new();
+    let flush = |word: &mut String, out: &mut String| {
+        out.push_str(word.strip_prefix(prefix.as_str()).unwrap_or(word));
+        word.clear();
+    };
+    for c in name.chars() {
+        if c.is_alphanumeric() || c == '_' || c == '.' {
+            word.push(c);
+        } else {
+            flush(&mut word, &mut out);
+            out.push(c);
         }
     }
-    name.to_string()
+    flush(&mut word, &mut out);
+    out
 }
 
 /// For each function, the functions with a closure literal (`MakeFn`) that names it as its code and

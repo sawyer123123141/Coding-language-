@@ -66,11 +66,7 @@ impl<'a> BodyChecker<'a> {
                 );
             } else if let Some(&eid) = self.t.enum_by_name.get(name) {
                 // A real variant makes the example, with `(...)` when it has fields.
-                let example = match self.t.enm(eid).variants.first() {
-                    Some(v) if v.fields.is_empty() => format!("`{name}.{}`", v.name),
-                    Some(v) => format!("`{name}.{}(...)`", v.name),
-                    None => format!("`{name}.Variant` once it has a variant"),
-                };
+                let example = self.variant_example(eid, name);
                 self.error_help(
                     *name_span,
                     format!("`{name}` is an enum, so it can't be called like a struct"),

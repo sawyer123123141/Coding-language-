@@ -62,6 +62,24 @@ impl Tables {
         self.holds_where(ty, &mut Vec::new(), &leaf)
     }
 
+    /// The placeholder without `equatable` that makes `ty` uncomparable, when nothing else (a
+    /// function or interface value) does: `T` in `T?`, `list[T]`, `Box[T]`.
+    pub(crate) fn uncomparable_param(&self, ty: Ty) -> Option<crate::generic::ParamId> {
+        if self.holds_where(ty, &mut Vec::new(), &|t| matches!(t, Ty::Fn(_) | Ty::Iface(_))) {
+            return None;
+        }
+        let found = std::cell::Cell::new(None);
+        let leaf = |t: Ty| match t {
+            Ty::Param(p) if !self.generic.param(p).equatable => {
+                found.set(Some(p));
+                true
+            }
+            _ => false,
+        };
+        self.holds_where(ty, &mut Vec::new(), &leaf);
+        found.get()
+    }
+
     /// Whether `ty` holds an interface value that a zero-filled array would leave empty: one
     /// directly, in a field, a payload or an array element (an optional starts as `none`, and a
     /// list or map starts empty).
@@ -211,11 +229,16 @@ impl Tables {
         }
     }
 
-    /// How a type reads in messages: struct types by name.
+    /// How a type reads in messages: struct types by name, a generic declaration with its own
+    /// placeholders (`Pair[A, B]`, what its bare name means inside it, G2).
     pub fn ty_name(&self, ty: Ty) -> String {
+        let own = |name: &str, params: &[crate::generic::ParamId]| match params {
+            [] => name.to_string(),
+            _ => format!("{name}[{}]", params.iter().map(|&p| self.param_name(p)).collect::<Vec<_>>().join(", ")),
+        };
         match ty {
-            Ty::Struct(id) => self.strukt(id).name.clone(),
-            Ty::Enum(id) => self.enm(id).name.clone(),
+            Ty::Struct(id) => own(&self.strukt(id).name, &self.strukt(id).params),
+            Ty::Enum(id) => own(&self.enm(id).name, &self.enm(id).params),
             Ty::Iface(id) => self.iface(id).name.clone(),
             Ty::Variant(id, v) => format!("{}.{}", self.enm(id).name, self.enm(id).variants[v as usize].name),
             Ty::Array(e) => format!("[{}]", self.ty_name(self.elem(e))),

@@ -7,6 +7,12 @@ main() {
     arena {
         s = Stack()
     }
+    var b = Stack[i64](items: [1])
+    arena {
+        b = Stack()
+    }
     keep(s)
+    print(b)
 }
 // error 8: this memory is freed at the end of the `arena { }` block, but `s` lives longer
+// error 12: this memory is freed at the end of the `arena { }` block, but `b` lives longer
