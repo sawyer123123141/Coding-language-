@@ -19,6 +19,8 @@ mod hex;
 mod iface;
 mod let_else;
 mod in_block;
+mod infer;
+mod inferred;
 mod instance_calls;
 mod lanes;
 mod list_fns;

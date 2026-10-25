@@ -3,8 +3,7 @@
 //! struct gives a construction of its instance, a generic function a call against its signature
 //! with the written types put in. Every use records its types as `type_args` for lowering.
 //!
-//! A generic named without types has nothing to work its types out from yet (Task 4 infers
-//! them): it says what to write.
+//! A generic called or built without types has them worked out (`infer.rs`, `inferred.rs`).
 
 use kestrel_syntax::ast::{Expr, ExprKind, TypeExpr};
 use kestrel_syntax::Span;
@@ -46,7 +45,7 @@ impl<'a> BodyChecker<'a> {
             self.t.res.insert(e.id, Res::Fn(fid));
             self.check_callee_purity(*name_span, fid);
             let sig = self.subst_call_sig(CallSig::of(self.t, fid), Subst { owner, args: list });
-            return self.check_args(e, sig, args, None);
+            return self.check_args(e, sig, args, None, None);
         }
         if let Some(&eid) = self.t.enum_by_name.get(name) {
             let ints = vec!["int"; self.t.enm(eid).params.len()].join(", ");
@@ -131,16 +130,6 @@ impl<'a> BodyChecker<'a> {
     pub(super) fn written_name(&self, name: &str, list: TyListId) -> String {
         let tys: Vec<String> = self.t.ty_list(list).iter().map(|&t| self.tn(t)).collect();
         format!("{name}[{}]", tys.join(", "))
-    }
-
-    /// A call of a generic function, a construction of a generic struct or a variant of a generic
-    /// enum with no types written, which nothing here can work out yet: says what to write for the
-    /// owner's first placeholder. `example` is the use with `int` for every placeholder (G26).
-    pub(crate) fn undecided(&mut self, span: Span, owner: GenericOwner, name: &str, example: &str) -> Ty {
-        let first = self.t.owner_params(owner)[0];
-        let p = self.t.param_name(first).to_string();
-        self.error(span, format!("can't tell what `{p}` is in `{name}`; write it, like `{example}`"));
-        Ty::Error
     }
 
     /// `name[int, int]` with `int` for each placeholder of `owner`.

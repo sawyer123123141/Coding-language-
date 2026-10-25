@@ -96,8 +96,13 @@ impl<'a> BodyChecker<'a> {
     /// owning one may be passed. Anything else converts as a store would (boxed), and an owning
     /// one that isn't a place is refused.
     pub(super) fn check_arg_value(&mut self, e: &Expr, want: Ty) -> Ty {
-        let Ty::Iface(i) = want else { return self.check_value(e, Some(want)) };
         let found = self.check_expr(e, Some(want));
+        self.finish_arg_value(e, found, want)
+    }
+
+    /// The rest of `check_arg_value`, once `e` has been checked and found to be `found`.
+    pub(super) fn finish_arg_value(&mut self, e: &Expr, found: Ty, want: Ty) -> Ty {
+        let Ty::Iface(i) = want else { return self.finish_value(e, found, Some(want)) };
         if found == Ty::Never {
             return self.reject_never(e, found);
         }

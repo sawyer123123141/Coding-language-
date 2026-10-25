@@ -133,14 +133,13 @@ impl<'a> BodyChecker<'a> {
         false
     }
 
-    pub(crate) fn check_field(&mut self, e: &Expr) -> Ty {
+    /// `base.name`; `want` is the expected type, which a generic enum's variant may take its
+    /// types from (P8).
+    pub(crate) fn check_field(&mut self, e: &Expr, want: Option<Ty>) -> Ty {
         let ExprKind::Field { base, name, name_span } = &e.kind else { unreachable!("check_field on non-field") };
         // A generic enum's variant (`Maybe[int].Nothing`) comes before today's bare-name test.
-        if let Some(found) = self.generic_variant_base(e, base, name) {
-            return match found {
-                Some(id) => self.variant_value(e, id, name, *name_span),
-                None => Ty::Error,
-            };
+        if let Some(ty) = self.generic_variant_value(e, base, name, *name_span, want) {
+            return ty;
         }
         if let Some(id) = self.enum_named(base) {
             return self.variant_value(e, id, name, *name_span);
@@ -196,16 +195,12 @@ impl<'a> BodyChecker<'a> {
         }
     }
 
-    pub(crate) fn check_method_call(&mut self, e: &Expr) -> Ty {
+    /// `receiver.name(args)`; `want` is the expected type, which a generic enum's variant may take
+    /// its types from.
+    pub(crate) fn check_method_call(&mut self, e: &Expr, want: Option<Ty>) -> Ty {
         let ExprKind::MethodCall { receiver, name, name_span, args } = &e.kind else { unreachable!("not a method call") };
-        if let Some(found) = self.generic_variant_base(e, receiver, name) {
-            return match found {
-                Some(id) => self.variant_construct(e, id, name, *name_span, args),
-                None => {
-                    self.check_loose_args(args);
-                    Ty::Error
-                }
-            };
+        if let Some(ty) = self.generic_variant_call(e, receiver, name, *name_span, args, want) {
+            return ty;
         }
         if let Some(id) = self.enum_named(receiver) {
             return self.variant_construct(e, id, name, *name_span, args);
@@ -287,7 +282,7 @@ impl<'a> BodyChecker<'a> {
         }
         // A method of an instance (or of its own declaration) is checked with its types filled in.
         let sig = self.method_sig(e, fid, receiver_ty);
-        let ret = self.check_args(e, sig, args, Some(recv));
+        let ret = self.check_args(e, sig, args, Some(recv), None);
         if by_pointer {
             let later: Vec<&Expr> = args.iter().map(|a| &a.value).collect();
             self.check_changed_later(&[receiver], &later);

@@ -1,0 +1,12 @@
+struct Stack[T] {
+    items: list[T] = []
+}
+keep(s: Stack[string]) {}
+main() {
+    var s = Stack[string](items: ["a"])
+    arena {
+        s = Stack()
+    }
+    keep(s)
+}
+// error 8: this memory is freed at the end of the `arena { }` block, but `s` lives longer

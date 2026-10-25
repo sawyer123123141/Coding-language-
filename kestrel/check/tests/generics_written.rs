@@ -176,16 +176,16 @@ fn a_type_is_not_a_value() {
 #[test]
 fn nothing_is_decided_without_written_types() {
     let errs = errors(&format!(
-        "{DECLS}pure make_empty[T]() -> list[T] {{ list[T]() }}\npair[A, B](a: A, b: B) {{ }}\nmain() {{\n    let a = make_empty()\n    pair(1, 2)\n    let s = Stack()\n    let m = Maybe.Nothing\n    let r = Result.Ok(value: 1)\n    let f = best\n}}\n"
+        "{DECLS}pure make_empty[T]() -> list[T] {{ list[T]() }}\npair[A, B](a: A) {{ }}\nmain() {{\n    let a = make_empty()\n    pair(1)\n    let s = Stack()\n    let m = Maybe.Nothing\n    let r = Result.Ok(value: 1)\n    let f = best\n}}\n"
     ));
     assert_eq!(
         errs,
         [
             "can't tell what `T` is in `make_empty`; write it, like `make_empty[int](...)`",
-            "can't tell what `A` is in `pair`; write it, like `pair[int, int](...)`",
+            "can't tell what `B` is in `pair`; write it, like `pair[int, int](...)`",
             "can't tell what `T` is in `Stack`; write it, like `Stack[int]()`",
             "can't tell what `T` is in `Maybe`; write it, like `Maybe[int].Nothing`",
-            "can't tell what `T` is in `Result`; write it, like `Result[int, int].Ok(...)`",
+            "can't tell what `E` is in `Result`; write it, like `Result[int, int].Ok(...)`",
             "`best` is generic; give its types to use it as a value, like `best[int]`",
         ]
     );

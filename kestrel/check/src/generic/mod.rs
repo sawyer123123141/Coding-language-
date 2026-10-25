@@ -17,6 +17,7 @@ use crate::ty::Ty;
 pub(crate) mod declare;
 pub(crate) mod expand;
 pub(crate) mod graph;
+pub(crate) mod infer;
 mod instances;
 pub(crate) mod rules;
 mod subst;

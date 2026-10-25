@@ -196,7 +196,7 @@ impl<'a> BodyChecker<'a> {
         for (i, a) in args.iter().enumerate() {
             match params.get(i) {
                 Some(p) if p.is_var => {
-                    if let Some(root) = self.check_var_arg(a, p, shown) {
+                    if let Some(root) = self.check_var_arg(a, p, shown, None) {
                         var_roots.push((root, Some(i)));
                     }
                 }

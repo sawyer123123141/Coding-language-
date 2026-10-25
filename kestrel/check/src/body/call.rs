@@ -19,7 +19,7 @@ const CONVERSIONS: &[(&str, Ty)] = &[
 ];
 
 impl<'a> BodyChecker<'a> {
-    pub(crate) fn check_call(&mut self, e: &Expr, _want: Option<Ty>) -> Ty {
+    pub(crate) fn check_call(&mut self, e: &Expr, want: Option<Ty>) -> Ty {
         let ExprKind::Call { name, name_span, args } = &e.kind else { unreachable!("check_call on non-call") };
         // A local or parameter of function type: `f(x)` calls through its value.
         if let Some(local) = self.lookup_local(name) {
@@ -51,13 +51,10 @@ impl<'a> BodyChecker<'a> {
             if self.t.vector(Ty::Struct(sid)).is_some() {
                 return self.check_vec_make(e, Ty::Struct(sid), args);
             }
-            // A generic struct needs its types, except inside its own declaration (G2).
-            let owner = GenericOwner::Struct(sid);
-            if !self.t.strukt(sid).params.is_empty() && self.own != Some(owner) {
-                let example = format!("{}()", self.int_types(owner, name));
-                self.undecided(*name_span, owner, name, &example);
-                self.check_loose_args(args);
-                return Ty::Error;
+            // A generic struct's types are worked out, except inside its own declaration, where
+            // its bare name means itself (G2).
+            if !self.t.strukt(sid).params.is_empty() && self.own != Some(GenericOwner::Struct(sid)) {
+                return self.check_inferred_construct(e, sid, name, *name_span, args, want);
             }
             return self.check_construct(e, sid, args);
         }
@@ -102,12 +99,9 @@ impl<'a> BodyChecker<'a> {
             }
             return Ty::Error;
         };
-        // Until calls work out their own types, a generic function needs them written.
+        // A generic function's types are worked out from the arguments and `want`.
         if self.is_generic_fn(fid) {
-            let example = format!("{}(...)", self.int_types(GenericOwner::Fn(fid), name));
-            self.undecided(*name_span, GenericOwner::Fn(fid), name, &example);
-            self.check_loose_args(args);
-            return Ty::Error;
+            return self.check_inferred_call(e, fid, name, *name_span, args, want);
         }
         self.t.res.insert(e.id, Res::Fn(fid));
         self.check_callee_purity(*name_span, fid);
@@ -222,6 +216,6 @@ impl<'a> BodyChecker<'a> {
     }
 
     fn check_user_call(&mut self, e: &Expr, fid: FnId, args: &[Arg]) -> Ty {
-        self.check_args(e, CallSig::of(self.t, fid), args, None)
+        self.check_args(e, CallSig::of(self.t, fid), args, None, None)
     }
 }

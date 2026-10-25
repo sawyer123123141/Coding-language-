@@ -51,7 +51,11 @@ impl<'a> BodyChecker<'a> {
     /// Checks a call's arguments against `sig`'s parameters, after the first one for a method's
     /// receiver `recv`. Then the exclusivity rules: no argument may see what another changes,
     /// and a closure literal passed straight to the call may not capture what it changes.
-    pub(crate) fn check_args(&mut self, e: &Expr, sig: CallSig, args: &[Arg], recv: Option<Receiver<'_>>) -> Ty {
+    ///
+    /// With `prechecked` (each argument's type, by argument, from inference, P3), the arguments
+    /// were checked already: each is only finished against `sig` (converted, lent or refused),
+    /// never checked or noted again; everything after runs as for any call.
+    pub(crate) fn check_args(&mut self, e: &Expr, sig: CallSig, args: &[Arg], recv: Option<Receiver<'_>>, prechecked: Option<&[Ty]>) -> Ty {
         let skip = usize::from(recv.is_some());
         // A `var self` receiver is changed by the call; one that isn't is passed by pointer.
         let mut var_roots: Vec<(LocalId, Option<usize>)> = recv.and_then(|r| r.var_root).map(|r| vec![(r, None)]).unwrap_or_default();
@@ -79,30 +83,38 @@ impl<'a> BodyChecker<'a> {
         for (pi, slot) in slots.iter().enumerate() {
             let Some(ai) = *slot else { continue };
             let (a, p) = (&args[ai], &params[pi]);
+            let checked = prechecked.map(|tys| tys[ai]);
             if p.is_var {
-                if let Some(root) = self.check_var_arg(a, p, &fname) {
+                if let Some(root) = self.check_var_arg(a, p, &fname, checked) {
                     var_roots.push((root, Some(ai)));
                 }
             } else {
                 if a.is_var {
                     self.error_help(a.span, format!("parameter `{}` of `{fname}` isn't `var`", p.name), "remove `var`");
                 }
-                if native && matches!(p.ty, Ty::Array(_)) {
+                // (A native has no placeholders, so its arguments are never pre-checked.)
+                if native && matches!(p.ty, Ty::Array(_)) && checked.is_none() {
                     self.check_native_array_arg(&a.value, p.ty);
                 } else {
-                    // A closure literal names the parameter in what it says about purity.
+                    // A closure literal names the parameter in what it says about purity (a
+                    // pre-checked one was named when it was checked).
                     if matches!(a.value.kind, ExprKind::Closure(_)) {
-                        self.arg_name = Some(p.name.clone());
+                        if checked.is_none() {
+                            self.arg_name = Some(p.name.clone());
+                        }
                         if !native {
                             self.note_stack_closure(a);
                         }
                     }
-                    self.check_arg_value(&a.value, p.ty);
+                    match checked {
+                        Some(found) => self.finish_arg_value(&a.value, found, p.ty),
+                        None => self.check_arg_value(&a.value, p.ty),
+                    };
                 }
             }
         }
         for (ai, a) in args.iter().enumerate() {
-            if !slots.contains(&Some(ai)) {
+            if !slots.contains(&Some(ai)) && prechecked.is_none() {
                 self.check_expr(&a.value, None);
             }
         }
@@ -188,11 +200,14 @@ impl<'a> BodyChecker<'a> {
     }
 
     /// Checks an argument for a `var` parameter: a changeable variable, field or element
-    /// of exactly the parameter's type. Returns the variable it is rooted at.
-    pub(super) fn check_var_arg(&mut self, a: &Arg, p: &ParamSig, fname: &str) -> Option<LocalId> {
+    /// of exactly the parameter's type. Returns the variable it is rooted at. `checked` is the
+    /// type it was already checked to (with no hint), if it was (see `check_args`).
+    pub(super) fn check_var_arg(&mut self, a: &Arg, p: &ParamSig, fname: &str, checked: Option<Ty>) -> Option<LocalId> {
         if !matches!(a.value.kind, ExprKind::Ident(_) | ExprKind::Field { .. } | ExprKind::Index { .. }) {
             self.error(a.value.span, "only a variable can be passed as `var`");
-            self.check_expr(&a.value, None);
+            if checked.is_none() {
+                self.check_expr(&a.value, None);
+            }
             return None;
         }
         if !a.is_var {
@@ -203,7 +218,10 @@ impl<'a> BodyChecker<'a> {
             let msg = format!("{} is `var`, so the call must say so", param_ref(p, fname));
             self.error_help(a.span, msg, help);
         }
-        let ty = self.check_expr(&a.value, None);
+        let ty = match checked {
+            Some(ty) => ty,
+            None => self.check_expr(&a.value, None),
+        };
         if let ExprKind::Index { base, .. } = &a.value.kind {
             if let Ty::Map(..) = self.t.ty(base.id) {
                 let msg = "a map entry can't be passed as `var`; read it, change it, and write it back with `m[k] = v`";
