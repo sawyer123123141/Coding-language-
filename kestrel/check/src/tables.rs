@@ -328,6 +328,8 @@ pub struct Tables {
     pub wrapped_literals: HashMap<ExprId, i64>,
     /// Placeholders, type lists, instances and copies (see `generic`).
     pub generic: Generics,
+    /// Stores into `var` parameters, for `var_stores::resolve` (P38); empty once checking ends.
+    pub var_stores: crate::var_stores::VarStores,
 }
 
 impl Tables {

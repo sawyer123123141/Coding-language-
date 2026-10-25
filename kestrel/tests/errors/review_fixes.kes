@@ -1,6 +1,6 @@
 // error 39: this memory is freed at the end of the `arena { }` block, but `kept` lives longer
 // error 44: this memory is freed at the end of the `arena { }` block, but `outer` lives longer
-// error 48: this memory is in the caller's current arena, which may not live as long as `b`
+// error 95: `reset` stores memory in `b` that is freed at the end of the `arena { }` block, but `b` lives longer
 // error 55: this memory is freed at the end of the `arena { }` block, but `h` lives longer
 // error 62: can't change `e` here: this `match` arm's `a` reads from it
 // error 71: `c` was moved earlier, so it can't be used here
@@ -89,3 +89,9 @@ pure peek(c: Chunk) -> int {
     n
 }
 main() {}
+resets() {
+    var b = Bag()
+    arena {
+        reset(var b)
+    }
+}

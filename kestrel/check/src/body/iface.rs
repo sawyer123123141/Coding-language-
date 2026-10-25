@@ -161,15 +161,17 @@ impl<'a> BodyChecker<'a> {
 
     /// `d = value` where `d` is a `var` parameter of interface type: the caller's place may hold
     /// a different type than the one assigned, which wouldn't fit. Reported after `value` is
-    /// checked; returns whether it was refused. A `T` counts too (R4: it holds an interface): in
-    /// a copy where `T` is an interface type, the caller's concrete place is lent to the `var`
-    /// parameter, and writing another type into it would corrupt it. The target's type decides,
-    /// whatever the value's expression is (`a = b`, `a = xs.pop()`, an `if`).
+    /// checked; returns whether it was refused. A `T` that may be an interface type counts too
+    /// (P39): in a copy where `T` is an interface type, the caller's concrete place is lent to the
+    /// `var` parameter, and writing another type into it would corrupt it. The target's type
+    /// decides, whatever the value's expression is (`a = b`, `a = xs.pop()`, an `if`).
     pub(super) fn check_iface_replace(&mut self, target: &Expr, value: &Expr, target_ty: Ty) -> bool {
-        let iface = match target_ty {
-            Ty::Iface(i) => Some(i),
-            // Any `T` may be an interface in some copy; its first interface rule gives the example.
-            Ty::Param(p) => self.t.generic.param(p).ifaces.first().copied(),
+        let (iface, placeholder) = match target_ty {
+            Ty::Iface(i) => (Some(i), None),
+            // A `T` with a built-in rule or two interface rules is never an interface type; any
+            // other may be one in some copy, and its interface rule gives the example.
+            Ty::Param(p) if !self.t.param_may_be_iface(p) => return false,
+            Ty::Param(p) => (self.t.generic.param(p).ifaces.first().copied(), Some(p)),
             _ => return false,
         };
         if !matches!(target.kind, ExprKind::Ident(_)) {
@@ -188,7 +190,15 @@ impl<'a> BodyChecker<'a> {
         };
         let name = self.t.local(root).name.clone();
         let msg = format!("can't replace `{name}`: it may be the caller's {example}; change it through its methods");
-        self.error(target.span, msg);
+        match placeholder {
+            // With no interface rule, a built-in one rules interface types out. (With one, an
+            // `equatable` type couldn't meet it: the generic would be useless.)
+            Some(p) if iface.is_none() => {
+                let pn = self.t.param_name(p).to_string();
+                self.error_help(target.span, msg, format!("if `{pn}` is never an interface type, give it a built-in rule, like `[{pn}: equatable]`"));
+            }
+            _ => self.error(target.span, msg),
+        }
         true
     }
 

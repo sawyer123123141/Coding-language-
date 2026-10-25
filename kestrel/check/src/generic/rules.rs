@@ -140,6 +140,14 @@ impl Tables {
         self.rules_of(p).into_iter().map(|r| self.rule_name(r)).collect()
     }
 
+    /// Whether some type that meets `p`'s rules may be an interface type (P39). Under R7 an
+    /// interface type meets only its own interface rule and is never `equatable` (which `ordered`
+    /// and `key` set too), so a placeholder with a built-in rule or two interface rules isn't one.
+    pub(crate) fn param_may_be_iface(&self, p: ParamId) -> bool {
+        let info = self.generic.param(p);
+        !info.equatable && info.ifaces.len() <= 1
+    }
+
     fn rule_name(&self, r: Rule) -> String {
         match r {
             Rule::Iface(i) => self.iface(i).name.clone(),

@@ -5,7 +5,7 @@ use kestrel_syntax::ast::{Arg, Expr, ExprKind};
 use super::exclusive::RecvChange;
 use super::lists::written;
 use super::place::Immutable;
-use super::regions::Ctx;
+use super::regions::{tail, Ctx};
 use super::BodyChecker;
 use crate::natives::may_want_scratch;
 use crate::tables::{FnId, LocalId, ParamSig, Tables};
@@ -110,6 +110,9 @@ impl<'a> BodyChecker<'a> {
             self.ctxs.pop();
         }
         self.check_exclusive(args, &var_roots, read_root);
+        if ok {
+            self.note_call_stores(e, &sig, args, recv, &slots, &var_roots);
+        }
         let changes = self.call_changes(args, receiver_changed);
         self.check_call_captures(e.span, args, &changes, None);
         // Arguments run in source order; one passed by pointer earlier must
@@ -278,8 +281,12 @@ impl<'a> BodyChecker<'a> {
             if var_roots.iter().any(|&(_, ai)| ai == Some(bi)) || !self.t.ty(b.value.id).is_aggregate() {
                 continue;
             }
-            let Some(root) = self.place_root(&b.value) else { continue };
-            let Some(&(_, source)) = var_roots.iter().find(|&&(r, _)| r == root) else { continue };
+            // An `if` or `match` passes the place its branch ends in, by pointer, like the place
+            // itself (P40): `f(var w, if c { w.s } else { "" })` would see `w` change.
+            let mut leaves = Vec::new();
+            tail_places(&b.value, &mut leaves);
+            let shared = leaves.iter().filter_map(|l| self.place_root(l)).find_map(|root| var_roots.iter().find(|&&(r, _)| r == root));
+            let Some(&(root, source)) = shared else { continue };
             let name = self.t.local(root).name.clone();
             let msg = match source {
                 None => format!("`{name}` is changed by this call, so it can't also be passed to it"),
@@ -287,5 +294,23 @@ impl<'a> BodyChecker<'a> {
             };
             self.error(b.span, msg);
         }
+    }
+}
+
+/// The expressions `e`'s value may be without a copy: `e` itself, or the last expression of each
+/// branch of an `if` or `match` (looked through again).
+fn tail_places<'e>(e: &'e Expr, out: &mut Vec<&'e Expr>) {
+    match &e.kind {
+        ExprKind::If { then_block, else_block, .. } => {
+            for t in std::iter::once(then_block).chain(else_block.as_ref()).filter_map(tail) {
+                tail_places(t, out);
+            }
+        }
+        ExprKind::Match { arms, .. } => {
+            for t in arms.iter().filter_map(|a| tail(&a.body)) {
+                tail_places(t, out);
+            }
+        }
+        _ => out.push(e),
     }
 }

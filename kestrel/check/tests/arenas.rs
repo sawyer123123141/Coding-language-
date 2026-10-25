@@ -103,8 +103,8 @@ fn ownership_and_escape_errors() {
             "can't return memory from an `arena { }` block: it's freed at the block's end",
         ),
         (
-            "fill(var c: Chunk) {\n c.heights = [1, 2]\n}\nmain() {}\n",
-            "this memory is in the caller's current arena, which may not live as long as `c`",
+            "fill(var c: Chunk) {\n c.heights = [1, 2]\n}\nmain() {\n var c = Chunk(x: 1)\n arena {\n  fill(var c)\n }\n}\n",
+            "`fill` stores memory in `c` that is freed at the end of the `arena { }` block, but `c` lives longer",
         ),
         (
             "main() {\n var c = Chunk(x: 1)\n var other = [0]\n in c.mem {\n  other = [1, 2]\n }\n}\n",
@@ -130,6 +130,8 @@ fn values_made_and_kept_inside_a_block_are_fine() {
         "main() {\n var xs = [1]\n arena {\n  xs[0] = 5\n }\n}\n",
         "mk() -> [int] {\n let a = [1, 2]\n a\n}\nmain() {\n let b = mk()\n}\n",
         "main() {\n var c = Chunk(x: 1)\n in c.mem {\n  let local = [1, 2]\n  c.heights = local\n }\n}\n",
+        // A store into a `var` parameter is checked where the function is called (P38).
+        "fill(var c: Chunk) {\n c.heights = [1, 2]\n}\nmain() {\n var c = Chunk(x: 1)\n fill(var c)\n}\n",
     ];
     for body in ok {
         let errs = run(&format!("{CHUNK}{body}")).1;
@@ -141,25 +143,27 @@ fn values_made_and_kept_inside_a_block_are_fine() {
 fn helps(src: &str) -> Vec<Option<String>> {
     let (p, d) = parse(src);
     assert!(d.is_empty(), "parse errors: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
-    check(&p).1.into_iter().map(|d| d.help).collect()
+    check(&p).1.into_iter().filter(|d| d.is_error()).map(|d| d.help).collect()
 }
 
 #[test]
 fn escape_help_names_a_fix_that_exists() {
+    // A function's own `var` parameter is checked at each call (P38); a closure's keeps the error,
+    // since a closure is only called through a value.
     let cases = [
         // The arena field is named as the struct spells it.
         (
-            "struct Bucket {\n pool: Arena = Arena()\n ids: [int] = []\n}\nfill(var b: Bucket) {\n b.ids = [1]\n}\nmain() {}\n",
+            "struct Bucket {\n pool: Arena = Arena()\n ids: [int] = []\n}\nmain() {\n let f = (var b: Bucket) {\n  b.ids = [1]\n }\n}\n",
             "allocate it with `in b.pool { }`",
         ),
         // No arena field: say to add one.
         (
-            "struct Tag {\n ids: [int] = []\n}\nfill(var t: Tag) {\n t.ids = [1]\n}\nmain() {}\n",
+            "struct Tag {\n ids: [int] = []\n}\nmain() {\n let f = (var t: Tag) {\n  t.ids = [1]\n }\n}\n",
             "give `Tag` an `Arena` field, and build it inside `in t.<that field> { }`",
         ),
         // An element of a list parameter is named as the loop spells it.
         (
-            "fill(var cs: list[Chunk]) {\n for c in cs {\n  c.heights = [1]\n }\n}\nmain() {}\n",
+            "main() {\n let f = (var cs: list[Chunk]) {\n  for c in cs {\n   c.heights = [1]\n  }\n }\n}\n",
             "allocate it with `in c.mem { }`",
         ),
         // A `match` arm's binding is a variant: name the variant, not the enum.
@@ -168,26 +172,34 @@ fn escape_help_names_a_fix_that_exists() {
  Say { text: string }
  Quit
 }
-say(var m: Msg, n: int) {
- match m {
-  Say s { s.text = \"n{n}\" }
-  Quit { }
+main() {
+ let f = (var m: Msg, n: int) {
+  match m {
+   Say s { s.text = \"n{n}\" }
+   Quit { }
+  }
  }
 }
-main() {}
 ",
             "give the `Say` variant an `Arena` field, and build it inside `in s.<that field> { }`",
         ),
         // A list has no fields: its owner needs the arena.
         (
-            "add(var xs: list[[int]]) {\n xs.add([1])\n}\nmain() {}\n",
+            "main() {\n let f = (var xs: list[[int]]) {\n  xs.add([1])\n }\n}\n",
             "build it in the caller, or give the owner of `xs` an `Arena` field and build it inside `in <owner>.<that field> { }`",
+        ),
+        // A call that stores into a closure's `var` parameter gets the same help.
+        (
+            "struct Bucket {\n pool: Arena = Arena()\n ids: [int] = []\n}\nfill(var b: Bucket) {\n b.ids = [1]\n}\nmain() {\n let f = (var b: Bucket) {\n  fill(var b)\n }\n}\n",
+            "allocate it with `in b.pool { }`",
         ),
     ];
     for (body, expected) in cases {
         let found = helps(&format!("{CHUNK}{body}"));
         assert_eq!(found, vec![Some(expected.to_string())], "source:\n{body}");
     }
+    let errs = run(&format!("{CHUNK}{}", cases[5].0)).1;
+    assert_eq!(errs, ["`fill` stores memory in `b` that is in the caller's current arena, which may not live as long as `b`"]);
 }
 
 #[test]

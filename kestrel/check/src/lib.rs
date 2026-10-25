@@ -12,6 +12,7 @@ mod str_method;
 pub mod tables;
 mod tables_ty;
 pub mod ty;
+mod var_stores;
 mod vectors;
 
 use kestrel_syntax::ast::Program;
@@ -71,6 +72,8 @@ pub fn check_keeping_tables(program: &Program, needs_main: bool) -> (Tables, Vec
         }
         body::check_fn(program, FnId(f as u32), &mut t, &mut diags);
     }
+    // Stores into `var` parameters are judged at their calls once every body has been read (P38).
+    var_stores::resolve(&mut t, &mut diags);
     collect_ty::check_map_values(&t, &mut diags);
     (t, diags)
 }

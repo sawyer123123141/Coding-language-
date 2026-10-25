@@ -62,8 +62,19 @@ pub(crate) struct MatchGuard {
 }
 
 /// A set of contexts, by index into `BodyChecker::ctxs`.
-fn bit(i: usize) -> u64 {
+pub(super) fn bit(i: usize) -> u64 {
     1 << i.min(63)
+}
+
+/// A place a store goes to: its root variable (aliases followed), its path as written, the
+/// context it was declared in (`None` for a parameter, which outlives the function), and the
+/// variable as written, for messages.
+pub(super) struct StoreTarget {
+    pub(super) root: LocalId,
+    path: Option<PathKey>,
+    decl: Option<usize>,
+    pub(super) name: String,
+    pub(super) written_ty: Ty,
 }
 
 pub(crate) fn tail(block: &Block) -> Option<&Expr> {
@@ -106,7 +117,7 @@ impl<'a> BodyChecker<'a> {
         s
     }
 
-    fn current(&self) -> u64 {
+    pub(super) fn current(&self) -> u64 {
         bit(self.ctxs.len() - 1)
     }
 
@@ -121,7 +132,7 @@ impl<'a> BodyChecker<'a> {
     /// unless the local is owning (it holds an `Arena` or a GPU object): an arena
     /// it holds may hold the value's memory and is dropped on the way out, so
     /// the value is copied.
-    fn region(&self, e: &Expr, moving: bool) -> u64 {
+    pub(super) fn region(&self, e: &Expr, moving: bool) -> u64 {
         let inner = self.region_of_value(e, moving);
         // A value stored as an interface value is copied into the current arena whatever it is, so
         // a struct of plain numbers has a region once it is one (like a string).
@@ -225,28 +236,6 @@ impl<'a> BodyChecker<'a> {
         }
     }
 
-    /// What to do about memory in the caller's current arena that is stored
-    /// into `name`, a variable of type `ty`: build it in an arena that `name`
-    /// owns, which takes an `Arena` field on its type.
-    fn caller_memory_help(&self, name: &str, ty: Ty) -> String {
-        let (owner, fields) = match ty {
-            Ty::Struct(s) => (format!("`{}`", self.t.strukt(s).name), &self.t.strukt(s).fields),
-            Ty::Variant(e, v) => {
-                let variant = &self.t.enm(e).variants[v as usize];
-                (format!("the `{}` variant", variant.name), &variant.fields)
-            }
-            _ => {
-                return format!(
-                    "build it in the caller, or give the owner of `{name}` an `Arena` field and build it inside `in <owner>.<that field> {{ }}`"
-                )
-            }
-        };
-        match fields.iter().find(|f| f.ty == Ty::Arena) {
-            Some(arena) => format!("allocate it with `in {name}.{} {{ }}`", arena.name),
-            None => format!("give {owner} an `Arena` field, and build it inside `in {name}.<that field> {{ }}`"),
-        }
-    }
-
     /// Checks that the memory `value` points into lives at least as long as
     /// the place `target` it's stored into.
     pub(crate) fn check_store(&mut self, target: &Expr, value: &Expr) {
@@ -262,7 +251,44 @@ impl<'a> BodyChecker<'a> {
     }
 
     fn check_store_region(&mut self, target: &Expr, value: &Expr, r: u64) {
-        let Some(root) = self.place_root(target) else { return };
+        let Some(t) = self.store_target(target) else { return };
+        for i in (0..self.ctxs.len()).filter(|&i| r & bit(i) != 0) {
+            if self.ctx_holds(i, &t) {
+                continue;
+            }
+            // Caller memory stored into this function's own `var` parameter is checked at each call (P38).
+            if matches!(self.ctxs[i], Ctx::Function) && self.defer_var_store(t.root) {
+                continue;
+            }
+            let (name, written_ty) = (&t.name, t.written_ty);
+            let (msg, help) = match self.ctxs[i].clone() {
+                Ctx::Function => (
+                    format!("this memory is in the caller's current arena, which may not live as long as `{name}`"),
+                    self.caller_memory_help(name, written_ty),
+                ),
+                Ctx::Scoped => (
+                    format!("this memory is freed at the end of the `arena {{ }}` block, but `{name}` lives longer"),
+                    "build it outside the block, or store it in a variable declared inside".to_string(),
+                ),
+                Ctx::Scratch(callee) => (
+                    format!("this memory is freed when the call to `{callee}` returns, but `{name}` lives longer"),
+                    "build it before the call, or store it in a variable declared inside the argument".to_string(),
+                ),
+                Ctx::Owned(p) => {
+                    let owner = self.path_name(&p);
+                    (
+                        format!("this memory belongs to `{owner}`, but `{name}` isn't part of `{owner}`"),
+                        format!("store it inside `{owner}`, or in a variable declared in this `in` block"),
+                    )
+                }
+            };
+            return self.error_help(value.span, msg, help);
+        }
+    }
+
+    /// The place a store goes to, as `ctx_holds` judges it. `None` when `target` isn't a place.
+    pub(super) fn store_target(&self, target: &Expr) -> Option<StoreTarget> {
+        let root = self.place_root(target)?;
         let path = self.path_key(target);
         let info = self.t.local(root);
         // Name the variable as written (a loop element, not its collection).
@@ -270,35 +296,16 @@ impl<'a> BodyChecker<'a> {
         let (name, written_ty) = (written.name.clone(), written.ty);
         // Parameters outlive the function, so `None`.
         let decl = if info.is_param { None } else { self.local_ctx.get(&root).map(|&(c, _)| c) };
-        for i in (0..self.ctxs.len()).filter(|&i| r & bit(i) != 0) {
-            let (ok, msg, help) = match &self.ctxs[i] {
-                Ctx::Function => (
-                    self.is_main() || decl.is_some(),
-                    format!("this memory is in the caller's current arena, which may not live as long as `{name}`"),
-                    self.caller_memory_help(&name, written_ty),
-                ),
-                Ctx::Scoped => (
-                    decl.is_some_and(|d| d >= i),
-                    format!("this memory is freed at the end of the `arena {{ }}` block, but `{name}` lives longer"),
-                    "build it outside the block, or store it in a variable declared inside".to_string(),
-                ),
-                Ctx::Scratch(callee) => (
-                    decl.is_some_and(|d| d >= i),
-                    format!("this memory is freed when the call to `{callee}` returns, but `{name}` lives longer"),
-                    "build it before the call, or store it in a variable declared inside the argument".to_string(),
-                ),
-                Ctx::Owned(p) => {
-                    let owner = self.path_name(p);
-                    (
-                        decl.is_some_and(|d| d >= i) || path.as_ref().is_some_and(|t| t.starts_with(p)),
-                        format!("this memory belongs to `{owner}`, but `{name}` isn't part of `{owner}`"),
-                        format!("store it inside `{owner}`, or in a variable declared in this `in` block"),
-                    )
-                }
-            };
-            if !ok {
-                return self.error_help(value.span, msg, help);
-            }
+        Some(StoreTarget { root, path, decl, name, written_ty })
+    }
+
+    /// Whether memory of context `i` may be stored into `t`. The one test for a store written
+    /// here and for a store a called function makes into its `var` parameter (see `call_stores`).
+    pub(super) fn ctx_holds(&self, i: usize, t: &StoreTarget) -> bool {
+        match &self.ctxs[i] {
+            Ctx::Function => self.is_main() || t.decl.is_some(),
+            Ctx::Scoped | Ctx::Scratch(_) => t.decl.is_some_and(|d| d >= i),
+            Ctx::Owned(p) => t.decl.is_some_and(|d| d >= i) || t.path.as_ref().is_some_and(|path| path.starts_with(p)),
         }
     }
 

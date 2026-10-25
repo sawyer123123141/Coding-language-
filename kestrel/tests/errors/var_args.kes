@@ -13,3 +13,24 @@ main() {
     two(var a, var a)
     bump(var a, var a)
 }
+
+struct Holder {
+    mem: Arena = Arena()
+    s: string = ""
+}
+
+swap_out(var h: Holder, v: string) {
+    h = Holder()
+    print(v)
+}
+
+parts() {
+    var h = Holder()
+    var other = Holder()
+    let n = 1
+    swap_out(var h, h.s)
+    swap_out(var h, if n > 0 { h.s } else { "" })
+    swap_out(var h, other.s)
+}
+// error 31: `h` is passed as `var` and also used in another argument of the same call
+// error 32: `h` is passed as `var` and also used in another argument of the same call

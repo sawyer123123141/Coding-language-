@@ -130,7 +130,7 @@ fn a_constant_can_not_call_a_generic_function() {
 
 #[test]
 fn type_calls_as_statements() {
-    let decls = "struct Stack[T] {\n    items: list[T] = []\n    push(var self, v: T) { }\n}\nfill[T](var s: Stack[T], a: T, b: T) {\n    s.push(a)\n    s.push(b)\n}\npure size[T](xs: list[T]) -> int { xs.len }\n";
+    let decls = "struct Stack[T] {\n    items: list[T] = []\n    push(var self, v: T) { self.items.add(v) }\n}\nfill[T](var s: Stack[T], a: T, b: T) {\n    s.push(a)\n    s.push(b)\n}\npure size[T](xs: list[T]) -> int { xs.len }\n";
     clean(&format!("{decls}main() {{\n    var s = Stack[int]()\n    fill[int](var s, 1, 2)\n}}\n"));
     assert_eq!(
         errors(&format!("{decls}main() {{\n    var s = Stack[int]()\n    size[int](s.items)\n}}\n")),

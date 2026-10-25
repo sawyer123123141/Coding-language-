@@ -51,6 +51,7 @@ impl<'a> BodyChecker<'a> {
             return Ty::Error;
         }
         self.t.res.insert(e.id, Res::FnValue(fid));
+        self.note_fn_value(fid, e.span);
         Ty::Fn(self.t.fn_sig(fid))
     }
 

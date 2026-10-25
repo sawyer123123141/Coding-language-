@@ -8,7 +8,7 @@
 // error 26: this closure would copy all of `self`, including its function fields; copy what it needs into a local first
 // error 54: this reads `w.chunks`, whose items other iterations are changing; use the loop's item (`c`)
 // error 63: this memory is freed at the end of the `arena { }` block, but `f` lives longer
-// error 72: this memory is in the caller's current arena, which may not live as long as `keep`
+// error 83: `store_into` stores memory in `k` that is freed at the end of the `arena { }` block, but `k` lives longer
 struct Pool {
     mem: Arena = Arena()
     size: int = 0
@@ -77,3 +77,9 @@ bump(var x: int) { x += 1 }
 take(p: Pool) { }
 
 main() { }
+keeps() {
+    var k = Keep()
+    arena {
+        store_into(var k, 2)
+    }
+}

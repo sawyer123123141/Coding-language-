@@ -1,7 +1,7 @@
 // error 12: `a` was moved earlier, so it can't be used here
 // error 15: this memory is freed at the end of the `arena { }` block, but `xs` lives longer
 // error 17: an `Arena` can't be replaced: values that point into it would be left dangling
-// error 20: this memory is in the caller's current arena, which may not live as long as `c`
+// error 25: `fill` stores memory in `c` that is freed at the end of the `arena { }` block, but `c` lives longer
 struct Chunk {
     mem: Arena = Arena()
     heights: [int] = []
@@ -18,4 +18,10 @@ main() {
 }
 fill(var c: Chunk) {
     c.heights = [1, 2]
+}
+refill() {
+    var c = Chunk()
+    arena {
+        fill(var c)
+    }
 }

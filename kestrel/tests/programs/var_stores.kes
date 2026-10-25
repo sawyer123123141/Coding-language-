@@ -1,0 +1,78 @@
+struct Names {
+    items: list[string] = []
+    push(var self, v: string) { self.items.add(v) }
+    pure tag(var self, v: string) { self.items.add("{v}!") }
+}
+
+struct World {
+    mem: Arena = Arena()
+    names: Names = Names()
+}
+
+interface Shelf {
+    put(var self, v: string)
+}
+
+struct Box: Shelf {
+    items: list[string] = []
+    put(var self, v: string) { self.items.add(v) }
+}
+
+append(var s: string, n: int) { s += " {n}" }
+
+swap_names(var a: string, var b: string) {
+    let t = a
+    a = b
+    b = t
+}
+
+fill(var ns: Names, n: int) {
+    for i from 0 to n { ns.push("n{i}") }
+}
+
+fill_twice(var ns: Names) {
+    fill(var ns, 2)
+    fill(var ns, 1)
+}
+
+tag_all(var groups: list[Names]) {
+    par for ns in groups { ns.tag("t") }
+}
+
+fill_shelf(var s: Shelf) { s.put("a") }
+
+main() {
+    var ns = Names()
+    ns.push("a")
+    fill_twice(var ns)
+    print(ns.items)
+    var s = "x"
+    append(var s, 1)
+    var other = "y"
+    swap_names(var s, var other)
+    print(s, other)
+    var w = World()
+    in w.mem {
+        fill(var w.names, 2)
+    }
+    print(w.names.items)
+    arena {
+        var local = Names()
+        fill(var local, 1)
+        print(local.items)
+    }
+    var groups: list[Names] = [Names(), Names()]
+    tag_all(var groups)
+    print(groups[0].items, groups[1].items.len)
+    var b = Box()
+    fill_shelf(var b)
+    var sh: Shelf = Box()
+    sh.put("q")
+    print(b.items)
+}
+// expect: ["a", "n0", "n1", "n0"]
+// expect: y x 1
+// expect: ["n0", "n1"]
+// expect: ["n0"]
+// expect: ["t!"] 1
+// expect: ["a"]

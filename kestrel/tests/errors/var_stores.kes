@@ -1,0 +1,68 @@
+interface Shelf {
+    put(var self, v: string)
+}
+struct Box: Shelf {
+    items: list[string] = []
+    put(var self, v: string) { self.items.add(v) }
+}
+struct Cell[T] {
+    v: T
+}
+struct Bin {
+    mem: Arena = Arena()
+    names: list[string] = []
+}
+keep_name(var names: list[string], v: string) { names.add(v) }
+relay(var names: list[string]) { keep_name(var names, "r") }
+relay_twice(var names: list[string]) { relay(var names) }
+ping(var names: list[string], n: int) {
+    if n > 0 { pong(var names, n - 1) }
+}
+pong(var names: list[string], n: int) {
+    names.add("p{n}")
+    ping(var names, n)
+}
+fill_shelf(var s: Shelf) { s.put("a") }
+fill_any[T: Shelf](var x: T) { x.put("a") }
+set_cell[T](var c: Cell[T], v: T) { c.v = v }
+overwrite[T](var a: T, b: T) { a = b }
+overwrite_shelf[T: Shelf](var a: T, b: T) { a = b }
+main() {
+    var names: list[string] = []
+    var b = Box()
+    var sh: Shelf = Box()
+    var c = Cell[string](v: "x")
+    arena {
+        keep_name(var names, "a")
+        relay_twice(var names)
+        ping(var names, 3)
+        fill_shelf(var b)
+        sh.put("x")
+        fill_any[Box](var b)
+        set_cell[string](var c, "y")
+    }
+    var bin = Bin()
+    var other: list[string] = []
+    in bin.mem {
+        keep_name(var bin.names, "kept")
+        keep_name(var other, "lost")
+    }
+    let f = keep_name
+    let g = set_cell[string]
+    let h = (var xs: list[string], v: string) { xs.add(v) }
+    let k = (var xs: list[string]) { keep_name(var xs, "k") }
+}
+// error 28: can't replace `a`: it may be the caller's a different type; change it through its methods
+// error 29: can't replace `a`: it may be the caller's `Box`; change it through its methods
+// error 36: `keep_name` stores memory in `names` that is freed at the end of the `arena { }` block, but `names` lives longer
+// error 37: `relay_twice` stores memory in `names` that is freed at the end of the `arena { }` block, but `names` lives longer
+// error 38: `ping` stores memory in `names` that is freed at the end of the `arena { }` block, but `names` lives longer
+// error 39: `fill_shelf` stores memory in `b` that is freed at the end of the `arena { }` block, but `b` lives longer
+// error 40: `Shelf.put` stores memory in `sh` that is freed at the end of the `arena { }` block, but `sh` lives longer
+// error 41: `fill_any` stores memory in `b` that is freed at the end of the `arena { }` block, but `b` lives longer
+// error 42: `set_cell` stores memory in `c` that is freed at the end of the `arena { }` block, but `c` lives longer
+// error 48: `keep_name` stores memory in `other` that belongs to `bin`, but `other` isn't part of `bin`
+// error 50: `keep_name` stores memory from the caller's current arena in its `var` parameter `names`, so it can't be used as a value; call it by name instead
+// error 51: `set_cell` stores memory from the caller's current arena in its `var` parameter `c`, so it can't be used as a value; call it by name instead
+// error 52: this memory is in the caller's current arena, which may not live as long as `xs`
+// error 53: `keep_name` stores memory in `xs` that is in the caller's current arena, which may not live as long as `xs`

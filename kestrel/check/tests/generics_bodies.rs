@@ -87,9 +87,8 @@ fn a_placeholder_is_lent_to_its_rule() {
 fn methods_on_instances_are_substituted() {
     let decl = "struct Stack[T] {\n    items: list[T] = []\n    push(var self, v: T) { self.items.add(v) }\n    pure size(self) -> int { self.items.len }\n    pure twice(self) -> int { self.size() * 2 }\n}\n";
     let (p, t, errs) = run(&format!("{decl}f(var s: Stack[int]) {{ s.push(3) }}\nmain() {{}}\n"));
-    // R4: a `T` may be a `string`, so `push` storing its parameter in `self` gets the arena
-    // message a `string` gets (nothing else is wrong: `size`, `twice` and the call are fine).
-    assert_eq!(errs, ["this memory is in the caller's current arena, which may not live as long as `self`"]);
+    // `push` storing its parameter in `self` is checked at each call (P38), and `f` passes it on.
+    assert!(errs.is_empty(), "{errs:?}");
     let push = the(&p, "(.call s push 3)");
     let args = t.generic.type_args[&push];
     assert_eq!(t.ty_list(args), [Ty::Int]);
@@ -101,8 +100,7 @@ fn methods_on_instances_are_substituted() {
     assert_eq!(args.len(), 1);
     assert!(matches!(args[0], Ty::Param(_)) && t.ty_name(args[0]) == "T", "{args:?}");
     // A wrong argument is judged against the substituted parameter.
-    let (_, _, mut errs) = run(&format!("{decl}g(var s: Stack[int]) {{ s.push(\"x\") }}\nmain() {{}}\n"));
-    errs.retain(|e| !e.starts_with("this memory is in the caller's current arena"));
+    let (_, _, errs) = run(&format!("{decl}g(var s: Stack[int]) {{ s.push(\"x\") }}\nmain() {{}}\n"));
     assert_eq!(errs, ["expected int, found string"]);
 }
 

@@ -2,6 +2,7 @@ mod args;
 mod assume;
 mod builtins;
 mod call;
+mod call_stores;
 mod captures;
 mod closure;
 mod closure_result;

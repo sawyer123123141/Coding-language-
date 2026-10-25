@@ -15,7 +15,7 @@
 // error 122: `Pool` owns an `Arena`, so it can't be stored as a `Damageable`; keep it in a `list[Pool]`
 // error 123: `Pool()` owns an `Arena`; store it in a `let` first, then pass it
 // error 131: this memory is freed at the end of the `arena { }` block, but `keep` lives longer
-// error 136: this memory is in the caller's current arena, which may not live as long as `h`
+// error 147: `param_store` stores memory in `h` that is freed at the end of the `arena { }` block, but `h` lives longer
 // error 140: expected Drawable, found Damageable
 interface Damageable {
     hit(var self, n: int)
@@ -141,3 +141,9 @@ other_interface(d: Damageable) {
 }
 
 main() { }
+holds() {
+    var h = Holder(d: Goblin())
+    arena {
+        param_store(var h)
+    }
+}

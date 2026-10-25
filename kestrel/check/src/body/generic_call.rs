@@ -79,6 +79,7 @@ impl<'a> BodyChecker<'a> {
             let Some(list) = self.written_types(owner, name, *name_span, type_args) else { return Ty::Error };
             self.t.generic.type_args.insert(e.id, list);
             self.t.res.insert(e.id, Res::FnValue(fid));
+            self.note_fn_value(fid, e.span);
             let sig = self.t.subst_sig(self.t.fn_sig(fid), Subst { owner, args: list });
             return Ty::Fn(sig);
         }
