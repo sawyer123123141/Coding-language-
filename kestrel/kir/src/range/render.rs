@@ -78,8 +78,8 @@ fn summary_text(f: &FuncReport) -> String {
     format!("{checks}, {}{fails}", count_text(f.allocations(), "allocation", "allocations"))
 }
 
-/// The label of an item's kind.
-fn label(kind: ItemKind) -> &'static str {
+/// The label of an item's kind, as the report prints it: "bounds check", "allocation".
+pub fn label(kind: ItemKind) -> &'static str {
     match kind {
         ItemKind::Check(CheckKind::Overflow) => "overflow check",
         ItemKind::Check(CheckKind::Shift) => "shift check",

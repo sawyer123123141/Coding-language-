@@ -1,0 +1,64 @@
+{
+  "name": "kestrel",
+  "displayName": "Kestrel",
+  "description": "Kestrel language support: highlighting, errors as you type, hover, go to definition, and the cost lens.",
+  "version": "0.1.0",
+  "publisher": "kestrel-local",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.82.0"
+  },
+  "categories": ["Programming Languages"],
+  "main": "./extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "languages": [
+      {
+        "id": "kestrel",
+        "aliases": ["Kestrel", "kestrel"],
+        "extensions": [".kes"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "kestrel",
+        "scopeName": "source.kestrel",
+        "path": "./syntaxes/kestrel.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Kestrel",
+      "properties": {
+        "kestrel.server.path": {
+          "type": "string",
+          "default": "",
+          "description": "The kestrel-lsp executable. Empty: kestrel-lsp on PATH, else the one built in this repository (target/release, then target/debug)."
+        },
+        "kestrel.costLens.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show every check, allocation and other way to fail that the compiler leaves in, and why (what `kestrel check --report` says), on each line. Runs when a file is opened or saved."
+        },
+        "kestrel.costLens.build": {
+          "type": "string",
+          "enum": ["checked", "release"],
+          "enumDescriptions": ["The checks of `kestrel run` (overflow checks included).", "The checks of `--release`."],
+          "default": "checked",
+          "description": "Which build's checks the cost lens shows."
+        },
+        "kestrel.costLens.show": {
+          "type": "string",
+          "enum": ["hints", "diagnostics", "both"],
+          "enumDescriptions": ["A hint at the end of the line.", "An Information diagnostic on the line (also listed in Problems).", "Both."],
+          "default": "hints",
+          "description": "How the cost lens shows what it found."
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

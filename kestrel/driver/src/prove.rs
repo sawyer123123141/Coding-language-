@@ -18,6 +18,8 @@ pub struct Proved {
     pub ok: bool,
     /// Its diagnostics, rendered (empty when there are none).
     pub text: String,
+    /// The same diagnostics, with spans in the program's shared span space (see `Compiled::sources`).
+    pub diags: Vec<Diagnostic>,
     /// The analysis of the module, when it was analysed: `kestrel check --report` reuses it.
     pub analysis: Option<Analysis>,
 }
@@ -28,7 +30,7 @@ pub struct Proved {
 pub fn prove(c: &mut Compiled, checked: bool, warn: bool, style: DiagStyle) -> Proved {
     let warn = warn && !c.module.assumptions.is_empty();
     if c.module.contracts.is_empty() && !warn {
-        return Proved { ok: true, text: String::new(), analysis: None };
+        return Proved { ok: true, text: String::new(), diags: Vec::new(), analysis: None };
     }
     let arith = Arith::of(checked);
     // Copied before the analysis marks the module.
@@ -49,7 +51,7 @@ pub fn prove(c: &mut Compiled, checked: bool, warn: bool, style: DiagStyle) -> P
     }
     let text = if diags.is_empty() { String::new() } else { report(&c.sources, &diags, style) };
     let ok = !diags.iter().any(Diagnostic::is_error);
-    Proved { ok, text, analysis: Some(analysis) }
+    Proved { ok, text, diags, analysis: Some(analysis) }
 }
 
 /// A warning for each assumption that every analysed copy of it, in every analysis, used without
