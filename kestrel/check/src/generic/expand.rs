@@ -1,24 +1,32 @@
-//! The type expansion check (G10, `collect` phase 4): a generic struct or enum whose fields need
-//! ever bigger copies of it (`struct Tree[T] { kids: list[Tree[list[T]]] }`) would need endless
-//! copies. It is Go's "instantiation cycle" check (`types2/monomorph.go`): a node per placeholder;
-//! each instance `G[args]` written in a declaration's fields adds an edge from every placeholder in
-//! `args[i]` to `G`'s placeholder `i`, growing unless `args[i]` is exactly that placeholder; a
-//! strongly connected component with a growing edge inside is endless.
+//! The expansion checks (G10): a generic that would need endless copies of itself.
 //!
-//! Such a declaration is reported once per cycle, at its first declaration in source order, and
-//! every declaration of the cycle goes into `generic.endless` before the pending instances are
-//! filled, so filling them (fields `Error`) ends (P9). The function graph (Task 5) reuses `Graph`.
+//! Both are Go's "instantiation cycle" check (`types2/monomorph.go`): a node per placeholder; each
+//! use `G[args]` adds an edge from every placeholder in `args[i]` to `G`'s placeholder `i`, growing
+//! unless `args[i]` is exactly that placeholder; a strongly connected component with a growing
+//! edge inside is endless.
+//! - The type check (`collect` phase 4) looks at the instances written in generic structs' and
+//!   enums' fields (`struct Tree[T] { kids: list[Tree[list[T]]] }`).
+//! - The function check (the collection pass, before its walk) looks at the `type_args` of calls,
+//!   function values and method calls in generic functions and methods (`deeper[T]` calling
+//!   `deeper[list[T]]`). Constructions and variants are not edges (P24): growth through them is
+//!   the collection walk's cap's to find, and rule calls (`ParamCall`) add nothing either.
+//!
+//! A cycle is reported once, at its first declaration in source order, and every declaration of
+//! the cycle goes into `generic.endless`: for types before the pending instances are filled, so
+//! filling them (fields `Error`) ends; for functions the walk then doesn't run (P9).
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use kestrel_syntax::ast::Program;
+use kestrel_syntax::visit::each_expr;
 use kestrel_syntax::Diagnostic;
 
 use crate::generic::graph::Graph;
 use crate::generic::{GenericOwner, ParamId};
-use crate::tables::{EnumId, StructId, Tables};
+use crate::tables::{EnumId, FnId, Res, StructId, Tables};
 use crate::ty::Ty;
 
-/// An instance written in a declaration's fields: `G[args]` inside `from`.
+/// A use `G[args]` inside `from`: an instance written in its fields, or a call in its body.
 struct Site {
     from: GenericOwner,
     to: GenericOwner,
@@ -47,16 +55,61 @@ pub(crate) fn check_type_expansion(t: &mut Tables, diags: &mut Vec<Diagnostic>) 
             }
         }
     }
+    report(t, &graph, &sites, Verb::Holds, diags);
+}
+
+/// The collection pass's first step: reports generic functions and methods whose calls need ever
+/// bigger copies (`deeper[T]` calls `deeper[list[T]]`) and marks them `endless`. Returns whether
+/// it reported, in which case the walk doesn't run (P9).
+pub(crate) fn check_fn_expansion(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnostic>) -> bool {
+    let mut graph = Graph::default();
+    let mut sites: Vec<Site> = Vec::new();
+    for f in 0..t.fns.len() {
+        let info = t.func(FnId(f as u32));
+        let Some(from) = info.generic else { continue };
+        if info.copy.is_some() || info.is_abstract || info.is_native {
+            continue;
+        }
+        let mut ids = Vec::new();
+        each_expr(&info.decl(program).body, &mut |e| ids.push(e.id));
+        for id in ids {
+            let (Some(Res::Fn(callee) | Res::FnValue(callee)), Some(&args)) = (t.res.get(&id).copied(), t.generic.type_args.get(&id)) else {
+                continue;
+            };
+            let Some(to) = t.func(callee).generic else { continue };
+            add_site(t, from, to, t.ty_list(args).to_vec(), &mut graph, &mut sites);
+        }
+    }
+    report(t, &graph, &sites, Verb::Calls, diags)
+}
+
+/// How a message says one use leads to the next.
+#[derive(Clone, Copy)]
+enum Verb {
+    Holds,
+    Calls,
+}
+
+/// Reports each growing cycle at its first declaration and marks every declaration in it
+/// `endless`; returns whether any was reported.
+fn report(t: &mut Tables, graph: &Graph, sites: &[Site], verb: Verb, diags: &mut Vec<Diagnostic>) -> bool {
     let mut reported: HashSet<GenericOwner> = HashSet::new();
+    let mut any = false;
     for cycle in graph.growing_cycles() {
         let owners: HashSet<GenericOwner> = cycle.iter().map(|&p| t.generic.param(p).owner).collect();
-        let first = *owners.iter().min_by_key(|&&o| (decl_item(t, o), owner_key(o))).expect("a cycle has placeholders");
+        let first = *owners.iter().min_by_key(|&&o| (t.owner_item(o), owner_key(o))).expect("a cycle has placeholders");
         if reported.insert(first) {
-            let (msg, help) = message(t, first, &cycle, &owners, &graph, &sites);
-            diags.push(Diagnostic::error(decl_span(t, first), msg).with_help(help));
+            let (msg, help) = message(t, first, &cycle, &owners, graph, sites, verb);
+            let d = Diagnostic::error(t.owner_span(first), msg);
+            diags.push(match help {
+                Some(help) => d.with_help(help),
+                None => d,
+            });
+            any = true;
         }
         t.generic.endless.extend(owners);
     }
+    any
 }
 
 /// Adds the edges of every instance in `ty` (a field type of declaration `from`), arguments included.
@@ -87,19 +140,25 @@ fn walk(t: &Tables, ty: Ty, from: GenericOwner, graph: &mut Graph, sites: &mut V
     if args.is_empty() {
         return;
     }
-    let site = sites.len();
-    let targets = t.owner_params(to).to_vec();
-    for (i, &a) in args.iter().enumerate() {
-        let mut found = Vec::new();
-        placeholders(t, a, &mut found);
-        for p in found {
-            graph.add(p, targets[i], a != Ty::Param(p), site);
-        }
-    }
-    sites.push(Site { from, to, args: args.clone() });
+    add_site(t, from, to, args.clone(), graph, sites);
     for a in args {
         walk(t, a, from, graph, sites);
     }
+}
+
+/// Records the use `to[args]` inside `from`: an edge from each placeholder in `args[i]` to `to`'s
+/// placeholder `i`, growing unless `args[i]` is that placeholder itself.
+fn add_site(t: &Tables, from: GenericOwner, to: GenericOwner, args: Vec<Ty>, graph: &mut Graph, sites: &mut Vec<Site>) {
+    let site = sites.len();
+    let targets = t.owner_params(to).to_vec();
+    for (&a, &target) in args.iter().zip(&targets) {
+        let mut found = Vec::new();
+        placeholders(t, a, &mut found);
+        for p in found {
+            graph.add(p, target, a != Ty::Param(p), site);
+        }
+    }
+    sites.push(Site { from, to, args });
 }
 
 /// Every placeholder in `ty` (an instance's through its arguments; a declaration's own).
@@ -128,15 +187,7 @@ fn placeholders(t: &Tables, ty: Ty, found: &mut Vec<ParamId>) {
     }
 }
 
-fn decl_item(t: &Tables, o: GenericOwner) -> usize {
-    match o {
-        GenericOwner::Struct(s) => t.strukt(s).item,
-        GenericOwner::Enum(e) => t.enm(e).item,
-        GenericOwner::Fn(f) => t.func(f).item,
-    }
-}
-
-/// A tie-break for `decl_item` (never needed between items, which differ).
+/// A tie-break for `owner_item` (never needed between items, which differ).
 fn owner_key(o: GenericOwner) -> (u8, u32) {
     match o {
         GenericOwner::Struct(s) => (0, s.0),
@@ -145,25 +196,9 @@ fn owner_key(o: GenericOwner) -> (u8, u32) {
     }
 }
 
-fn decl_span(t: &Tables, o: GenericOwner) -> kestrel_syntax::Span {
-    match o {
-        GenericOwner::Struct(s) => t.strukt(s).span,
-        GenericOwner::Enum(e) => t.enm(e).span,
-        GenericOwner::Fn(f) => t.func(f).span,
-    }
-}
-
-fn decl_name(t: &Tables, o: GenericOwner) -> String {
-    match o {
-        GenericOwner::Struct(s) => t.strukt(s).name.clone(),
-        GenericOwner::Enum(e) => t.enm(e).name.clone(),
-        GenericOwner::Fn(f) => t.func(f).name.clone(),
-    }
-}
-
-/// The error and its help for a cycle reported at `first`: the chain made by following a cycle
-/// of written instances from `first` back to it twice (`Tree[T]` holds a `Tree[list[T]]`, which
-/// holds a `Tree[list[list[T]]]`).
+/// The error (and, for a type, its help) for a cycle reported at `first`: the chain made by
+/// following a cycle of uses from `first` back to it twice (`Tree[T]` holds a `Tree[list[T]]`,
+/// which holds a `Tree[list[list[T]]]`; `deeper[T]` calls `deeper[list[T]]`, which calls ...).
 fn message(
     t: &Tables,
     first: GenericOwner,
@@ -171,21 +206,22 @@ fn message(
     owners: &HashSet<GenericOwner>,
     graph: &Graph,
     sites: &[Site],
-) -> (String, String) {
-    let name = decl_name(t, first);
+    verb: Verb,
+) -> (String, Option<String>) {
+    let name = t.owner_name(first).to_string();
     let own: Vec<String> = t.owner_params(first).iter().map(|&p| t.param_name(p).to_string()).collect();
     let written = |args: &[String]| format!("{name}[{}]", args.join(", "));
-    let help = format!("use the same placeholders (`{}`), or types that don't grow", written(&own));
     let path = cycle_path(first, cycle, owners, graph, sites);
     let once = compose(t, &path, sites, own.clone());
     let twice = compose(t, &path, sites, once.clone());
-    let msg = format!(
-        "`{name}` would need endless copies: `{}` holds a `{}`, which holds a `{}`, and so on",
-        written(&own),
-        written(&once),
-        written(&twice)
-    );
-    (msg, help)
+    let (own, once, twice) = (written(&own), written(&once), written(&twice));
+    match verb {
+        Verb::Holds => (
+            format!("`{name}` would need endless copies: `{own}` holds a `{once}`, which holds a `{twice}`, and so on"),
+            Some(format!("use the same placeholders (`{own}`), or types that don't grow")),
+        ),
+        Verb::Calls => (format!("`{name}` would need endless copies: `{own}` calls `{once}`, which calls `{twice}`, and so on"), None),
+    }
 }
 
 /// Sites leading from `first` through a growing site of the cycle and back to `first`, each

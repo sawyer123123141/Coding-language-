@@ -14,6 +14,8 @@ use kestrel_syntax::Span;
 use crate::tables::{EnumId, FnId, IfaceId, StructId, Tables};
 use crate::ty::Ty;
 
+pub(crate) mod copies;
+mod copies_cap;
 pub(crate) mod declare;
 pub(crate) mod expand;
 pub(crate) mod graph;
@@ -133,6 +135,33 @@ impl Tables {
             GenericOwner::Struct(s) => &self.strukt(s).params,
             GenericOwner::Enum(e) => &self.enm(e).params,
             GenericOwner::Fn(f) => &self.func(f).type_params,
+        }
+    }
+
+    /// A generic owner's name as messages write it (`Stack`, `best`, `Stack.push`).
+    pub(crate) fn owner_name(&self, owner: GenericOwner) -> &str {
+        match owner {
+            GenericOwner::Struct(s) => &self.strukt(s).name,
+            GenericOwner::Enum(e) => &self.enm(e).name,
+            GenericOwner::Fn(f) => &self.func(f).name,
+        }
+    }
+
+    /// Where a generic owner is declared (its name).
+    pub(crate) fn owner_span(&self, owner: GenericOwner) -> Span {
+        match owner {
+            GenericOwner::Struct(s) => self.strukt(s).span,
+            GenericOwner::Enum(e) => self.enm(e).span,
+            GenericOwner::Fn(f) => self.func(f).span,
+        }
+    }
+
+    /// A generic owner's index in `Program::items` (a method's is its type's).
+    pub(crate) fn owner_item(&self, owner: GenericOwner) -> usize {
+        match owner {
+            GenericOwner::Struct(s) => self.strukt(s).item,
+            GenericOwner::Enum(e) => self.enm(e).item,
+            GenericOwner::Fn(f) => self.func(f).item,
         }
     }
 

@@ -75,5 +75,10 @@ pub fn check_keeping_tables(program: &Program, needs_main: bool) -> (Tables, Vec
     // Stores into `var` parameters are judged at their calls once every body has been read (P38).
     var_stores::resolve(&mut t, &mut diags);
     collect_ty::check_map_values(&t, &mut diags);
+    // Every copy of every generic, made only from a clean check (instances R3 refused, or a
+    // declaration found endless, never reach it); the tables are frozen after it (R2, R6).
+    if !diags.iter().any(|d| d.is_error()) {
+        generic::copies::collect_copies(program, &mut t, &mut diags);
+    }
     (t, diags)
 }

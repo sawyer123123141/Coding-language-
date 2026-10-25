@@ -1,0 +1,11 @@
+struct S[T] {
+    f: pure () -> int = () {
+        let inner = S[list[T]]()
+        1
+    }
+}
+main() {
+    let s = S[int]()
+    print(s.f())
+}
+// error 1: making copies of `S` doesn't end: `S[int]` needs `S[list[int]]`, and so on (stopped after 32 levels)

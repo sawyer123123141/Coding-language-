@@ -88,11 +88,7 @@ impl Tables {
         diags: &mut Vec<Diagnostic>,
     ) -> bool {
         let params = self.owner_params(owner).to_vec();
-        let generic = match owner {
-            GenericOwner::Struct(s) => self.strukt(s).name.clone(),
-            GenericOwner::Enum(e) => self.enm(e).name.clone(),
-            GenericOwner::Fn(f) => self.func(f).name.clone(),
-        };
+        let generic = self.owner_name(owner).to_string();
         let mut refused = false;
         for ((&arg, &param), &at) in tys.iter().zip(&params).zip(spans) {
             if let Some(queue) = &mut self.generic.queued_args {

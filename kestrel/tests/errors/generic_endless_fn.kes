@@ -1,0 +1,7 @@
+pure deeper[T](x: T, n: int) -> int {
+    if n == 0 { return 0 }
+    let xs: list[T] = [x]
+    deeper(xs, n - 1)
+}
+main() {}
+// error 1: `deeper` would need endless copies: `deeper[T]` calls `deeper[list[T]]`, which calls `deeper[list[list[T]]]`, and so on

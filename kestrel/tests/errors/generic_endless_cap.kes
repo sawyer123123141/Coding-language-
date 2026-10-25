@@ -1,0 +1,12 @@
+interface Grow {
+    pure grow(self) -> int
+}
+struct Box[T]: Grow {
+    v: T
+    pure grow(self) -> int { walk(Box[Box[T]](v: self)) }
+}
+pure walk[T: Grow](x: T) -> int { x.grow() }
+main() {
+    print(walk(Box(v: 1)))
+}
+// error 8: making copies of `walk` doesn't end: `walk[Box[int]]` needs `walk[Box[Box[int]]]`, and so on (stopped after 32 levels)
