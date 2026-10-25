@@ -200,9 +200,27 @@ pub struct Module {
     pub assumptions: Vec<AssumeInfo>,
     /// Each function, method or loop with a `@prove`, by the id its `Stmt::Prove` blocks give it.
     pub contracts: Vec<ContractSite>,
+    /// What each copy of a generic function or method was made from, by the copy's function.
+    pub copies: HashMap<FuncIdx, CopyNote>,
+    /// The generic functions and methods that have no copy, by name and packed lines (see
+    /// `Func::lines`): nothing was checked in them.
+    pub uncopied: Vec<(String, (u32, u32))>,
     /// The build range analysis marked the module for, in place (`range::remove_checks` or
     /// `mark_proven`); `None` until then. Codegen compiles an analysed module as it is.
     pub analysed: Option<crate::range::Arith>,
+}
+
+/// What a copy of a generic was made for (see `Module::copies`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CopyNote {
+    /// The generic's plain name: `best` or `Stack.push`.
+    pub generic: String,
+    /// What made it: `Stack[string]` for a copy of a method, the copy's own name (`best[Enemy]`)
+    /// for a copy of a function.
+    pub made_by: String,
+    /// The packed line (see `pack_line`) of the first place in the program's own code that led to
+    /// the copy.
+    pub made_at: u32,
 }
 
 /// An `@assume` condition as written: for its run-time error and the report.

@@ -5,6 +5,7 @@ mod closure;
 mod collections;
 mod compare;
 mod consts;
+mod copies;
 mod env;
 mod expr;
 mod fnvalue;
@@ -68,6 +69,7 @@ pub fn lower(program: &Program, t: &Tables, lines: &LineIndex) -> Module {
     let tables = helpers.ifaces.tables;
     let assumptions = helpers.assumptions;
     let contracts = helpers.proves.sites;
+    let (copies, uncopied) = (copies::notes(t, lines), copies::uncopied(program, t, lines));
     let m = Module {
         funcs,
         structs,
@@ -83,6 +85,8 @@ pub fn lower(program: &Program, t: &Tables, lines: &LineIndex) -> Module {
         not_inlined: Vec::new(),
         assumptions,
         contracts,
+        copies,
+        uncopied,
         analysed: None,
     };
     // Stack environments live only as long as the call they are passed to.

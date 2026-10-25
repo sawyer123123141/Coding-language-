@@ -91,6 +91,8 @@ fn module() -> Module {
         not_inlined: Vec::new(),
         assumptions: Vec::new(),
         contracts: Vec::new(),
+        copies: HashMap::new(),
+        uncopied: Vec::new(),
         analysed: None,
     }
 }

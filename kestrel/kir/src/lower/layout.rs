@@ -116,7 +116,21 @@ impl Layouts<'_> {
     }
 }
 
-/// A type's name as printed: without the module it came from (`geom.Point` prints as `Point`).
+/// A type's name as printed: without the module it came from (`geom.Point` prints as `Point`),
+/// and for an instance the same for each type argument (`geom.Stack[geom.Item]` prints as
+/// `Stack[Item]`, G17). Each run of name characters keeps what follows its last `.`.
 fn shown(name: &str) -> String {
-    name.rsplit('.').next().unwrap_or(name).to_string()
+    let mut out = String::with_capacity(name.len());
+    let mut word = String::new();
+    for c in name.chars() {
+        if c.is_alphanumeric() || c == '_' || c == '.' {
+            word.push(c);
+        } else {
+            out.push_str(word.rsplit('.').next().unwrap_or_default());
+            word.clear();
+            out.push(c);
+        }
+    }
+    out.push_str(word.rsplit('.').next().unwrap_or_default());
+    out
 }

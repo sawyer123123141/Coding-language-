@@ -33,3 +33,24 @@ pub fn lower(path: &Path, src: &str, needs_main: bool, read: Read, checked: bool
     };
     Some(Lowered { sources: c.sources().to_vec(), diags: proved.diags, lens })
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::lower;
+
+    #[test]
+    fn two_copies_of_a_generic_give_one_lens_entry_per_line() {
+        // Both copies of `total` hold the same overflow check on line 4: one entry on that line.
+        let src = "pure total[T](xs: list[T]) -> int {\n    var n = 0\n    for x in xs {\n        n += 1\n    }\n    n\n}\n\npub run(xs: list[int], ys: list[float]) -> int {\n    total(xs) + total(ys)\n}\n\nmain() {}\n";
+        let read = |_: &Path| None;
+        let lowered = lower(Path::new("lens_copies.kes"), src, true, &read, true, true).expect("compiles");
+        let mut lines: Vec<u32> = lowered.lens.iter().map(|l| l.line).collect();
+        let before = lines.len();
+        lines.dedup();
+        assert_eq!(lines.len(), before, "a line twice: {:?}", lowered.lens.iter().map(|l| l.line).collect::<Vec<_>>());
+        let on_four = lowered.lens.iter().find(|l| l.line == 3).expect("an entry on line 4");
+        assert_eq!(on_four.items.len(), 1, "{:?}", on_four.items);
+    }
+}

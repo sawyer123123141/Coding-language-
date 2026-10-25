@@ -20,6 +20,7 @@ mod par;
 mod refine;
 pub mod render;
 pub mod report;
+mod report_copies;
 pub mod show;
 pub mod sites;
 pub mod state;

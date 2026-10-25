@@ -167,13 +167,7 @@ pub fn builtin_name(function_name: &str) -> Option<&'static str> {
 /// (`geom.helper` is `helper` in `geom.kes`).
 pub fn display_name(m: &Module, g: FuncIdx) -> String {
     let f = &m.funcs[g.0 as usize];
-    if let Some((prefix, rest)) = f.name.split_once('.') {
-        let file = m.files.get(unpack_line(f.lines.0).1 as usize);
-        if file.is_some_and(|file| file.strip_suffix(".kes") == Some(prefix)) {
-            return rest.to_string();
-        }
-    }
-    f.name.clone()
+    super::report_copies::plain_name(m, &f.name, f.lines.0)
 }
 
 /// A function as a chain names it: "`spawn`", "the closure at line 8", "`filter`".
@@ -194,33 +188,7 @@ pub fn callee_name(m: &Module, g: FuncIdx) -> String {
     }
 }
 
-/// The function a line is in: the program's own functions, which don't overlap (a closure counts
-/// as part of the function around it).
-pub struct Owners {
-    /// (first line, last line, function), by first line.
-    spans: Vec<(u32, u32, FuncIdx)>,
-}
-
-impl Owners {
-    pub fn new(m: &Module) -> Self {
-        let classes = classes(m);
-        let mut spans: Vec<_> = m
-            .funcs
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| classes[*i] == Class::User)
-            .map(|(i, f)| (f.lines.0, f.lines.1, FuncIdx(i as u32)))
-            .collect();
-        spans.sort_by_key(|s| (s.0, std::cmp::Reverse(s.1)));
-        Owners { spans }
-    }
-
-    /// The function that holds `line`, if one does.
-    pub fn of(&self, line: u32) -> Option<FuncIdx> {
-        let at = self.spans.partition_point(|s| s.0 <= line);
-        self.spans[..at].iter().rev().take(4).find(|s| line <= s.1).map(|s| s.2)
-    }
-}
+pub use super::report_copies::Owners;
 
 /// Builds the report of module `m`, which `remove_checks` has just analysed (`a`) in the build
 /// mode `arith`.
@@ -231,7 +199,8 @@ pub fn build(m: &Module, a: &Analysis) -> Report {
     let summaries = summary::summarize(m, a, &events, Some(&own_checks));
     let mut cx = items::Cx::new(m, a, &classes, &events, &summaries);
     let called = called(m);
-    let made = made_closures(m);
+    let makers = super::report_copies::makers(m);
+    let made: Vec<bool> = makers.iter().map(|v| !v.is_empty()).collect();
     let owners = Owners::new(m);
     // The closures inside each user function.
     let mut closures: HashMap<usize, Vec<usize>> = HashMap::new();
@@ -240,7 +209,7 @@ pub fn build(m: &Module, a: &Analysis) -> Report {
         // (A closure whose literal is gone, inlined into its loop, is dead code: its live copy is
         // in the function that holds the loop.)
         if *class == Class::Closure && made[j] {
-            match owners.of(m.funcs[j].lines.0) {
+            match owners.closure_host(m, &classes, &makers, j) {
                 Some(o) => closures.entry(o.0 as usize).or_default().push(j),
                 None => loose.push(j),
             }
@@ -254,7 +223,10 @@ pub fn build(m: &Module, a: &Analysis) -> Report {
         }
         let mut with = vec![i];
         with.extend(closures.get(&i).into_iter().flatten().copied());
-        let never_called = !called[i] && inlined.contains(&i) && with.len() == 1;
+        // (Every copy of a generic has the same lines, so code can't be traced to one: a copy
+        // nothing refers to has been inlined everywhere.)
+        let is_copy = m.copies.contains_key(&FuncIdx(i as u32));
+        let never_called = !called[i] && (is_copy || inlined.contains(&i)) && with.len() == 1;
         let mut fr = cx.func_report(i, &with);
         if never_called {
             // Its checks are listed where it was inlined, and counted there.
@@ -338,7 +310,7 @@ fn called(m: &Module) -> Vec<bool> {
 /// appear in another function's body.
 fn inlined_into_others(m: &Module, classes: &[Class], called: &[bool], made: &[bool]) -> std::collections::HashSet<usize> {
     let mut spans: Vec<(u32, u32, usize)> = (0..m.funcs.len())
-        .filter(|&i| classes[i] == Class::User && !called[i])
+        .filter(|&i| classes[i] == Class::User && !called[i] && !m.copies.contains_key(&FuncIdx(i as u32)))
         .map(|i| (m.funcs[i].lines.0, m.funcs[i].lines.1, i))
         .collect();
     spans.sort();
@@ -392,22 +364,4 @@ fn check_ids(c: &super::FuncChecks, collapse: bool) -> Vec<u64> {
             h.finish()
         })
         .collect()
-}
-
-/// For each function, whether a closure literal (`MakeFn`) in some function names it as its code and
-/// something can call it. Inlining a literal into the loop that calls it leaves the code behind,
-/// unused: its live copy is in the function that holds the loop.
-fn made_closures(m: &Module) -> Vec<bool> {
-    let mut made = vec![false; m.funcs.len()];
-    for f in &m.funcs {
-        let unused = events::unused_makes(f);
-        walk(&f.body, &mut |n| {
-            if let Node::Expr(e @ Expr { kind: ExprKind::MakeFn { code, .. }, .. }) = n {
-                if !unused.contains(&(e as *const Expr as usize)) {
-                    made[code.0 as usize] = true;
-                }
-            }
-        });
-    }
-    made
 }

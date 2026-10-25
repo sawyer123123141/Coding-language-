@@ -6,14 +6,20 @@ use kestrel_syntax::ast::Contract;
 use super::region::{Copy, Lost};
 use crate::ir::*;
 use crate::range::report::{callee_name, display_name};
+use crate::range::report_copies::plain_name;
 use crate::range::sites::CheckKind;
 use crate::range::summary::{chain_rest, chain_text, check_words, is_builtin_body, line_ref, reason_text, Chain, Reason, Stop};
 
-/// What a site is on: "`step`", "`Goblin.area`" or "the loop at line 12".
+/// What a site is on: "`step`", "`Goblin.area`" or "the loop at line 12". A copy of a generic adds
+/// where it came from: "`Stack[string].put` (made by `Stack[string]` on line 12)".
 pub(super) fn target(m: &Module, site: &ContractSite) -> String {
-    match site.target {
-        ProveTarget::Func(f) => format!("`{}`", display_name(m, f)),
-        ProveTarget::Loop { line, .. } => format!("the loop at line {}", unpack_line(line).0),
+    let (named, func, home) = match site.target {
+        ProveTarget::Func(f) => (format!("`{}`", display_name(m, f)), f, m.funcs[f.0 as usize].lines.0),
+        ProveTarget::Loop { func, line } => (format!("the loop at line {}", unpack_line(line).0), func, line),
+    };
+    match m.copies.get(&func) {
+        Some(note) => format!("{named} (made by `{}` {})", plain_name(m, &note.made_by, home), on(m, note.made_at, unpack_line(home).1)),
+        None => named,
     }
 }
 

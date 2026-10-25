@@ -303,3 +303,59 @@ fn a_vector_sum_names_its_lanes() {
     assert!(text.contains("    line 2: overflow check: `h.x + h.y` may exceed `int` (`h.x` can be any `int`; `h.y` can be any `int`)\n"), "{text}");
     assert!(text.contains("`((h.x + h.y) + h.z) + h.w` may exceed `int`"), "{text}");
 }
+
+const COPIES: &str = "pure best[T](xs: list[T]) -> int {
+    var n = 0
+    for x in xs {
+        n += 1
+    }
+    n
+}
+
+pure spare[T](x: T) -> T { x }
+
+main() {
+    let a: list[int] = [1, 2]
+    print(best(a))
+}
+";
+
+#[test]
+fn copies_in_the_report() {
+    let dir = project("copies", &[("copies.kes", COPIES)]);
+    let out = kestrel(&["check", "--report"], &dir.join("copies.kes"));
+    assert!(out.status.success(), "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(text.contains("function `best[int]` (line 1)"), "{text}");
+    assert!(text.contains("`spare`: not checked, no copies"), "{text}");
+    assert!(!text.contains("`best`: not checked"), "{text}");
+    // `best[int]` is inlined into `main`, whose report names the generic.
+    assert!(text.contains("    loop at line 3 (in `best`)\n"), "{text}");
+}
+
+#[test]
+fn an_item_inlined_from_a_copy_names_the_generic() {
+    // `total[Goblin]` is inlined into `main`, whose loop is then listed under `main`; a copy of
+    // `total` for another type holds the same lines and must not be named in its place.
+    let src = "pure total[T](xs: list[T]) -> int {
+    var n = 0
+    for x in xs {
+        n += 1
+    }
+    n
+}
+
+pub run(xs: list[int], ys: list[float]) -> int {
+    total(xs) + total(ys) + xs[0]
+}
+
+main() {}
+";
+    let dir = project("inlined_copy", &[("inlined.kes", src)]);
+    let out = kestrel(&["check", "--report"], &dir.join("inlined.kes"));
+    assert!(out.status.success(), "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(!text.contains("(in `total["), "{text}");
+    assert!(text.contains("    loop at line 3 (in `total`)\n"), "{text}");
+    assert!(text.contains("function `total[int]` (line 1)") && text.contains("function `total[float]` (line 1)"), "{text}");
+}

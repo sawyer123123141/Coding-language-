@@ -362,3 +362,22 @@ main() {
     let on_ints = comparisons(funcs(&m, "less[int]")[0]);
     assert_eq!(on_ints[0].1.ty, KTy::I32);
 }
+
+#[test]
+fn instances_print_without_modules() {
+    // G17: an instance's print name has the declaration and each type argument without its module.
+    let geom = "pub struct Item {\n    n: int\n}\n\npub struct Stack[T] {\n    items: list[T] = []\n}\n\npub enum Maybe[T] {\n    Nothing\n    Just { value: T }\n}\n";
+    let main = "use { Item, Stack, Maybe from geom }\n\nmain() {\n    let s = Stack[Item]()\n    let t = Stack[list[Item]]()\n    let m = Maybe[Item].Just(value: Item(n: 1))\n    print(s.items.len, t.items.len)\n}\n";
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("generics_print_names");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("geom.kes"), geom).unwrap();
+    let path = dir.join("main.kes");
+    std::fs::write(&path, main).unwrap();
+    let (compiled, text) = kestrel_driver::compile_unoptimized(&path.to_string_lossy(), main, kestrel_driver::DiagStyle::Short, true);
+    let m = compiled.unwrap_or_else(|| panic!("{text}")).module;
+    let structs: Vec<&str> = m.structs.iter().map(|s| s.name.as_str()).collect();
+    assert!(structs.contains(&"Stack[Item]"), "{structs:?}");
+    assert!(structs.contains(&"Stack[list[Item]]"), "{structs:?}");
+    assert!(m.enums.iter().any(|e| e.name == "Maybe[Item]"), "{:?}", m.enums.iter().map(|e| &e.name).collect::<Vec<_>>());
+}

@@ -229,3 +229,111 @@ fn an_assumption_on_an_ivec4_lane_removes_no_check() {
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(stderr(&out), "2:5: warning: `@assume(v.x >= 0 and v.x < 10)` removes no check; delete it\n");
 }
+
+/// `Stack.put` stores an item; the contract on it holds for `int` and fails for `string`, which
+/// copying allocates. `b.put` on line 12 is what makes the `string` copy.
+const STACK_PROVE: &str = "struct Stack[T] {
+    items: list[T] = []
+
+    @prove(no_alloc)
+    put(var self, i: int, v: T) { self.items[i] = v }
+}
+
+main() {
+    var a = Stack[int](items: [1])
+    a.put(0, 2)
+    var b = Stack[string](items: [\"x\"])
+    b.put(0, \"y\")
+}
+";
+
+#[test]
+fn a_contract_is_judged_per_copy() {
+    let out = check_short("per_copy", STACK_PROVE);
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    let text = stderr(&out);
+    assert_eq!(text.matches("error:").count(), 1, "{text}");
+    let want = "`Stack[string].put` (made by `Stack[string]` on line 12) can't be proven `no_alloc`";
+    assert!(text.contains(want), "{want}\n{text}");
+    // With only the `int` lines, the one copy holds.
+    let ints: String = STACK_PROVE.lines().filter(|l| !l.contains("b.put") && !l.contains("var b")).map(|l| format!("{l}\n")).collect();
+    let out = check_short("per_copy_int", &ints);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(stderr(&out), "");
+}
+
+#[test]
+fn a_library_copy_breaks_a_program_contract() {
+    let geom = "pub struct Stack[T] {
+    items: list[T] = []
+
+    put(var self, i: int, v: T) { self.items[i] = v }
+}
+";
+    let main = "use { Stack from geom }
+
+@prove(no_alloc)
+fill(var s: Stack[string]) { s.put(0, \"y\") }
+
+main() {
+    var s = Stack[string](items: [\"x\"])
+    fill(var s)
+}
+";
+    let dir = project("library_copy", &[("geom.kes", geom), ("main.kes", main)]);
+    let out = kestrel(&["check", "--diagnostics=short"], &dir.join("main.kes"));
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    let text = stderr(&out);
+    // Reported at the contract on `fill` (line 3 of `main.kes`), and the item is in the library's
+    // copy; whatever the inliner did with `put`, the error names the line in `geom.kes`.
+    assert_eq!(text, "3:8: error: `fill` can't be proven `no_alloc`: it allocates on geom.kes:4: makes a copy of `v`\n");
+}
+
+#[test]
+fn a_generic_with_no_copies_passes() {
+    let src = "@prove(no_alloc, no_panic)\npure best[T](xs: list[T]) -> int { xs.len }\n\nmain() {}\n";
+    let out = check_short("no_copies", src);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(stderr(&out), "");
+}
+
+#[test]
+fn one_copy_fails_a_loop_contract_another_passes() {
+    // `held = x` copies a `string` (an allocation) and a plain `int` copies nothing.
+    let src = "pure keeps[T](xs: list[T], v: T) -> int {
+    var n = 0
+    var held = v
+    @prove(no_alloc)
+    for x in xs {
+        held = x
+        n += 1
+    }
+    n
+}
+
+main() {
+    let a: list[int] = [1, 2, 3]
+    let b: list[string] = [\"a\", \"b\"]
+    print(keeps(a, 0), keeps(b, \"z\"))
+}
+";
+    let out = check_short("loop_per_copy", src);
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    let text = stderr(&out);
+    assert_eq!(text.matches("error:").count(), 1, "{text}");
+    let want = "the loop at line 5 (made by `keeps[string]` on line 15) can't be proven `no_alloc`";
+    assert!(text.contains(want), "{want}\n{text}");
+    assert!(text.contains("makes a copy of `x`"), "{text}");
+}
+
+#[test]
+fn a_copy_of_a_library_contract_names_where_the_program_made_it() {
+    // The contract is the library's; the copy is made by `main.kes`, so the clause names its file.
+    let geom = "pub struct Stack[T] {\n    items: list[T] = []\n\n    @prove(no_alloc)\n    put(var self, i: int, v: T) { self.items[i] = v }\n}\n";
+    let main = "use { Stack from geom }\n\nmain() {\n    var s = Stack[string](items: [\"x\"])\n    s.put(0, \"y\")\n}\n";
+    let dir = project("library_contract", &[("geom.kes", geom), ("main.kes", main)]);
+    let out = kestrel(&["check", "--diagnostics=short"], &dir.join("main.kes"));
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    let want = "`Stack[string].put` (made by `Stack[string]` on main.kes:5) can't be proven `no_alloc`: it allocates on line 5: makes a copy of `v`";
+    assert!(stderr(&out).contains(want), "{want}\n{}", stderr(&out));
+}

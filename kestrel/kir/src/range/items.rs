@@ -167,13 +167,14 @@ impl<'a> Cx<'a> {
 
 /// Puts the items of function `home` in the order the report prints them (see `Cx::arrange`).
 pub(super) fn arrange(m: &Module, owners: &Owners, home: Option<FuncIdx>, checks: Vec<Item>, others: Vec<Item>) -> Vec<Item> {
+    // (The copies of a generic are all the generic: they have its lines.)
     let own = |line: u32| match (owners.of(line), home) {
-        (Some(o), Some(h)) => o == h,
+        (Some(o), Some(h)) => o == owners.home(h),
         _ => true,
     };
     let mut keyed: Vec<(u32, u8, Item)> = Vec::new();
     for list in [checks, others] {
-        let mut anchor = home.map_or(0, |h| m.funcs[h.0 as usize].lines.0);
+        let mut anchor = home.map_or(0, |h| owners.first_line(m, h));
         for item in list {
             if own(item.line) {
                 anchor = item.line;

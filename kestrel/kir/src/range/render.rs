@@ -1,7 +1,8 @@
 //! The report as text: grouped by file, then function, then loop, one line per item. See the
 //! range-analysis design spec, "The report".
 
-use super::report::{display_name, FuncReport, Item, ItemKind, Owners, Report};
+use super::report::{FuncReport, Item, ItemKind, Owners, Report};
+use super::report_copies::{rows, Row};
 use super::show::number;
 use super::sites::CheckKind;
 use crate::ir::*;
@@ -14,13 +15,19 @@ pub fn render(r: &Report, m: &Module, user_file: &dyn Fn(u32) -> bool) -> String
     let mut out = String::new();
     let mut file = None;
     let (mut left, mut removed, mut allocs, mut fails) = (0u32, 0u32, 0u32, 0u32);
-    for f in r.funcs.iter().filter(|f| user_file(unpack_line(f.lines.0).1)) {
-        let home = unpack_line(f.lines.0).1;
+    for (home, _, row) in rows(m, &r.funcs, user_file) {
         if file != Some(home) {
             file = Some(home);
             out.push_str(m.files.get(home as usize).map_or("(no file name)", |s| s.as_str()));
             out.push('\n');
         }
+        let f = match row {
+            Row::Func(f) => f,
+            Row::Uncopied(text) => {
+                out.push_str(&format!("  {text}\n"));
+                continue;
+            }
+        };
         let host = Host { m, owners: &owners, file: home, func: f.func };
         out.push_str(&format!("  function `{}` (line {}): {}\n", f.name, unpack_line(f.lines.0).0, summary_text(f)));
         if f.gave_up && !f.never_called {
@@ -127,7 +134,7 @@ impl Host<'_> {
             _ => format!("line {n}"),
         };
         match self.owners.of(line) {
-            Some(o) if o != self.func => format!("{base} (in `{}`)", display_name(self.m, o)),
+            Some(o) if o != self.owners.home(self.func) => format!("{base} (in `{}`)", self.owners.name(self.m, o)),
             _ => base,
         }
     }
