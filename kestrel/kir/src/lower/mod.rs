@@ -3,6 +3,7 @@ mod builtins;
 mod call;
 mod closure;
 mod collections;
+mod compare;
 mod consts;
 mod env;
 mod expr;

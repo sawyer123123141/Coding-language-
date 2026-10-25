@@ -308,3 +308,57 @@ main() {
     homes.sort_by_key(|f| f.0);
     assert_eq!(homes, [idx(&m, "count[int]"), idx(&m, "count[string]")], "each copy has a loop site of its own");
 }
+
+/// The comparisons in `f`'s body: the operator and the two sides' kinds.
+fn comparisons(f: &Func) -> Vec<(BinOp, Expr, Expr)> {
+    let mut found = Vec::new();
+    visit::walk(&f.body, &mut |n| {
+        if let visit::Node::Expr(Expr { kind: ExprKind::Binary(op, l, r), .. }) = n {
+            if op.is_comparison() {
+                found.push((*op, (**l).clone(), (**r).clone()));
+            }
+        }
+    });
+    found
+}
+
+#[test]
+fn string_order_uses_cmp() {
+    let m = lowered("pure lt(a: string, b: string) -> bool { a < b }\nmain() { print(lt(\"a\", \"b\")) }\n");
+    let f = &funcs(&m, "lt")[0];
+    let found = comparisons(f);
+    assert_eq!(found.len(), 1);
+    let (op, l, r) = &found[0];
+    assert_eq!(*op, BinOp::Lt);
+    assert!(matches!(l.kind, ExprKind::Str(StrOp::Cmp, _)), "left is a Cmp: {:?}", l.kind);
+    assert_eq!(l.ty, KTy::U8);
+    assert!(matches!(r.kind, ExprKind::Int(1)));
+    assert_eq!(r.ty, KTy::U8);
+}
+
+#[test]
+fn bool_order_compares_bytes() {
+    let m = lowered("pure ge(a: bool, b: bool) -> bool { a >= b }\nmain() { print(ge(true, false)) }\n");
+    let found = comparisons(funcs(&m, "ge")[0]);
+    assert_eq!(found.len(), 1);
+    let (op, l, r) = &found[0];
+    assert_eq!(*op, BinOp::Ge);
+    assert!(matches!(&l.kind, ExprKind::Cast(x) if x.ty == KTy::Bool) && l.ty == KTy::U8, "{l:?}");
+    assert!(matches!(&r.kind, ExprKind::Cast(x) if x.ty == KTy::Bool) && r.ty == KTy::U8, "{r:?}");
+}
+
+#[test]
+fn an_ordered_copy_orders_strings_with_cmp() {
+    let src = "pure less[T: ordered](a: T, b: T) -> bool { a < b }
+main() {
+    print(less(\"a\", \"b\"), less(true, false), less(1, 2))
+}
+";
+    let m = lowered(src);
+    let on_strings = comparisons(funcs(&m, "less[string]")[0]);
+    assert!(matches!(on_strings[0].1.kind, ExprKind::Str(StrOp::Cmp, _)));
+    let on_bools = comparisons(funcs(&m, "less[bool]")[0]);
+    assert!(matches!(on_bools[0].1.kind, ExprKind::Cast(_)));
+    let on_ints = comparisons(funcs(&m, "less[int]")[0]);
+    assert_eq!(on_ints[0].1.ty, KTy::I32);
+}

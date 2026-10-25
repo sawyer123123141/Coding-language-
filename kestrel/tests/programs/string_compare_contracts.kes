@@ -1,0 +1,36 @@
+// A string or bool comparison makes nothing and fails nothing, so it keeps every contract; and
+// as a constant it is built where it is used, like any other expression.
+
+let EARLY = "apple" < "banana"
+let LATE = "b" <= "a"
+let FLAGS = false < true
+
+@prove(no_alloc, no_checks, no_panic)
+pure before(a: string, b: string) -> bool { a < b }
+
+@prove(no_alloc, no_checks, no_panic)
+pure later(a: bool, b: bool) -> bool { a >= b }
+
+@prove(no_alloc)
+pure longest_first(ws: list[string]) -> int {
+    var n = 0
+    for w in ws {
+        if w >= "m" { n += 1 }
+    }
+    n
+}
+
+main() {
+    print(EARLY, LATE, FLAGS, before("a", "b"), later(false, true))
+    print(longest_first(["pear", "fig", "zebra"]))
+    let s = "x"
+    let t = "y"
+    var i = 5
+    if s > t { i = 0 }
+    let xs: list[int] = [1, 2, 3, 4, 5, 6]
+    print(xs[i], i)
+}
+
+// expect: true false true true false
+// expect: 2
+// expect: 6 5

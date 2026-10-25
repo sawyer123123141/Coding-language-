@@ -45,7 +45,6 @@ bump(var x: int?) {
 // error 21: `map[string, int]` has no field `size`
 // error 21: `map[string, int]` has no method `missing`
 // error 22: `==` needs two numbers, two bools or two strings, found string and int
-// error 22: `<` needs numbers, found string and string
 // error 24: P? may be `none`, so it has no field `x`
 // error 25: this only reads the map, so the line does nothing
 // error 26: `map[K, V]()` takes no arguments

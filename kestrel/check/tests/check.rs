@@ -99,11 +99,21 @@ fn errors_are_reported() {
         ("main() {\n let y: int = if true { return } else { return }\n}\n", NEVER_IF),
         ("f(x: int) {}\nmain() {\n f(if true { return } else { return })\n}\n", NEVER_IF),
         ("main() {\n let s = \"a\" + 1\n}\n", "`+` needs two numbers or two strings, found string and int"),
+        ("main() {\n let b = \"a\" < 1\n}\n", "`<` needs two numbers, two strings or two bools, found string and int"),
+        ("main() {\n let b = true <= 1\n}\n", "`<=` needs two numbers, two strings or two bools, found bool and int"),
+        ("main() {\n let b = \"a\" > true\n}\n", "`>` needs two numbers, two strings or two bools, found string and bool"),
+        ("main() {\n let b = 1 >= \"x\"\n}\n", "`>=` needs two numbers, two strings or two bools, found int and string"),
+        ("struct P {\n x: int\n}\nmain() {\n let b = P(1) < P(2)\n}\n", "`<` needs two numbers, two strings or two bools, found P and P"),
     ];
     for (src, expected) in cases {
         let errs = errors(src);
         assert_eq!(errs, vec![expected.to_string()], "source:\n{src}");
     }
+}
+
+#[test]
+fn two_strings_or_two_bools_order_and_give_a_bool() {
+    ok("main() {\n let a: bool = \"a\" < \"b\"\n let b: bool = \"a\" >= \"b\"\n let c: bool = false < true\n let d: bool = true > false\n print(a, b, c, d, \"a\" <= \"a\")\n}\n");
 }
 
 #[test]

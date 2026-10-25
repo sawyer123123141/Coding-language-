@@ -1,0 +1,6 @@
+pure below[T: ordered](a: T, b: T) -> bool { a < b }
+
+pure small[T: ordered](a: T) -> bool { a < 1 }
+
+main() {}
+// error 3: `<` needs two numbers, two strings or two bools, found T and int

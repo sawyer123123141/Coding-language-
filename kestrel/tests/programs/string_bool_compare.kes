@@ -1,0 +1,16 @@
+main() {
+    print("apple" < "banana", "b" < "a", "abc" <= "abc", "abd" > "abc", "a" >= "b")
+    print("Zebra" < "apple", "é" > "z", "" < "a")
+    print(false < true, true < false, true <= true, false >= true)
+    let words: list[string] = ["pear", "fig", "apple"]
+    var smallest = words[0]
+    for w in words {
+        if w < smallest { smallest = w }
+    }
+    print(smallest)
+}
+
+// expect: true false true true false
+// expect: true true true
+// expect: true false true false
+// expect: apple

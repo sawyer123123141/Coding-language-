@@ -1,0 +1,8 @@
+main() {
+    print("a" < 1)
+    print(true < 1)
+    print(1.5 >= "x")
+}
+// error 2: `<` needs two numbers, two strings or two bools, found string and int
+// error 3: `<` needs two numbers, two strings or two bools, found bool and int
+// error 4: `>=` needs two numbers, two strings or two bools, found float and string

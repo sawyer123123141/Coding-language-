@@ -119,6 +119,16 @@ impl<'a> BodyChecker<'a> {
                     }
                     return Ty::Bool;
                 }
+                // `<`, `<=`, `>` and `>=` also order two strings or two bools (G5); a mix, or any
+                // other pair that isn't two numbers, is refused here with the ordering's wording.
+                if !matches!(op, BinaryOp::Eq | BinaryOp::Ne) && (!lt.is_numeric() || !rt.is_numeric()) {
+                    let ordered_pair = lt == rt && matches!(lt, Ty::Bool | Ty::Str);
+                    if !ordered_pair && lt != Ty::Error && rt != Ty::Error {
+                        let msg = format!("`{}` needs two numbers, two strings or two bools, found {} and {}", op.symbol(), self.tn(lt), self.tn(rt));
+                        self.error(e.span, msg);
+                    }
+                    return Ty::Bool;
+                }
                 self.operands(e, op, lhs, lt, rhs, rt);
                 Ty::Bool
             }

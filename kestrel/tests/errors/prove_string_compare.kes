@@ -1,0 +1,11 @@
+// An ordering of strings says nothing about the numbers around it.
+@prove(no_checks)
+pure pick(xs: list[int], s: string, t: string) -> int {
+    var i = 5
+    if s < t { i = 0 }
+    xs[i]
+}
+
+main() {}
+
+// error 2: `pick` can't be proven `no_checks`

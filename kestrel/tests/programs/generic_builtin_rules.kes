@@ -1,0 +1,75 @@
+struct Unit {
+    team: string
+    hp: int
+}
+
+pure count_by[T, K: key](xs: list[T], kind: pure (T) -> K) -> map[K, int] {
+    var counts: map[K, int] = map[K, int]()
+    for x in xs {
+        let k = kind(x)
+        let n = counts[k] else {
+            counts[k] = 1
+            continue
+        }
+        counts[k] = n + 1
+    }
+    counts
+}
+
+pure count[T: equatable](xs: list[T], want: T) -> int {
+    var n = 0
+    for x in xs {
+        if x == want { n += 1 }
+    }
+    n
+}
+
+pure where[T: equatable](xs: list[T], want: T) -> int {
+    let i = xs.find(want) else { return -1 }
+    i
+}
+
+pure contains[T: equatable](xs: list[T], v: T) -> bool { xs.has(v) }
+
+pure smallest[T: ordered](xs: list[T]) -> T {
+    var best = xs[0]
+    for x in xs {
+        if x < best { best = x }
+    }
+    best
+}
+
+pure sorted[T: ordered](xs: list[T]) -> list[T] {
+    var ys = xs
+    ys.sort()
+    ys
+}
+
+pure by_key[T, K: ordered](xs: list[T], key: pure (T) -> K) -> list[T] {
+    var ys = xs
+    ys.sort_by(key)
+    ys
+}
+
+main() {
+    let units: list[Unit] = [Unit(team: "red", hp: 3), Unit(team: "blue", hp: 5), Unit(team: "red", hp: 1)]
+    print(count_by(units, (u) { u.team }), count_by(units, (u) { u.hp % 2 }))
+    let ints: list[int] = [1, 2, 1]
+    let strs: list[string] = ["a", "b", "a", "a"]
+    let vs: list[vec2] = [vec2(1, 2), vec2(0, 0), vec2(1, 2)]
+    print(count(ints, 1), count(strs, "a"), count(vs, vec2(1, 2)))
+    print(where(ints, 2), where(strs, "z"), where(vs, vec2(0, 0)), contains(strs, "b"))
+    let fs: list[float] = [2.5, -1.0, 7.0]
+    let names: list[string] = ["pear", "fig", "apple"]
+    let flags: list[bool] = [true, false, true]
+    print(smallest(fs), smallest(names), smallest(flags))
+    print(sorted(fs), sorted(names), sorted(flags))
+    print(by_key(ints, (i) { -i }), by_key(names, (s) { s.len }), by_key(fs, (f) { f }))
+}
+
+// expect: {"red": 2, "blue": 1} {1: 3}
+// expect: 2 3 2
+// expect: 1 -1 1 true
+// expect: -1 apple false
+// expect: [-1, 2.5, 7] ["apple", "fig", "pear"] [false, true, true]
+// expect: [2, 1, 1] ["fig", "pear", "apple"] [-1, 2.5, 7]

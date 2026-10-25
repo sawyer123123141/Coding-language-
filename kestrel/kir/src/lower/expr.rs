@@ -84,12 +84,11 @@ impl<'a> FnLowerer<'a> {
                 let (l, r) = (self.expr(lhs), self.expr(rhs));
                 self.vec_equal(*op == ast::BinaryOp::Ne, l, r, line)
             }
-            // Temporary (P12, until Task 8): ordering two strings or two bools isn't lowered yet;
-            // a copy of an `ordered` generic can reach it, and a number comparison would be wrong.
-            ast::ExprKind::Binary { op: ast::BinaryOp::Lt | ast::BinaryOp::Le | ast::BinaryOp::Gt | ast::BinaryOp::Ge, lhs, .. }
+            // Two strings or two bools ordered (G5, P5).
+            ast::ExprKind::Binary { op: op @ (ast::BinaryOp::Lt | ast::BinaryOp::Le | ast::BinaryOp::Gt | ast::BinaryOp::Ge), lhs, rhs }
                 if matches!(self.ty(lhs.id), Ty::Str | Ty::Bool) =>
             {
-                panic!("ordering two strings or two bools with `<`, `<=`, `>` or `>=` isn't supported yet")
+                self.ordered_compare(*op, lhs, rhs, line)
             }
             ast::ExprKind::Binary { op, lhs, rhs } if self.vec_ty(e).is_some() => {
                 let (l, r) = (self.expr(lhs), self.expr(rhs));
