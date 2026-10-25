@@ -3,6 +3,7 @@ mod branch;
 mod closure;
 mod depth;
 mod expr;
+mod generics;
 mod iface;
 mod item;
 mod members;

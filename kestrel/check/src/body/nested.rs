@@ -88,7 +88,8 @@ impl<'a> BodyChecker<'a> {
             ExprKind::Ident(_) if self.t.moves.contains(&e.id) => out.moved_roots.extend(self.place_root(e)),
             // Building a closure runs none of its body, and it changes nothing it captures.
             ExprKind::Closure(_) => {}
-            ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::None | ExprKind::Str(_) | ExprKind::Ident(_) => {}
+            ExprKind::Brackets { .. } => unreachable!("settled after parsing"),
+            ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::None | ExprKind::Str(_) | ExprKind::Ident(_) | ExprKind::TypeApply { .. } => {}
         }
     }
 

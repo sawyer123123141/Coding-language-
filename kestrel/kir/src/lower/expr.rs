@@ -193,6 +193,8 @@ impl<'a> FnLowerer<'a> {
             ast::ExprKind::MapLit(entries) => self.map_lit(entries, ty, line),
             ast::ExprKind::CallValue { .. } => unreachable!("the checker resolves a call of a value to `Res::CallValue`"),
             ast::ExprKind::Closure(lit) => self.make_closure(e, lit),
+            ast::ExprKind::TypeApply { .. } => unreachable!("generics are lowered from Task 6b"),
+            ast::ExprKind::Brackets { .. } => unreachable!("settled after parsing"),
         };
         Expr { kind, ty, line }
     }

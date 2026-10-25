@@ -26,6 +26,7 @@ impl Parser {
     pub(super) fn struct_decl(&mut self, is_pub: bool, start: Span) -> PResult<Item> {
         self.bump();
         let (name, name_span) = self.expect_ident("a struct name")?;
+        let type_params = self.type_params()?;
         let ifaces = self.iface_list()?;
         self.expect(&Tok::LBrace, "`{`")?;
         let (mut fields, mut methods) = (Vec::new(), Vec::new());
@@ -45,12 +46,13 @@ impl Parser {
             self.skip_newlines();
         }
         let end = self.expect(&Tok::RBrace, "`}`")?;
-        Ok(Item::Struct(StructDecl { is_pub, name, name_span, ifaces, fields, methods, span: start.to(end) }))
+        Ok(Item::Struct(StructDecl { is_pub, name, name_span, type_params, ifaces, fields, methods, span: start.to(end) }))
     }
 
     pub(super) fn enum_decl(&mut self, is_pub: bool, start: Span) -> PResult<Item> {
         self.bump();
         let (name, name_span) = self.expect_ident("an enum name")?;
+        let type_params = self.type_params()?;
         let ifaces = self.iface_list()?;
         self.expect(&Tok::LBrace, "`{`")?;
         let (mut variants, mut methods) = (Vec::new(), Vec::new());
@@ -70,7 +72,7 @@ impl Parser {
             self.skip_newlines();
         }
         let end = self.expect(&Tok::RBrace, "`}`")?;
-        Ok(Item::Enum(EnumDecl { is_pub, name, name_span, ifaces, variants, methods, span: start.to(end) }))
+        Ok(Item::Enum(EnumDecl { is_pub, name, name_span, type_params, ifaces, variants, methods, span: start.to(end) }))
     }
 
     /// One variant (`Name` or `Name { field: Type, ... }`) or one method, after any annotations.
@@ -90,10 +92,20 @@ impl Parser {
             let is_pure = self.eat(&Tok::Pure);
             self.reject_native_method()?;
             let (name, name_span) = self.expect_ident("a method name")?;
+            self.refuse_method_params()?;
             methods.push(self.fn_rest(name, name_span, is_pub, is_pure, start, Some(owner))?);
             return Ok(());
         }
         let (name, name_span) = self.expect_ident("a variant or method name")?;
+        if self.at(&Tok::LBracket) {
+            // Not `is_method` above, whose test sees `[`: a method with placeholders of its own.
+            self.refuse_method_params()?;
+            if !self.at(&Tok::LParen) {
+                return Err(());
+            }
+            methods.push(self.fn_rest(name, name_span, false, false, start, Some(owner))?);
+            return Ok(());
+        }
         let fields = if self.at(&Tok::LBrace) { self.variant_fields()? } else { Vec::new() };
         variants.push(VariantDecl { name, name_span, fields });
         Ok(())
@@ -147,6 +159,12 @@ impl Parser {
         let is_pure = self.eat(&Tok::Pure);
         self.reject_native_method()?;
         let (name, name_span) = self.expect_ident("a field or method name")?;
+        if self.at(&Tok::LBracket) {
+            self.refuse_method_params()?;
+            if !self.at(&Tok::LParen) {
+                return Err(());
+            }
+        }
         if self.at(&Tok::LParen) {
             methods.push(self.fn_rest(name, name_span, is_pub, is_pure, start, Some(owner))?);
             return Ok(());

@@ -24,6 +24,7 @@ impl Parser {
     pub(super) fn interface_decl(&mut self, is_pub: bool, start: Span) -> PResult<Item> {
         self.bump();
         let (name, name_span) = self.expect_ident("an interface name")?;
+        self.refuse_type_params("interfaces don't take placeholders yet")?;
         self.expect(&Tok::LBrace, "`{`")?;
         let mut methods = Vec::new();
         self.skip_newlines();
@@ -74,6 +75,7 @@ impl Parser {
             return Err(());
         }
         let body = Block { stmts: Vec::new(), span: Span { start: end.end, end: end.end } };
-        Ok(FnDecl { name, name_span, is_pure, is_pub: false, is_native: false, params, ret, body, span: start.to(end) })
+        let type_params = Vec::new();
+        Ok(FnDecl { name, name_span, is_pure, is_pub: false, is_native: false, type_params, params, ret, body, span: start.to(end) })
     }
 }

@@ -157,7 +157,9 @@ fn names_used(e: &Expr, out: &mut Vec<(String, Span)>) {
             arms.iter().for_each(|a| names_in_block(&a.body, out));
         }
         ExprKind::Closure(c) => names_in_block(&c.body, out),
-        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::None | ExprKind::Str(_) => {}
+        ExprKind::Brackets { .. } => unreachable!("settled after parsing"),
+        // A type applied names no constant (an enum's variants come through its `Field`/`MethodCall`).
+        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::None | ExprKind::Str(_) | ExprKind::TypeApply { .. } => {}
     }
 }
 
@@ -246,6 +248,9 @@ pub(crate) fn is_const_expr(e: &Expr, t: &Tables) -> bool {
         ExprKind::ArrayLit(items) => items.iter().all(|i| is_const_expr(i, t)),
         ExprKind::MapLit(entries) => entries.iter().all(|(k, v)| is_const_expr(k, t) && is_const_expr(v, t)),
         ExprKind::TypeCall { args, .. } => all(args),
+        // A generic named with types (`Maybe[int]`) is constant like a bare name (G19).
+        ExprKind::TypeApply { .. } => true,
+        ExprKind::Brackets { .. } => unreachable!("settled after parsing"),
         // A closure is a value; its body runs only when it is called.
         ExprKind::Closure(_) => true,
         ExprKind::Interp(_)
@@ -289,6 +294,7 @@ pub(crate) fn struct_field_read(e: &Expr, t: &Tables) -> Option<Span> {
         ExprKind::Binary { lhs, rhs, .. } => struct_field_read(lhs, t).or_else(|| struct_field_read(rhs, t)),
         ExprKind::ArrayLit(items) => items.iter().find_map(|i| struct_field_read(i, t)),
         ExprKind::MapLit(entries) => entries.iter().find_map(|(k, v)| struct_field_read(k, t).or_else(|| struct_field_read(v, t))),
+        ExprKind::Brackets { .. } => unreachable!("settled after parsing"),
         _ => None,
     }
 }

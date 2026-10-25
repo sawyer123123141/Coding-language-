@@ -119,7 +119,7 @@ impl Resolver<'_> {
                 }
                 Symbol::new(format!("{name}: {}", self.ty(ty)), None)
             }
-            ExprKind::Call { name, .. } | ExprKind::TypeCall { name, .. } => Symbol::new(format!("{name}: {}", self.ty(ty)), None),
+            ExprKind::Call { name, .. } | ExprKind::TypeCall { name, .. } | ExprKind::TypeApply { name, .. } => Symbol::new(format!("{name}: {}", self.ty(ty)), None),
             _ => Symbol::new(self.ty(ty), None),
         }
     }

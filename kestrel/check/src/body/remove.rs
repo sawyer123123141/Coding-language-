@@ -293,6 +293,7 @@ fn expr_removes(x: &Expr, name: &str) -> bool {
         ExprKind::Interp(parts) => parts.iter().any(|p| matches!(p, InterpPart::Expr(x) if e(x))),
         // A closure's `remove` is its own: it can't remove an outer loop's item (see `check_remove`).
         ExprKind::Closure(_) => false,
-        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::None | ExprKind::Str(_) | ExprKind::Ident(_) => false,
+        ExprKind::Brackets { .. } => unreachable!("settled after parsing"),
+        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::None | ExprKind::Str(_) | ExprKind::Ident(_) | ExprKind::TypeApply { .. } => false,
     }
 }

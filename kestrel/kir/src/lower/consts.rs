@@ -235,6 +235,8 @@ fn uses_in(program: &Program, t: &Tables, e: &ast::Expr, out: &mut Vec<ConstId>)
             uses_in(program, t, k, out);
             uses_in(program, t, v, out);
         }),
+        ast::ExprKind::TypeApply { .. } => unreachable!("generics are lowered from Task 6b"),
+        ast::ExprKind::Brackets { .. } => unreachable!("settled after parsing"),
         // Not in a constant expression (see `is_const_expr`).
         _ => {}
     }

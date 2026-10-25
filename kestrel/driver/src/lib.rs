@@ -148,6 +148,16 @@ fn compile_reading(path: &str, src: &str, style: DiagStyle, needs_main: bool, re
         diags.extend(check_diags);
         tables
     };
+    // Temporary (Task 1a to Task 6b): lowering doesn't know generics yet. After a clean check,
+    // so the checker's errors come first; every entry point (`compile`, `compile_as`,
+    // `compile_as_reading`, `compile_unoptimized`) goes through here.
+    let tables = tables.filter(|_| match first_generic(&program) {
+        Some(span) => {
+            diags.push(Diagnostic::error(span, "generics aren't supported yet"));
+            false
+        }
+        None => true,
+    });
     let text = report(&files, &diags, style);
     let Some(tables) = tables else { return (None, text) };
     let parts: Vec<(u32, &str)> = files.iter().map(|f| (f.base, f.src.as_str())).collect();
@@ -157,6 +167,16 @@ fn compile_reading(path: &str, src: &str, style: DiagStyle, needs_main: bool, re
     let sources = files;
     let files = sources.iter().map(|f| SourceFile::new(Path::new(&f.path))).collect();
     (Some(Compiled { module, files, builtins, sources }), text)
+}
+
+/// The name of the first struct, enum or function that declares placeholders.
+fn first_generic(program: &kestrel_syntax::ast::Program) -> Option<Span> {
+    program.items.iter().find_map(|item| match item {
+        Item::Fn(f) if !f.type_params.is_empty() => Some(f.name_span),
+        Item::Struct(s) if !s.type_params.is_empty() => Some(s.name_span),
+        Item::Enum(e) if !e.type_params.is_empty() => Some(e.name_span),
+        _ => None,
+    })
 }
 
 /// Reads `path` and compiles it (as a library when `needs_main` is false).

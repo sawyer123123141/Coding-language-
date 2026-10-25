@@ -56,6 +56,7 @@ fn builds_owning(e: &Expr, t: &Tables) -> bool {
         ExprKind::Binary { lhs, rhs, .. } => builds_owning(lhs, t) || builds_owning(rhs, t),
         ExprKind::ArrayLit(items) => items.iter().any(|i| builds_owning(i, t)),
         ExprKind::MapLit(entries) => entries.iter().any(|(k, v)| builds_owning(k, t) || builds_owning(v, t)),
+        ExprKind::Brackets { .. } => unreachable!("settled after parsing"),
         _ => false,
     }
 }

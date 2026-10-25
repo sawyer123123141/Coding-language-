@@ -53,6 +53,12 @@ pub fn check_keeping_tables(program: &Program, needs_main: bool) -> (Tables, Vec
         ..Tables::default()
     };
     let mut diags = Vec::new();
+    // Temporary (Task 1a to Task 2a): nothing past the parser knows placeholders yet.
+    let generics = generic_decls(program);
+    if !generics.is_empty() {
+        diags.extend(generics.into_iter().map(|span| Diagnostic::error(span, "generics aren't supported yet")));
+        return (t, diags);
+    }
     collect::collect(program, &mut t, &mut diags, needs_main);
     t.compute_owning();
     body::check_consts(program, &mut t, &mut diags);
@@ -69,4 +75,19 @@ pub fn check_keeping_tables(program: &Program, needs_main: bool) -> (Tables, Vec
     }
     collect_ty::check_map_values(&t, &mut diags);
     (t, diags)
+}
+
+/// The name of each struct, enum and function that declares placeholders, in source order.
+fn generic_decls(program: &Program) -> Vec<kestrel_syntax::Span> {
+    use kestrel_syntax::ast::Item;
+    program
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Fn(f) if !f.type_params.is_empty() => Some(f.name_span),
+            Item::Struct(s) if !s.type_params.is_empty() => Some(s.name_span),
+            Item::Enum(e) if !e.type_params.is_empty() => Some(e.name_span),
+            _ => None,
+        })
+        .collect()
 }

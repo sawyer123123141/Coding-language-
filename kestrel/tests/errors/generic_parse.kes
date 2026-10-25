@@ -1,0 +1,17 @@
+struct Stack[T] {
+    items: list[T] = []
+    convert[U](self, f: (T) -> U) -> list[U] { list[U]() }
+}
+enum Maybe[T] {
+    Nothing
+    wrap[U](self) -> int { 1 }
+}
+interface Named[T] {
+    pure name(self) -> string
+}
+native peek[T](x: T) -> int
+main() {}
+// error 3: methods can't have placeholders of their own yet; use a generic function that takes the struct instead
+// error 7: methods can't have placeholders of their own yet; use a generic function that takes the struct instead
+// error 9: interfaces don't take placeholders yet
+// error 12: native functions can't have placeholders

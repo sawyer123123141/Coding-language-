@@ -108,6 +108,7 @@ impl<'a> Walk<'a> {
                 self.builds(k, out);
                 self.builds(v, out);
             }),
+            ExprKind::Brackets { .. } => unreachable!("settled after parsing"),
             _ => {}
         }
     }

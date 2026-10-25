@@ -99,6 +99,15 @@ impl Expr {
                 s
             }
             ExprKind::Index { base, index } => format!("(index {} {})", base.to_sexpr(), index.to_sexpr()),
+            ExprKind::Brackets { base, index, types } => {
+                let tys: Vec<String> = types.iter().map(TypeExpr::to_sexpr).collect();
+                let index = index.as_ref().map_or("-".to_string(), |i| i.to_sexpr());
+                format!("(brackets {} [{}] {index})", base.to_sexpr(), tys.join(", "))
+            }
+            ExprKind::TypeApply { name, type_args, .. } => {
+                let tys: Vec<String> = type_args.iter().map(TypeExpr::to_sexpr).collect();
+                format!("(apply {name}[{}])", tys.join(", "))
+            }
             ExprKind::ArrayLit(items) => {
                 let items: Vec<String> = items.iter().map(Expr::to_sexpr).collect();
                 format!("[{}]", items.join(" "))
@@ -154,6 +163,26 @@ impl TypeExpr {
             }
         }
     }
+}
+
+impl TypeParam {
+    /// `T`, or `T: Damageable + Named` with its rules.
+    pub fn to_sexpr(&self) -> String {
+        if self.rules.is_empty() {
+            return self.name.clone();
+        }
+        let rules: Vec<&str> = self.rules.iter().map(|(r, _)| r.as_str()).collect();
+        format!("{}: {}", self.name, rules.join(" + "))
+    }
+}
+
+/// A placeholder list as written: `[T, K: key]`; the empty string for none.
+pub fn type_params_sexpr(params: &[TypeParam]) -> String {
+    if params.is_empty() {
+        return String::new();
+    }
+    let params: Vec<String> = params.iter().map(TypeParam::to_sexpr).collect();
+    format!("[{}]", params.join(", "))
 }
 
 fn args_sexpr(args: &[Arg]) -> String {

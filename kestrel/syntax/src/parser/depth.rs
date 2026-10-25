@@ -94,6 +94,8 @@ impl Parser {
             ExprKind::MethodCall { receiver, args, .. } => self.tallest(std::iter::once(&**receiver).chain(args.iter().map(|a| &a.value))),
             ExprKind::Match { scrutinee, .. } => self.height(scrutinee) + 1,
             ExprKind::Index { base, index } => self.height(base).max(self.height(index)) + 1,
+            ExprKind::Brackets { base, index, .. } => index.iter().map(|i| self.height(i)).fold(self.height(base), u32::max) + 1,
+            ExprKind::TypeApply { .. } => 0,
             ExprKind::ArrayLit(items) => self.tallest(items.iter()),
             ExprKind::MapLit(entries) => self.tallest(entries.iter().flat_map(|(k, v)| [k, v])),
             // The body is a block of its own: its height comes in as `inner`.

@@ -62,12 +62,14 @@ impl<'p> Finder<'p> {
             }
             Item::Struct(s) => {
                 self.hit(s.name_span, Hit::Decl(s.name_span));
+                self.type_params(&s.type_params);
                 self.ifaces(&s.ifaces);
                 self.fields(&s.fields);
                 s.methods.iter().for_each(|m| self.func(m));
             }
             Item::Enum(e) => {
                 self.hit(e.name_span, Hit::Decl(e.name_span));
+                self.type_params(&e.type_params);
                 self.ifaces(&e.ifaces);
                 for v in &e.variants {
                     self.hit(v.name_span, Hit::Decl(v.name_span));
@@ -80,6 +82,14 @@ impl<'p> Finder<'p> {
                 i.methods.iter().for_each(|m| self.func(m));
             }
             Item::Use(_) => {}
+        }
+    }
+
+    /// Each placeholder is a declaration, and each rule it lists names an interface (or a built-in rule).
+    fn type_params(&mut self, params: &'p [TypeParam]) {
+        for p in params {
+            self.hit(p.span, Hit::Decl(p.span));
+            self.ifaces(&p.rules);
         }
     }
 
@@ -101,6 +111,7 @@ impl<'p> Finder<'p> {
 
     fn func(&mut self, f: &'p FnDecl) {
         self.hit(f.name_span, Hit::Decl(f.name_span));
+        self.type_params(&f.type_params);
         for p in &f.params {
             self.hit(p.bind.span, Hit::Binding(&p.bind));
             // A `self` parameter's type is filled in by the parser, at the `self`.
@@ -207,6 +218,11 @@ impl<'p> Finder<'p> {
                 type_args.iter().for_each(|t| self.ty(t));
                 self.args(args);
             }
+            ExprKind::TypeApply { name_span, type_args, .. } => {
+                self.hit(*name_span, Hit::Name(e));
+                type_args.iter().for_each(|t| self.ty(t));
+            }
+            ExprKind::Brackets { .. } => unreachable!("settled after parsing"),
             ExprKind::CallValue { callee, args } => {
                 self.expr(callee);
                 self.args(args);

@@ -8,8 +8,10 @@ pub mod parser;
 mod sexpr;
 pub mod span;
 pub mod token;
+pub mod visit;
 
 pub use diag::{render, render_short, Diagnostic, Severity};
+pub use sexpr::type_params_sexpr;
 pub use span::{LineIndex, Span};
 
 /// Lex and parse one source file. Diagnostics from both stages, in order.

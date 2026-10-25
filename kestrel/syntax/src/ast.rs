@@ -92,6 +92,8 @@ pub struct EnumDecl {
     pub is_pub: bool,
     pub name: String,
     pub name_span: Span,
+    /// `enum E[T, K]`: the placeholders, empty for an ordinary enum.
+    pub type_params: Vec<TypeParam>,
     /// `enum E: A, B`: the interfaces it says it implements, with where each is written.
     pub ifaces: Vec<(String, Span)>,
     pub variants: Vec<VariantDecl>,
@@ -124,6 +126,8 @@ pub struct StructDecl {
     pub is_pub: bool,
     pub name: String,
     pub name_span: Span,
+    /// `struct S[T]`: the placeholders, empty for an ordinary struct.
+    pub type_params: Vec<TypeParam>,
     /// `struct S: A, B`: the interfaces it says it implements, with where each is written.
     pub ifaces: Vec<(String, Span)>,
     pub fields: Vec<FieldDecl>,
@@ -148,10 +152,22 @@ pub struct FnDecl {
     /// `native name(params)`: implemented in Rust, with no body. `body` is
     /// then empty, spanned at the end of the signature.
     pub is_native: bool,
+    /// `best[T: Named](...)`: the placeholders, empty for an ordinary function. Methods, natives
+    /// and interface methods keep it empty.
+    pub type_params: Vec<TypeParam>,
     pub params: Vec<Param>,
     pub ret: Option<TypeExpr>,
     pub body: Block,
     pub span: Span,
+}
+
+/// One placeholder of a generic struct, enum or function: `T`, or `T: Named + ordered` with the
+/// rules (interface names or built-in rule words) a type must meet to take its place.
+#[derive(Clone, Debug)]
+pub struct TypeParam {
+    pub name: String,
+    pub span: Span,
+    pub rules: Vec<(String, Span)>,
 }
 
 #[derive(Clone, Debug)]
@@ -263,6 +279,12 @@ pub enum ExprKind {
     Match { scrutinee: Box<Expr>, arms: Vec<MatchArm> },
     /// `base[index]`
     Index { base: Box<Expr>, index: Box<Expr> },
+    /// `base[...]` before it is known whether the brackets hold an index or types. Made by the
+    /// parser only, and settled (into `Index`, `TypeApply`, `TypeCall` or a type) before anything
+    /// else sees it.
+    Brackets { base: Box<Expr>, index: Option<Box<Expr>>, types: Vec<TypeExpr> },
+    /// `best[int]`, `Stack[int]`: a generic named with types and not called.
+    TypeApply { name: String, name_span: Span, type_args: Vec<TypeExpr> },
     /// `[a, b, c]`
     ArrayLit(Vec<Expr>),
     /// `{k: v, ...}`, a map's keys and values in order.

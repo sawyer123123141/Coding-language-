@@ -235,6 +235,15 @@ impl Rewriter<'_> {
                 self.expr(base);
                 self.expr(index);
             }
+            // Task 1b settles `Brackets` and decides what link does with a `TypeApply`'s name.
+            ExprKind::Brackets { base, index, types } => {
+                self.expr(base);
+                if let Some(i) = index {
+                    self.expr(i);
+                }
+                types.iter_mut().for_each(|t| self.ty(t));
+            }
+            ExprKind::TypeApply { type_args, .. } => type_args.iter_mut().for_each(|t| self.ty(t)),
             ExprKind::ArrayLit(items) => items.iter_mut().for_each(|i| self.expr(i)),
             ExprKind::MapLit(entries) => {
                 for (k, v) in entries {

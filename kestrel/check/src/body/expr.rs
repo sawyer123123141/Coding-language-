@@ -72,6 +72,12 @@ impl<'a> BodyChecker<'a> {
             ExprKind::ArrayLit(items) => self.check_array_lit(e, items, want),
             ExprKind::MapLit(entries) => self.check_map_lit(e, entries, want),
             ExprKind::TypeCall { .. } => self.check_type_call(e),
+            // Removed by Task 3b, which checks a generic named with its types.
+            ExprKind::TypeApply { .. } => {
+                self.error(e.span, "generics aren't supported yet");
+                Ty::Error
+            }
+            ExprKind::Brackets { .. } => unreachable!("settled after parsing"),
         }
     }
 

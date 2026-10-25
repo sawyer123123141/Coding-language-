@@ -123,10 +123,11 @@ impl Parser {
         start: Span,
         owner: Option<&str>,
     ) -> PResult<FnDecl> {
+        let type_params = self.type_params()?;
         let (params, ret, _) = self.signature(owner)?;
         let body = self.fn_body()?.0;
         let span = start.to(body.span);
-        Ok(FnDecl { name, name_span, is_pure, is_pub, is_native: false, params, ret, body, span })
+        Ok(FnDecl { name, name_span, is_pure, is_pub, is_native: false, type_params, params, ret, body, span })
     }
 
     /// `(params) -> Type`, the return type being optional. Also gives the span
@@ -155,13 +156,20 @@ impl Parser {
     /// so it has no block. Its body is an empty block at the end of the signature.
     fn native_decl(&mut self, is_pub: bool, is_pure: bool, start: Span) -> PResult<Item> {
         let (name, name_span) = self.expect_ident("a function name")?;
+        if self.at(&Tok::LBracket) {
+            // Reported and dropped: with no item, the driver's check for user natives has
+            // nothing to add, and `recover_item` skips the rest of the declaration.
+            self.refuse_type_params("native functions can't have placeholders")?;
+            return Err(());
+        }
         let (params, ret, end) = self.signature(None)?;
         if self.at(&Tok::LBrace) {
             self.error_here("native functions have no body; remove the `{ }`");
             return Err(());
         }
         let body = Block { stmts: Vec::new(), span: Span { start: end.end, end: end.end } };
-        Ok(Item::Fn(FnDecl { name, name_span, is_pure, is_pub, is_native: true, params, ret, body, span: start.to(end) }))
+        let type_params = Vec::new();
+        Ok(Item::Fn(FnDecl { name, name_span, is_pure, is_pub, is_native: true, type_params, params, ret, body, span: start.to(end) }))
     }
 
     fn param(&mut self, index: usize, owner: Option<&str>) -> PResult<Param> {
