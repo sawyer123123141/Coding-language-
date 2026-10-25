@@ -31,3 +31,36 @@ fn a_generic_with_copies_leads_to_its_declaration() {
         assert_eq!(s.def.map(|d| d.start), Some(decl));
     }
 }
+
+const GEOM: &str = "pub struct Stack[T] {\n    items: list[T] = []\n    push(var self, v: T) { self.items.add(v) }\n}\n\npub struct Item {\n    id: int\n}\n\npub pure best[T](xs: list[T], score: pure (T) -> int) -> T? {\n    let n: T? = none\n    n\n}\n";
+const MAIN: &str = "use { Stack, best, Item from geom }\nuse geom\n\nmain() {\n    var s = Stack[int]()\n    s.push(1)\n    let items: list[Item] = [Item(id: 4)]\n    let low = geom.best[Item](items, (i) { 10 - i.id })\n    let top = best(items, (i) { i.id })\n    print(s, low, top)\n}\n";
+
+fn across_files() -> kestrel_driver::Analysis {
+    let read = |p: &std::path::Path| (p.file_name()? == "geom.kes").then(|| GEOM.to_string());
+    let a = analyze("game/main.kes", MAIN, true, &read);
+    assert!(a.diags.is_empty(), "{:?}", a.diags);
+    a
+}
+
+fn defined_in(a: &kestrel_driver::Analysis, def: kestrel_syntax::Span) -> (usize, String) {
+    let i = a.source_at(def.start);
+    let s = &a.sources[i];
+    (i, s.src[(def.start - s.base) as usize..(def.end - s.base) as usize].to_string())
+}
+
+#[test]
+fn generics_of_another_module_lead_to_its_file() {
+    let a = across_files();
+    let at = |needle: &str, nth: usize, into: u32| MAIN.match_indices(needle).nth(nth).unwrap().0 as u32 + into;
+    // `Stack` in `Stack[int]()` (hover shows the instance), `best` in `geom.best[Item]` and in the plain call, `Item` in `[Item]`.
+    for (off, code, name) in [
+        (at("Stack[int]", 0, 1), "struct geom.Stack[int]", "Stack"),
+        (at("best[Item]", 0, 1), "pure geom.best(xs: list[T], score: pure (T) -> int) -> T?", "best"),
+        (at("best(items", 0, 1), "pure geom.best(xs: list[T], score: pure (T) -> int) -> T?", "best"),
+        (at("[Item]", 1, 2), "struct geom.Item {", "Item"),
+    ] {
+        let s = resolve(&a, off).unwrap_or_else(|| panic!("nothing at {off}"));
+        assert!(s.code.starts_with(code), "{}", s.code);
+        assert_eq!(defined_in(&a, s.def.expect("a definition")), (1, name.to_string()));
+    }
+}
