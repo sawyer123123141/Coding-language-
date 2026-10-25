@@ -1,0 +1,44 @@
+interface Named {
+    pure name(self) -> string
+}
+
+struct Shelf {
+    s: Stack[int]
+}
+
+struct Stack[T]: Named {
+    items: list[T] = []
+    pure name(self) -> string { "stack of {self.items.len}" }
+}
+
+show(n: Named) { print(n.name()) }
+
+pure label[T: Named](x: T) -> string { x.name() }
+
+wrap[T](s: Stack[T]) { show(s) }
+
+shelved(sh: Shelf) -> string { sh.s.name() }
+
+main() {
+    let a = Stack(items: [1, 2])
+    let b = Stack(items: ["x"])
+    show(a)
+    show(b)
+    let all: list[Named] = [a, b]
+    for n in all { print(n.name()) }
+    print(label(a), label(b))
+    wrap(a)
+    wrap(Stack[float]())
+    let sh = Shelf(s: Stack(items: [4, 5, 6]))
+    show(sh.s)
+    print(label(sh.s), shelved(sh))
+}
+// expect: stack of 2
+// expect: stack of 1
+// expect: stack of 2
+// expect: stack of 1
+// expect: stack of 2 stack of 1
+// expect: stack of 2
+// expect: stack of 0
+// expect: stack of 3
+// expect: stack of 3 stack of 3

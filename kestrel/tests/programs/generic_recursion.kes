@@ -1,0 +1,32 @@
+pure depth[T](xs: list[T], i: int) -> int {
+    if i >= xs.len { return 0 }
+    1 + depth(xs, i + 1)
+}
+
+pure ping[T](x: T, n: int) -> int {
+    if n == 0 { return 0 }
+    1 + pong(x, n - 1)
+}
+
+pure pong[T](x: T, n: int) -> int {
+    if n == 0 { return 0 }
+    10 + ping(x, n - 1)
+}
+
+struct Counter[T] {
+    items: list[T] = []
+    pure size(self) -> int { self.items.len }
+    pure twice(self) -> int { self.size() * 2 }
+}
+
+main() {
+    let xs: list[string] = ["a", "b", "c"]
+    let fs: list[float] = [1.5]
+    print(depth(xs, 0), depth(fs, 0))
+    print(ping(true, 3), ping("x", 4))
+    let c = Counter[int](items: [1, 2, 3])
+    print(c.twice())
+}
+// expect: 3 1
+// expect: 12 22
+// expect: 6

@@ -24,16 +24,25 @@ use crate::stack_envs::is_stack_fn;
 
 /// The methods that implement interface method `method` (named `name`): the method of that name of
 /// every struct and enum that lists its interface, from the checker's tables, whether or not a
-/// value of the type is ever made an interface value.
+/// value of the type is ever made an interface value. A generic declaration and an instance that
+/// holds a placeholder have no code of their own (their methods are trapping stubs); a concrete
+/// instance's method is its copy, when the collection pass made one (a copy no code reaches
+/// isn't made).
 pub(crate) fn implementations(t: &Tables, method: FnId, name: &str) -> Vec<FnId> {
     let Some(iface) = t.ifaces.iter().position(|i| i.methods.contains(&method)) else { return Vec::new() };
     let iface = IfaceId(iface as u32);
-    let structs = t.structs.iter().map(|s| (&s.ifaces, &s.methods));
-    let enums = t.enums.iter().map(|e| (&e.ifaces, &e.methods));
+    let structs = t.structs.iter().map(|s| (&s.ifaces, &s.methods, s.concrete, s.instance.map(|i| i.args)));
+    let enums = t.enums.iter().map(|e| (&e.ifaces, &e.methods, e.concrete, e.instance.map(|i| i.args)));
     structs
         .chain(enums)
-        .filter(|(ifaces, _)| ifaces.contains(&iface))
-        .map(|(_, methods)| *methods.get(name).unwrap_or_else(|| panic!("conformance guarantees a method `{name}`")))
+        .filter(|&(ifaces, _, concrete, _)| concrete && ifaces.contains(&iface))
+        .filter_map(|(_, methods, _, args)| {
+            let own = *methods.get(name).unwrap_or_else(|| panic!("conformance guarantees a method `{name}`"));
+            match args {
+                Some(args) => t.generic.fn_copies.get(&(own, args)).copied(),
+                None => Some(own),
+            }
+        })
         .collect()
 }
 

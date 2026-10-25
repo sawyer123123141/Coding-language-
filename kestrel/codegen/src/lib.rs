@@ -46,9 +46,18 @@ impl Default for Options {
     }
 }
 
-/// Symbol name of a Kestrel function, kept apart from C names like `main`.
-pub(crate) fn symbol(name: &str) -> String {
-    format!("k_{name}")
+/// Symbol name of Kestrel function `index`, named `name`, kept apart from C names like `main`. A
+/// copy's name (`Pair[int, bool].swap`) has characters a symbol can't: each outside
+/// `[A-Za-z0-9_.]` becomes `_`, and `.<index>` is added so two copies can't collide (P31). No
+/// plain name ends in `.` and digits (a name never starts with a digit), so neither can a copy
+/// and a plain function. Every other name keeps `k_<name>`.
+pub(crate) fn symbol(name: &str, index: usize) -> String {
+    let plain = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '.';
+    if name.chars().all(plain) {
+        return format!("k_{name}");
+    }
+    let sanitised: String = name.chars().map(|c| if plain(c) { c } else { '_' }).collect();
+    format!("k_{sanitised}.{index}")
 }
 
 /// Declares every function of `m` in `module` and defines the ones with bodies
@@ -83,10 +92,10 @@ pub(crate) fn define_module<M: Module>(
     let ptr = module.target_config().pointer_type();
     let rt = rt::RtFuncs::declare(module)?;
     let mut ids = Vec::with_capacity(m.funcs.len());
-    for f in &m.funcs {
+    for (i, f) in m.funcs.iter().enumerate() {
         let id = match &f.native {
             Some(import) => module.declare_function(import, Linkage::Import, &native::signature(f, cc, ptr)),
-            None => module.declare_function(&symbol(&f.name), Linkage::Local, &func::signature(f, cc, ptr)),
+            None => module.declare_function(&symbol(&f.name, i), Linkage::Local, &func::signature(f, cc, ptr)),
         };
         ids.push(id.map_err(|e| e.to_string())?);
     }

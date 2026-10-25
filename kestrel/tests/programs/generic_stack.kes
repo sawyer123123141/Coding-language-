@@ -1,0 +1,49 @@
+struct Enemy {
+    hp: int
+    at: vec2
+}
+
+struct Stack[T] {
+    items: list[T] = []
+
+    push(var self, v: T) { self.items.add(v) }
+
+    pop(var self) -> T? { self.items.pop() }
+
+    pure size(self) -> int { self.items.len }
+}
+
+main() {
+    var ints = Stack[int]()
+    ints.push(3)
+    print(ints)
+    ints.push(4)
+    let top = ints.pop() else { return }
+    print(top, ints.size())
+    var names = Stack[string]()
+    names.push("a")
+    names.push("b")
+    var other = names
+    other.push("c")
+    other.items[0] = "z"
+    print(names.items, other.items)
+    var wave = Stack[Enemy]()
+    wave.push(Enemy(hp: 9, at: vec2(1, 2)))
+    print(wave.size(), wave)
+    var stacks: list[Stack[int]] = []
+    stacks.add(ints)
+    stacks[0].push(7)
+    print(stacks, ints)
+    var nested = Stack[Stack[int]]()
+    nested.push(stacks[0])
+    print(nested)
+    var empty = Stack[int]()
+    print(empty.pop())
+}
+// expect: Stack[int](items: [3])
+// expect: 4 1
+// expect: ["a", "b"] ["z", "b", "c"]
+// expect: 1 Stack[Enemy](items: [Enemy(hp: 9, at: vec2(x: 1, y: 2))])
+// expect: [Stack[int](items: [3, 7])] Stack[int](items: [3])
+// expect: Stack[Stack[int]](items: [Stack[int](items: [3, 7])])
+// expect: none

@@ -1,0 +1,33 @@
+pure count[T](xs: list[T]) -> int { xs.len }
+
+struct Bag[T] {
+    items: list[T] = []
+    label: string = "bag"
+    spare: T? = none
+}
+
+struct Counter {
+    measure: pure (list[int]) -> int = (xs) { count(xs) }
+}
+
+let EMPTY = Bag[int]()
+
+fill() -> Bag[string] {
+    var b = Bag[string](label: "words")
+    b.items.add("hi")
+    b
+}
+
+main() {
+    print(EMPTY.items.len, EMPTY.label)
+    let w = fill()
+    print(w.items, w.label, w.spare)
+    let c = Counter()
+    print(c.measure([1, 2, 3]))
+    let q = Bag(spare: 4, items: [1, 2])
+    print(q.items, q.spare, q.label)
+}
+// expect: 0 bag
+// expect: ["hi"] words none
+// expect: 3
+// expect: [1, 2] 4 bag

@@ -84,6 +84,13 @@ impl<'a> FnLowerer<'a> {
                 let (l, r) = (self.expr(lhs), self.expr(rhs));
                 self.vec_equal(*op == ast::BinaryOp::Ne, l, r, line)
             }
+            // Temporary (P12, until Task 8): ordering two strings or two bools isn't lowered yet;
+            // a copy of an `ordered` generic can reach it, and a number comparison would be wrong.
+            ast::ExprKind::Binary { op: ast::BinaryOp::Lt | ast::BinaryOp::Le | ast::BinaryOp::Gt | ast::BinaryOp::Ge, lhs, .. }
+                if matches!(self.ty(lhs.id), Ty::Str | Ty::Bool) =>
+            {
+                panic!("ordering two strings or two bools with `<`, `<=`, `>` or `>=` isn't supported yet")
+            }
             ast::ExprKind::Binary { op, lhs, rhs } if self.vec_ty(e).is_some() => {
                 let (l, r) = (self.expr(lhs), self.expr(rhs));
                 self.vec_combine(binop(*op), l, r, ty, line)
@@ -107,23 +114,9 @@ impl<'a> FnLowerer<'a> {
             {
                 self.call_value(e, ty, line)
             }
-            ast::ExprKind::Call { args, .. } => match self.resolved(e.id) {
-                Res::Convert(_) => ExprKind::Cast(Box::new(self.expr(&args[0].value))),
-                Res::Construct(sid) if self.t.vec_makes.contains(&e.id) => self.vec_make(sid, args, ty, line),
-                Res::SimdMake(_) => self.simd_make(e, args, ty, line),
-                Res::NewArena => ExprKind::NewArena,
-                Res::Builtin(b) => self.builtin_call(b, args, ty, line),
-                Res::Fn(f) if self.wants_scratch(f, args) => self.scratch_call_value(e, f, args, ty, line),
-                Res::Fn(f) => {
-                    let (pre, fi, a) = self.call_parts(e, f, args, None);
-                    Self::with_pre(pre, ExprKind::Call(fi, a), ty, line)
-                }
-                Res::Construct(sid) => {
-                    let (pre, kind) = self.construct(e, sid, args);
-                    Self::with_pre(pre, kind, ty, line)
-                }
-                other => unreachable!("{other:?} used as a value"),
-            },
+            ast::ExprKind::Call { args, .. } => self.call(e, args, ty, line),
+            // A user `TypeCall` (`best[int](xs)`, `Stack[int]()`) is the call it stands for (P28).
+            ast::ExprKind::TypeCall { args, .. } if !builtin_type_call(e) => self.call(e, args, ty, line),
             ast::ExprKind::MethodCall { receiver, name, args, .. }
                 if matches!(self.res(e.id), Some(Res::MapRead | Res::MapRemove)) =>
             {
@@ -193,10 +186,36 @@ impl<'a> FnLowerer<'a> {
             ast::ExprKind::MapLit(entries) => self.map_lit(entries, ty, line),
             ast::ExprKind::CallValue { .. } => unreachable!("the checker resolves a call of a value to `Res::CallValue`"),
             ast::ExprKind::Closure(lit) => self.make_closure(e, lit),
-            ast::ExprKind::TypeApply { .. } => unreachable!("generics are lowered from Task 6b"),
+            // `best[Enemy]` as a value: the copy's function value. (A struct or enum with its types
+            // written is a type, never a value; its variants are the `Field` or `MethodCall` around it.)
+            ast::ExprKind::TypeApply { .. } => match self.resolved(e.id) {
+                Res::FnValue(f) => self.fn_ref(f),
+                other => unreachable!("a type application resolved to {other:?}"),
+            },
             ast::ExprKind::Brackets { .. } => unreachable!("settled after parsing"),
         };
         Expr { kind, ty, line }
+    }
+
+    /// A call by name (or a user `TypeCall`) as a value of type `ty`.
+    fn call(&mut self, e: &ast::Expr, args: &[ast::Arg], ty: KTy, line: u32) -> ExprKind {
+        match self.resolved(e.id) {
+            Res::Convert(_) => ExprKind::Cast(Box::new(self.expr(&args[0].value))),
+            Res::Construct(sid) if self.t.vec_makes.contains(&e.id) => self.vec_make(sid, args, ty, line),
+            Res::SimdMake(_) => self.simd_make(e, args, ty, line),
+            Res::NewArena => ExprKind::NewArena,
+            Res::Builtin(b) => self.builtin_call(b, args, ty, line),
+            Res::Fn(f) if self.wants_scratch(f, args) => self.scratch_call_value(e, f, args, ty, line),
+            Res::Fn(f) => {
+                let (pre, fi, a) = self.call_parts(e, f, args, None);
+                Self::with_pre(pre, ExprKind::Call(fi, a), ty, line)
+            }
+            Res::Construct(sid) => {
+                let (pre, kind) = self.construct(e, sid, args);
+                Self::with_pre(pre, kind, ty, line)
+            }
+            other => unreachable!("{other:?} used as a value"),
+        }
     }
 
     /// The initializer of a constant that holds no array, list or map, written out at each use.
@@ -204,6 +223,13 @@ impl<'a> FnLowerer<'a> {
         let (t, program) = (self.t, self.program);
         self.expr(&decl(program, t, c).value)
     }
+}
+
+/// Whether `e` is a `TypeCall` of a built-in collection (`array[int](n)`, `list[T]()`,
+/// `map[K, V]()`). Every other `TypeCall` names a user generic and is lowered like the `Call` it
+/// stands for (P28).
+pub(crate) fn builtin_type_call(e: &ast::Expr) -> bool {
+    matches!(&e.kind, ast::ExprKind::TypeCall { name, .. } if matches!(name.as_str(), "array" | "list" | "map"))
 }
 
 /// The value of a numeric literal or `PI` / `TAU` (possibly negated) as float type `to`,

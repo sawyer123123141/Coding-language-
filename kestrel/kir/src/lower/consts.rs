@@ -207,7 +207,9 @@ fn uses_in(program: &Program, t: &Tables, e: &ast::Expr, out: &mut Vec<ConstId>)
                 out.push(c);
             }
         }
-        ast::ExprKind::Call { args, .. } => {
+        // A user `TypeCall` (`Bag[int]()`) is the call it stands for (P28): its missing defaults
+        // may name heap constants too.
+        ast::ExprKind::Call { args, .. } | ast::ExprKind::TypeCall { args, .. } if !super::expr::builtin_type_call(e) => {
             all(args, out);
             if let Some(Res::Construct(sid)) = plain_res(t, e.id) {
                 // Built-in structs (the vectors) have no declaration, and no defaults.
@@ -236,7 +238,8 @@ fn uses_in(program: &Program, t: &Tables, e: &ast::Expr, out: &mut Vec<ConstId>)
             uses_in(program, t, k, out);
             uses_in(program, t, v, out);
         }),
-        ast::ExprKind::TypeApply { .. } => unreachable!("generics are lowered from Task 6b"),
+        // A generic function as a value (`best[int]`), or the type before a variant: no constant.
+        ast::ExprKind::TypeApply { .. } => {}
         ast::ExprKind::Brackets { .. } => unreachable!("settled after parsing"),
         // Not in a constant expression (see `is_const_expr`).
         _ => {}

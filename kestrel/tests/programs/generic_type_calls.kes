@@ -1,0 +1,30 @@
+struct Bag[T] {
+    items: list[T] = []
+    ids: [int] = DEFAULTS
+}
+
+let EMPTY = Bag[int]()
+let DEFAULTS = [7, 8, 9]
+
+struct Stack[T] {
+    items: list[T] = []
+    push(var self, v: T) { self.items.add(v) }
+}
+
+fill[T](var s: Stack[T], a: T, b: T) {
+    s.push(a)
+    s.push(b)
+}
+
+pure first[T](xs: list[T]) -> T { xs[0] }
+
+main() {
+    var s = Stack[int]()
+    fill[int](var s, 1, 2)
+    var t = Stack[string]()
+    fill[string](var t, "p", "q")
+    print(s.items, t.items, first[int](s.items))
+    print(EMPTY.ids, EMPTY.items.len)
+}
+// expect: [1, 2] ["p", "q"] 1
+// expect: [7, 8, 9] 0

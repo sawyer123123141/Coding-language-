@@ -111,3 +111,113 @@ main() {
     assert_eq!(stub.len(), 1);
     assert_eq!(stub[0].body, vec![Stmt::Trap]);
 }
+
+fn idx(m: &Module, name: &str) -> FuncIdx {
+    FuncIdx(m.funcs.iter().position(|f| f.name == name).unwrap_or_else(|| panic!("no function {name}")) as u32)
+}
+
+/// The functions `stmts` call directly, and whether they make a virtual call.
+fn calls(stmts: &[Stmt]) -> (Vec<FuncIdx>, bool) {
+    let (mut direct, mut virtual_call) = (Vec::new(), false);
+    visit::walk(stmts, &mut |n| match n {
+        visit::Node::Expr(Expr { kind: ExprKind::Call(f, _), .. }) | visit::Node::Stmt(Stmt::Call(f, _, _)) => direct.push(*f),
+        visit::Node::Expr(Expr { kind: ExprKind::CallVirtual { .. }, .. }) | visit::Node::Stmt(Stmt::CallVirtual { .. }) => virtual_call = true,
+        _ => {}
+    });
+    (direct, virtual_call)
+}
+
+/// Whether `stmts` make an interface value.
+fn makes_iface(stmts: &[Stmt]) -> bool {
+    let mut found = false;
+    visit::walk(stmts, &mut |n| found |= matches!(n, visit::Node::Expr(Expr { kind: ExprKind::MakeIface { .. }, .. })));
+    found
+}
+
+const RULES: &str = include_str!("../../tests/programs/generic_rules.kes");
+const BEST: &str = include_str!("../../tests/programs/generic_best.kes");
+const IFACE_IMPL: &str = include_str!("../../tests/programs/generic_iface_impl.kes");
+const TYPE_CALLS: &str = include_str!("../../tests/programs/generic_type_calls.kes");
+
+#[test]
+fn calls_on_a_placeholder_are_direct() {
+    let m = lowered(RULES);
+    let (direct, virtual_call) = calls(&funcs(&m, "total_hp[Goblin]")[0].body);
+    assert!(direct.contains(&idx(&m, "Goblin.hp")), "`total_hp[Goblin]` calls `Goblin.hp`");
+    assert!(!virtual_call, "`total_hp[Goblin]` makes no virtual call");
+    let (_, virtual_call) = calls(&funcs(&m, "total_hp[Damageable]")[0].body);
+    assert!(virtual_call, "`total_hp[Damageable]` calls through the interface");
+    // `var self` through a rule: `hurt[Troll]` calls `Troll.hit` directly.
+    let (direct, _) = calls(&funcs(&m, "hurt[Troll]")[0].body);
+    assert!(direct.contains(&idx(&m, "Troll.hit")));
+}
+
+#[test]
+fn calls_reach_copies() {
+    let m = lowered(BEST);
+    let (direct, _) = calls(&funcs(&m, "main")[0].body);
+    assert!(direct.contains(&idx(&m, "best[Enemy]")), "`main` calls `best[Enemy]`");
+    assert!(direct.contains(&idx(&m, "best[int]")), "`main` calls `best[int]`");
+    let stub = idx(&m, "best");
+    for f in &m.funcs {
+        assert!(!calls(&f.body).0.contains(&stub), "`{}` calls the stub `best`", f.name);
+    }
+}
+
+#[test]
+fn one_table_per_instance() {
+    let m = lowered(IFACE_IMPL);
+    let mut names: Vec<&str> = m.tables.iter().flat_map(|t| t.methods.iter().map(|f| m.funcs[f.0 as usize].name.as_str())).collect();
+    names.sort_unstable();
+    assert_eq!(names, ["Stack[float].name", "Stack[int].name", "Stack[string].name"]);
+}
+
+#[test]
+fn an_annotated_generic_judges_its_copies() {
+    let m = lowered("@prove(no_alloc)\npure id[T](x: T) -> T { x }\nmain() { print(id(1)) }\n");
+    assert_eq!(m.contracts.len(), 1, "one site");
+    assert_eq!(m.contracts[0].target, ProveTarget::Func(idx(&m, "id[int]")));
+}
+
+#[test]
+fn a_conversion_to_its_own_interface_is_dropped() {
+    // G14: `pass_on[Goblin]` makes `x` a `Damageable`; in `pass_on[Damageable]` it already is one.
+    let src = "interface Damageable {
+    pure hp(self) -> int
+}
+struct Goblin: Damageable {
+    health: int
+    pure hp(self) -> int { self.health }
+}
+show(d: Damageable) { print(d.hp()) }
+pass_on[T: Damageable](x: T) { show(x) }
+main() {
+    pass_on(Goblin(health: 1))
+    let d: Damageable = Goblin(health: 2)
+    pass_on(d)
+}
+";
+    let m = lowered(src);
+    assert!(makes_iface(&funcs(&m, "pass_on[Goblin]")[0].body));
+    let body = &funcs(&m, "pass_on[Damageable]")[0].body;
+    assert!(!makes_iface(body), "the value is passed through unconverted");
+    assert!(calls(body).0.contains(&idx(&m, "show")));
+}
+
+#[test]
+fn written_type_calls_are_calls_and_constructions() {
+    // P28: `Stack[int]()` builds a struct (not a list), and `fill[int](var s, 1, 2)` as a
+    // statement calls the copy.
+    let m = lowered(TYPE_CALLS);
+    let main = &funcs(&m, "main")[0].body;
+    let mut lists_of_structs = 0;
+    visit::walk(main, &mut |n| {
+        if let visit::Node::Expr(Expr { kind: ExprKind::ListNew, ty: KTy::Struct(_), .. }) = n {
+            lists_of_structs += 1;
+        }
+    });
+    assert_eq!(lists_of_structs, 0);
+    let (direct, _) = calls(main);
+    assert!(direct.contains(&idx(&m, "fill[int]")) && direct.contains(&idx(&m, "fill[string]")));
+    assert!(direct.contains(&idx(&m, "first[int]")));
+}

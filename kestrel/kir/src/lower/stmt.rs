@@ -111,6 +111,8 @@ impl<'a> FnLowerer<'a> {
             }
             ast::ExprKind::Match { .. } => return self.match_stmt(e, out),
             ast::ExprKind::Call { args, .. } => (None, args),
+            // `fill[int](var s, 1, 2)`: a user `TypeCall` is the call it stands for (P28).
+            ast::ExprKind::TypeCall { args, .. } if !super::expr::builtin_type_call(e) => (None, args),
             ast::ExprKind::MethodCall { receiver, args, .. } => (Some(&**receiver), args),
             _ => unreachable!("checker rejects statements with no effect"),
         };

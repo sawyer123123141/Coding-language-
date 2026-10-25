@@ -1,0 +1,64 @@
+interface Damageable {
+    pure hp(self) -> int
+    hit(var self, n: int)
+}
+
+interface Named {
+    pure name(self) -> string
+}
+
+struct Goblin: Damageable, Named {
+    health: int
+    pure hp(self) -> int { self.health }
+    hit(var self, n: int) { self.health -= n }
+    pure name(self) -> string { "goblin" }
+}
+
+struct Troll: Damageable {
+    health: int
+    pure hp(self) -> int { self.health * 2 }
+    hit(var self, n: int) { self.health -= n / 2 }
+}
+
+pure total_hp[T: Damageable](xs: list[T]) -> int {
+    var sum = 0
+    for x in xs {
+        sum += x.hp()
+    }
+    sum
+}
+
+describe[T: Damageable + Named](x: T) -> string {
+    "{x.name()} has {x.hp()}"
+}
+
+hurt[T: Damageable](var x: T, n: int) {
+    x.hit(n)
+}
+
+show(d: Damageable) { print(d.hp()) }
+
+pass_on[T: Damageable](x: T) { show(x) }
+
+main() {
+    let goblins: list[Goblin] = [Goblin(health: 3), Goblin(health: 4)]
+    print(total_hp(goblins))
+    let mixed: list[Damageable] = [Goblin(health: 5), Troll(health: 6)]
+    print(total_hp(mixed))
+    var g = Goblin(health: 10)
+    print(describe(g))
+    hurt(var g, 4)
+    print(g.health)
+    var t = Troll(health: 10)
+    hurt(var t, 4)
+    print(t.health)
+    pass_on(g)
+    pass_on(t)
+}
+// expect: 7
+// expect: 17
+// expect: goblin has 10
+// expect: 6
+// expect: 8
+// expect: 6
+// expect: 16

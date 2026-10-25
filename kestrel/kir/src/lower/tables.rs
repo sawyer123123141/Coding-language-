@@ -44,18 +44,28 @@ impl Helpers {
         if let Some(&idx) = self.ifaces.by_pair.get(&(concrete, iface)) {
             return idx;
         }
-        let own = match ty {
-            Ty::Struct(s) => &t.strukt(s).methods,
-            Ty::Enum(e) => &t.enm(e).methods,
+        // An instance's methods are its declaration's generic originals: each is called as its
+        // copy for the instance's types, which the collection pass made (one table per instance).
+        let (own, args) = match ty {
+            Ty::Struct(s) => (&t.strukt(s).methods, t.strukt(s).instance.map(|i| i.args)),
+            Ty::Enum(e) => (&t.enm(e).methods, t.enm(e).instance.map(|i| i.args)),
             other => unreachable!("only structs and enums implement interfaces, not {other:?}"),
         };
+        assert!(t.is_concrete(ty), "a generic type reached KIR unsubstituted; this is a compiler bug");
         let methods = t
             .iface(iface)
             .methods
             .iter()
             .map(|&m| {
                 let name = &t.func(m).decl(program).name;
-                FuncIdx(own.get(name).unwrap_or_else(|| panic!("conformance guarantees a method `{name}`")).0)
+                let own = *own.get(name).unwrap_or_else(|| panic!("conformance guarantees a method `{name}`"));
+                let f = match args {
+                    Some(args) => *t.generic.fn_copies.get(&(own, args)).unwrap_or_else(|| {
+                        panic!("the collection pass missed `{}.{name}` in a method table; this is a compiler bug", t.ty_name(ty))
+                    }),
+                    None => own,
+                };
+                FuncIdx(f.0)
             })
             .collect();
         let next_id = self.ifaces.type_ids.len() as u32 + 1;

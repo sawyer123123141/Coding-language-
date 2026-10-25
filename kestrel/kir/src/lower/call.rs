@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use kestrel_check::{EnumId, FnId, Res, StructId};
+use kestrel_check::{EnumId, FnId, GenericOwner, Res, StructId, Subst};
 use kestrel_syntax::ast;
 
 use super::consts::hoisted;
@@ -131,6 +131,8 @@ impl<'a> FnLowerer<'a> {
     /// Whether a call to `f` builds text in a scratch arena (see `wants_scratch` in the
     /// checker, which also treats the arguments as memory freed at the call's end).
     pub(crate) fn wants_scratch(&self, f: FnId, args: &[ast::Arg]) -> bool {
+        // Reads the arguments' types unsubstituted: safe, since only a native says yes and natives
+        // never take a `T` (no native has placeholders, so its arguments' types are its own).
         kestrel_check::wants_scratch(self.t.func(f), args, self.t)
     }
 
@@ -205,7 +207,12 @@ impl<'a> FnLowerer<'a> {
                 },
                 None => match program.items.get(t.strukt(sid).item) {
                     Some(ast::Item::Struct(decl)) => {
-                        self.value(decl.fields[fi].default.as_ref().expect("checker requires a default for a missing field"))
+                        let default = decl.fields[fi].default.as_ref().expect("checker requires a default for a missing field");
+                        // An instance's default is its declaration's, in the instance's types.
+                        match t.strukt(sid).instance {
+                            Some(i) => self.with_subst(Subst { owner: GenericOwner::Struct(i.def), args: i.args }, |cx| cx.value(default)),
+                            None => self.value(default),
+                        }
                     }
                     // `vec2()` and `ivec3()`: a built-in vector's components start at zero.
                     _ => super::builtins::number(0, super::kty(t.strukt(sid).fields[fi].ty), self.line(e.span)),

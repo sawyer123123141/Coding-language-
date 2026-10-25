@@ -1,0 +1,52 @@
+struct Enemy {
+    hp: int
+    pos: vec2
+}
+
+pure best[T](xs: list[T], score: pure (T) -> float) -> T? {
+    var found: T? = none
+    var top = 0.0
+    var first = true
+    for x in xs {
+        let s = score(x)
+        if first or s > top {
+            found = x
+            top = s
+            first = false
+        }
+    }
+    found
+}
+
+pure by_hp(e: Enemy) -> float { float(e.hp) }
+
+let RULE = best[int]
+
+main() {
+    let foes: list[Enemy] = [Enemy(hp: 3, pos: vec2(0, 0)), Enemy(hp: 9, pos: vec2(5, 0)), Enemy(hp: 4, pos: vec2(1, 1))]
+    let me = vec2(4, 0)
+    let near = best(foes, (e) { -e.pos.distance_to(me) }) else { return }
+    print(near.hp)
+    let strong = best(foes, by_hp) else { return }
+    print(strong.hp)
+    let heights: list[int] = [3, 11, 7]
+    print(best(heights, (h) { float(h) }))
+    let low: pure (int) -> float = (h) { -float(h) }
+    print(best(heights, low))
+    let written = best[Enemy](foes, by_hp) else { return }
+    print(written.hp)
+    let f = best[Enemy]
+    let g = f(foes, (e) { -e.pos.x }) else { return }
+    print(g.hp)
+    print(RULE(heights, low))
+    let empty: list[int] = []
+    print(best(empty, low))
+}
+// expect: 9
+// expect: 9
+// expect: 11
+// expect: 3
+// expect: 9
+// expect: 3
+// expect: 3
+// expect: none

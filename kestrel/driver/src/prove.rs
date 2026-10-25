@@ -6,9 +6,11 @@
 //! A program with no `@prove` (and, when warnings are asked for, no `@assume`) is left exactly as
 //! `compile` made it, so it costs nothing: codegen analyses a copy of it as before.
 
+use std::collections::HashMap;
+
 use kestrel_kir::range::{contracts, remove_checks, Analysis, Arith};
 use kestrel_kir::Module;
-use kestrel_syntax::Diagnostic;
+use kestrel_syntax::{Diagnostic, Span};
 
 use crate::{report, Compiled, DiagStyle};
 
@@ -54,8 +56,10 @@ pub fn prove(c: &mut Compiled, checked: bool, warn: bool, style: DiagStyle) -> P
     Proved { ok, text, diags, analysis: Some(analysis) }
 }
 
-/// A warning for each assumption that every analysed copy of it, in every analysis, used without
-/// removing a check. One no analysis recorded (its function was given up on) gets none.
+/// A warning for each `@assume` that every analysed copy of it, in every analysis, used without
+/// removing a check. One no analysis recorded (its function was given up on) gets none. Each copy
+/// of a generic lowers its own assumptions, so they are judged together by the `@assume`'s span:
+/// one that a single copy needs is kept (P32).
 fn useless_assumptions(m: &Module, analyses: &[&Analysis]) -> Vec<Diagnostic> {
     let n = m.assumptions.len();
     let (mut seen, mut removes) = (vec![false; n], vec![false; n]);
@@ -65,9 +69,22 @@ fn useless_assumptions(m: &Module, analyses: &[&Analysis]) -> Vec<Diagnostic> {
             removes[id as usize] |= u.removed > 0;
         }
     }
-    (0..n)
-        .filter(|&i| seen[i] && !removes[i])
-        .map(|i| {
+    // Per span, in the order the assumptions were lowered: whether one was analysed, and whether
+    // one removes a check.
+    let mut by_span: Vec<(usize, bool, bool)> = Vec::new();
+    let mut group: HashMap<Span, usize> = HashMap::new();
+    for i in 0..n {
+        let g = *group.entry(m.assumptions[i].span).or_insert_with(|| {
+            by_span.push((i, false, false));
+            by_span.len() - 1
+        });
+        by_span[g].1 |= seen[i];
+        by_span[g].2 |= removes[i];
+    }
+    by_span
+        .into_iter()
+        .filter(|&(_, seen, removes)| seen && !removes)
+        .map(|(i, ..)| {
             let info = &m.assumptions[i];
             Diagnostic::warning(info.span, format!("`@assume({})` removes no check; delete it", info.text))
         })

@@ -40,6 +40,11 @@ impl<'a> FnLowerer<'a> {
     /// A closure literal as a value.
     pub(crate) fn make_closure(&mut self, e: &ast::Expr, lit: &ClosureLit) -> ExprKind {
         let (program, t, lines) = (self.program, self.t, self.lines);
+        // Temporary (P12, P4, until Task 7): closure code is keyed by the literal only, so a copy
+        // (or an instance's field default) would share another's code and types.
+        if self.active_subst().is_some() {
+            panic!("closures in generic code aren't supported yet");
+        }
         let encl_fn = self.closure(e.id).encl_fn;
         let code = self.helpers.closure_code(e.id, |helpers| lower_closure(program, t, lines, encl_fn, e, lit, helpers));
         let line = self.line(e.span);

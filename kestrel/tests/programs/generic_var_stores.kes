@@ -1,0 +1,43 @@
+struct Stack[T] {
+    items: list[T] = []
+    push(var self, v: T) { self.items.add(v) }
+}
+
+struct Cell[T] {
+    v: T
+}
+
+swap[T: equatable](var a: T, var b: T) {
+    let t = a
+    a = b
+    b = t
+}
+
+set_cell[T](var c: Cell[T], v: T) { c.v = v }
+
+fill[T](var s: Stack[T], v: T, n: int) {
+    for i from 0 to n { s.push(v) }
+}
+
+main() {
+    var x = "p"
+    var y = "q"
+    swap[string](var x, var y)
+    var i = 1
+    var j = 2
+    swap[int](var i, var j)
+    print(x, y, i, j)
+    var c = Cell[string](v: "a")
+    set_cell[string](var c, "b")
+    var n = Cell[int](v: 1)
+    arena {
+        set_cell[int](var n, 5)
+    }
+    print(c, n)
+    var s = Stack[string]()
+    fill[string](var s, "z", 2)
+    print(s.items)
+}
+// expect: q p 2 1
+// expect: Cell[string](v: "b") Cell[int](v: 5)
+// expect: ["z", "z"]

@@ -1,0 +1,49 @@
+struct Stack[T] {
+    items: list[T] = []
+}
+
+struct Pair[A, B] {
+    a: A
+    b: B
+}
+
+pure pick[T](a: T, b: T) -> T { b }
+
+pure make[T](f: pure () -> T) -> T { f() }
+
+pure apply[T, R](x: T, f: pure (T) -> R) -> R { f(x) }
+
+pure first_or[T](xs: list[T], d: T?) -> T? {
+    for x in xs { return x }
+    d
+}
+
+pure count[T](xs: list[T]) -> int { xs.len }
+
+pure both[T](a: list[T], b: list[T]) -> int { a.len + b.len }
+
+main() {
+    print(pick(1, 2), pick(1, 2.5), pick("a", "b"))
+    let s: Stack[int] = Stack()
+    let t = Stack(items: [1, 2])
+    print(s, t)
+    print(Pair(a: 1, b: true), Pair(b: 2.5, a: 2))
+    print(make(() { 3 }), make(() { "made" }))
+    print(apply(4, (x) { x * 2 }), apply(4, (x) { float(x) / 8.0 }))
+    let xs: list[int] = [5, 6]
+    print(first_or(xs, none), first_or(xs, 9))
+    let empty: list[string] = []
+    print(first_or(empty, none))
+    print(count(xs), count([1.5, 2.5]), both(xs, []))
+    let x: float = pick(1, 2)
+    print(x)
+}
+// expect: 2 2.5 b
+// expect: Stack[int](items: []) Stack[int](items: [1, 2])
+// expect: Pair[int, bool](a: 1, b: true) Pair[int, float](a: 2, b: 2.5)
+// expect: 3 made
+// expect: 8 0.5
+// expect: 5 5
+// expect: none
+// expect: 2 2 2
+// expect: 2

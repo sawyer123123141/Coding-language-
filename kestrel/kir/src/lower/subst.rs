@@ -9,11 +9,16 @@
 //! `kir/tests/subst_discipline.rs` keeps the direct reads (`t.ty(`, `t.res`, `t.coerce`,
 //! `iface_borrows`, `t.sig(`, `t.local(`, `t.closures[`) out of every other file of `lower/`.
 
-use kestrel_check::{ClosureInfo, LocalId, LocalInfo, Res, Sig, SigId, Subst, Tables, Ty};
+use kestrel_check::{ClosureInfo, FnId, GenericOwner, LocalId, LocalInfo, Res, Sig, SigId, Subst, Tables, Ty, TyListId};
 use kestrel_syntax::ast::ExprId;
 
 use super::{kty, FnLowerer};
 use crate::ir::KSig;
+
+/// A type the collection pass should have interned (or a copy it should have made) is missing.
+fn missed(what: &str, copy: &str) -> ! {
+    panic!("the collection pass missed `{what}` in `{copy}`; this is a compiler bug")
+}
 
 /// The signature of a call through a value of the checker's function type `sig`, which is
 /// already in the terms of the code being lowered (substituted, or from plain code).
@@ -43,11 +48,105 @@ impl<'a> FnLowerer<'a> {
         self.default_substs.last().copied().or(self.subst)
     }
 
-    /// The name a missed type is reported in: the function being lowered.
+    /// The name a missed type is reported in: the instance whose field default is being lowered
+    /// (`Stack[int]`), else the function being lowered.
     fn copy_name(&self) -> &'a str {
+        let t = self.t;
+        if let Some(&Subst { owner: GenericOwner::Struct(def), args }) = self.default_substs.last() {
+            if let Some(&inst) = t.generic.struct_instances.get(&(def, args)) {
+                return &t.strukt(inst).name;
+            }
+        }
         match self.fn_id {
-            Some(f) => &self.t.func(f).name,
+            Some(f) => &t.func(f).name,
             None => "a field default",
+        }
+    }
+
+    /// Type list `l` (a generic callee's `type_args`), in the terms of the code being lowered.
+    fn sub_list(&self, l: TyListId) -> TyListId {
+        if self.active_subst().is_none() {
+            return l;
+        }
+        let tys: Vec<Ty> = self.t.ty_list(l).iter().map(|&ty| self.sub(ty)).collect();
+        match self.t.generic.ty_list_ids.get(&tys) {
+            Some(&l) => l,
+            None => {
+                let shown: Vec<String> = tys.iter().map(|&ty| self.t.ty_name(ty)).collect();
+                missed(&format!("[{}]", shown.join(", ")), self.copy_name())
+            }
+        }
+    }
+
+    /// `r`, the checker's resolution of `e`, in the terms of the code being lowered: a generic
+    /// callee becomes its copy for `e`'s types, a construction or variant names its instance, and
+    /// a call on a `T` (`ParamCall`) becomes a direct call of the concrete type's method (or its
+    /// copy) or, when `T` is an interface type, a call through the interface (R7: then `T` has
+    /// exactly that one interface rule).
+    fn res_in_terms(&self, e: ExprId, r: Res) -> Res {
+        let t = self.t;
+        match r {
+            Res::Fn(f) => Res::Fn(self.callee(e, f)),
+            Res::FnValue(f) => Res::FnValue(self.callee(e, f)),
+            Res::Construct(sid) => match self.sub(Ty::Struct(sid)) {
+                Ty::Struct(sid) => Res::Construct(sid),
+                other => unreachable!("a struct substitutes to a struct, not {other:?}"),
+            },
+            Res::Variant(eid, v) => match self.sub(Ty::Enum(eid)) {
+                Ty::Enum(eid) => Res::Variant(eid, v),
+                other => unreachable!("an enum substitutes to an enum, not {other:?}"),
+            },
+            Res::CallValue(sig) => match self.sub(Ty::Fn(sig)) {
+                Ty::Fn(sig) => Res::CallValue(sig),
+                other => unreachable!("a function type substitutes to a function type, not {other:?}"),
+            },
+            Res::Convert(ty) => Res::Convert(self.sub(ty)),
+            Res::SimdMake(ty) => Res::SimdMake(self.sub(ty)),
+            Res::ParamCall { param, iface, slot } => {
+                let method = t.iface(iface).methods[slot as usize];
+                let name = t.func(method).name.rsplit('.').next().unwrap_or_default();
+                let on = self.sub(Ty::Param(param));
+                let (methods, args) = match on {
+                    Ty::Struct(s) => (&t.strukt(s).methods, t.strukt(s).instance.map(|i| i.args)),
+                    Ty::Enum(en) => (&t.enm(en).methods, t.enm(en).instance.map(|i| i.args)),
+                    Ty::Iface(i) => {
+                        let slot = t.iface(i).methods.iter().position(|&m| t.func(m).name.rsplit('.').next() == Some(name));
+                        let slot = slot.unwrap_or_else(|| panic!("`{}` has no method `{name}`; this is a compiler bug", t.iface(i).name));
+                        return Res::IfaceCall { iface: i, slot: slot as u32 };
+                    }
+                    other => panic!("a rule call on `{}` reached KIR; this is a compiler bug", t.ty_name(other)),
+                };
+                let m = *methods.get(name).unwrap_or_else(|| panic!("conformance guarantees a method `{name}`"));
+                Res::Fn(match args {
+                    Some(args) => self.copy_of(m, args),
+                    None => m,
+                })
+            }
+            other => other,
+        }
+    }
+
+    /// The function call (or function value) `e` reaches when it names `f`: `f` itself, or, for
+    /// a generic original, its copy for `e`'s types.
+    fn callee(&self, e: ExprId, f: FnId) -> FnId {
+        let info = self.t.func(f);
+        if info.generic.is_none() || info.copy.is_some() {
+            return f;
+        }
+        let Some(&l) = self.t.generic.type_args.get(&e) else {
+            panic!("a call of the generic `{}` has no types; this is a compiler bug", info.name)
+        };
+        self.copy_of(f, self.sub_list(l))
+    }
+
+    /// The copy of generic `f` for (already substituted) `args`, which the collection pass made.
+    fn copy_of(&self, f: FnId, args: TyListId) -> FnId {
+        match self.t.generic.fn_copies.get(&(f, args)) {
+            Some(&c) => c,
+            None => {
+                let shown: Vec<String> = self.t.ty_list(args).iter().map(|&ty| self.t.ty_name(ty)).collect();
+                missed(&format!("{}[{}]", self.t.func(f).name, shown.join(", ")), self.copy_name())
+            }
         }
     }
 
@@ -108,9 +207,10 @@ impl<'a> FnLowerer<'a> {
         self.t.iface_borrows.contains(&e) && (self.active_subst().is_none() || self.coerce(e).is_some())
     }
 
-    /// What `e` resolves to.
+    /// What `e` resolves to, in the terms of the code being lowered (see `res_in_terms`).
     pub(crate) fn res(&self, e: ExprId) -> Option<Res> {
-        self.t.res.get(&e).copied()
+        let r = self.t.res.get(&e).copied()?;
+        Some(self.res_in_terms(e, r))
     }
 
     /// What `e` resolves to, when the checker resolves every such expression.
@@ -126,8 +226,6 @@ impl<'a> FnLowerer<'a> {
 
     /// Runs `f` under substitution `s` (a field default of an instance, lowered at a
     /// construction).
-    // `construct` lowers an instance's missing field defaults under it from Task 6b.
-    #[allow(dead_code)]
     pub(crate) fn with_subst<R>(&mut self, s: Subst, f: impl FnOnce(&mut Self) -> R) -> R {
         self.default_substs.push(s);
         let out = f(self);

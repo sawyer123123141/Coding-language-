@@ -36,6 +36,11 @@ impl Proves {
         }
         p.by_target = program.proves.iter().enumerate().map(|(i, a)| (a.target, i)).collect();
         for (i, info) in t.fns.iter().enumerate() {
+            // A generic original is a trapping stub: its copies (which share its declaration) are
+            // judged instead (P15).
+            if info.generic.is_some() && info.copy.is_none() {
+                continue;
+            }
             let decl = info.decl(program);
             let Some(&k) = p.by_target.get(&decl.span) else { continue };
             let contracts = &program.proves[k].contracts;
@@ -108,6 +113,11 @@ impl FnLowerer<'_> {
             return false;
         }
         let Some(&k) = self.helpers.proves.by_target.get(&s.span()) else { return false };
+        // Temporary (P12, until Task 7): loop sites are keyed by annotation only, so copies would
+        // share one site.
+        if self.active_subst().is_some() {
+            panic!("`@prove` on a loop in generic code isn't supported yet");
+        }
         let id = match self.helpers.proves.loops.get(&k) {
             Some(&id) => id,
             None => {

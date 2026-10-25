@@ -4,8 +4,23 @@
 
 use std::path::{Path, PathBuf};
 
-const FORBIDDEN: [&str; 8] =
-    ["t.ty(", "t.res.get(", "t.res[", "t.coerce.get(", "iface_borrows.contains(", "t.sig(", "t.local(", "t.closures["];
+const FORBIDDEN: [&str; 14] = [
+    "t.ty(",
+    "t.res.get(",
+    "t.res[",
+    "t.coerce.get(",
+    "iface_borrows.contains(",
+    "t.sig(",
+    "t.local(",
+    "t.closures[",
+    // The fields behind those accessors, read directly.
+    "t.expr_ty[",
+    "t.locals[",
+    "t.sigs[",
+    "t.closures.get(",
+    "t.res.contains_key(",
+    "t.coerce.contains_key(",
+];
 
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(dir).expect("lower/ is readable") {
