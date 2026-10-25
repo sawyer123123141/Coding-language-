@@ -2,6 +2,7 @@
 //! the locals in scope.
 
 use super::{Rewriter, Scoped};
+use crate::settle::names_generic_item;
 use crate::ast::*;
 
 impl Rewriter<'_> {
@@ -9,10 +10,12 @@ impl Rewriter<'_> {
         match item {
             Item::Fn(f) => {
                 f.name = self.qualified(&f.name).unwrap_or_else(|| f.name.clone());
+                self.type_params(&mut f.type_params);
                 self.func(f);
             }
             Item::Struct(s) => {
                 s.name = self.qualified(&s.name).unwrap_or_else(|| s.name.clone());
+                self.type_params(&mut s.type_params);
                 for f in &mut s.fields {
                     self.ty(&mut f.ty);
                     if let Some(d) = &mut f.default {
@@ -28,6 +31,7 @@ impl Rewriter<'_> {
             }
             Item::Enum(e) => {
                 e.name = self.qualified(&e.name).unwrap_or_else(|| e.name.clone());
+                self.type_params(&mut e.type_params);
                 self.iface_names(&mut e.ifaces);
                 for v in &mut e.variants {
                     v.fields.iter_mut().for_each(|f| self.ty(&mut f.ty));
@@ -42,6 +46,24 @@ impl Rewriter<'_> {
                 self.expr(&mut c.value);
             }
             Item::Use(_) => {}
+        }
+        self.placeholders.clear();
+    }
+
+    /// The placeholders of an item come into scope for every type in it (its bodies included),
+    /// until the item ends. A rule is named like an interface, except the built-in rules.
+    fn type_params(&mut self, params: &mut [TypeParam]) {
+        self.placeholders = params.iter().map(|p| p.name.clone()).collect();
+        for p in params {
+            for (rule, span) in &mut p.rules {
+                if matches!(rule.as_str(), "equatable" | "ordered" | "key") {
+                    continue;
+                }
+                match self.qualified(rule) {
+                    Some(q) => *rule = q,
+                    None => self.unseen(&rule.clone(), *span, "type", false),
+                }
+            }
         }
     }
 
@@ -75,9 +97,14 @@ impl Rewriter<'_> {
     fn ty(&mut self, t: &mut TypeExpr) {
         match &mut t.kind {
             TypeKind::Named { name, args } => {
-                match self.qualified(name) {
-                    Some(q) => *name = q,
-                    None => self.unseen(&name.clone(), t.span, "type", false),
+                // A placeholder is left alone, before anything else: a constant of the module
+                // with its name doesn't turn it into `geom.N`, and an entry-file item named
+                // like it is no "unknown type".
+                if !self.placeholders.contains(name) {
+                    match self.qualified(name) {
+                        Some(q) => *name = q,
+                        None => self.unseen(&name.clone(), t.span, "type", false),
+                    }
                 }
                 args.iter_mut().for_each(|a| self.ty(a));
             }
@@ -154,7 +181,7 @@ impl Rewriter<'_> {
     fn expr(&mut self, e: &mut Expr) {
         match &mut e.kind {
             ExprKind::Ident(name) => match self.scope.get(name.as_str()) {
-                Some(Scoped::Own(q) | Scoped::Item(q)) => *name = q.clone(),
+                Some(Scoped::Own(q, _) | Scoped::Item(q, _)) => *name = q.clone(),
                 Some(Scoped::Module(_)) => {
                     let msg = format!("`{name}` is a module; use one of its items, like `{name}.something`");
                     self.error(e.span, msg);
@@ -235,15 +262,25 @@ impl Rewriter<'_> {
                 self.expr(base);
                 self.expr(index);
             }
-            // Task 1b settles `Brackets` and decides what link does with a `TypeApply`'s name.
+            // The base first (`geom.best` becomes `geom.best` the name); then what it is decides
+            // which half is rewritten: the types after a generic, the index after anything else.
+            // `settle` (at the end of `link`) makes the same decision.
             ExprKind::Brackets { base, index, types } => {
                 self.expr(base);
-                if let Some(i) = index {
+                let is_local = |n: &str| self.locals.iter().any(|l| l == n);
+                if names_generic_item(base, is_local, |n| self.visible.get(n).copied()).is_some() {
+                    types.iter_mut().for_each(|t| self.ty(t));
+                } else if let Some(i) = index {
                     self.expr(i);
                 }
-                types.iter_mut().for_each(|t| self.ty(t));
             }
-            ExprKind::TypeApply { type_args, .. } => type_args.iter_mut().for_each(|t| self.ty(t)),
+            ExprKind::TypeApply { name, name_span, type_args } => {
+                match self.qualified(name) {
+                    Some(q) => *name = q,
+                    None => self.unseen(&name.clone(), *name_span, "type", false),
+                }
+                type_args.iter_mut().for_each(|t| self.ty(t));
+            }
             ExprKind::ArrayLit(items) => items.iter_mut().for_each(|i| self.expr(i)),
             ExprKind::MapLit(entries) => {
                 for (k, v) in entries {

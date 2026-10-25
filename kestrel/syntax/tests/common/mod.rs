@@ -27,3 +27,16 @@ pub fn body(src: &str) -> String {
     let p = ok(&format!("main() {{\n{src}\n}}"));
     fn_decl(&p, 0).body.to_sexpr()
 }
+
+/// Parses `src` (declarations and a `main`) with `parse`, which settles brackets, asserts there
+/// are no diagnostics, and returns the body of the function named `main` as an s-expression.
+pub fn main_body(src: &str) -> String {
+    let p = ok(src);
+    p.items
+        .iter()
+        .find_map(|i| match i {
+            Item::Fn(f) if f.name == "main" => Some(f.body.to_sexpr()),
+            _ => None,
+        })
+        .expect("a function named main")
+}

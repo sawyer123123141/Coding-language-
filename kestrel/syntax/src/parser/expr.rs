@@ -134,13 +134,12 @@ impl Parser {
         let mut e = self.primary()?;
         loop {
             if self.at(&Tok::LBracket) {
-                let (index, end) = self.nested(|p| {
-                    p.bump();
-                    let index = p.inside_brackets(Self::expr)?;
-                    Ok((index, p.expect(&Tok::RBracket, "`]`")?))
-                })?;
-                let span = e.span.to(end);
-                e = self.expr_node(ExprKind::Index { base: Box::new(e), index: Box::new(index) }, span);
+                // After a name or a field the brackets may hold types (`best[Enemy]`).
+                e = if matches!(e.kind, ExprKind::Ident(_) | ExprKind::Field { .. }) {
+                    self.brackets_after(e)?
+                } else {
+                    self.index_after(e)?
+                };
                 continue;
             }
             if self.at(&Tok::LParen) {

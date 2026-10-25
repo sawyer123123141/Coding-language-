@@ -6,6 +6,7 @@ pub mod link;
 mod newlines;
 pub mod parser;
 mod sexpr;
+mod settle;
 pub mod span;
 pub mod token;
 pub mod visit;
@@ -14,13 +15,17 @@ pub use diag::{render, render_short, Diagnostic, Severity};
 pub use sexpr::type_params_sexpr;
 pub use span::{LineIndex, Span};
 
-/// Lex and parse one source file. Diagnostics from both stages, in order.
+/// Lex and parse one source file, and settle its brackets (see `settle`). Diagnostics from all
+/// stages, in order.
 pub fn parse(src: &str) -> (ast::Program, Vec<Diagnostic>) {
-    parse_at(src, 0, 0, 0)
+    let (mut program, mut diags) = parse_at(src, 0, 0, 0);
+    diags.extend(settle::settle(&mut program));
+    (program, diags)
 }
 
 /// Parses one file of several: its spans start at byte `base` and its ids
-/// at `next_expr` / `next_bind`, so files can be merged into one program.
+/// at `next_expr` / `next_bind`, so files can be merged into one program. The brackets after
+/// names are not settled: `link` does that once it knows what the names are.
 pub fn parse_at(src: &str, base: u32, next_expr: u32, next_bind: u32) -> (ast::Program, Vec<Diagnostic>) {
     let (mut toks, mut diags) = lexer::lex(src);
     if base != 0 {

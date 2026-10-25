@@ -1,5 +1,6 @@
 mod annot;
 mod branch;
+mod brackets;
 mod closure;
 mod depth;
 mod expr;
@@ -53,6 +54,20 @@ pub struct Parser {
     hex_literals: Vec<ExprId>,
 }
 
+/// What `Parser::attempt` puts back on a failure (see `snapshot`).
+#[derive(Clone, Copy)]
+struct Snapshot {
+    pos: usize,
+    diags: usize,
+    depth: u32,
+    type_depth: u32,
+    too_deep_at: Option<usize>,
+    hex_literals: usize,
+    proves: usize,
+    blocks: usize,
+    block_top: Option<u32>,
+}
+
 impl Parser {
     /// `toks` must end with `Tok::Eof` (as `lex` guarantees).
     pub fn new(toks: Vec<Token>) -> Self {
@@ -103,6 +118,51 @@ impl Parser {
             hex_literals,
         };
         (program, self.finish_diags())
+    }
+
+    /// Where the parser is, so `restore` can put it back: the position and everything a parse
+    /// since then may have added or changed. Ids handed out stay unused, and `heights` keeps its
+    /// entries (it is indexed by id, and each id has one).
+    fn snapshot(&self) -> Snapshot {
+        Snapshot {
+            pos: self.pos,
+            diags: self.diags.len(),
+            depth: self.depth,
+            type_depth: self.type_depth,
+            too_deep_at: self.too_deep_at,
+            hex_literals: self.hex_literals.len(),
+            proves: self.proves.len(),
+            blocks: self.block_heights.len(),
+            block_top: self.block_heights.last().copied(),
+        }
+    }
+
+    fn restore(&mut self, s: Snapshot) {
+        self.pos = s.pos;
+        self.diags.truncate(s.diags);
+        self.depth = s.depth;
+        self.type_depth = s.type_depth;
+        self.too_deep_at = s.too_deep_at;
+        self.hex_literals.truncate(s.hex_literals);
+        self.proves.truncate(s.proves);
+        // A failed closure body leaves its `open_block` unpopped.
+        self.block_heights.truncate(s.blocks);
+        if let (Some(top), Some(saved)) = (self.block_heights.last_mut(), s.block_top) {
+            *top = saved;
+        }
+    }
+
+    /// Runs `f`; when it fails, puts the parser back as it was (position, diagnostics, depths,
+    /// hex literals, `@prove`s, block heights) and gives `None`: the failure leaves no trace.
+    pub(crate) fn attempt<T>(&mut self, f: impl FnOnce(&mut Self) -> PResult<T>) -> Option<T> {
+        let saved = self.snapshot();
+        match f(self) {
+            Ok(v) => Some(v),
+            Err(()) => {
+                self.restore(saved);
+                None
+            }
+        }
     }
 
     fn peek(&self) -> &Tok {
