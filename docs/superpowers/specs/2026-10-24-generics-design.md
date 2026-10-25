@@ -312,3 +312,15 @@ Opus for Tasks 2, 4, 5 and 6 and every review (representation, inference, the co
 ## Not this round
 
 From the proposal: the `number` rule (question A); owning types, optionals, function types and types holding functions as `T` (R3, G6); placeholders on methods and interfaces (R8); default types (`[T = int]`); constant placeholders (`Grid[W, H]`); `is` type tests; specialising a generic for one type; Godot exports of generics. Also: partial written type arguments (G8); writing a module's type as `geom.Stack[int]` in a type position (types from modules are imported by name, as today); working out a generic function value's types from an expected function type (`let f: (list[Enemy]) -> Enemy? = best`); a standard `Result` module (the tests write their own); devirtualising calls on an interface `T`; sharing one copy between types with the same layout.
+
+## Corrections from planning (2026-10-24)
+
+The plan (`docs/superpowers/plans/2026-10-24-generics.md`, rulings P1-P20) found these while reading the code; it wins over the text above on each:
+- **`<` on strings** compares `StrOp::Cmp` (which gives 0 for before, 1 for equal, 2 for after) with 1, not with 0 (P5).
+- **A copy's contract message** is today's sentence ("`X` can't be proven `no_alloc`: it allocates on line N: ...") with " (made by `Stack[string]` on line 12)" after the target's name; the example above isn't today's wording (P6).
+- **Per-copy caches in lowering** (closure code, environments, layouts, `@prove` loop sites) are keyed by the active substitution, not by `(ExprId, Option<FnId>)`: a closure in a generic struct's field default is lowered in plain code under the instance's types, so `Box[int]` and `Box[string]` would otherwise share one closure code (P4).
+- **A non-empty array literal given for an open `list[...]` parameter** decides through its items and becomes a list (otherwise `count([1, 2])` can't work out `T`, and G7's own example can't happen) (P11).
+- **Unit variants take the expected type** too (`let m: Maybe[int] = Maybe.Nothing` is a field access, so `check_field` gets it) (P8).
+- **`is_const_expr`:** a `TypeCall` is constant only for the built-in names; `best[int](xs)` is not a constant expression (P17).
+- **Two more guards behind G13:** the subst-discipline test also forbids `t.sig(` and `t.local(` outside `subst.rs` (P19), and lowering refuses any non-concrete type at its end, not only a bare `Ty::Param` in `kty` (P16).
+- **The new checker tables are one field, `Tables::generic`,** to keep `check/src/tables.rs` under 400 lines (P1).
