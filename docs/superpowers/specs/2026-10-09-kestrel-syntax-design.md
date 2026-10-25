@@ -357,7 +357,10 @@ use {
 
 - **Operators**, highest to lowest precedence: unary `-`, `not` and
   `~`; `* / % *%`; `+ - +% -%`; `<< >>`; `&`; `^`; `|`; `== != < > <= >=`;
-  `and`; `or`. Comparisons don't chain. Logic is words only: `&&`,
+  `and`; `or`. Comparisons don't chain. `< <= > >=` take two numbers, two
+  strings (by code point, the order `sort()` uses) or two bools (`false <
+  true`), decided 2026-10-25 for generics; a mix is "`<` needs two numbers,
+  two strings or two bools, found string and int". Logic is words only: `&&`,
   `||` and `!` don't exist (`!=` stays). Bit operators are symbols, as
   in GDScript, and work on integers (decided 2026-10-10): `& | ^` and
   `~x`, shifts `<<` and `>>` (arithmetic for signed types). A shift by
@@ -677,6 +680,102 @@ main() {
 
 **Cost.** A call through an interface is an indirect call through the method table, and is not inlined; the kernels in `kestrel/bench/kernels/results.md` measure it. Storing allocates a copy; lending does not.
 
+## Generics
+
+Design, rulings and what was built: `2026-10-24-generics-design.md` (its "As built" section lists what differs). A generic is a struct, enum or function written once with placeholders, and used for many types. In GDScript terms: `Array[Enemy]` is a typed array, and `list[Enemy]` is the same idea; a generic lets you write your own `Stack[T]`, which GDScript can't. Untyped GDScript gets the same reuse from `Variant`, which is boxed and only checked when the line runs. A Kestrel generic is checked once, where it is written, against what its placeholder is promised to be; then the compiler makes a separate compiled copy for each type you use it with (`Stack[int]` and `Stack[string]` are two types with two sets of methods). There is no boxing and no type tag at run time, and no `Variant`.
+
+```
+struct Stack[T] {
+    items: list[T] = []
+
+    push(var self, v: T) { self.items.add(v) }
+    pop(var self) -> T? { self.items.pop() }
+    pure size(self) -> int { self.items.len }
+}
+
+pure total_hp[T: Damageable](xs: list[T]) -> int {
+    var sum = 0
+    for x in xs { sum += x.hp() }
+    sum
+}
+
+main() {
+    var names = Stack[string]()            // the types written
+    names.push("a")
+    var ints: Stack[int] = Stack()         // or worked out from the annotation
+    ints.push(3)
+    print(ints, names.size())              // Stack[int](items: [3]) 1
+}
+```
+
+**Declaring.**
+- **Placeholders** go in square brackets after the name of a struct, an enum or a function, separated by commas: `struct Stack[T]`, `enum Result[T, E]`, `best[T](...)`, `pure best[T](...)`, `pub best[T](...)`. A struct's or enum's interface list comes after them: `struct Stack[T]: Named { ... }`.
+- **Names:** a placeholder's name starts with a capital letter (`T`, `Item`), and it can't be the name of a type that exists (a struct, enum, interface or built-in type anywhere in the program): Kestrel never lets one name hide another. A function or constant with the same name is fine. Each name appears once in a list.
+- **Methods** use their struct's or enum's placeholders and have none of their own ("methods can't have placeholders of their own yet; use a generic function that takes the struct instead"). Interfaces, natives and `main` have none either.
+- **Inside its own declaration** a generic type's bare name means itself with its own placeholders: in `struct Stack[T]`, `Stack` is `Stack[T]`. Everywhere else it is written with its types: "`Stack` needs its types, like `Stack[int]`".
+
+**Rules.** What a placeholder can do comes only from the rules after it, joined with `+`: `[T: Damageable + Named, K: key]`. A rule is the name of an interface, or one of three built-in words that are words only in this position (`key` stays usable as a name):
+- `equatable`: `==`, `!=`, `xs.has(x)`, `xs.find(x)`. The types that allow it are the numbers, `bool`, `string` and the vectors.
+- `ordered`: `<`, `<=`, `>`, `>=`, `xs.sort()` and a `sort_by` key. The numbers, `bool` and `string`. It includes `equatable`.
+- `key`: a `map[K, V]` key. `int`, `i64`, `u8`, `bool` and `string`. It includes `equatable`.
+
+An interface can't be named `equatable`, `ordered` or `key`. Two interface rules whose methods share a name must have the same signature (a call means either), else "no type can be both `A` and `B`: their `name` methods differ". In GDScript the nearest thing is checking `has_method` before a call, which is unchecked until the line runs.
+
+**Using.**
+- **In types:** `Stack[int]`, `Pair[string, vec2]`, `list[Stack[int]]`, `map[string, Result[Level, string]]`. A generic type from another module is imported by name (`use { Stack from geom }`) and written with its types; `geom.Stack` isn't a type name in a type position.
+- **In expressions** brackets after a name mean types when the name is a generic struct, enum or function, and an index otherwise: `best[Enemy](foes, score)`, `Stack[int]()`, `Result[int, string].Ok(value: 3)`, `Maybe[int].Nothing`, `geom.best[Enemy](...)`, `geom.Stack[int]()`; but `handlers[i](3)` indexes (a local is never hidden by an item of the same name). Written types give all of the placeholders, never some ("`Result` takes 2 types, found 1").
+- **Methods** are called on a value as usual (`ints.push(3)`); the value's type fixes the placeholders.
+- **A generic function is a value once its types are fixed:** `let f = best[Enemy]`, `let RULE = best[int]` (a constant). `let f = best` is "`best` is generic; give its types to use it as a value, like `best[int]`".
+- **`match`** on a generic enum names variants as for any enum; `r.value` has the copy's type. `print` shows `Stack[int](items: [3])` and `Result[int, string].Ok(value: 3)`.
+
+**Working out the types.** When no types are written, a call, a construction or a variant works them out from what you pass, in this order:
+1. **The values**, in source order. A placeholder met by an `int` and then a `float` becomes `float` (numbers widen, as mixed arithmetic does), **except** through a `var` argument, inside a type (`list[T]`, `T?`, a function type) or by a closure's result, which must match exactly.
+2. **The expected type** (a `let` annotation, a parameter, a field, a `return`) fills only what the values left open. `let x: float = first(ints)` works; `let s: Stack[float] = Stack(items: [1, 2])` is an error, because `T` is `int` from the list: write `Stack[float](items: [1, 2])` or `[1.0, 2.0]`.
+3. **Deferred arguments:** closures whose parameter types aren't written, `none`, `[]` and `{}`, each checked with the parameter type filled in. A closure's result decides an open placeholder exactly (`make(() { 3 })` gives `int`).
+4. **Every placeholder must be decided:** "can't tell what `T` is in `best`; write it, like `best[int](...)`". A conflict says where each type came from: "`T` in `pick` can't be both `int` (from `a`) and `string` (from `b`)".
+
+A non-empty array literal given for a `list[T]` parameter decides `T` through its items (`count([1, 2])`). A placeholder no parameter mentions can only be written (`make_empty[int]()`).
+
+**What `T` can do inside generic code.** The body is checked once, with `T` unknown. A `T` value can be stored, copied, passed, returned, printed (`print(x)`, `"{x}"`), held in a `list[T]`, a `[T]` literal, a `T?`, a map value or another generic type, captured by a closure and passed where a `T?` is expected. Everything else needs a rule:
+
+| Written | Needs | Otherwise |
+|---|---|---|
+| `x.hp()` | an interface rule with a method `hp` | "`T` has no method `hp`: its rules (`Named`) don't have one"; with no rules, "`T` has no rules, so it has no methods; add one, like `[T: Damageable]`" |
+| `x` where a `Damageable` is expected | the rule `Damageable` | "expected Damageable, found T" |
+| `==`, `!=`, `has`, `find` | `equatable` | "`==` on `T` needs the rule `equatable`: write `[T: equatable]`" |
+| `<`, `<=`, `>`, `>=`, `sort()`, a `sort_by` key | `ordered` | "`<` on `T` needs the rule `ordered`: write `[T: ordered]`" |
+| `map[K, V]` | `K: key` | "`K` can't be a map key without the rule `key`: write `[K: key]`" |
+
+- **Fields of `T`** aren't reachable: "`x` is a `T`, which can be any type, so it has no field `hp`", help "give `T` a rule with a method instead, like `[T: HasHp]`".
+- **Arithmetic** isn't available (there is no `number` rule this round): "`+` doesn't work on `T`, which can be any type; take a function that does it, like `add: (T, T) -> T`".
+- **`T` names a type:** `T(...)` is "`T` is a placeholder, so it can't be built here; take a value of it as a parameter instead", and `array[T](n)` is refused because the zeros it fills may not be a `T` ("build a `list[T]` with `add` instead"). `list[T]()`, `map[K, V]()` and `[a, b]` are fine.
+- **`pure` and `par for`:** a call through a rule follows the interface's method, which must be `pure` there.
+- **Closures** in generic code may take, return and capture `T` values.
+- **Field defaults** of a generic struct are checked once and built per copy (`items: list[T] = []`); a field of type `T` can't have a default.
+
+**Which types can be `T`.** Checked wherever a placeholder gets a type, written or worked out:
+- **Not an owning type:** "`Sprite` owns a GPU object, so it can't be `T` yet" (an `Arena` likewise).
+- **Not an optional:** "`int?` is an optional, so it can't be `T` yet; hold it in a struct field instead".
+- **Not a function type, and not a type that holds a function anywhere** (`list[(int) -> int]`, a struct with a callback field): "`(int) -> int` is a function type, so it can't be `T` yet".
+- **It meets every rule:** "`Rock` isn't `Damageable`, so it can't be `T` in `total_hp`"; "`Enemy` isn't `equatable` (numbers, bools, strings and vectors are), so it can't be `T` in `count`". An interface type meets its own rule only, so `total_hp` over a `list[Damageable]` works (that copy calls through the interface, an indirect call). Inside another generic, a placeholder meets a rule it carries, else the message adds "; add the rule: `[U: Damageable]`".
+- Interface types, lists, arrays, maps and other generic types are fine (`Stack[Damageable]`, `Stack[list[int]]`, `Stack[Stack[int]]`).
+
+**Endless copies.** Each copy is compiled code, so a generic can't need endless copies. The checker refuses it at the declaration, even if nothing uses it yet: "`Tree` would need endless copies: `Tree[T]` holds a `Tree[list[T]]`, which holds a `Tree[list[list[T]]]`, and so on" (help "use the same placeholders (`Tree[T]`), or types that don't grow"), and the same for a function that calls itself with a growing type. A few that go through a rule's method can only be found when copies are made, and stop there at 32 levels of nesting, 1,000 parts in one type, or 10,000 copies of one generic ("making copies of `walk` doesn't end ..."). A type that holds itself through a generic is today's "struct `Bad` contains itself".
+
+**Modules.** `pub struct Stack[T]`, `pub enum Result[T, E]` and `pub best[T]` are imported like any `pub` item (`use { Stack, best from geom }`, or `use geom` and `geom.best(...)`). The copies are made in the program that uses them, once per generic and set of types, whichever modules use it.
+
+**Contracts and the report.** `@prove` on a generic is checked on every copy; an error names the copy and the line that first led to it: "`Stack[string].put` (made by `Stack[string]` on line 12) can't be proven `no_alloc`: ...". A generic nothing uses has nothing to check, and `kestrel check --report` lists it as "`best`: not checked, no copies". Generic functions and their copies aren't exported to Godot; write a non-generic wrapper.
+
+**Cost.** One compiled copy per generic and set of types: code size and compile time grow with the number of distinct types you use. A copy is meant to run like the function you would have written by hand: a call on a `T` with a rule is a direct call the compiler can inline, unless `T` is an interface type, which is an indirect call as always (`kestrel/bench/kernels/results.md`, "Generics").
+
+**What this round changed in the rest of the language** (none of it new syntax):
+- **`<`, `<=`, `>`, `>=` work on two strings and two bools everywhere**, not only on numbers (strings by code point, the order `sort()` uses; `false < true`), so a copy of `[T: ordered]` code made for `string` compares strings. A mix is "`<` needs two numbers, two strings or two bools, found string and int".
+- **A function may store memory from the caller's arena into a `var` parameter, and the check moves to the call** (before, it was an error in the body). `push(var self, v: string) { self.items.add(v) }` works, and so does a generic `Stack[T].push`. Each function records which of its `var` parameters it stores such memory into, each direct call checks the place passed (as built-in `add` does), and a call through an interface or a rule takes the union of the implementations'. Such a function can't be used as a value. `Stack[int].push` inside an `arena { }` on an outer stack is still refused, as a `Stack[string]`'s is: the check assumes any `T` holds memory.
+- **Replacing a whole `var` placeholder** (`a = b`) is refused only when the placeholder may be an interface type (no built-in rule and at most one interface rule): `swap[T: equatable](var a: T, var b: T)` works, `swap[T]` doesn't ("if `T` is never an interface type, give it a built-in rule, like `[T: equatable]`").
+- **A `var` argument conflicts with an `if` or `match` argument that gives part of it** (`f(var w, if c { w.s } else { "" })`), as `f(var w, w.s)` already did; copy it into a `let` first.
+
+**Not built:** the `number` rule (arithmetic on `T`); owning types, optionals, function types and types holding functions as `T`; placeholders on methods and interfaces; default types (`[T = int]`); constant placeholders (`Grid[W, H]`); `is` type tests; specialising a generic for one type; Godot exports of generics; some but not all types written (`count_by[_, string]`); `geom.Stack[int]` in a type position; working out a generic function value's types from an expected function type (`let f: (list[Enemy]) -> Enemy? = best`); devirtualising a call on an interface `T`.
+
 ## Memory
 
 ```
@@ -715,12 +814,14 @@ let hp = scores["ana"] else { return }
 ```
 file      := (use | decl)*
 decl      := 'pub'? (func | struct | enum | interface | 'let' binding | 'var' binding)
-func      := 'pure'? 'native'? IDENT '(' params? ')' ('->' type)? block?
+func      := 'pure'? 'native'? IDENT tparams? '(' params? ')' ('->' type)? block?
+tparams   := '[' tparam (',' tparam)* ']'
+tparam    := IDENT (':' rule ('+' rule)*)?    // IDENT starts with a capital; a rule is an interface, equatable, ordered or key
 params    := param (',' param)*
 param     := 'var'? (IDENT ':' type | 'self')
-struct    := 'struct' IDENT impls? '{' (field | func)* '}'
+struct    := 'struct' IDENT tparams? impls? '{' (field | func)* '}'
 field     := IDENT ':' type ('=' expr)?
-enum      := 'enum' IDENT impls? '{' (variant | func)* '}'
+enum      := 'enum' IDENT tparams? impls? '{' (variant | func)* '}'
 impls     := ':' IDENT (',' IDENT)*
 interface := 'interface' IDENT '{' sig+ '}'
 sig       := 'pure'? IDENT '(' params? ')' ('->' type)?
@@ -789,7 +890,7 @@ pure at(xs: [int], i: int) -> int {
 
 ## Out of scope (later specs)
 
-User-defined generic types/functions, `is` type tests on interface values (and default method bodies, fields and inheritance between interfaces), error types beyond `?`, fixed-size arrays,
+User-defined generics are built (see "Generics"; what they leave out is under "Not built" there, and in the generics spec's "Not this round"). Still out of scope: `is` type tests on interface values (and default method bodies, fields and inheritance between interfaces), error types beyond `?`, fixed-size arrays,
 C FFI declarations, GPU/shader code. Also not yet: optional function types, methods and
 built-ins as values, `reduce`, `reverse`, a comparator sort.
 

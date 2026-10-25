@@ -2,6 +2,8 @@
 
 **Source:** the proposal `docs/superpowers/plans/2026-10-24-generics-proposal.md`, approved 2026-10-24: square brackets (pick 1), types worked out from values and the expected type (pick 2), what `T` may do comes only from its rules (pick 3), several rules with `+` (pick 4), generic enums this round (pick 5); no `number` rule (A), the three built-in rules `equatable`, `ordered`, `key` (B), capitalised placeholder names that can't hide a type (C); Claude's rulings R1-R8. This spec doesn't reopen any of them. It settles what the proposal left to it ("For the spec to settle") and everything a plan needs: the representation, the parsing, checking generic code once, working out types, the collection of copies, lowering per copy, names, modules, tests and tasks.
 
+**Status (2026-10-25):** built through Task 11; the final review, the full test run and the timings are still owed. "As built" at the end of this file lists what differs from the text below and what was found.
+
 Rulings in this document that aren't the user's picks are Claude's (G1-G27 at the end), each with what it costs if wrong. Everything here was designed against the code as of bad78c5 (read only; nothing was built or run).
 
 ## For the user: what this spec decides that you would see
@@ -346,3 +348,67 @@ From Task 3a's review (2026-10-25, plan rulings P38-P39, built in the plan's new
   - A storing function can't be a function value, and closures' own `var` parameters stay strict.
 
   R4's "arena escape rules as for a `string`" still holds: the summary assumes any `T` holds memory, so `Stack[int].push` inside `arena { }` on an outer stack is refused like `Stack[string]`'s. The whole replacement of a `var a: T` (`a = b`) stays refused when `T` may be an interface type (a copy lends the caller's concrete place), and is allowed when `T` has a built-in rule or two different interface rules, which no interface type can meet (R7, P39): `swap[T: equatable]` works. If wrong: a use after free through an unchecked indirect call; the plan's Task 3c lists each indirect path.
+
+## As built (2026-10-25)
+
+Built on `main` in the order of the spec's tasks, with one task added (3c) and two split (1a/1b, 2a/2b, 3a/3b, 6a/6b). Plan: `docs/superpowers/plans/2026-10-24-generics.md` (rulings P1-P41). The build ledger (git-ignored, this machine) is `.superpowers/sdd/2026-10-24-generics/`: `progress.md`, one report per task, the plan review and the diffs the reviews read. **Not yet done: the final whole-round review (Opus), its fix wave, and the full `cargo test --workspace` run (Task 12); every timing below is owed.** Status of the claims here: each task ran its own focused tests and clippy; nothing in this section was checked by a full-workspace run.
+
+| Task | Commit | What it delivered |
+|---|---|---|
+| 1a | eda06fa | `TypeParam`, `type_params`, `parser/generics.rs`; refused for now |
+| 1b | 2240bfb | the dual parse of `name[...]`, `Parser::attempt`, `settle.rs`, `visit.rs` |
+| 2a | 228d298 | `Ty::Param`, `ParamInfo`, type lists, instances, `subst`/`subst_known`, the R4 answers |
+| 2b | d15f659 | expansion check, self-containment, G9, R3/R7 on written types, `compute_owning` for instances |
+| 3a | ecc9c99, 6c7258b | generic bodies checked once, `Res::ParamCall`, operator and rule messages; fix round (replacing a whole `var T`) |
+| 3b | 74011f7 | `TypeCall`/`TypeApply` with written types, methods on instances |
+| 3c | 1ff637b (plan), f336c16 | stores into `var` parameters checked at the call (new; P38-P40) |
+| 4 | bef4626, 4b5ee2e | inference; fix round (moves in source order) |
+| 5 | 94248bf, 44d151e | the collection pass and its caps; fix round (the width cap, P41) |
+| 6a | 4787a4e | lowering's substitution layer (`lower/subst.rs`), placeholder layouts, the P16 guard |
+| 6b | e0b2124 | lowering per copy: generic programs compile and run |
+| 7 | 1c1557f | closure code, environments and loop sites per (literal, substitution) |
+| 8 | 6a319aa | `<` on strings and bools, the built-in rules in copies |
+| 9 | 8c5779a | names, contracts and the report: `CopyNote`, `uncopied`, `report_copies.rs`, `shown` |
+| 10 | ffabfb2 | modules: no compiler change, 10 CLI tests and one LSP test |
+| 11 | (this commit) | docs and the measurement |
+
+### What differs from the text above
+
+The plan's rulings P1-P41 correct this spec in the places its "Corrections from planning" block lists (P1-P37, then P38-P41 below). Beyond those, building changed or settled:
+
+- **Stores into `var` parameters (G28, P38-P40, new Task 3c).** Task 3a found that R4 refuses `Stack[T].push(var self, v: T) { self.items.add(v) }` with today's arena message ("this memory is in the caller's current arena ..."), the same one plain `push(var self, v: string)` always got. Relaxing R4 would be unsound, so the check was moved to the call: a per-function summary of the `var` parameters it stores caller-arena memory into, worked out to a fixpoint, checked at each direct call with the per-context tests `check_store_region` already had, the union over implementations for an interface or a rule call, no function value for a storing function, closures' own `var` parameters unchanged. No new syntax; programs that checked before are unchanged (their summaries are empty). **P39:** the refusal of replacing a whole `var` placeholder (`a = b`) applies only to a placeholder that may be an interface type, so `swap[T: equatable]` is accepted. **P40:** the Task 3c design review thought `f(var w, w.s)` slipped past the exclusivity rule; it was already refused (strings are aggregates). The real hole was an `if` or `match` argument (`f(var w, if c { w.s } else { "" })` read freed memory under `KESTREL_POISON=1`); exclusivity now looks through the tails of `if` and `match` for every `var` argument, so the non-owning `g(var c, c.name)` also stays refused.
+- **P41, the width cap.** The 32-level cap bounds nesting, not width: a default building `S[Pair[T, T]]()`, or a rule-call chain that doubles a type, builds instance names of about 9 * 2^n characters and runs the compiler and the language server out of memory before level 32. A type list over 1,000 parts now stops the walk (measured before anything is interned). Cost: a legitimate type over 1,000 parts is refused.
+- **P31's suffix is `.<index>`, not `_<index>`.** A copy symbol with replaced characters gets `.<function index>`: no plain Kestrel name can contain a `.` followed by digits, so `a_b__3` (a plain function) can't collide with a copy `a[b]`. The exe pass links these.
+- **The layout of the checker code** differs from the "How it is built" text in names only: inference is a `BodyChecker` method (`body/infer.rs`, `body/inferred.rs`) with the type-level matching in `generic/infer.rs`; the collection pass is `generic/copies*.rs`; generic enums are in `body/generic_variants.rs` (P20, `enums.rs` is untouched); `Tables::generic` holds the generic tables (P1); the copy note is `Module::copies` (P2).
+- **Inference.** Values that give no type (a closure whose body gives nothing, a unit) bind no placeholder, so `apply(4, (x) { print(x) })` needs its types written. P11 (an array literal for a `list[T]` parameter decides `T` through its items) is one level deep: `[[1], [2]]` for a `list[list[T]]` decides `T` but stays a mismatch inside; write the type. The expected type fills only what the values left open (G7), and a deferred closure whose parameter's result is still open is checked after it. A conflict is reported at the later value. An inferred construction or variant moves its arguments in source order (found in Task 4's review, below).
+- **The message for an enum used like a struct** (`Result[int, string](...)`) names the enum form with its first variant (`Result[int, string].Ok(...)`), not the spec's struct form; its written types are not counted or checked first.
+- **Copy requests from plain code past 32 levels,** and caps tripped inside a walk, blame what repeats on the chain (P41's rule); with only one entry on the chain the message names it twice ("`f[X]` needs `f[X]`"), which only absurdly deep written types reach.
+- **A closure literal inlined out of its copy** is listed in the report as a loose "closure at line N", since copies share lines (Task 9); the P38 message names the generic (`Stack.push`), not the copy, because the checker has no copy yet. `made_by` keeps the module in a type argument (`best[geom.Item]`), like the copy's name.
+- **Range analysis** sees `StrOp::Cmp` as any `u8` and derives no fact from a string compare; `Cmp` neither allocates nor fails, so `@prove(no_alloc, no_panic)` holds over `<` on strings (Task 8). `let X = "a" < "b"` is a constant with no extra code.
+- **Modules (Task 10)** needed no compiler change. Type arguments are bare names (`geom.Stack[Item]`); a placeholder named like a type in any module is refused, one named like a constant or function is fine (G16); two modules' `Item`s through one `Stack` are two instances that both print `Stack[Item]`.
+
+### What the reviews found
+
+Opus reviews ran on Tasks 2a-7 (3c included) and on the plan itself; Tasks 8-11 have only the final review (Task 12). The plan review (15 findings, three critical) was folded in first (P21-P37).
+- **Plan review:** stale `default_allocates` on instances made during `collect` (a use after free in an `arena { }`, P22), the driver's refusal in a function no real path calls (P21), and a user `TypeCall` mishandled by every arm that handled `list`/`map`/`array` (P28).
+- **2a, 2b, 3b, 6a, 6b, 7:** approved with no critical or important findings. 6b's probes (closures returned, captured and nested, `sort_by`, `par for`, function values, per-copy contracts, under `KESTREL_POISON=1`, in the JIT, as an exe and in release) found no miscompile.
+- **3a: one important,** replacing a whole `var T` (`a = b`) corrupts the caller's place when `T` is an interface type; fixed, then narrowed by P39.
+- **3c design review:** no hole in the design; two test fixes, five minor, and the P40 premise (above).
+- **4: one critical,** an inferred construction or variant consumed its arguments after all of them were checked, so an owning local used twice was a double move (a double free once lowered); fixed so moves follow source order, with closures deferred per G7.
+- **5: one important,** the width blow-up (P41, above).
+- **Deferred minors** (all in the ledger, none a soundness question): the follow-ups file lists them under "Found while building generics".
+
+### Tests added
+
+Program tests (`kestrel/tests/programs/`): `generic_stack`, `generic_best`, `generic_rules`, `generic_builtin_rules`, `generic_result`, `generic_infer`, `generic_defaults`, `generic_closures`, `generic_closure_forms`, `generic_arena`, `generic_iface_impl`, `generic_recursion`, `generic_type_calls`, `generic_var_stores`, `generic_prove_loop`, `string_bool_compare`, `string_compare_contracts`, `var_stores` (each also runs as an exe and in release). Error tests (`kestrel/tests/errors/`): 16 `generic_*` files plus `var_stores`, `compare_mixed`, `compare_param_mixed`, `prove_string_compare`, and lines added to `arenas`, `closures`, `iface_use`, `review_fixes` and `var_args`. Unit tests: syntax (`parser_generics`, `parser_brackets`, `visit`), check (`generics_decls`, `generics_types`, `generics_bodies`, `generics_written`, `generics_infer`, `generics_copies`, `var_stores`), kir (`generics.rs`, `subst_discipline.rs`), cli (`modules_generics.rs` with 10, plus additions to `report`, `contracts`, `modules`) and lsp (`nav_generic`, one lens test). The baseline was 1,245 tests at 3c79a9a; the new full count is owed (Task 12).
+
+### Measured
+
+**Nothing is timed yet** (the user was gaming when Task 11 ran). Done without timing loops, `kestrel/bench/kernels`, "Generics": the generic kernel `iface_step_generic.kes` (`step_all[T: Damageable]` and `total_hp[T: Damageable]` over a `list[Goblin]`) has the **same checksum** as `iface_step_direct.kes` (52483816), and its `bench` function's `--dump` (Cranelift IR and machine code) is **byte-identical** to the hand-written one's: the copies are inlined into `bench` and what remains is the hand-written loop. So the generic copy runs like the hand-written loop in this case; the claim is not yet timed, and the cost of an interface `T` (the `list[Damageable]` loop, an indirect call) is the earlier "Interface calls" number.
+
+### Owed
+
+- **Task 12:** the final whole-round review (Opus), its fix wave, and the full `cargo test --workspace --no-fail-fast` and clippy in all three workspaces (`kestrel/`, `kestrel/godot`, `kestrel/bench/kernels`), when the user says the machine is free. Compare the count with 1,245 plus the round's new tests.
+- **Timings, rerun when the machine is quiet** (commands in `results.md`, "Generics"): the three loops' ns per item (`py measure.py --rounds 9 --only iface --threads 1`); `kestrel build` of the frozen voxel world against 236d238 (P16's walk over the finished module, expected under 1%); the per-edit cost of the collection pass, `kestrel_driver::analyze` on the largest generic program test and on the frozen voxel world against 236d238 (P30). Record the numbers in `results.md`, here and in the handoff, and say plainly if the generic loop is slower.
+- **Open questions the final review should rule on:** the checker builds exponentially wide instance names from linear plain code (30 lines of `let x1 = Pair(a: x0, b: x0)`, or `f(f(f(x)))` with `f[T](x: T) -> Pair[T, T]`), because names are built eagerly when an instance is interned: an out-of-memory risk in the language server while typing (fix idea: lazy names or a size cap at interning); the deferred minors in the follow-ups file's "Found while building generics".
+- **Docs:** the syntax spec's "Generics" section and the README part are written; they describe what is built and say what is not timed.

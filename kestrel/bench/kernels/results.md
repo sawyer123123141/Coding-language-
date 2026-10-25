@@ -8,6 +8,7 @@ These are small loops from the particles demo, timed alone so that a change to t
 - `step_pow.kes`: the step exactly as the demo writes it, with `pow(KEEP, dt)` for every particle.
 - `copy.kes`: the demo's draw copy, every particle's position into a `list[vec2]`.
 - `src/bin/rust.rs`: the same three kernels in Rust (`step`, `pow` and `copy`), one thread, same arithmetic.
+- `iface_step_generic.kes`: `iface_step_direct.kes` with its two passes written once as `step_all[T: Damageable]` and `total_hp[T: Damageable]`, over a `list[Goblin]` (see "Generics" at the end).
 - `iface_hp.kes`, `iface_step.kes`: calls through a `list[Damageable]` (see "Interface calls" at the end), each with an `_direct.kes` version over a `list[Goblin]`, and `dyn_hp`, `dyn_step`, `direct_hp` and `direct_step` modes in `src/bin/rust.rs`.
 - `filter.kes`, `map.kes`, `sort_by.kes`: the list methods that take a closure (see "The list methods" at the end), each with a hand-written `_loop.kes` version doing the same work, and `filter`, `map` and `sort_by` modes in `src/bin/rust.rs`.
 - `noise_scalar.kes`, `noise_corners.kes`, `noise_wide.kes`: one 2D value noise written three ways (plain `int`s, the four corners in one `ivec4`, four samples in one `ivec4`/`vec4`; see "SIMD vectors" at the end), with `noise_scalar` and `noise_wide` (SSE4.1 intrinsics) modes in `src/bin/rust.rs` from `src/noise4.rs`. Here an item is one noise sample.
@@ -496,3 +497,24 @@ The "SIMD vectors" section above was measured on a busy machine. Quiet, now comp
 - **Four corners at once: 1.25 times scalar** (was 1.4-1.7, noisy).
 - **Checked builds still cost nothing:** checked over `--release` is 1.00-1.01 on all three.
 - Why the busy numbers flattered the wide kernel is not known for sure; the scalar loop's four independent hash chains likely suffered more from the shared core than the wide loop's one.
+
+## Generics (2026-10-25)
+
+`iface_step_generic.kes` is the `iface_step_direct.kes` loop (1,000,000 `Goblin`s in a `list[Goblin]`, `step(var self)` on every item for `iters` passes, then the sum of `hp()`) with the two passes written once, as generic functions over any type with the rule `Damageable`:
+
+```
+step_all[T: Damageable](var xs: list[T]) { for d in xs { d.step() } }
+total_hp[T: Damageable](xs: list[T]) -> int { ... for d in xs { sum += d.hp() } ... }
+```
+
+`bench` calls `step_all(var foes)` once per pass and `total_hp(foes)` at the end. The compiler makes one copy of each for `Goblin` (`step_all[Goblin]`, `total_hp[Goblin]`), and the calls on `T` become direct calls, so the claim to check is that a generic copy runs like the copy you would write by hand. The three loops are `iface_step.kes` (a `list[Damageable]`, indirect calls), `iface_step_direct.kes` (hand-written, `list[Goblin]`) and `iface_step_generic.kes` (generic, `list[Goblin]`). `measure.py` has an entry for the new one beside the other two (`py measure.py --rounds 9 --only iface --threads 1`).
+
+**Done on a busy machine (the user was gaming), no timing loops:**
+- **The checksum is the same.** `kernels.exe iface_step_direct.kes --release --n 1000000 --iters 3 --reps 1` and the same for `iface_step_generic.kes` both print checksum 52483816. (`iface_step.kes` prints 55483704: its list holds `Slime`s too.)
+- **The generated code is the same.** `kernels.exe NAME.kes --release --dump bench` for the hand-written and the generic kernel gives two byte-identical dumps (327 lines each, Cranelift IR and machine code): the inliner puts the copies of `step_all` and `total_hp` into `bench`, and what is left is the hand-written loop. The copies are also there on their own, as `step_all[Goblin]` and `total_hp[Goblin]`. So the generic copy should not be slower than the hand-written loop, and any gap in the timings below is layout or noise, not code. (One unreplicated run of each, on the busy machine, read 0.54 ns per item hand-written and 0.68 generic; with identical code that is the machine, not a result.)
+- `cargo clippy --all-targets -- -D warnings` in `kestrel/bench/kernels` is clean.
+
+**Owed: rerun when the machine is quiet** (nothing below has been timed):
+- **The three loops, ns per item,** medians of 9 rounds with ranges, taking turns: `py measure.py --rounds 9 --only iface --threads 1` in `kestrel/bench/kernels` after `cargo build --release` there. Read the `iface_step.kes`, `iface_step_direct.kes` and `iface_step_generic.kes` rows. If the generic row is slower than the hand-written one, say so here and look at the machine code of `bench` again, since the dump above says they are the same.
+- **Compile time of the voxel world with and without generics in the compiler** (P16 walks the finished module once per compile, expected under 1%): `kestrel build main.kes` of the frozen voxel world (`kestrel/bench/voxels3d`), checked and `--release`, 9 runs each taking turns, the current compiler against one built from 236d238 (the commit before the first generics code) in a git worktree, as "`@prove` and `@assume`" in `kestrel/bench/voxels3d/results.md` did.
+- **The cost of the collection pass in the editor (P30):** the time of `kestrel_driver::analyze` (what the language server runs on each edit) on the largest generic program test (`kestrel/tests/programs/generic_closures.kes`, 2.2 KB, the biggest of the `generic_*` programs) and on the frozen voxel world (no generics: the pass returns at once, so the same as 236d238 within noise), against 236d238. A throwaway timing loop around `analyze`, median of many calls.

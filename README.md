@@ -116,6 +116,35 @@ main() {
 
 A struct that owns an `Arena` or a GPU object can be lent to an interface but not stored as one. There is no `is` test to get the struct back out yet. A call through an interface is an indirect call that isn't inlined: about 5 ns where a direct call is under 1, and about 15% behind Rust's `Box<dyn Trait>` (`kestrel/bench/kernels/results.md`). The details are in the "Interfaces" section of the syntax file.
 
+Structs, enums and functions can take types in square brackets, as `list[T]` does. In GDScript terms: `Array[Enemy]` is a typed array, and this lets you write your own `Stack[T]`, which GDScript can't; untyped GDScript gets the same reuse from `Variant`, which is boxed and checked when the line runs. A Kestrel generic is checked once, where it is written, against rules you give its placeholder (an interface, or the built-in `equatable`, `ordered` and `key`), and a call on a `T` can only use what its rules promise. The compiler then makes one compiled copy for each type you use, so there is no boxing and no type tag:
+
+```kestrel
+struct Stack[T] {
+    items: list[T] = []
+    push(var self, v: T) { self.items.add(v) }
+    pop(var self) -> T? { self.items.pop() }
+}
+
+pure total_hp[T: Damageable](xs: list[T]) -> int {
+    var sum = 0
+    for x in xs { sum += x.hp() }
+    sum
+}
+
+main() {
+    var names = Stack[string]()             // types written
+    names.push("a")
+    var ints: Stack[int] = Stack()          // or worked out
+    ints.push(3)
+    print(ints)                             // Stack[int](items: [3])
+    print(total_hp([Goblin(), Goblin()]))   // T is Goblin: direct calls, inlinable
+}
+```
+
+**What it costs.** One compiled copy per type: the code size and the compile time grow with the number of distinct types you use a generic with (`Stack[int]` and `Stack[string]` are two sets of methods), and `kestrel check` makes the copies too (a program with no generics pays nothing). A copy is meant to run like the function you would have written by hand, but that is not timed yet: one test loop written both ways compiles to identical machine code, but the timings are owed (`kestrel/bench/kernels/results.md`, "Generics"). A `T` that is an interface type (`total_hp` over a `list[Damageable]`) makes an indirect call, as before. **What it doesn't do yet:** arithmetic on a `T` (there is no `number` rule; take a function instead), owning types, optionals and function types as `T`, placeholders on methods and interfaces, default types, writing only some of the types, and Godot exports of generics. The details are in the "Generics" section of the syntax file.
+
+Two things changed elsewhere with it: `<` now works on strings and bools (so `[T: ordered]` code works for them), and a function can store a string into its `var` parameter, with the check made at the call (so `push(var self, v: string)` works).
+
 ## Use
 
 Needs Rust (stable) and, on Windows, Visual Studio's C++ build tools (for `link.exe`).
@@ -280,6 +309,6 @@ The core language works: functions, structs with methods, enums and `match`, vec
 
 It also runs inside Godot 4: see [`kestrel/godot`](kestrel/godot/README.md). GDScript calls Kestrel functions, and edits hot-reload.
 
-Also built: closures and function values with the list methods that take them, interfaces (checked method sets with dynamic dispatch), `map` (the hash map), `par for` (loops that run on every core over `pure` code), range analysis (checks the compiler proves can't fail are left out, and `kestrel check --report` lists the rest), `@prove` performance contracts and `@assume`, global math and random numbers, and the window above with textures, 3D and the voxel viewer. Small structs now stay in registers, and `vec4`/`ivec4` are SIMD values with the wrapping operators `*% +% -%` (built 2026-10-24). Next: the full test suite over that work (its final review and fixes are done), the Cranelift upgrade, and a no-rules engine version of the voxel world.
+Also built: closures and function values with the list methods that take them, interfaces (checked method sets with dynamic dispatch), `map` (the hash map), `par for` (loops that run on every core over `pure` code), range analysis (checks the compiler proves can't fail are left out, and `kestrel check --report` lists the rest), `@prove` performance contracts and `@assume`, generics (structs, enums and functions with rules, built 2026-10-25; the final review and the full test run are still to come), global math and random numbers, and the window above with textures, 3D and the voxel viewer. Small structs now stay in registers, and `vec4`/`ivec4` are SIMD values with the wrapping operators `*% +% -%` (built 2026-10-24). Next: the full test suite over that work (its final review and fixes are done), the Cranelift upgrade, and a no-rules engine version of the voxel world.
 
 Speed versus Rust is between 1.0x and 1.5x on loops and structs, and about 3x on the voxel heightmap milestone. The particle demo's update step is close now that small structs stay in registers: on one thread it takes 1.07 times Rust's time (1.15 times with the `pow` hoisted out, down from 1.5 and 3.4), but its copy loop is still about 4 times behind, and a whole frame with bulk drawing was only 2-7% behind before that change. Leaving out the checks the compiler proves can't fail makes the 3D voxel world with checks on 2.2 times faster (1.4 s to 0.64 s, now 1.09 times its `--release` time, was 2.4 times) and a `for i` loop over `parts[i]` 26% faster; it adds 40-70 ms to the build of a big program like that one. The numbers are in `kestrel/bench/*/results.md`.

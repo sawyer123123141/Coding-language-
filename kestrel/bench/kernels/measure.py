@@ -36,6 +36,7 @@ KERNELS = [
     ("iface_hp_direct.kes (list[Goblin])", ["kernels", "iface_hp_direct.kes", "--release", "--n", "1000000"], 20),
     ("iface_step.kes (step(var self) through list[Damageable])", ["kernels", "iface_step.kes", "--release", "--n", "1000000"], 20),
     ("iface_step_direct.kes (list[Goblin])", ["kernels", "iface_step_direct.kes", "--release", "--n", "1000000"], 20),
+    ("iface_step_generic.kes (step_all[T], list[Goblin])", ["kernels", "iface_step_generic.kes", "--release", "--n", "1000000"], 20),
     # The value noise, 262,144 samples (256 rows of 1,024) per pass; checked and `--release`.
     ("noise_scalar.kes checked (four hash calls)", ["kernels", "noise_scalar.kes", "--n", "262144"], 10),
     ("noise_scalar.kes --release", ["kernels", "noise_scalar.kes", "--release", "--n", "262144"], 10),

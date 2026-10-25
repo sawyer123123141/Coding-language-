@@ -1,0 +1,49 @@
+// The `iface_step_direct.kes` loop with its two passes written once as generic functions, over a
+// `list[Goblin]`: `step_all[T: Damageable]` calls `step()` on every item and `total_hp[T: Damageable]`
+// adds up `hp()`. The compiler makes one copy of each for `Goblin`, so the calls on `T` should be
+// the direct calls of `iface_step_direct.kes`; the checksum is the same.
+interface Damageable {
+    step(var self)
+    pure hp(self) -> int
+}
+
+struct Goblin: Damageable {
+    health: int
+    step(var self) { self.health += 1 }
+    pure hp(self) -> int { self.health }
+}
+
+step_all[T: Damageable](var xs: list[T]) {
+    for d in xs {
+        d.step()
+    }
+}
+
+total_hp[T: Damageable](xs: list[T]) -> int {
+    var sum = 0
+    for d in xs {
+        sum += d.hp()
+    }
+    sum
+}
+
+pub bench(n: int, iters: int) -> float {
+    var total = 0.0
+    arena {
+        var foes: list[Goblin] = []
+        var x = 1
+        for i from 0 to n {
+            x = (x * 75 + 74) % 65537
+            foes.add(Goblin(health: x % 100))
+        }
+        for k from 0 to iters {
+            step_all(var foes)
+        }
+        total = float(total_hp(foes))
+    }
+    total
+}
+
+main() {
+    print(bench(1000, 10))
+}
