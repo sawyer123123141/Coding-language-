@@ -12,6 +12,8 @@ mod enums;
 mod exclusive;
 mod expr;
 mod fnvalue;
+mod generic_call;
+mod generic_variants;
 mod hex;
 mod iface;
 mod let_else;

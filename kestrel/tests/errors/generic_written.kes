@@ -1,0 +1,28 @@
+struct Stack[T] {
+    items: list[T] = []
+}
+enum Result[T, E] {
+    Ok { value: T }
+    Err { error: E }
+}
+struct Enemy {
+    hp: int
+}
+pure best[T](xs: list[T]) -> int { xs.len }
+pure make_empty[T]() -> list[T] { list[T]() }
+main() {
+    let f = best
+    let s = Stack[int]
+    let r = Result[int].Ok(value: 1)
+    let n = best[int, int]
+    let e = make_empty()
+    let o = Stack[int?]()
+    let x = Enemy[int](hp: 1)
+}
+// error 14: `best` is generic; give its types to use it as a value, like `best[int]`
+// error 15: `Stack[int]` is a type; build one with `Stack[int](...)`
+// error 16: `Result` takes 2 types, found 1
+// error 17: `best` takes 1 type, found 2
+// error 18: can't tell what `T` is in `make_empty`; write it, like `make_empty[int](...)`
+// error 19: `int?` is an optional, so it can't be `T` yet; hold it in a struct field instead
+// error 20: `Enemy` takes no types

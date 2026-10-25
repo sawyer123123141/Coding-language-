@@ -10,6 +10,7 @@ use super::exclusive::CalleePlace;
 use super::lists::written;
 use super::BodyChecker;
 use crate::builtins::Builtin;
+use crate::generic::GenericOwner;
 use crate::sig::SigId;
 use crate::tables::{ConstId, FnId, LocalId, ParamSig, Res};
 use crate::ty::Ty;
@@ -40,6 +41,13 @@ impl<'a> BodyChecker<'a> {
     pub(crate) fn fn_name_value(&mut self, e: &Expr, fid: FnId) -> Ty {
         if self.t.func(fid).is_native {
             self.error(e.span, "native functions can't be used as values yet; wrap it in a closure");
+            return Ty::Error;
+        }
+        // A generic function is a value once its types are fixed (R8).
+        if self.is_generic_fn(fid) {
+            let name = self.t.func(fid).name.clone();
+            let example = self.int_types(GenericOwner::Fn(fid), &name);
+            self.error(e.span, format!("`{name}` is generic; give its types to use it as a value, like `{example}`"));
             return Ty::Error;
         }
         self.t.res.insert(e.id, Res::FnValue(fid));
@@ -233,6 +241,7 @@ pub(super) fn quote(shown: &str) -> String {
 pub(super) fn shown_callee(callee: &Expr) -> String {
     match callee.kind {
         ExprKind::Ident(_) | ExprKind::Field { .. } | ExprKind::Index { .. } => written(callee),
+        ExprKind::TypeApply { ref name, .. } => name.clone(),
         _ => "this function value".to_string(),
     }
 }

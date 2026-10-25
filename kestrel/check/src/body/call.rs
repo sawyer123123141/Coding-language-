@@ -6,6 +6,7 @@ use super::closure::Impure;
 use super::nested::Later;
 use super::BodyChecker;
 use crate::builtins::Builtin;
+use crate::generic::GenericOwner;
 use crate::tables::{FnId, Res};
 use crate::ty::Ty;
 
@@ -50,6 +51,14 @@ impl<'a> BodyChecker<'a> {
             if self.t.vector(Ty::Struct(sid)).is_some() {
                 return self.check_vec_make(e, Ty::Struct(sid), args);
             }
+            // A generic struct needs its types, except inside its own declaration (G2).
+            let owner = GenericOwner::Struct(sid);
+            if !self.t.strukt(sid).params.is_empty() && self.own != Some(owner) {
+                let example = format!("{}()", self.int_types(owner, name));
+                self.undecided(*name_span, owner, name, &example);
+                self.check_loose_args(args);
+                return Ty::Error;
+            }
             return self.check_construct(e, sid, args);
         }
         let Some(&fid) = self.t.fn_by_name.get(name) else {
@@ -93,6 +102,13 @@ impl<'a> BodyChecker<'a> {
             }
             return Ty::Error;
         };
+        // Until calls work out their own types, a generic function needs them written.
+        if self.is_generic_fn(fid) {
+            let example = format!("{}(...)", self.int_types(GenericOwner::Fn(fid), name));
+            self.undecided(*name_span, GenericOwner::Fn(fid), name, &example);
+            self.check_loose_args(args);
+            return Ty::Error;
+        }
         self.t.res.insert(e.id, Res::Fn(fid));
         self.check_callee_purity(*name_span, fid);
         self.check_user_call(e, fid, args)

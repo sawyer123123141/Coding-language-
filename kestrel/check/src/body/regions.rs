@@ -154,7 +154,7 @@ impl<'a> BodyChecker<'a> {
                 }
             }
             // A named function has no environment, so it points into no arena.
-            ExprKind::Ident(_) if matches!(self.t.res.get(&e.id), Some(Res::FnValue(_))) => 0,
+            ExprKind::Ident(_) | ExprKind::TypeApply { .. } if matches!(self.t.res.get(&e.id), Some(Res::FnValue(_))) => 0,
             // An empty list still remembers the current arena, to grow in.
             ExprKind::ArrayLit(items) if items.is_empty() => {
                 if matches!(ty, Ty::List(_)) {
@@ -186,7 +186,8 @@ impl<'a> BodyChecker<'a> {
                     None => self.current(),
                 }
             }
-            ExprKind::Call { args, .. } | ExprKind::MethodCall { args, .. }
+            // (A written construction, `Stack[int]()`, is the `Call` it stands for.)
+            ExprKind::Call { args, .. } | ExprKind::MethodCall { args, .. } | ExprKind::TypeCall { args, .. }
                 if matches!(self.t.res.get(&e.id), Some(Res::Construct(_) | Res::Variant(..))) =>
             {
                 // Defaults like `[1, 2]` or `list[T]()` allocate here too.

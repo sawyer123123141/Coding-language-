@@ -4,6 +4,7 @@ use kestrel_syntax::{Diagnostic, Span};
 use super::nested::Later;
 use super::{BodyChecker, Expect};
 use super::fnvalue::builtin_wrapper;
+use super::generic_call::user_type_call;
 use crate::builtins::Builtin;
 use crate::tables::{LocalId, Res};
 use crate::ty::Ty;
@@ -72,11 +73,7 @@ impl<'a> BodyChecker<'a> {
             ExprKind::ArrayLit(items) => self.check_array_lit(e, items, want),
             ExprKind::MapLit(entries) => self.check_map_lit(e, entries, want),
             ExprKind::TypeCall { .. } => self.check_type_call(e),
-            // Removed by Task 3b, which checks a generic named with its types.
-            ExprKind::TypeApply { .. } => {
-                self.error(e.span, "generics aren't supported yet");
-                Ty::Error
-            }
+            ExprKind::TypeApply { .. } => self.check_type_apply(e),
             ExprKind::Brackets { .. } => unreachable!("settled after parsing"),
         }
     }
@@ -264,6 +261,8 @@ impl<'a> BodyChecker<'a> {
             ExprKind::If { .. } => self.check_if(e, Expect::Discard),
             ExprKind::Match { .. } => self.check_match(e, Expect::Discard),
             ExprKind::Call { .. } | ExprKind::MethodCall { .. } | ExprKind::CallValue { .. } => self.check_discarded_call(e),
+            // A written call or construction (`fill[int](var s, 1, 2)`) is the `Call` it stands for.
+            _ if user_type_call(e) => self.check_discarded_call(e),
             _ => {
                 let ty = self.check_expr(e, None);
                 if ty != Ty::Error {

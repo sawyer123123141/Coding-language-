@@ -94,13 +94,16 @@ impl<'a> Walk<'a> {
                     out.push(Node::Const(c));
                 }
             }
-            ExprKind::Call { args, .. } => {
+            // A written construction (`Stack[int]()`) builds what the `Call` it stands for builds.
+            ExprKind::Call { args, .. } | ExprKind::TypeCall { args, .. } => {
                 if let (Some(&Res::Construct(sid)), Some(slots)) = (self.t.res.get(&e.id), self.t.ctor_args.get(&e.id)) {
+                    // A construction of an instance counts as one of its declaration.
+                    let sid = self.t.strukt(sid).instance.map_or(sid, |i| i.def);
                     out.extend(slots.iter().enumerate().filter(|(_, s)| s.is_none()).map(|(fi, _)| Node::Default(sid, fi)));
                 }
                 args.iter().for_each(|a| self.builds(&a.value, out));
             }
-            ExprKind::MethodCall { args, .. } | ExprKind::TypeCall { args, .. } => args.iter().for_each(|a| self.builds(&a.value, out)),
+            ExprKind::MethodCall { args, .. } => args.iter().for_each(|a| self.builds(&a.value, out)),
             ExprKind::Unary { expr, .. } => self.builds(expr, out),
             // A component or swizzle of a constant vector builds that vector.
             ExprKind::Field { base, .. } => self.builds(base, out),

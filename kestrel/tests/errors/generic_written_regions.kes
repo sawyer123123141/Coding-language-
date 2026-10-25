@@ -1,0 +1,20 @@
+struct Stack[T] {
+    items: list[T] = []
+}
+struct Holder[T] {
+    v: T
+    mem: Arena = Arena()
+}
+struct Keeps {
+    h: Holder[int] = Holder[int](v: 1)
+}
+keep(s: Stack[string]) {}
+main() {
+    var s = Stack[string](items: ["a"])
+    arena {
+        s = Stack[string]()
+    }
+    keep(s)
+}
+// error 9: field defaults can't build a value that owns an `Arena` or a GPU object; set the field when you build it
+// error 15: this memory is freed at the end of the `arena { }` block, but `s` lives longer

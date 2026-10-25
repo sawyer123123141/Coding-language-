@@ -92,11 +92,8 @@ impl<'a> BodyChecker<'a> {
     pub(crate) fn check_type_call(&mut self, e: &Expr) -> Ty {
         let ExprKind::TypeCall { name, name_span, type_args, args } = &e.kind else { unreachable!("not a type call") };
         if !matches!(name.as_str(), "array" | "list" | "map") {
-            // A user name with its types written (`best[int](xs)`, `Stack[int]()`). Temporary:
-            // Task 3b checks them (and says "`Enemy` takes no types" for a plain struct).
-            self.error(*name_span, "generics aren't supported yet");
-            self.check_loose_args(args);
-            return Ty::Error;
+            // A user name with its types written (`best[int](xs)`, `Stack[int]()`).
+            return self.check_user_type_call(e);
         }
         if name == "map" {
             return self.check_map_new(e, *name_span, type_args, args);

@@ -5,6 +5,7 @@ use super::args::Receiver;
 use super::lists::written;
 use super::place::Immutable;
 use super::consts::struct_field_read;
+use super::generic_call::user_type_call;
 use super::{is_const_expr, BodyChecker};
 use crate::builtins::Builtin;
 use crate::generic::GenericOwner;
@@ -55,6 +56,8 @@ fn builds_owning(e: &Expr, t: &Tables) -> bool {
         // A constant is built again at each use, so naming an owning one builds one. One that is
         // just an `Arena` is a fresh `Arena()` each time, like writing it out.
         ExprKind::Ident(_) => matches!(t.res.get(&e.id), Some(Res::Const(_))) && t.ty(e.id) != Ty::Arena && t.is_owning(t.ty(e.id)),
+        // A written construction or call (`Holder[int](v: 1)`) is tested like the `Call` it stands for.
+        ExprKind::TypeCall { args, .. } if user_type_call(e) => t.is_owning(t.ty(e.id)) || any(args),
         ExprKind::TypeCall { args, .. } => any(args),
         ExprKind::Unary { expr, .. } => builds_owning(expr, t),
         ExprKind::Binary { lhs, rhs, .. } => builds_owning(lhs, t) || builds_owning(rhs, t),
@@ -132,6 +135,13 @@ impl<'a> BodyChecker<'a> {
 
     pub(crate) fn check_field(&mut self, e: &Expr) -> Ty {
         let ExprKind::Field { base, name, name_span } = &e.kind else { unreachable!("check_field on non-field") };
+        // A generic enum's variant (`Maybe[int].Nothing`) comes before today's bare-name test.
+        if let Some(found) = self.generic_variant_base(e, base, name) {
+            return match found {
+                Some(id) => self.variant_value(e, id, name, *name_span),
+                None => Ty::Error,
+            };
+        }
         if let Some(id) = self.enum_named(base) {
             return self.variant_value(e, id, name, *name_span);
         }
@@ -188,6 +198,15 @@ impl<'a> BodyChecker<'a> {
 
     pub(crate) fn check_method_call(&mut self, e: &Expr) -> Ty {
         let ExprKind::MethodCall { receiver, name, name_span, args } = &e.kind else { unreachable!("not a method call") };
+        if let Some(found) = self.generic_variant_base(e, receiver, name) {
+            return match found {
+                Some(id) => self.variant_construct(e, id, name, *name_span, args),
+                None => {
+                    self.check_loose_args(args);
+                    Ty::Error
+                }
+            };
+        }
         if let Some(id) = self.enum_named(receiver) {
             return self.variant_construct(e, id, name, *name_span, args);
         }

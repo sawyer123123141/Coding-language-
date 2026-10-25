@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use kestrel_syntax::ast::{Arg, Block, ConstDecl, Expr, ExprKind, InterpPart, Item, Program, Stmt};
 use kestrel_syntax::{Diagnostic, Span};
 
+use super::generic_call::user_type_call;
 use super::BodyChecker;
 use crate::builtins::Builtin;
 use crate::tables::{ConstId, Tables};
@@ -227,7 +228,8 @@ fn check_const(c: &ConstDecl, i: usize, t: &mut Tables, diags: &mut Vec<Diagnost
 pub(crate) fn is_const_expr(e: &Expr, t: &Tables) -> bool {
     let all = |args: &[Arg]| args.iter().all(|a| is_const_expr(&a.value, t));
     // `State.Idle` and `Shape.Circle(1)`: an enum's values.
-    let names_enum = |base: &Expr| matches!(&base.kind, ExprKind::Ident(n) if t.enum_by_name.contains_key(n));
+    // (A generic enum with its types written, `Maybe[int].Nothing`, is one too.)
+    let names_enum = |base: &Expr| names_enum(base, t);
     match &e.kind {
         ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::None | ExprKind::Str(_) | ExprKind::Ident(_) => true,
         ExprKind::Call { name, args, .. } if name == "Arena" => args.is_empty(),
@@ -246,7 +248,9 @@ pub(crate) fn is_const_expr(e: &Expr, t: &Tables) -> bool {
         // Each use builds a fresh array, like any other value.
         ExprKind::ArrayLit(items) => items.iter().all(|i| is_const_expr(i, t)),
         ExprKind::MapLit(entries) => entries.iter().all(|(k, v)| is_const_expr(k, t) && is_const_expr(v, t)),
-        ExprKind::TypeCall { args, .. } => all(args),
+        // The built-in `array[T](n)`, `list[T]()` and `map[K, V]()`, and a generic struct's
+        // construction (`Stack[int]()`), are values; a generic function's call is not (P17).
+        ExprKind::TypeCall { name, args, .. } => (!user_type_call(e) || t.struct_by_name.contains_key(name)) && all(args),
         // A generic named with types (`Maybe[int]`) is constant like a bare name (G19).
         ExprKind::TypeApply { .. } => true,
         ExprKind::Brackets { .. } => unreachable!("settled after parsing"),
@@ -259,6 +263,11 @@ pub(crate) fn is_const_expr(e: &Expr, t: &Tables) -> bool {
         | ExprKind::If { .. }
         | ExprKind::Match { .. } => false,
     }
+}
+
+/// Whether `base` names an enum, with or without types written (`State`, `Maybe[int]`).
+fn names_enum(base: &Expr, t: &Tables) -> bool {
+    matches!(&base.kind, ExprKind::Ident(n) | ExprKind::TypeApply { name: n, .. } if t.enum_by_name.contains_key(n))
 }
 
 /// Whether calling `name` can't be a function call: it's capitalised, an enum or a constant, and
@@ -280,7 +289,7 @@ pub(crate) fn struct_field_read(e: &Expr, t: &Tables) -> Option<Span> {
     let in_args = |args: &[Arg]| args.iter().find_map(|a| struct_field_read(&a.value, t));
     match &e.kind {
         ExprKind::Field { base, .. } => {
-            if matches!(&base.kind, ExprKind::Ident(n) if t.enum_by_name.contains_key(n)) {
+            if names_enum(base, t) {
                 None
             } else if t.vector(t.ty(base.id)).is_some() || t.ty(base.id) == Ty::Error {
                 struct_field_read(base, t)

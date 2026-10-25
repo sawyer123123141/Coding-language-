@@ -34,9 +34,13 @@ impl<'a> BodyChecker<'a> {
         };
         let args = self.t.intern_ty_list(args);
         self.t.generic.type_args.insert(e.id, args);
-        let s = Subst { owner, args };
+        self.subst_call_sig(plain, Subst { owner, args })
+    }
+
+    /// `plain`'s parameters and result with `s`'s arguments put in for its owner's placeholders.
+    pub(super) fn subst_call_sig(&mut self, plain: CallSig, s: Subst) -> CallSig {
         let params = plain.params.iter().map(|p| ParamSig { name: p.name.clone(), ty: self.t.subst(p.ty, s), is_var: p.is_var }).collect();
         let ret = self.t.subst(plain.ret, s);
-        CallSig { fid, params, ret }
+        CallSig { fid: plain.fid, params, ret }
     }
 }
