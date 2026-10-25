@@ -337,3 +337,12 @@ From the plan review (2026-10-25, rulings P21-P37); the text above is updated to
 - **Copy names are sanitised into symbols** (`Pair[int, bool].swap` has spaces and brackets) (P31), and **`@assume` warnings are aggregated across copies by span**, so an assumption one copy needs isn't called useless (P32).
 - **The dual parse tries the index only when the types parse,** and `attempt` restores `block_heights` (P34); a native with placeholders is dropped after its error (P35); placeholders are left alone in every type of their item, bodies included (P37).
 - **A mixed comparison is "`<` needs two numbers, two strings or two bools, found string and int"** (P36).
+
+From Task 3a's review (2026-10-25, plan rulings P38-P39, built in the plan's new Task 3c):
+- **G28. Stores into `var` parameters are checked where the function is called** (P38), so generic containers work: `Stack[T].push(var self, v: T) { self.items.add(v) }` checks once (R1), as plain `push(var self, v: string)` now does too.
+  - Each function records which of its `var` parameters it may store caller-arena memory into.
+  - Each direct call checks that store against the place passed, the way built-in `add` is checked.
+  - A call through an interface or a rule takes the union of the implementations' stores.
+  - A storing function can't be a function value, and closures' own `var` parameters stay strict.
+
+  R4's "arena escape rules as for a `string`" still holds: the summary assumes any `T` holds memory, so `Stack[int].push` inside `arena { }` on an outer stack is refused like `Stack[string]`'s. The whole replacement of a `var a: T` (`a = b`) stays refused when `T` may be an interface type (a copy lends the caller's concrete place), and is allowed when `T` has a built-in rule or two different interface rules, which no interface type can meet (R7, P39): `swap[T: equatable]` works. If wrong: a use after free through an unchecked indirect call; the plan's Task 3c lists each indirect path.

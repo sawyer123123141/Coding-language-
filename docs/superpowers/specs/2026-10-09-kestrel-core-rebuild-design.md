@@ -241,6 +241,16 @@ Run in order; each collects all its errors before the next starts
    - `Caller`: returned, or stored into locals; storing into a `var`
      parameter's place is an error with the hint "allocate it with
      `in <param>.mem { }`".
+     (Refined 2026-10-25, generics Task 3c, plan ruling P38: such a store is
+     no longer an error in the body. The function records which of its
+     `var` parameters it stores caller-arena memory into, including through
+     its own calls, worked out to a fixpoint after every body. Each direct
+     call (a function, a method, a generic, or a call through an interface
+     or a rule, which takes the union of the implementations) then checks
+     that the caller's current arena and the arguments' memory may be stored
+     into the place passed, as built-in `xs.add(v)` is checked where it is
+     written. A function that stores into a `var` parameter can't be used as
+     a value, and a closure's own `var` parameters keep the old error.)
    The error names both lifetimes and suggests `copy_to`.
 
 ### Diagnostics
