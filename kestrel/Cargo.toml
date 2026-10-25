@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 exclude = ["godot", "bench/particles/rust", "bench/kernels"]
-members = ["syntax", "check", "kir", "runtime", "window", "codegen", "driver", "cli"]
+members = ["syntax", "check", "kir", "runtime", "window", "codegen", "driver", "cli", "lsp"]
 
 [workspace.package]
 version = "0.1.0"
