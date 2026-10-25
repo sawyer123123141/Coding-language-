@@ -15,7 +15,10 @@ use crate::tables::{EnumId, FnId, IfaceId, StructId, Tables};
 use crate::ty::Ty;
 
 pub(crate) mod declare;
+pub(crate) mod expand;
+pub(crate) mod graph;
 mod instances;
+pub(crate) mod rules;
 mod subst;
 
 /// A placeholder, an index into `Generics::params`.
@@ -97,6 +100,9 @@ pub struct Generics {
     /// and queued here (their declarations' fields may not be known yet).
     pub(crate) collecting: bool,
     pub(crate) pending: Vec<Pending>,
+    /// While `collect` runs, the written type arguments waiting for their R3/R7 check (phase 7,
+    /// after `compute_owning`); `None` before and after, when they are checked at once.
+    pub(crate) queued_args: Option<Vec<rules::QueuedArg>>,
 }
 
 impl Generics {

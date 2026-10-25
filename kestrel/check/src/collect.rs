@@ -6,6 +6,7 @@ use kestrel_syntax::{Diagnostic, Span};
 use crate::builtins::Builtin;
 use crate::collect_ty::{check_self_containment, resolve_type, TypeScope};
 use crate::generic::declare::{check_rule_clashes, declare_fn_params, declare_type_params};
+use crate::generic::expand::check_type_expansion;
 use crate::generic::GenericOwner;
 use crate::sig::{Sig, SigParam};
 use crate::tables::{
@@ -52,10 +53,13 @@ pub(crate) fn reserved_name_error(name: &str, shown: &str) -> Option<String> {
 /// Records every type, function signature and constant before bodies are
 /// checked. Type names come first so any type can refer to any other. The phases (generics spec,
 /// "Checker: declarations"): 1-2 names, placeholders and their rules; 3 fields and signatures
-/// (instances named there wait, pending); G9; 5 the pending instances filled; then conformance,
-/// default allocation (each followed by the instances' sync), self-containment and natives.
+/// (instances named there wait, pending, and their arguments' R3/R7 checks are queued); G9;
+/// 4 the type expansion check; 5 the pending instances filled; 6 conformance, default allocation
+/// (each followed by the instances' sync), self-containment and natives; 7 owning-ness, then the
+/// queued R3/R7 checks.
 pub(crate) fn collect(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnostic>, needs_main: bool) {
     check_names(program, diags);
+    t.generic.queued_args = Some(Vec::new());
     add_builtin_vectors(t);
     for (item_idx, item) in program.items.iter().enumerate() {
         match item {
@@ -136,6 +140,8 @@ pub(crate) fn collect(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnos
     }
     // G9 compares the interfaces' method signatures, made in the loop above (P26).
     check_rule_clashes(program, t, diags);
+    // Endless declarations are marked before filling, so filling their instances ends (G10).
+    check_type_expansion(t, diags);
     t.fill_pending();
     crate::iface::check_conformance(program, t, diags);
     t.sync_instance_ifaces();
@@ -143,6 +149,8 @@ pub(crate) fn collect(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnos
     t.sync_instance_field_flags();
     check_self_containment(t, diags);
     crate::natives::check_natives(program, t, diags);
+    t.compute_owning();
+    t.check_queued_args(diags);
     if t.main.is_none() && needs_main {
         diags.push(Diagnostic::error(Span::new(0, 0), "program needs a `main()` function"));
     }

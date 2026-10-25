@@ -1,0 +1,50 @@
+interface Damageable {
+    pure hp(self) -> int
+}
+struct Pair[A, B] {
+    a: A
+    b: B
+}
+struct Grid[K: key] {
+    cells: map[K, int]
+}
+struct Hurt[T: Damageable] {
+    who: T
+}
+struct Enemy {
+    hp: int
+}
+struct Button {
+    on: () -> int
+}
+struct World {
+    mem: Arena
+}
+a(p: Pair[int]) {}
+b(p: Pair) {}
+c(x: Enemy[int]) {}
+d(w: Pair[World, int]) {}
+e(o: Pair[int?, int]) {}
+f(x: Pair[(int) -> int, int]) {}
+g(x: Pair[Button, int]) {}
+h(x: Pair[list[Button], int]) {}
+i(x: Grid[float]) {}
+j(x: Hurt[Enemy]) {}
+k[U](x: Grid[U]) {}
+l[U: ordered](x: Grid[U]) {}
+m(x: Grid[Damageable]) {}
+n(x: Hurt[Damageable]) {}
+main() {}
+// error 23: `Pair` takes 2 types, found 1
+// error 24: `Pair` needs its types, like `Pair[int, int]`
+// error 25: `Enemy` takes no types
+// error 26: `World` owns an `Arena`, so it can't be `A` yet
+// error 27: `int?` is an optional, so it can't be `A` yet; hold it in a struct field instead
+// error 28: `(int) -> int` is a function type, so it can't be `A` yet
+// error 29: `Button` holds a function value, so it can't be `A` yet
+// error 30: `list[Button]` holds a function value, so it can't be `A` yet
+// error 31: `float` isn't a `key` (integers, bools and strings are), so it can't be `K` in `Grid`
+// error 32: `Enemy` isn't `Damageable`, so it can't be `T` in `Hurt`
+// error 33: `U` isn't a `key` (integers, bools and strings are), so it can't be `K` in `Grid`; add the rule: `[U: key]`
+// error 34: `U` isn't a `key` (integers, bools and strings are), so it can't be `K` in `Grid`; add the rule: `[U: ordered + key]`
+// error 35: `Damageable` isn't a `key` (integers, bools and strings are), so it can't be `K` in `Grid`

@@ -133,6 +133,11 @@ fn named_with_args(name: &str, args: &[TypeExpr], scope: &TypeScope, t: &mut Tab
     if tys.contains(&Ty::Error) {
         return Ok(Ty::Error);
     }
+    // R3/R7: queued during `collect`; in bodies a refused argument makes no instance.
+    let spans: Vec<Span> = args.iter().map(|a| a.span).collect();
+    if t.check_written_args(owner, &tys, &spans, scope, diags) {
+        return Ok(Ty::Error);
+    }
     let list = t.intern_ty_list(tys);
     Ok(match owner {
         GenericOwner::Struct(def) => Ty::Struct(t.intern_struct(def, list)),
@@ -205,11 +210,15 @@ fn self_help(name: &str) -> String {
     format!("to make `{name}` recursive, hold a `list[{name}]` or an array `[{name}]` instead of a `{name}` or `{name}?`; they keep their items elsewhere")
 }
 
-/// A type can't hold itself, directly or through others: it would be infinitely large.
+/// A type can't hold itself, directly or through others: it would be infinitely large. The walk
+/// goes through instances (their filled fields), but only declarations and plain structs and
+/// enums are reported, never an instance: a generic declaration contains itself when it reaches
+/// itself or one of its instances (`struct G[T] { v: G[int]? }`). Declarations that would need
+/// endless copies are skipped (already reported; their instances have no fields).
 pub(crate) fn check_self_containment(t: &Tables, diags: &mut Vec<Diagnostic>) {
-    fn reaches(t: &Tables, from: Ty, target: Ty, seen: &mut Vec<Ty>) -> bool {
+    fn reaches(t: &Tables, from: Ty, target: &dyn Fn(Ty) -> bool, seen: &mut Vec<Ty>) -> bool {
         for inner in contained(t, from) {
-            if inner == target {
+            if target(inner) {
                 return true;
             }
             if !seen.contains(&inner) {
@@ -221,16 +230,44 @@ pub(crate) fn check_self_containment(t: &Tables, diags: &mut Vec<Diagnostic>) {
         }
         false
     }
+    let before = diags.len();
+    let mut instance_loops: Option<(Span, String)> = None;
     for (i, s) in t.structs.iter().enumerate() {
-        let ty = Ty::Struct(StructId(i as u32));
-        if reaches(t, ty, ty, &mut Vec::new()) {
+        let (ty, id) = (Ty::Struct(StructId(i as u32)), StructId(i as u32));
+        if t.generic.endless.contains(&GenericOwner::Struct(id)) {
+            continue;
+        }
+        if let Some(inst) = s.instance {
+            if instance_loops.is_none() && reaches(t, ty, &|x| x == ty, &mut Vec::new()) {
+                instance_loops = Some((t.strukt(inst.def).span, format!("struct `{}`", t.strukt(inst.def).name)));
+            }
+            continue;
+        }
+        let copy_of_self = |x: Ty| x == ty || matches!(x, Ty::Struct(o) if t.strukt(o).instance.is_some_and(|n| n.def == id));
+        if reaches(t, ty, &copy_of_self, &mut Vec::new()) {
             diags.push(Diagnostic::error(s.span, format!("struct `{}` contains itself", s.name)).with_help(self_help(&s.name)));
         }
     }
     for (i, e) in t.enums.iter().enumerate() {
-        let ty = Ty::Enum(EnumId(i as u32));
-        if reaches(t, ty, ty, &mut Vec::new()) {
+        let (ty, id) = (Ty::Enum(EnumId(i as u32)), EnumId(i as u32));
+        if t.generic.endless.contains(&GenericOwner::Enum(id)) {
+            continue;
+        }
+        if let Some(inst) = e.instance {
+            if instance_loops.is_none() && reaches(t, ty, &|x| x == ty, &mut Vec::new()) {
+                instance_loops = Some((t.enm(inst.def).span, format!("enum `{}`", t.enm(inst.def).name)));
+            }
+            continue;
+        }
+        let copy_of_self = |x: Ty| x == ty || matches!(x, Ty::Enum(o) if t.enm(o).instance.is_some_and(|n| n.def == id));
+        if reaches(t, ty, &copy_of_self, &mut Vec::new()) {
             diags.push(Diagnostic::error(e.span, format!("enum `{}` contains itself", e.name)).with_help(self_help(&e.name)));
         }
+    }
+    // An instance that holds itself is always held by a reported type above; if none was
+    // reported, refuse the program anyway, at the instance's declaration (it would be endless).
+    if let (true, Some((span, what))) = (diags.len() == before, instance_loops) {
+        let bare = what.split('`').nth(1).unwrap_or_default().to_string();
+        diags.push(Diagnostic::error(span, format!("{what} contains itself")).with_help(self_help(&bare)));
     }
 }

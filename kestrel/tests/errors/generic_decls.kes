@@ -1,0 +1,33 @@
+interface Damageable {
+    pure hp(self) -> int
+}
+interface Named {
+    pure hp(self) -> string
+}
+struct Item {
+    id: int
+}
+struct Bag[t] {
+    xs: list[t]
+}
+struct Box[Item] {
+    v: int
+}
+struct Two[T, T] {
+    a: T
+}
+pure both[T: Damageable + Damageable](x: T) -> int { x.hp() }
+pure clash[T: Damageable + Named](x: T) -> int { 1 }
+pure odd[T: Missing](x: T) -> int { 1 }
+interface key {
+    pure k(self) -> int
+}
+main[T]() {}
+// error 10: a placeholder's name starts with a capital letter, like `T` or `Item`
+// error 13: `Item` is already a type, so it can't be a placeholder's name; pick another, like `T`
+// error 16: `T` is listed twice
+// error 19: `Damageable` is listed twice
+// error 20: no type can be both `Damageable` and `Named`: their `hp` methods differ
+// error 21: `Missing` isn't an interface or a built-in rule (`equatable`, `ordered` or `key`)
+// error 22: `key` is a built-in rule's name; pick another
+// error 25: `main` can't have placeholders

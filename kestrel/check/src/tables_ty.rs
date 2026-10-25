@@ -176,20 +176,31 @@ impl Tables {
     }
 
     /// Fills `owning_structs` / `owning_enums`, growing from `false` until
-    /// nothing changes, so types that contain themselves terminate.
+    /// nothing changes, so types that contain themselves terminate. An instance owns exactly when
+    /// its declaration does (R3 keeps owning types out of placeholders; one written anyway is an
+    /// error, and still doesn't make its instance owning, so every instance agrees with one
+    /// interned later).
     pub(crate) fn compute_owning(&mut self) {
         self.owning_structs = vec![false; self.structs.len()];
         self.owning_enums = vec![false; self.enums.len()];
         loop {
             let mut changed = false;
             for s in 0..self.structs.len() {
-                if !self.owning_structs[s] && self.structs[s].fields.iter().any(|f| self.is_owning(f.ty)) {
+                let owns = match self.structs[s].instance {
+                    Some(i) => self.owning_structs[i.def.0 as usize],
+                    None => self.structs[s].fields.iter().any(|f| self.is_owning(f.ty)),
+                };
+                if !self.owning_structs[s] && owns {
                     self.owning_structs[s] = true;
                     changed = true;
                 }
             }
             for e in 0..self.enums.len() {
-                if !self.owning_enums[e] && self.enums[e].variants.iter().flat_map(|v| &v.fields).any(|f| self.is_owning(f.ty)) {
+                let owns = match self.enums[e].instance {
+                    Some(i) => self.owning_enums[i.def.0 as usize],
+                    None => self.enums[e].variants.iter().flat_map(|v| &v.fields).any(|f| self.is_owning(f.ty)),
+                };
+                if !self.owning_enums[e] && owns {
                     self.owning_enums[e] = true;
                     changed = true;
                 }

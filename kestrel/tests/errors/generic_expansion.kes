@@ -1,0 +1,17 @@
+struct Tree[T] {
+    kids: list[Tree[list[T]]]
+}
+struct Wrap[T] {
+    v: T
+}
+struct Bad {
+    w: Wrap[Bad]
+}
+enum L[T] {
+    Cons { tail: L[T]? }
+    End
+}
+main() {}
+// error 1: `Tree` would need endless copies: `Tree[T]` holds a `Tree[list[T]]`, which holds a `Tree[list[list[T]]]`, and so on
+// error 7: struct `Bad` contains itself
+// error 10: enum `L` contains itself

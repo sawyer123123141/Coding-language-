@@ -56,8 +56,8 @@ pub fn check_keeping_tables(program: &Program, needs_main: bool) -> (Tables, Vec
         ..Tables::default()
     };
     let mut diags = Vec::new();
+    // `collect` ends with `compute_owning` and the queued R3/R7 checks (its phase 7).
     collect::collect(program, &mut t, &mut diags, needs_main);
-    t.compute_owning();
     body::check_consts(program, &mut t, &mut diags);
     body::check_field_defaults(program, &mut t, &mut diags);
     // Defaults that build each other would recurse forever in KIR; this needs a clean check so far.
