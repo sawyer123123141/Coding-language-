@@ -8,7 +8,7 @@ use super::place::Immutable;
 use super::regions::Ctx;
 use super::BodyChecker;
 use crate::natives::may_want_scratch;
-use crate::tables::{FnId, LocalId, ParamSig};
+use crate::tables::{FnId, LocalId, ParamSig, Tables};
 use crate::ty::Ty;
 
 /// How a message names a parameter: a function type's parameters have no names.
@@ -30,18 +30,35 @@ pub(crate) struct Receiver<'e> {
     pub(crate) read_root: Option<LocalId>,
 }
 
+/// The signature a call is checked against: `fid`'s parameters and result as they are, or (for a
+/// method called on an instance of a generic type) substituted with the receiver's arguments.
+#[derive(Clone, Debug)]
+pub(crate) struct CallSig {
+    pub(crate) fid: FnId,
+    pub(crate) params: Vec<ParamSig>,
+    pub(crate) ret: Ty,
+}
+
+impl CallSig {
+    /// `fid`'s own signature.
+    pub(crate) fn of(t: &Tables, fid: FnId) -> CallSig {
+        let info = t.func(fid);
+        CallSig { fid, params: info.params.clone(), ret: info.ret }
+    }
+}
+
 impl<'a> BodyChecker<'a> {
-    /// Checks a call's arguments against `fid`'s parameters, after the first one for a method's
+    /// Checks a call's arguments against `sig`'s parameters, after the first one for a method's
     /// receiver `recv`. Then the exclusivity rules: no argument may see what another changes,
     /// and a closure literal passed straight to the call may not capture what it changes.
-    pub(crate) fn check_args(&mut self, e: &Expr, fid: FnId, args: &[Arg], recv: Option<Receiver<'_>>) -> Ty {
+    pub(crate) fn check_args(&mut self, e: &Expr, sig: CallSig, args: &[Arg], recv: Option<Receiver<'_>>) -> Ty {
         let skip = usize::from(recv.is_some());
         // A `var self` receiver is changed by the call; one that isn't is passed by pointer.
         let mut var_roots: Vec<(LocalId, Option<usize>)> = recv.and_then(|r| r.var_root).map(|r| vec![(r, None)]).unwrap_or_default();
         let read_root = recv.and_then(|r| r.read_root);
-        let info = &self.t.fns[fid.0 as usize];
+        let info = &self.t.fns[sig.fid.0 as usize];
         let receiver_changed = recv.map(|r| (r.expr, if info.params[0].is_var { RecvChange::Changed } else { RecvChange::Read }));
-        let (params, ret, fname) = (info.params[skip..].to_vec(), info.ret, info.name.clone());
+        let (params, ret, fname) = (sig.params[skip..].to_vec(), sig.ret, info.name.clone());
         // Text built for a native's arguments may be freed when the call returns (see `wants_scratch`),
         // so memory made while checking them can't be kept past the call.
         let scratch = may_want_scratch(info, args);

@@ -32,7 +32,7 @@ fn func(t: &Tables, name: &str) -> usize {
     t.fns.iter().position(|f| f.name == name).unwrap_or_else(|| panic!("no function {name}"))
 }
 
-const SRC: &str = "interface Named {\n    pure name(self) -> string\n}\nstruct Stack[T] {\n    items: list[T] = []\n    push(var self, v: T) { self.items.add(v) }\n}\nstruct Pair[A, B] {\n    a: A\n    b: B\n}\nstruct Holder[T] {\n    v: T\n    mem: Arena = Arena()\n}\nstruct Keyed[K: key, V: Named + equatable] {\n    m: map[K, int]\n}\nf(a: Stack[int], b: Stack[int], c: Stack[string], d: Pair[int, Stack[int]]) {}\ng(xs: list[int]) {\n    let hs: list[Holder[string]] = []\n}\nmain() {}\n";
+const SRC: &str = "interface Named {\n    pure name(self) -> string\n}\nstruct Stack[T] {\n    items: list[T] = []\n    push(var self, v: T) { }\n}\nstruct Pair[A, B] {\n    a: A\n    b: B\n}\nstruct Holder[T] {\n    v: T\n    mem: Arena = Arena()\n}\nstruct Keyed[K: key, V: Named + equatable] {\n    m: map[K, int]\n}\nf(a: Stack[int], b: Stack[int], c: Stack[string], d: Pair[int, Stack[int]]) {}\ng(xs: list[int]) {\n    let hs: list[Holder[string]] = []\n}\nmain() {}\n";
 
 #[test]
 fn instances_are_interned_once() {

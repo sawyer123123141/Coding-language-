@@ -78,6 +78,10 @@ pub enum Res {
     /// `d.hp()` where `d` is an interface value: the method in slot `slot` of the interface's method
     /// table, which is `Tables::iface(iface).methods[slot]` (declaration order).
     IfaceCall { iface: IfaceId, slot: u32 },
+    /// `x.hp()` where `x` is a `T` and a rule of `T` has the method: the method in slot `slot` of
+    /// interface `iface`, one of `param`'s rules (the first whose method is `pure`, else the first
+    /// that has it). The call is checked against the interface's abstract method.
+    ParamCall { param: ParamId, iface: IfaceId, slot: u32 },
 }
 
 #[derive(Clone, Debug)]

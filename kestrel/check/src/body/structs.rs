@@ -7,6 +7,7 @@ use super::place::Immutable;
 use super::consts::struct_field_read;
 use super::{is_const_expr, BodyChecker};
 use crate::builtins::Builtin;
+use crate::generic::GenericOwner;
 use crate::tables::{ListMethod, LocalId, Res, StructId, Tables, BUILTIN_STRUCTS};
 use crate::ty::Ty;
 
@@ -22,17 +23,15 @@ pub(crate) fn check_field_defaults(program: &Program, t: &mut Tables, diags: &mu
         _ => None,
     });
     for (sid, s) in structs.enumerate() {
-        // Temporary (Task 2a to Task 3a, P12): a generic struct's defaults are checked with its
-        // placeholders in scope.
-        if !s.type_params.is_empty() {
-            continue;
-        }
+        let sid = sid + BUILTIN_STRUCTS as usize;
+        // A generic struct's defaults are checked once, with its placeholders in scope.
+        let own = (!s.type_params.is_empty()).then_some(GenericOwner::Struct(StructId(sid as u32)));
         for f in &s.fields {
             let Some(default) = &f.default else { continue };
-            let sid = sid + BUILTIN_STRUCTS as usize;
             let Some(field) = t.structs[sid].fields.iter().find(|g| g.name == f.name) else { continue };
             let ty = field.ty;
             let mut bc = BodyChecker::new(t, diags, None, Ty::Unit, false);
+            bc.set_scope(own);
             if !is_const_expr(default, bc.t) {
                 bc.error(default.span, DEFAULT_EXPR);
             } else if bc.check_value(default, Some(ty)) == Ty::Error {
@@ -156,6 +155,7 @@ impl<'a> BodyChecker<'a> {
             }
             Ty::Variant(id, v) => (self.tn(base_ty), &self.t.enm(id).variants[v as usize].fields),
             Ty::Error => return Ty::Error,
+            Ty::Param(p) => return self.param_field_error(base, p, name, *name_span),
             Ty::Optional(_) => {
                 let msg = format!("{} may be `none`, so it has no field `{name}`", self.tn(base_ty));
                 self.error_help(*name_span, msg, "unwrap it first: `let x = ... else { ... }`");
@@ -215,7 +215,13 @@ impl<'a> BodyChecker<'a> {
         if let Some((field, sig)) = self.fn_field(receiver_ty, name) {
             return self.check_field_call(e, receiver, name, field, sig, args);
         }
+        let mut rule_call = None;
         let found = match receiver_ty {
+            // A `T` has the methods its rules have.
+            Ty::Param(p) => self.param_method(p, name).map(|(f, res)| {
+                rule_call = Some(res);
+                f
+            }).map_err(Some),
             Ty::Struct(sid) => {
                 let info = self.t.strukt(sid);
                 info.methods.get(name).copied().ok_or_else(|| Some(format!("`{}` has no method `{name}`", info.name)))
@@ -245,7 +251,7 @@ impl<'a> BodyChecker<'a> {
         // A call through an interface value names the method by its slot in the method table.
         let res = match receiver_ty {
             Ty::Iface(iface) => Res::IfaceCall { iface, slot: self.iface_method(iface, name).expect("found above").1 },
-            _ => Res::Fn(fid),
+            _ => rule_call.unwrap_or(Res::Fn(fid)),
         };
         self.t.res.insert(e.id, res);
         self.check_callee_purity(*name_span, fid);
@@ -260,7 +266,9 @@ impl<'a> BodyChecker<'a> {
         } else if receiver_ty.is_aggregate() {
             recv.read_root = self.place_root(receiver);
         }
-        let ret = self.check_args(e, fid, args, Some(recv));
+        // A method of an instance (or of its own declaration) is checked with its types filled in.
+        let sig = self.method_sig(e, fid, receiver_ty);
+        let ret = self.check_args(e, sig, args, Some(recv));
         if by_pointer {
             let later: Vec<&Expr> = args.iter().map(|a| &a.value).collect();
             self.check_changed_later(&[receiver], &later);

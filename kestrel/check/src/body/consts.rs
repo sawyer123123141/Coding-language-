@@ -9,7 +9,6 @@ use kestrel_syntax::{Diagnostic, Span};
 
 use super::BodyChecker;
 use crate::builtins::Builtin;
-use crate::collect_ty::{resolve_type, TypeScope};
 use crate::tables::{ConstId, Tables};
 use crate::ty::Ty;
 
@@ -203,7 +202,7 @@ fn names_in_block(b: &Block, out: &mut Vec<(String, Span)>) {
 
 fn check_const(c: &ConstDecl, i: usize, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
     let mut bc = BodyChecker::new(t, diags, None, Ty::Unit, false);
-    let want = c.ty.as_ref().map(|ty| resolve_type(ty, &TypeScope::NONE, bc.t, bc.diags));
+    let want = c.ty.as_ref().map(|ty| bc.resolve(ty));
     let ty = if !is_const_expr(&c.value, bc.t) {
         bc.error(c.value.span, CONST_EXPR);
         Ty::Error

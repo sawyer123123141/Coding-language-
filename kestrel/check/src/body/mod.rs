@@ -16,6 +16,7 @@ mod hex;
 mod iface;
 mod let_else;
 mod in_block;
+mod instance_calls;
 mod lanes;
 mod list_fns;
 mod lists;
@@ -25,6 +26,8 @@ mod matching;
 mod moves;
 mod nested;
 mod par;
+mod param_calls;
+mod param_ops;
 mod ops;
 mod place;
 mod pop_owner;
@@ -44,9 +47,11 @@ pub(crate) use structs::check_field_defaults;
 
 use std::collections::{HashMap, HashSet};
 
-use kestrel_syntax::ast::{Binding, Expr, ExprId, Program, Stmt};
+use kestrel_syntax::ast::{Binding, Expr, ExprId, Program, Stmt, TypeExpr};
 use kestrel_syntax::{Diagnostic, Span};
 
+use crate::collect_ty::{resolve_type, TypeScope};
+use crate::generic::{GenericOwner, ParamId};
 use crate::sig::sig_accepts;
 use crate::tables::{FnId, LocalId, LocalInfo, Tables};
 use crate::ty::Ty;
@@ -107,6 +112,12 @@ pub(crate) struct BodyChecker<'a> {
     /// The closure literals passed straight to `filter`, `map`, `any`, `all` or `sort_by`, whose
     /// loops can't store them, so rule 7b doesn't apply to them (see `captures`).
     unstored: HashSet<ExprId>,
+    /// The placeholders written types may name here: a generic function's own, or those of the
+    /// struct or enum a method (or a field default) belongs to. Empty in plain code.
+    type_scope: Vec<ParamId>,
+    /// The generic whose placeholders `type_scope` lists. The bare name of a generic struct or
+    /// enum means itself with these placeholders (G2).
+    own: Option<GenericOwner>,
 }
 
 pub(crate) fn check_fn(program: &Program, fn_id: FnId, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
@@ -114,7 +125,9 @@ pub(crate) fn check_fn(program: &Program, fn_id: FnId, t: &mut Tables, diags: &m
     let decl = info.decl(program);
     let (ret, is_pure, params) = (info.ret, info.is_pure, info.params.clone());
     let is_native = info.is_native;
+    let own = info.generic;
     let mut bc = BodyChecker::new(t, diags, Some(fn_id), ret, is_pure);
+    bc.set_scope(own);
     bc.scopes.push(HashMap::new());
     // A native has no body; its parameters are declared so calls and codegen see them, but
     // they are only labels, so their names aren't checked (see `link`).
@@ -170,7 +183,28 @@ impl<'a> BodyChecker<'a> {
             arg_name: None,
             infer_result: false,
             unstored: HashSet::new(),
+            type_scope: Vec::new(),
+            own: None,
         }
+    }
+
+    /// Puts a generic owner's placeholders in scope: types written in this code may name them.
+    pub(crate) fn set_scope(&mut self, own: Option<GenericOwner>) {
+        self.type_scope = own.map(|o| self.t.owner_params(o).to_vec()).unwrap_or_default();
+        self.own = own;
+    }
+
+    /// A type written in this code, with this code's placeholders in scope.
+    pub(crate) fn resolve(&mut self, ty: &TypeExpr) -> Ty {
+        // A generic function's bare name for itself doesn't exist; a type's own does (G2).
+        let own = self.own.filter(|o| !matches!(o, GenericOwner::Fn(_)));
+        let scope = TypeScope { params: &self.type_scope, own };
+        resolve_type(ty, &scope, self.t, self.diags)
+    }
+
+    /// The placeholder called `name` in this code, if there is one.
+    pub(crate) fn param_named(&self, name: &str) -> Option<ParamId> {
+        self.type_scope.iter().copied().find(|&p| self.t.generic.param(p).name == name)
     }
 
     /// A type as it reads in messages.

@@ -8,7 +8,6 @@ use kestrel_syntax::Span;
 
 use super::remove::Over;
 use super::BodyChecker;
-use crate::collect_ty::{resolve_type, TypeScope};
 use crate::ty::Ty;
 
 impl<'a> BodyChecker<'a> {
@@ -103,7 +102,7 @@ impl<'a> BodyChecker<'a> {
             return self.check_map_new(e, *name_span, type_args, args);
         }
         let elem = match type_args.as_slice() {
-            [ty] => resolve_type(ty, &TypeScope::NONE, self.t, self.diags),
+            [ty] => self.resolve(ty),
             _ => {
                 self.error(*name_span, format!("`{name}[...]` takes one element type"));
                 Ty::Error
@@ -132,7 +131,8 @@ impl<'a> BodyChecker<'a> {
             return Ty::Error;
         }
         // Zero-filling would leave interface values empty, and calling one would crash.
-        if name == "array" && self.t.zero_fill_breaks(elem) {
+        // (An element holding a placeholder gets the generic message instead of this one.)
+        if name == "array" && !self.array_of_param_error(e, elem) && self.t.zero_fill_breaks(elem) {
             let msg = format!("`array[{}](n)` would start with empty items; build it with a literal or `add`", self.tn(elem));
             self.error(e.span, msg);
         }

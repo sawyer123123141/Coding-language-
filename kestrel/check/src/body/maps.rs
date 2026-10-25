@@ -7,7 +7,7 @@ use kestrel_syntax::ast::{Arg, AssignOp, Binding, Block, Expr, ExprKind, TypeExp
 use kestrel_syntax::Span;
 
 use super::BodyChecker;
-use crate::collect_ty::{map_ty, resolve_type, TypeScope};
+use crate::collect_ty::map_ty;
 use crate::tables::Res;
 use crate::ty::Ty;
 
@@ -63,7 +63,7 @@ impl<'a> BodyChecker<'a> {
             self.error(name_span, "`map[...]` takes a key type and a value type");
             return Ty::Error;
         };
-        let (kt, vt) = (resolve_type(k, &TypeScope::NONE, self.t, self.diags), resolve_type(v, &TypeScope::NONE, self.t, self.diags));
+        let (kt, vt) = (self.resolve(k), self.resolve(v));
         map_ty(kt, vt, k.span, e.span, self.t, self.diags)
     }
 

@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use kestrel_syntax::ast::{Block, ExprKind, Stmt};
 
 use super::{regions, BodyChecker, Expect};
-use crate::collect_ty::{resolve_type, TypeScope};
 use crate::ty::Ty;
 
 impl<'a> BodyChecker<'a> {
@@ -35,7 +34,7 @@ impl<'a> BodyChecker<'a> {
                 Ty::Unit
             }
             Stmt::Let { is_var, bind, ty, value, .. } => {
-                let ann = ty.as_ref().map(|t| resolve_type(t, &TypeScope::NONE, self.t, self.diags));
+                let ann = ty.as_ref().map(|t| self.resolve(t));
                 let mut local_ty = self.check_value(value, ann);
                 if matches!(local_ty, Ty::Unit | Ty::Never) {
                     self.error(value.span, "this expression has no value to store");

@@ -135,6 +135,11 @@ impl Tables {
         rules
     }
 
+    /// A placeholder's rules as a message writes them: its interfaces, then the words.
+    pub(crate) fn rule_names(&self, p: ParamId) -> Vec<String> {
+        self.rules_of(p).into_iter().map(|r| self.rule_name(r)).collect()
+    }
+
     fn rule_name(&self, r: Rule) -> String {
         match r {
             Rule::Iface(i) => self.iface(i).name.clone(),

@@ -220,7 +220,12 @@ impl<'a> BodyChecker<'a> {
             return Ty::Error;
         }
         let Which::Other(method) = which else { return self.list_add(e, receiver, args, elem) };
-        let comparable = elem.is_numeric() || matches!(elem, Ty::Bool | Ty::Str | Ty::Error) || self.t.vector(elem).is_some();
+        if matches!(method, ListMethod::Has | ListMethod::Find) && self.list_param_rule(name, elem, *name_span) {
+            self.check_loose_args(args);
+            return Ty::Error;
+        }
+        // (A placeholder that gets here has the rule.)
+        let comparable = elem.is_numeric() || matches!(elem, Ty::Bool | Ty::Str | Ty::Error | Ty::Param(_)) || self.t.vector(elem).is_some();
         if matches!(method, ListMethod::Has | ListMethod::Find) && !comparable {
             let msg = format!(
                 "`{name}` needs items that `==` can compare (numbers, bools, strings and vectors); `{}` holds `{}`",

@@ -18,11 +18,12 @@ use crate::ty::Ty;
 
 impl Tables {
     /// The function a call resolved to: the user function or method of `Res::Fn`, or the abstract
-    /// method of an interface call (the one the call is checked against).
+    /// method of an interface call or a call through a `T`'s rule (the one the call is checked
+    /// against).
     pub(crate) fn callee(&self, res: Option<&Res>) -> Option<FnId> {
         match res? {
             Res::Fn(f) => Some(*f),
-            Res::IfaceCall { iface, slot } => Some(self.iface(*iface).methods[*slot as usize]),
+            Res::IfaceCall { iface, slot } | Res::ParamCall { iface, slot, .. } => Some(self.iface(*iface).methods[*slot as usize]),
             _ => None,
         }
     }
@@ -76,10 +77,11 @@ impl<'a> BodyChecker<'a> {
         true
     }
 
-    /// Whether the checked expression `e` is a struct or enum value converted to an interface
-    /// value by boxing: a copy of it goes into the current arena.
+    /// Whether the checked expression `e` is a struct or enum value (or a `T`, which is one in
+    /// every copy) converted to an interface value by boxing: a copy of it goes into the current
+    /// arena.
     pub(super) fn boxes_iface(&self, e: &Expr) -> bool {
-        if !matches!(self.t.ty(e.id), Ty::Struct(_) | Ty::Enum(_)) || self.t.iface_borrows.contains(&e.id) {
+        if !matches!(self.t.ty(e.id), Ty::Struct(_) | Ty::Enum(_) | Ty::Param(_)) || self.t.iface_borrows.contains(&e.id) {
             return false;
         }
         match self.t.coerce.get(&e.id) {

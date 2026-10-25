@@ -101,7 +101,7 @@ impl Resolver<'_> {
         let res = self.t.res.get(&e.id).copied();
         let by_res = match res {
             Some(Res::Fn(f) | Res::FnValue(f)) => Some(self.func(f)),
-            Some(Res::IfaceCall { iface, slot }) => Some(self.func(self.t.iface(iface).methods[slot as usize])),
+            Some(Res::IfaceCall { iface, slot } | Res::ParamCall { iface, slot, .. }) => Some(self.func(self.t.iface(iface).methods[slot as usize])),
             Some(Res::Construct(s)) => Some(self.strukt(s)),
             Some(Res::Variant(en, v)) => Some(self.variant(en, v)),
             Some(Res::Local(l)) => Some(self.local(l)),

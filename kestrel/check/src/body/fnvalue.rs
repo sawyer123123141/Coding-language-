@@ -55,6 +55,7 @@ impl<'a> BodyChecker<'a> {
             }
             Ty::Enum(id) => self.t.enm(id).methods.contains_key(name),
             Ty::Iface(id) => self.iface_method(id, name).is_some(),
+            Ty::Param(p) => self.t.generic.param(p).ifaces.iter().any(|&i| self.iface_method(i, name).is_some()),
             _ => self.t.vector(base_ty).is_some() && Builtin::vector_method(name).is_some(),
         };
         if is_method {

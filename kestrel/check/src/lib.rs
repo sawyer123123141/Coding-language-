@@ -65,9 +65,8 @@ pub fn check_keeping_tables(program: &Program, needs_main: bool) -> (Tables, Vec
         body::check_default_cycles(program, &t, &mut diags);
     }
     for f in 0..t.fns.len() {
-        // Temporary (Task 2a to Task 3a, P12): generic functions and methods of generic types are
-        // checked once their bodies know their placeholders (`BodyChecker`'s type scope).
-        if t.fns[f].is_abstract || t.fns[f].generic.is_some() {
+        // A generic function or method is checked once, against its placeholders' rules (R1).
+        if t.fns[f].is_abstract {
             continue;
         }
         body::check_fn(program, FnId(f as u32), &mut t, &mut diags);

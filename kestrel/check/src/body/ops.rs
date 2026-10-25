@@ -14,6 +14,9 @@ impl<'a> BodyChecker<'a> {
             }
             UnaryOp::BitNot => {
                 let ty = self.check_expr(inner, want.filter(|t| t.is_int()));
+                if self.param_unary(inner, "~", ty) {
+                    return Ty::Error;
+                }
                 if self.t.vector(ty).is_some_and(|k| k.has_bits()) {
                     return ty;
                 }
@@ -26,6 +29,9 @@ impl<'a> BodyChecker<'a> {
             }
             UnaryOp::Neg => {
                 let ty = self.check_expr(inner, want.filter(|t| t.is_numeric()));
+                if self.param_unary(inner, "-", ty) {
+                    return Ty::Error;
+                }
                 if self.t.vector(ty).is_some() {
                     return ty;
                 }
@@ -62,6 +68,9 @@ impl<'a> BodyChecker<'a> {
             BinaryOp::Shl | BinaryOp::Shr => {
                 let lt = self.check_expr(lhs, want.filter(|t| t.is_int()));
                 let rt = self.check_expr(rhs, Some(lt).filter(|t| t.is_int()));
+                if self.param_operator(e, op.symbol(), lt, rt) {
+                    return Ty::Error;
+                }
                 if self.either_vector(lt, rt) {
                     return self.vec_binary(e, op, lhs, lt, rhs, rt);
                 }
@@ -71,6 +80,9 @@ impl<'a> BodyChecker<'a> {
             _ if op.is_bitwise() => {
                 let lt = self.check_expr(lhs, want.filter(|t| t.is_int()));
                 let rt = self.check_expr(rhs, Some(lt).filter(|t| t.is_int()));
+                if self.param_operator(e, op.symbol(), lt, rt) {
+                    return Ty::Error;
+                }
                 if self.either_vector(lt, rt) {
                     return self.vec_binary(e, op, lhs, lt, rhs, rt);
                 }
@@ -82,6 +94,10 @@ impl<'a> BodyChecker<'a> {
             _ if op.is_comparison() => {
                 let lt = self.check_expr(lhs, None);
                 let rt = self.check_expr(rhs, Some(lt).filter(|t| t.is_numeric()));
+                // A `T` compares only with the rule for it, and only with another `T`.
+                if let Some(ty) = self.param_comparison(e, op, lt, rt) {
+                    return ty;
+                }
                 if self.either_vector(lt, rt) {
                     self.vec_binary(e, op, lhs, lt, rhs, rt);
                     return Ty::Bool;
@@ -110,6 +126,9 @@ impl<'a> BodyChecker<'a> {
                 let hint = want.filter(|t| t.is_numeric());
                 let lt = self.check_expr(lhs, hint);
                 let rt = self.check_expr(rhs, Some(lt).filter(|t| t.is_numeric()).or(hint));
+                if self.param_operator(e, op.symbol(), lt, rt) {
+                    return Ty::Error;
+                }
                 if op.is_wrapping() {
                     return self.wrap_binary(e, op, lhs, lt, rhs, rt);
                 }

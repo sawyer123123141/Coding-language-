@@ -34,7 +34,6 @@ use super::moves::Moved;
 use super::regions::Ctx;
 use super::{BodyChecker, Expect};
 use crate::closure::ClosureInfo;
-use crate::collect_ty::{resolve_type, TypeScope};
 use crate::sig::{Sig, SigParam};
 use crate::tables::LocalId;
 use crate::ty::Ty;
@@ -189,7 +188,7 @@ impl<'a> BodyChecker<'a> {
         let mut tys = Vec::with_capacity(lit.params.len());
         for (i, p) in lit.params.iter().enumerate() {
             let ty = match (&p.ty, want_sig.as_ref().and_then(|w| w.params.get(i))) {
-                (Some(t), _) => resolve_type(t, &TypeScope::NONE, self.t, self.diags),
+                (Some(t), _) => self.resolve(t),
                 (None, Some(wp)) => wp.ty,
                 (None, None) => {
                     // (Where the shape was wrong, that was said already.)
@@ -205,7 +204,7 @@ impl<'a> BodyChecker<'a> {
             };
             tys.push(ty);
         }
-        let declared = lit.ret.as_ref().map(|t| resolve_type(t, &TypeScope::NONE, self.t, self.diags));
+        let declared = lit.ret.as_ref().map(|t| self.resolve(t));
         // (`map` gives the item type, and takes the result type from the body.)
         let known = declared.or(want_sig.as_ref().filter(|_| !infer_result).map(|w| w.ret));
 

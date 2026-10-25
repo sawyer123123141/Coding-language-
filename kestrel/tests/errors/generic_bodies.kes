@@ -1,0 +1,60 @@
+interface Named {
+    pure name(self) -> string
+}
+interface Loud {
+    shout(self)
+}
+pure field_of[T](x: T) -> int { x.hp }
+pure no_rule[T](x: T) -> int { x.hp() }
+pure wrong_rule[T: Named](x: T) -> int { x.hp() }
+pure plus[T](a: T, b: T) -> T { a + b }
+pure same[T](a: T, b: T) -> bool { a == b }
+pure less[T](a: T, b: T) -> bool { a < b }
+pure keyed[K](k: K) -> int {
+    let m = map[K, int]()
+    m.len
+}
+pure sorted[T](xs: list[T]) -> list[T] {
+    var ys = xs
+    ys.sort()
+    ys
+}
+pure contains[T](xs: list[T], x: T) -> bool { xs.has(x) }
+pure zeros[T](n: int) -> int {
+    let xs = array[T](n)
+    xs.len
+}
+pure build[T]() -> int {
+    let x = T()
+    1
+}
+pure as_value[T]() -> int {
+    let x = T
+    1
+}
+pure as_named[T](x: T) -> string {
+    let n: Named = x
+    n.name()
+}
+pure calls_loud[T: Loud](x: T) { x.shout() }
+shout_all[T: Loud](xs: list[T]) {
+    par for x in xs { x.shout() }
+}
+pure convert[T](x: T) -> float { float(x) }
+main() {}
+// error 7: `x` is a `T`, which can be any type, so it has no field `hp`
+// error 8: `T` has no rules, so it has no methods; add one, like `[T: Damageable]`
+// error 9: `T` has no method `hp`: its rules (`Named`) don't have one
+// error 10: `+` doesn't work on `T`, which can be any type; take a function that does it, like `add: (T, T) -> T`
+// error 11: `==` on `T` needs the rule `equatable`: write `[T: equatable]`
+// error 12: `<` on `T` needs the rule `ordered`: write `[T: ordered]`
+// error 14: `K` can't be a map key without the rule `key`: write `[K: key]`
+// error 19: `sort` needs `T` to be `ordered`: write `[T: ordered]`
+// error 22: `has` needs `T` to be `equatable`: write `[T: equatable]`
+// error 24: `array[T](n)` fills its items with zeros, which a `T` may not have; build a `list[T]` with `add` instead
+// error 28: `T` is a placeholder, so it can't be built here; take a value of it as a parameter instead
+// error 32: `T` is a type, not a value
+// error 36: expected Named, found T
+// error 39: pure functions can only call pure functions; `Loud.shout` isn't pure
+// error 41: `par for` bodies can only call `pure` functions; `Loud.shout` isn't `pure`
+// error 43: can't convert T to float

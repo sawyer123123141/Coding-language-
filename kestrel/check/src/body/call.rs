@@ -1,6 +1,7 @@
 use kestrel_syntax::ast::{Arg, Expr, ExprKind};
 use kestrel_syntax::Span;
 
+use super::args::CallSig;
 use super::closure::Impure;
 use super::nested::Later;
 use super::BodyChecker;
@@ -52,7 +53,12 @@ impl<'a> BodyChecker<'a> {
             return self.check_construct(e, sid, args);
         }
         let Some(&fid) = self.t.fn_by_name.get(name) else {
-            if let Some(&eid) = self.t.enum_by_name.get(name) {
+            if self.param_named(name).is_some() {
+                self.error(
+                    *name_span,
+                    format!("`{name}` is a placeholder, so it can't be built here; take a value of it as a parameter instead"),
+                );
+            } else if let Some(&eid) = self.t.enum_by_name.get(name) {
                 // A real variant makes the example, with `(...)` when it has fields.
                 let example = match self.t.enm(eid).variants.first() {
                     Some(v) if v.fields.is_empty() => format!("`{name}.{}`", v.name),
@@ -101,7 +107,7 @@ impl<'a> BodyChecker<'a> {
         let callee = self.t.callee(res.as_ref());
         match res {
             // A pure function changes nothing but its `var` arguments.
-            Some(Res::Fn(_) | Res::IfaceCall { .. })
+            Some(Res::Fn(_) | Res::IfaceCall { .. } | Res::ParamCall { .. })
                 if callee.is_some_and(|f| self.t.fns[f.0 as usize].is_pure && !self.t.fns[f.0 as usize].params.iter().any(|p| p.is_var)) =>
             {
                 let name = self.t.fns[callee.expect("a call").0 as usize].name.clone();
@@ -200,6 +206,6 @@ impl<'a> BodyChecker<'a> {
     }
 
     fn check_user_call(&mut self, e: &Expr, fid: FnId, args: &[Arg]) -> Ty {
-        self.check_args(e, fid, args, None)
+        self.check_args(e, CallSig::of(self.t, fid), args, None)
     }
 }

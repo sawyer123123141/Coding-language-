@@ -18,6 +18,7 @@ use super::closure::Impure;
 use super::exclusive::{CalleePlace, RecvChange};
 use super::fnvalue::shown_callee;
 use super::lists::{written, Overlap};
+use super::param_ops::sortable;
 use super::BodyChecker;
 use crate::sig::{Sig, SigId, SigParam};
 use crate::tables::{ListMethod, Res};
@@ -167,9 +168,12 @@ impl<'a> BodyChecker<'a> {
                 self.error(f.span, format!("`map` needs a {what} that gives a value"));
                 None
             }
-            ret if sorting && !sortable(ret) => {
-                let msg = format!("`sort_by` needs a key that is a number, string or bool; this one gives `{}`", self.tn(ret));
-                self.error(f.span, msg);
+            ret if sorting && !sortable(self.t, ret) => {
+                // A placeholder is told which rule it needs; anything else what a key may be.
+                if !self.list_param_rule("sort_by", ret, f.span) {
+                    let msg = format!("`sort_by` needs a key that is a number, string or bool; this one gives `{}`", self.tn(ret));
+                    self.error(f.span, msg);
+                }
                 None
             }
             ret => Some(ret),
@@ -214,16 +218,14 @@ impl<'a> BodyChecker<'a> {
             return self.list_fn(e, receiver, recv_ty, method, name_span, args);
         }
         let elem = self.elem_of(recv_ty).expect("a collection type");
-        if !(sortable(elem) || elem == Ty::Error) {
+        if self.list_param_rule("sort", elem, name_span) {
+            return Ty::Error;
+        }
+        if !(sortable(self.t, elem) || elem == Ty::Error) {
             let msg = format!("`sort` needs numbers, strings or bools; `{}` holds `{}`; use `sort_by` with a key", self.tn(recv_ty), self.tn(elem));
             self.error(name_span, msg);
             return Ty::Error;
         }
         Ty::Unit
     }
-}
-
-/// Whether values of type `ty` have a sort order: numbers, strings and bools.
-fn sortable(ty: Ty) -> bool {
-    ty.is_numeric() || matches!(ty, Ty::Bool | Ty::Str)
 }
