@@ -438,3 +438,61 @@ Two 9-round runs earlier the same afternoon agree (`--release`: scalar 10.86 and
 - **Rust's scalar loop is slower than its instruction count suggests:** LLVM converts three of the four lattice values with `cvtsi2ss` into registers it doesn't clear first (`xmm9`, `xmm10`, `xmm11`), a false dependency on the previous iteration's divide. Kestrel clears each target with `vxorps` first. I did not confirm that this is what costs Rust's loop its time.
 
 **In short:** four samples at once in `vec4`/`ivec4` are 3.2 times scalar Kestrel and level with hand-written Rust SSE4.1 (SSE, not AVX: the Rust side uses the 128-bit non-VEX forms, the Kestrel JIT the AVX encodings); four corners at once are about 1.4-1.7 times (noisy). The checked build costs nothing on this code because the analysis proves every lane check. The small gaps to Rust (an extra `xor` per hash, a divide by 16, spilled constants) are in `docs/superpowers/plans/2026-10-09-core-2a-followups.md` under "Found while measuring SIMD vectors".
+
+## Quiet reruns (2026-10-24, evening)
+
+The user closed every app and said the machine was free: the quietest runs in this file (the ranges of the rounds are 1-2%, against 20-30% for the SIMD section above). Ryzen 7 5800X, Windows 11, one thread, `--release` unless a row says checked. Three compilers, each with its own `bench/kernels` build, made in `git worktree`s at `C:\kt`: **pre-upgrade** ac885a3 (the SIMD round on Cranelift 0.116), **pre-sort** 2dfe1e9 (the Cranelift 0.137 merge), and **now** d9c2223 (`sort_by` key caching and the `filter` cleanup, plan `docs/superpowers/plans/2026-10-24-sort-filter.md`). Two runs of `measure.py --old DIR`, each taking its two compilers in turns within every round: now against pre-sort (9 rounds), then pre-sort against pre-upgrade (7 rounds). ns per item, medians with the range of the rounds.
+
+### `sort_by` key caching and the `filter` cleanup (now against pre-sort)
+
+| Kernel | Now | Pre-sort | Now over pre-sort | Rust |
+|---|---:|---:|---:|---:|
+| `sort_by.kes` | **44.76** (43.50-47.64) | 140.60 (140.33-142.86) | **0.32** | 21.80 |
+| `sort_by_loop.kes` (hand merge sort) | 87.71 | 87.90 | 1.00 | |
+| `filter.kes` | 3.43 (3.40-3.45) | 3.43 (3.41-3.46) | 1.00 | 3.18 |
+| `filter_loop.kes` | 3.37 | 3.37 | 1.00 | |
+| `map.kes` | 1.49 | 1.47 | 1.01 | 0.84 |
+| every other kernel | | | 0.99-1.01 | |
+
+- **`sort_by` is 3.1 times faster: 2.05 times Rust's `sort_by`, where it was 6.4 times** (6.1 in the first measurement), and now twice as fast as the hand-written merge sort, where it was 1.6 times slower. The key runs 100,000 times instead of about 3.4 million, and the runtime's sort compares two `i64`s inline. What is left against Rust is the sort itself on `(key, position)` pairs plus the pass that moves the items into place; Rust sorts the 16-byte items directly.
+- **The `filter` change measured nothing,** because the gap it was aimed at had already gone: on Cranelift 0.137 `filter.kes` is 1.02 times its hand loop (3.43 against 3.37), where it was 1.23 times on 0.116, and 1.08 times Rust's `collect()`. Binding the item once and dropping the unused environment word change nothing measurable now; they stay, as simpler IR.
+- **The inliner change (an unused argument with no effect isn't evaluated) is neutral everywhere else:** every other kernel is within 1%.
+
+### The Cranelift 0.137 upgrade (pre-sort against pre-upgrade)
+
+| Kernel | Pre-sort (0.137) | Pre-upgrade (0.116) | New over old |
+|---|---:|---:|---:|
+| `step.kes` | 4.47 | 4.46 | 1.00 |
+| `step_index.kes` | 5.75 | 5.97 | 0.96 |
+| `step_pow.kes` | 17.35 | 17.32 | 1.00 |
+| `copy.kes` | 0.68 (0.67-0.72) | 0.62 (0.60-0.80) | 1.10 |
+| `filter.kes` | **3.38** | 4.04 | **0.84** |
+| `filter_loop.kes` | **3.32** | 3.94 | **0.84** |
+| `map.kes` | 1.46 | 1.45 | 1.01 |
+| `sort_by.kes` | 139.17 | 147.25 | 0.95 |
+| `sort_by_loop.kes` | **86.70** | 95.75 | **0.91** |
+| `iface_hp.kes` | 4.28 | 4.27 | 1.00 |
+| `iface_hp_direct.kes` | 0.43 | 0.43 | 1.00 |
+| `iface_step.kes` | 4.47 | 4.19 | 1.07 |
+| `iface_step_direct.kes` | 0.44 | 0.37 | 1.19 |
+| `noise_scalar.kes` checked / `--release` | 6.91 / 6.81 | 7.13 / 7.23 | 0.97 / 0.94 |
+| `noise_corners.kes` checked / `--release` | 5.49 / 5.47 | 5.61 / 5.44 | 0.98 / 1.01 |
+| `noise_wide.kes` checked / `--release` | 2.70 / 2.68 | 2.80 / 2.79 | 0.96 / 0.96 |
+
+The upgrade branch's own measurement (before the SIMD round, on a busy machine) said the same: `filter` 0.82-0.83, the merge sort 0.90, `iface_step` 1.08, and `iface_step_direct` 1.30 (alignment: one more register move before the indirect call under regalloc2 0.15; see the follow-ups). New here: the noise kernels are 3-6% faster, and `copy.kes` 10% slower (0.06 ns an item; not chased).
+
+### SIMD vectors, the quiet rerun
+
+The "SIMD vectors" section above was measured on a busy machine. Quiet, now compiler (pre-sort is the same within 1%):
+
+| Kernel | Checked | `--release` | Rust |
+|---|---:|---:|---:|
+| `noise_scalar.kes` | 7.01 | 6.91 | 6.44 (scalar) |
+| `noise_corners.kes` | 5.57 | 5.55 | |
+| `noise_wide.kes` | 2.74 | **2.72** | **2.51** (SSE4.1) |
+
+- **Four samples at once are 2.5 times scalar Kestrel** (6.91 to 2.72), not the 3.15-3.2 of the busy measurement, and **1.08 times Rust's hand-written SSE4.1** (2.72 against 2.51), not level. Rust's own wide version is 2.57 times its scalar one, so Kestrel's `vec4`/`ivec4` gain is the same size as Rust's.
+- **Scalar Kestrel is 1.07 times Rust's scalar** (was 1.12 busy).
+- **Four corners at once: 1.25 times scalar** (was 1.4-1.7, noisy).
+- **Checked builds still cost nothing:** checked over `--release` is 1.00-1.01 on all three.
+- Why the busy numbers flattered the wide kernel is not known for sure; the scalar loop's four independent hash chains likely suffered more from the shared core than the wide loop's one.

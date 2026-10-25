@@ -225,3 +225,7 @@ The final whole-round review (Opus, 2026-10-24, `.superpowers/sdd/2026-10-21-sim
 - **The full suite, clippy and Task 4's proof sweep**: `cargo test --workspace --no-fail-fast`, `cargo clippy --workspace --all-targets -- -D warnings` (and in `kestrel/godot` and `kestrel/bench/kernels`), and the every-program proof check, plus the frozen voxel world's `kestrel check --report` (checked and `--release`) compared byte for byte with the one before Task 1 (it contains no vector code). Until the user says the machine is free.
 - **The quiet benchmark rerun** above.
 - **The Cranelift upgrade** (branch `claude/xenodochial-ardinghelli-291b23`, commit 8ab1f60) and the "Recheck after a Cranelift upgrade" list for the vector code.
+
+### The quiet rerun (2026-10-24, evening)
+
+On a quiet machine (`kestrel/bench/kernels/results.md`, "Quiet reruns"): four samples at once are **2.5 times** scalar Kestrel (6.91 to 2.72 ns), not the 3.15-3.2 measured on a busy machine, and **1.08 times** Rust's hand-written SSE4.1 (2.51 ns), not level; Rust's own wide version is 2.57 times its scalar one, so the gain is the same size as Rust's. Four corners at once: 1.25 times. Checked builds still cost nothing (1.00-1.01). The Cranelift 0.137 merge made the noise kernels 3-6% faster.

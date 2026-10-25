@@ -181,7 +181,7 @@ main() {
 }
 ```
 
-On a 2D value noise, four samples at once in `vec4`/`ivec4` run 3.2 times faster per sample than the scalar version, and are level with a hand-written Rust SSE4.1 version (SSE, not AVX; measured on a busy machine, so a quiet rerun is owed), and a checked build costs nothing measurable because the analysis proves every lane check (`kestrel/bench/kernels/results.md`, "SIMD vectors"). Four corners of one sample at once gain only about 1.4-1.7 times. Natives can't take `vec4` or `ivec4` yet, and Godot exports of them aren't built. The rules are in the "Vectors" bullet of the syntax file.
+On a 2D value noise, four samples at once in `vec4`/`ivec4` run 2.5 times faster per sample than the scalar version, and take 1.08 times as long as a hand-written Rust SSE4.1 version (SSE, not AVX; Rust's own four-at-once version is 2.6 times its scalar one), and a checked build costs nothing measurable because the analysis proves every lane check (`kestrel/bench/kernels/results.md`, "SIMD vectors"). Four corners of one sample at once gain only about 1.25 times. Natives can't take `vec4` or `ivec4` yet, and Godot exports of them aren't built. The rules are in the "Vectors" bullet of the syntax file.
 
 ## A window
 

@@ -355,3 +355,20 @@ Before `loop_exits` went back in, two sessions gave the frozen copy 1.04 and 1.0
 - `copy.kes` (+9%) is a sub-nanosecond loop with overlapping ranges.
 
 **Compile time:** no measurable change. `kestrel build main.kes --release`, 9 runs each in turns, took 2.49 s in all with the old compiler and 2.42 s with the new.
+
+## Quiet rerun after the merge (2026-10-24, evening)
+
+The Cranelift 0.137 upgrade was merged into `main` after the SIMD round (2dfe1e9). Measured on a quiet machine (the user closed every app): three compilers built in `git worktree`s at `C:\kt`, **pre-upgrade** ac885a3 (0.116), **pre-sort** 2dfe1e9 (0.137), **now** d9c2223 (plus `sort_by` key caching and the inliner's unused-argument skip). Each built the frozen `main.kes` and `voxels3d_tuned.kes`, checked and `--release`; all twelve exes print 463,749. 11 rounds, every exe once per round in turn (`C:\kt\vox\time_vox.ps1`); whole runs, medians with ranges; startup is 7 ms.
+
+| | Pre-upgrade | Pre-sort | Now | Pre-sort over pre-upgrade |
+|---|---:|---:|---:|---:|
+| Frozen, checks on | 423 (420-434) | 439 (438-448) | 439 (437-465) | 1.04 |
+| Frozen, `--release` | 373 (367-387) | 385 (381-402) | 382 (380-402) | 1.03 |
+| Tuned, checks on | 325 (323-337) | **312** (308-329) | 313 (309-328) | **0.96** |
+| Tuned, `--release` | 330 (325-345) | **312** (310-344) | 313 (310-334) | **0.95** |
+
+- **The upgrade makes the frozen copy 3-4% slower and the tuned copy 4-5% faster.** The upgrade branch, on a busy machine, measured the frozen copy level (1.00-1.01) and the tuned 2-7% faster. The frozen copy's loss is the dropped xor rebalancing (one more xor per hash, see above); "reassociate xor/add chains" in the follow-ups would win it back.
+- **Today's change is neutral here** (now against pre-sort, within 1%).
+- **The checked builds cost nothing in the tuned copy** (313 against 313) and 15% in the frozen one (439 against 382).
+
+**Against the straight Rust port** (`C:\kt\voxtuned\rust`, the same session, 11 rounds in turn): Rust release 344 ms (336-353), Rust with overflow checks 353 (351-366), Kestrel tuned `--release` 315 (310-319), Kestrel frozen `--release` 390 (381-421). **The tuned copy is 0.92 times Rust's time; the frozen copy 1.13 times** (it was 1.26-1.28 on 2026-10-20, before loop hoisting).
