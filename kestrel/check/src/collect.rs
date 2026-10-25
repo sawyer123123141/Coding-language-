@@ -4,7 +4,9 @@ use kestrel_syntax::ast::{EnumDecl, Expr, ExprKind, FieldDecl, FnDecl, Item, Pro
 use kestrel_syntax::{Diagnostic, Span};
 
 use crate::builtins::Builtin;
-use crate::collect_ty::{check_self_containment, resolve_type};
+use crate::collect_ty::{check_self_containment, resolve_type, TypeScope};
+use crate::generic::declare::{check_rule_clashes, declare_fn_params, declare_type_params};
+use crate::generic::GenericOwner;
 use crate::sig::{Sig, SigParam};
 use crate::tables::{
     ConstInfo, EnumId, EnumInfo, FieldInfo, FnId, FnInfo, IfaceId, IfaceInfo, ParamSig, StructId, StructInfo, Tables, VariantInfo,
@@ -48,7 +50,10 @@ pub(crate) fn reserved_name_error(name: &str, shown: &str) -> Option<String> {
 
 
 /// Records every type, function signature and constant before bodies are
-/// checked. Type names come first so any type can refer to any other.
+/// checked. Type names come first so any type can refer to any other. The phases (generics spec,
+/// "Checker: declarations"): 1-2 names, placeholders and their rules; 3 fields and signatures
+/// (instances named there wait, pending); G9; 5 the pending instances filled; then conformance,
+/// default allocation (each followed by the instances' sync), self-containment and natives.
 pub(crate) fn collect(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnostic>, needs_main: bool) {
     check_names(program, diags);
     add_builtin_vectors(t);
@@ -57,14 +62,33 @@ pub(crate) fn collect(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnos
             Item::Struct(s) => {
                 let id = StructId(t.structs.len() as u32);
                 t.struct_by_name.entry(s.name.clone()).or_insert(id);
-                let info = StructInfo { name: s.name.clone(), item: item_idx, span: s.name_span, fields: Vec::new(), methods: HashMap::new(), ifaces: Vec::new() };
-                t.structs.push(info);
+                t.structs.push(StructInfo {
+                    name: s.name.clone(),
+                    item: item_idx,
+                    span: s.name_span,
+                    fields: Vec::new(),
+                    methods: HashMap::new(),
+                    ifaces: Vec::new(),
+                    params: Vec::new(),
+                    instance: None,
+                    // A generic declaration's fields use its placeholders (P27).
+                    concrete: s.type_params.is_empty(),
+                });
             }
             Item::Enum(e) => {
                 let id = EnumId(t.enums.len() as u32);
                 t.enum_by_name.entry(e.name.clone()).or_insert(id);
-                let info = EnumInfo { name: e.name.clone(), item: item_idx, span: e.name_span, variants: Vec::new(), methods: HashMap::new(), ifaces: Vec::new() };
-                t.enums.push(info);
+                t.enums.push(EnumInfo {
+                    name: e.name.clone(),
+                    item: item_idx,
+                    span: e.name_span,
+                    variants: Vec::new(),
+                    methods: HashMap::new(),
+                    ifaces: Vec::new(),
+                    params: Vec::new(),
+                    instance: None,
+                    concrete: e.type_params.is_empty(),
+                });
             }
             Item::Interface(i) => {
                 let id = IfaceId(t.ifaces.len() as u32);
@@ -74,12 +98,17 @@ pub(crate) fn collect(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnos
             Item::Fn(_) | Item::Const(_) | Item::Use(_) => {}
         }
     }
+    declare_type_params(program, t, diags);
+    t.generic.collecting = true;
     let (mut struct_id, mut enum_id, mut iface_id) = (BUILTIN_STRUCTS, 0, 0);
     for (item_idx, item) in program.items.iter().enumerate() {
         match item {
             Item::Fn(f) => {
-                let id = add_fn(f, item_idx, None, t, diags);
+                let id = add_fn(f, item_idx, None, &TypeScope::NONE, t, diags);
                 if f.name == "main" && t.main.is_none() {
+                    if !f.type_params.is_empty() {
+                        diags.push(Diagnostic::error(f.name_span, "`main` can't have placeholders"));
+                    }
                     if !f.params.is_empty() || f.ret.is_some() {
                         diags.push(Diagnostic::error(f.name_span, "`main` takes no parameters and returns nothing"));
                     }
@@ -105,8 +134,13 @@ pub(crate) fn collect(program: &Program, t: &mut Tables, diags: &mut Vec<Diagnos
             Item::Use(_) => {}
         }
     }
+    // G9 compares the interfaces' method signatures, made in the loop above (P26).
+    check_rule_clashes(program, t, diags);
+    t.fill_pending();
     crate::iface::check_conformance(program, t, diags);
+    t.sync_instance_ifaces();
     mark_default_allocation(program, t);
+    t.sync_instance_field_flags();
     check_self_containment(t, diags);
     crate::natives::check_natives(program, t, diags);
     if t.main.is_none() && needs_main {
@@ -124,7 +158,9 @@ fn add_builtin_vectors(t: &mut Tables) {
             .iter()
             .map(|c| FieldInfo { name: c.to_string(), ty: lane, span: Span::default(), has_default: false, default_allocates: false })
             .collect();
-        t.structs.push(StructInfo { name: name.to_string(), item: usize::MAX, span: Span::default(), fields, methods: HashMap::new(), ifaces: Vec::new() });
+        let (methods, ifaces, params) = (HashMap::new(), Vec::new(), Vec::new());
+        let span = Span::default();
+        t.structs.push(StructInfo { name: name.to_string(), item: usize::MAX, span, fields, methods, ifaces, params, instance: None, concrete: true });
     }
 }
 
@@ -151,14 +187,14 @@ fn check_names(program: &Program, diags: &mut Vec<Diagnostic>) {
 }
 
 /// Resolves field types; reports duplicate field names.
-fn fields_of(owner: &str, decls: &[FieldDecl], t: &mut Tables, diags: &mut Vec<Diagnostic>) -> Vec<FieldInfo> {
+fn fields_of(owner: &str, decls: &[FieldDecl], scope: &TypeScope, t: &mut Tables, diags: &mut Vec<Diagnostic>) -> Vec<FieldInfo> {
     let mut fields: Vec<FieldInfo> = Vec::new();
     for f in decls {
         if fields.iter().any(|g| g.name == f.name) {
             diags.push(Diagnostic::error(f.name_span, format!("`{owner}` has two fields named `{}`", f.name)));
             continue;
         }
-        let ty = resolve_type(&f.ty, t, diags);
+        let ty = resolve_type(&f.ty, scope, t, diags);
         // `mark_default_allocation` fills in `default_allocates` once every field type is known.
         fields.push(FieldInfo { name: f.name.clone(), ty, span: f.name_span, has_default: f.default.is_some(), default_allocates: false });
     }
@@ -211,13 +247,14 @@ struct Taken<'a> {
     is_fn: bool,
 }
 
-/// Registers methods; `taken` names (of `taken_noun`s: fields or variants) can't be reused.
+/// Registers methods of `(owner, its item index)`; `taken` names (of `taken_noun`s: fields or
+/// variants) can't be reused.
 fn methods_of(
-    owner: &str,
-    item_idx: usize,
+    (owner, item_idx): (&str, usize),
     decls: &[FnDecl],
     taken: &[Taken],
     taken_noun: &str,
+    scope: &TypeScope,
     t: &mut Tables,
     diags: &mut Vec<Diagnostic>,
 ) -> HashMap<String, FnId> {
@@ -238,50 +275,71 @@ fn methods_of(
             diags.push(Diagnostic::error(m.name_span, format!("`{owner}` has two methods named `{}`", m.name)));
             continue;
         }
-        let fid = add_fn(m, item_idx, Some((mi, owner)), t, diags);
+        let fid = add_fn(m, item_idx, Some((mi, owner)), scope, t, diags);
         methods.insert(m.name.clone(), fid);
     }
     methods
 }
 
 fn add_struct_members(s: &StructDecl, item_idx: usize, id: StructId, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
-    let fields = fields_of(&s.name, &s.fields, t, diags);
+    let params = t.strukt(id).params.clone();
+    let scope = TypeScope { params: &params, own: (!params.is_empty()).then_some(GenericOwner::Struct(id)) };
+    let fields = fields_of(&s.name, &s.fields, &scope, t, diags);
     let names: Vec<Taken> = fields.iter().map(|f| Taken { name: &f.name, is_fn: matches!(f.ty, Ty::Fn(_)) }).collect();
-    let methods = methods_of(&s.name, item_idx, &s.methods, &names, "field", t, diags);
+    let methods = methods_of((&s.name, item_idx), &s.methods, &names, "field", &scope, t, diags);
     let info = &mut t.structs[id.0 as usize];
     info.fields = fields;
     info.methods = methods;
 }
 
 fn add_enum_members(e: &EnumDecl, item_idx: usize, id: EnumId, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
+    let params = t.enm(id).params.clone();
+    let scope = TypeScope { params: &params, own: (!params.is_empty()).then_some(GenericOwner::Enum(id)) };
     let mut variants: Vec<VariantInfo> = Vec::new();
     for v in &e.variants {
         if variants.iter().any(|w| w.name == v.name) {
             diags.push(Diagnostic::error(v.name_span, format!("`{}` has two variants named `{}`", e.name, v.name)));
             continue;
         }
-        let fields = fields_of(&v.name, &v.fields, t, diags);
+        let fields = fields_of(&v.name, &v.fields, &scope, t, diags);
         variants.push(VariantInfo { name: v.name.clone(), span: v.name_span, fields });
     }
     if e.variants.is_empty() {
         diags.push(Diagnostic::error(e.name_span, format!("`{}` needs at least one variant", e.name)));
     }
     let names: Vec<Taken> = variants.iter().map(|v| Taken { name: &v.name, is_fn: false }).collect();
-    let methods = methods_of(&e.name, item_idx, &e.methods, &names, "variant", t, diags);
+    let methods = methods_of((&e.name, item_idx), &e.methods, &names, "variant", &scope, t, diags);
     let info = &mut t.enums[id.0 as usize];
     info.variants = variants;
     info.methods = methods;
 }
 
-/// Registers a function's signature. `method` is (index in its type, type name).
-pub(crate) fn add_fn(f: &FnDecl, item_idx: usize, method: Option<(usize, &str)>, t: &mut Tables, diags: &mut Vec<Diagnostic>) -> FnId {
+/// Registers a function's signature. `method` is (index in its type, type name); `outer` is the
+/// type scope of a method's struct or enum. A generic function's placeholders are registered
+/// here, where its `FnId` is known (P29).
+pub(crate) fn add_fn(
+    f: &FnDecl,
+    item_idx: usize,
+    method: Option<(usize, &str)>,
+    outer: &TypeScope,
+    t: &mut Tables,
+    diags: &mut Vec<Diagnostic>,
+) -> FnId {
+    // Resolving types makes no functions, so this is the id `t.fns.push` below gives.
+    let id = FnId(t.fns.len() as u32);
+    let type_params = if f.type_params.is_empty() { Vec::new() } else { declare_fn_params(f, id, t, diags) };
+    let (scope, generic) = if type_params.is_empty() {
+        (*outer, outer.own)
+    } else {
+        (TypeScope { params: &type_params, own: None }, Some(GenericOwner::Fn(id)))
+    };
     let mut params = Vec::new();
     for p in &f.params {
-        let ty = resolve_type(&p.ty, t, diags);
+        let ty = resolve_type(&p.ty, &scope, t, diags);
         params.push(ParamSig { name: p.bind.name.clone(), ty, is_var: p.is_var });
     }
-    let ret = f.ret.as_ref().map_or(Ty::Unit, |r| resolve_type(r, t, diags));
-    let id = FnId(t.fns.len() as u32);
+    let ret = f.ret.as_ref().map_or(Ty::Unit, |r| resolve_type(r, &scope, t, diags));
+    assert_eq!(id.0 as usize, t.fns.len(), "resolving a signature added a function");
     let sig = Sig { params: params.iter().map(|p| SigParam { ty: p.ty, is_var: p.is_var }).collect(), ret, is_pure: f.is_pure };
     let sig = t.intern_sig(sig);
     let name = match method {
@@ -303,6 +361,9 @@ pub(crate) fn add_fn(f: &FnDecl, item_idx: usize, method: Option<(usize, &str)>,
         io: f.is_native && !f.is_pure,
         mutates_params: false,
         is_abstract: false,
+        generic,
+        type_params,
+        copy: None,
     });
     id
 }

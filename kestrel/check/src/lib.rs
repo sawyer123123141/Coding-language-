@@ -3,7 +3,9 @@ mod builtins;
 mod collect;
 mod closure;
 mod collect_ty;
+pub mod generic;
 mod iface;
+mod list_method;
 mod natives;
 mod sig;
 mod str_method;
@@ -16,6 +18,7 @@ use kestrel_syntax::ast::Program;
 use kestrel_syntax::Diagnostic;
 
 pub use builtins::Builtin;
+pub use generic::{CopyInfo, GenericOwner, Generics, Instance, ParamId, ParamInfo, Subst, TyListId};
 pub use collect::is_reserved_name;
 pub use natives::wants_scratch;
 pub use tables::{
@@ -53,12 +56,6 @@ pub fn check_keeping_tables(program: &Program, needs_main: bool) -> (Tables, Vec
         ..Tables::default()
     };
     let mut diags = Vec::new();
-    // Temporary (Task 1a to Task 2a): nothing past the parser knows placeholders yet.
-    let generics = generic_decls(program);
-    if !generics.is_empty() {
-        diags.extend(generics.into_iter().map(|span| Diagnostic::error(span, "generics aren't supported yet")));
-        return (t, diags);
-    }
     collect::collect(program, &mut t, &mut diags, needs_main);
     t.compute_owning();
     body::check_consts(program, &mut t, &mut diags);
@@ -68,26 +65,13 @@ pub fn check_keeping_tables(program: &Program, needs_main: bool) -> (Tables, Vec
         body::check_default_cycles(program, &t, &mut diags);
     }
     for f in 0..t.fns.len() {
-        if t.fns[f].is_abstract {
+        // Temporary (Task 2a to Task 3a, P12): generic functions and methods of generic types are
+        // checked once their bodies know their placeholders (`BodyChecker`'s type scope).
+        if t.fns[f].is_abstract || t.fns[f].generic.is_some() {
             continue;
         }
         body::check_fn(program, FnId(f as u32), &mut t, &mut diags);
     }
     collect_ty::check_map_values(&t, &mut diags);
     (t, diags)
-}
-
-/// The name of each struct, enum and function that declares placeholders, in source order.
-fn generic_decls(program: &Program) -> Vec<kestrel_syntax::Span> {
-    use kestrel_syntax::ast::Item;
-    program
-        .items
-        .iter()
-        .filter_map(|item| match item {
-            Item::Fn(f) if !f.type_params.is_empty() => Some(f.name_span),
-            Item::Struct(s) if !s.type_params.is_empty() => Some(s.name_span),
-            Item::Enum(e) if !e.type_params.is_empty() => Some(e.name_span),
-            _ => None,
-        })
-        .collect()
 }

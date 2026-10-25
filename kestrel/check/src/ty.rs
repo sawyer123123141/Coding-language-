@@ -1,5 +1,6 @@
 /// A checked type. `Never` is the type of code that doesn't finish
 /// (`return`, `break`); `Error` suppresses follow-on errors.
+use crate::generic::ParamId;
 use crate::sig::SigId;
 use crate::tables::{ElemId, EnumId, IfaceId, StructId};
 
@@ -44,6 +45,9 @@ pub enum Ty {
     Fn(SigId),
     /// An interface: any struct or enum that implements it. Two words, `{data, table}`.
     Iface(IfaceId),
+    /// A placeholder (`T` in `struct Stack[T]`) in generic code, checked once for every type it
+    /// may stand for: every question about it gets the answer that refuses more code (R4).
+    Param(ParamId),
     Error,
 }
 
@@ -89,6 +93,7 @@ impl Ty {
             Ty::Optional(_) => "optional",
             Ty::Fn(_) => "function",
             Ty::Iface(_) => "interface",
+            Ty::Param(_) => "placeholder",
             Ty::Error => "{error}",
         }
     }
@@ -105,7 +110,8 @@ impl Ty {
         self.is_int() || self.is_float()
     }
 
-    /// Values that live in memory and are passed by pointer.
+    /// Values that live in memory and are passed by pointer. A placeholder is (R4): it may stand
+    /// for a struct, so the exclusivity and "changed by a later argument" rules apply to it.
     pub fn is_aggregate(self) -> bool {
         matches!(
             self,
@@ -120,11 +126,13 @@ impl Ty {
                 | Ty::Optional(_)
                 | Ty::Fn(_)
                 | Ty::Iface(_)
+                | Ty::Param(_)
         )
     }
 
     /// Whether a value of `self` may be used where `to` is expected without
-    /// an explicit conversion: int→float, narrower→wider int, float→f64.
+    /// an explicit conversion: int→float, narrower→wider int, float→f64. A placeholder converts
+    /// only to itself here (to `T?` and to an interface rule in `coerce`).
     pub fn coerces_to(self, to: Ty) -> bool {
         use Ty::*;
         self == to

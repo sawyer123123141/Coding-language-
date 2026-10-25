@@ -8,7 +8,7 @@ use kestrel_syntax::Span;
 
 use super::remove::Over;
 use super::BodyChecker;
-use crate::collect_ty::resolve_type;
+use crate::collect_ty::{resolve_type, TypeScope};
 use crate::ty::Ty;
 
 impl<'a> BodyChecker<'a> {
@@ -103,7 +103,7 @@ impl<'a> BodyChecker<'a> {
             return self.check_map_new(e, *name_span, type_args, args);
         }
         let elem = match type_args.as_slice() {
-            [ty] => resolve_type(ty, self.t, self.diags),
+            [ty] => resolve_type(ty, &TypeScope::NONE, self.t, self.diags),
             _ => {
                 self.error(*name_span, format!("`{name}[...]` takes one element type"));
                 Ty::Error

@@ -5,6 +5,8 @@ use std::collections::HashSet;
 use kestrel_syntax::ast::{TypeExpr, TypeKind};
 use kestrel_syntax::{Diagnostic, Span};
 
+use crate::collect::BUILTINS;
+use crate::generic::{GenericOwner, ParamId};
 use crate::sig::{Sig, SigParam};
 use crate::tables::{EnumId, StructId, Tables};
 use crate::ty::Ty;
@@ -14,43 +16,56 @@ use crate::ty::Ty;
 const OPTIONAL_FN: &str =
     "optional function types aren't supported yet; give the field a do-nothing default instead: `on_hit: (int) = (n) { }`";
 
-pub(crate) fn resolve_type(ty: &TypeExpr, t: &mut Tables, diags: &mut Vec<Diagnostic>) -> Ty {
+/// The placeholders a written type may name, and the generic declaration whose bare name means
+/// itself (G2: `Stack` inside `struct Stack[T]` is `Stack[T]`).
+#[derive(Clone, Copy)]
+pub(crate) struct TypeScope<'a> {
+    pub params: &'a [ParamId],
+    pub own: Option<GenericOwner>,
+}
+
+impl<'a> TypeScope<'a> {
+    /// Plain code: no placeholders.
+    pub const NONE: TypeScope<'a> = TypeScope { params: &[], own: None };
+}
+
+pub(crate) fn resolve_type(ty: &TypeExpr, scope: &TypeScope, t: &mut Tables, diags: &mut Vec<Diagnostic>) -> Ty {
     let msg = match &ty.kind {
-        TypeKind::Named { name, args } if args.is_empty() => match Ty::from_name(name) {
-            Some(Ty::Gpu) if !t.in_builtin(ty.span) => "`GpuHandle` is only for Kestrel's built-in modules".to_string(),
-            Some(found) => return found,
-            None => {
-                if let Some(&id) = t.struct_by_name.get(name) {
-                    return Ty::Struct(id);
-                }
-                if let Some(&id) = t.enum_by_name.get(name) {
-                    return Ty::Enum(id);
-                }
-                if let Some(&id) = t.iface_by_name.get(name) {
-                    return Ty::Iface(id);
-                }
-                format!("unknown type `{name}`")
+        TypeKind::Named { name, args } if args.is_empty() => {
+            if let Some(&p) = scope.params.iter().find(|&&p| t.generic.param(p).name == *name) {
+                return Ty::Param(p);
             }
-        },
+            match Ty::from_name(name) {
+                Some(Ty::Gpu) if !t.in_builtin(ty.span) => "`GpuHandle` is only for Kestrel's built-in modules".to_string(),
+                Some(found) => return found,
+                None => match bare_name(name, scope, t) {
+                    Ok(found) => return found,
+                    Err(msg) => msg,
+                },
+            }
+        }
         TypeKind::Named { name, args } if name == "list" && args.len() == 1 => {
-            let elem = resolve_type(&args[0], t, diags);
+            let elem = resolve_type(&args[0], scope, t, diags);
             return if elem == Ty::Error { Ty::Error } else { Ty::List(t.intern_elem(elem)) };
         }
         TypeKind::Named { name, .. } if name == "list" => "`list[...]` takes one element type".to_string(),
         TypeKind::Named { name, args } if name == "map" && args.len() == 2 => {
-            let k = resolve_type(&args[0], t, diags);
-            let v = resolve_type(&args[1], t, diags);
+            let k = resolve_type(&args[0], scope, t, diags);
+            let v = resolve_type(&args[1], scope, t, diags);
             return map_ty(k, v, args[0].span, ty.span, t, diags);
         }
         TypeKind::Named { name, .. } if name == "map" => "`map[...]` takes a key type and a value type".to_string(),
         TypeKind::Named { name, .. } if name == "array" => "write array types as `[T]`".to_string(),
-        TypeKind::Named { name, .. } => format!("`{name}[...]` types aren't supported yet"),
+        TypeKind::Named { name, args } => match named_with_args(name, args, scope, t, diags) {
+            Ok(found) => return found,
+            Err(msg) => msg,
+        },
         TypeKind::Array(inner) => {
-            let elem = resolve_type(inner, t, diags);
+            let elem = resolve_type(inner, scope, t, diags);
             return if elem == Ty::Error { Ty::Error } else { Ty::Array(t.intern_elem(elem)) };
         }
         TypeKind::Optional(inner) => {
-            let elem = resolve_type(inner, t, diags);
+            let elem = resolve_type(inner, scope, t, diags);
             if matches!(elem, Ty::Fn(_)) {
                 OPTIONAL_FN.to_string()
             } else {
@@ -59,8 +74,8 @@ pub(crate) fn resolve_type(ty: &TypeExpr, t: &mut Tables, diags: &mut Vec<Diagno
         }
         TypeKind::Fn { params, ret, is_pure } => {
             let params: Vec<SigParam> =
-                params.iter().map(|p| SigParam { ty: resolve_type(&p.ty, t, diags), is_var: p.is_var }).collect();
-            let ret = ret.as_ref().map_or(Ty::Unit, |r| resolve_type(r, t, diags));
+                params.iter().map(|p| SigParam { ty: resolve_type(&p.ty, scope, t, diags), is_var: p.is_var }).collect();
+            let ret = ret.as_ref().map_or(Ty::Unit, |r| resolve_type(r, scope, t, diags));
             if ret == Ty::Error || params.iter().any(|p| p.ty == Ty::Error) {
                 return Ty::Error;
             }
@@ -71,6 +86,61 @@ pub(crate) fn resolve_type(ty: &TypeExpr, t: &mut Tables, diags: &mut Vec<Diagno
     Ty::Error
 }
 
+/// A struct, enum or interface named with no types. A generic one needs its types, except inside
+/// its own declaration (G2).
+fn bare_name(name: &str, scope: &TypeScope, t: &Tables) -> Result<Ty, String> {
+    let (ty, owner, count) = if let Some(&id) = t.struct_by_name.get(name) {
+        (Ty::Struct(id), GenericOwner::Struct(id), t.strukt(id).params.len())
+    } else if let Some(&id) = t.enum_by_name.get(name) {
+        (Ty::Enum(id), GenericOwner::Enum(id), t.enm(id).params.len())
+    } else if let Some(&id) = t.iface_by_name.get(name) {
+        return Ok(Ty::Iface(id));
+    } else {
+        return Err(format!("unknown type `{name}`"));
+    };
+    if count == 0 || scope.own == Some(owner) {
+        return Ok(ty);
+    }
+    let ints = vec!["int"; count].join(", ");
+    Err(format!("`{name}` needs its types, like `{name}[{ints}]`"))
+}
+
+/// `Name[A, B]` for a name other than `list`, `map` and `array`: an instance of a generic struct
+/// or enum (interned, so each is one type) when the count of types matches.
+fn named_with_args(name: &str, args: &[TypeExpr], scope: &TypeScope, t: &mut Tables, diags: &mut Vec<Diagnostic>) -> Result<Ty, String> {
+    let (owner, count) = if let Some(&id) = t.struct_by_name.get(name) {
+        (GenericOwner::Struct(id), t.strukt(id).params.len())
+    } else if let Some(&id) = t.enum_by_name.get(name) {
+        (GenericOwner::Enum(id), t.enm(id).params.len())
+    } else if t.iface_by_name.contains_key(name)
+        || BUILTINS.contains(&name)
+        || scope.params.iter().any(|&p| t.generic.param(p).name == name)
+    {
+        return Err(format!("`{name}` takes no types"));
+    } else {
+        return Err(format!("unknown type `{name}`"));
+    };
+    match count {
+        0 => return Err(format!("`{name}` takes no types")),
+        1 if args.len() != 1 => return Err(format!("`{name}` takes 1 type, found {}", args.len())),
+        n if n != args.len() => return Err(format!("`{name}` takes {n} types, found {}", args.len())),
+        _ => {}
+    }
+    let mut tys = Vec::with_capacity(args.len());
+    for a in args {
+        tys.push(resolve_type(a, scope, t, diags));
+    }
+    if tys.contains(&Ty::Error) {
+        return Ok(Ty::Error);
+    }
+    let list = t.intern_ty_list(tys);
+    Ok(match owner {
+        GenericOwner::Struct(def) => Ty::Struct(t.intern_struct(def, list)),
+        GenericOwner::Enum(def) => Ty::Enum(t.intern_enum(def, list)),
+        GenericOwner::Fn(_) => unreachable!("a type's name is a struct's or an enum's"),
+    })
+}
+
 /// `map[k, v]`, once `k` is known to work as a key (else an error at
 /// `key_span`). Value types are checked by `check_map_values`, which needs
 /// to know which types own an arena.
@@ -78,7 +148,14 @@ pub(crate) fn map_ty(k: Ty, v: Ty, key_span: Span, span: Span, t: &mut Tables, d
     if k == Ty::Error || v == Ty::Error {
         return Ty::Error;
     }
-    if !(k.is_int() || matches!(k, Ty::Bool | Ty::Str)) {
+    if let Ty::Param(p) = k {
+        if !t.generic.param(p).key {
+            let name = t.param_name(p);
+            let msg = format!("`{name}` can't be a map key without the rule `key`: write `[{name}: key]`");
+            diags.push(Diagnostic::error(key_span, msg));
+            return Ty::Error;
+        }
+    } else if !(k.is_int() || matches!(k, Ty::Bool | Ty::Str)) {
         let msg = if k.is_float() {
             format!("map keys must be integers, bools or strings; `{}` keys would be unreliable", t.ty_name(k))
         } else {
@@ -114,6 +191,8 @@ pub(crate) fn check_map_values(t: &Tables, diags: &mut Vec<Diagnostic>) {
 /// array, list or map keeps its items elsewhere, so those can hold their own type.
 fn contained(t: &Tables, ty: Ty) -> Vec<Ty> {
     match ty {
+        // A placeholder is a leaf (R4): what it stands for is checked in each instance.
+        Ty::Param(_) => Vec::new(),
         Ty::Optional(e) => vec![t.elem(e)],
         Ty::Struct(s) => t.strukt(s).fields.iter().map(|f| f.ty).collect(),
         Ty::Enum(e) => t.enm(e).variants.iter().flat_map(|v| v.fields.iter().map(|f| f.ty)).collect(),

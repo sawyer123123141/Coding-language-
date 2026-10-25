@@ -5,9 +5,11 @@ use kestrel_syntax::Span;
 
 use crate::builtins::Builtin;
 use crate::closure::ClosureInfo;
+use crate::generic::{CopyInfo, GenericOwner, Generics, Instance, ParamId};
 use crate::sig::{Sig, SigId};
 use crate::ty::Ty;
 
+pub use crate::list_method::ListMethod;
 pub use crate::str_method::StrMethod;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -39,49 +41,6 @@ pub struct IfaceId(pub u32);
 /// An interned element type of an array or list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ElemId(pub u32);
-
-/// The list methods besides `add` (which is `Res::ListAdd`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ListMethod {
-    RemoveAt,
-    Pop,
-    Insert,
-    Clear,
-    Has,
-    Find,
-    /// `xs.join(sep)` on a list or array of strings.
-    Join,
-    /// `xs.filter(f)`: a new list of the items `f` is true for.
-    Filter,
-    /// `xs.map(f)`: a new list of `f`'s results.
-    Map,
-    /// `xs.any(f)`: whether `f` is true for some item.
-    Any,
-    /// `xs.all(f)`: whether `f` is true for every item.
-    All,
-    /// `xs.sort()`: sorts a list or array of numbers, strings or bools in place.
-    Sort,
-    /// `xs.sort_by(key)`: sorts in place by a pure key function's number, string or bool.
-    SortBy,
-}
-
-impl ListMethod {
-    /// Whether the method changes its receiver; `has`, `find`, `join` and the four that take a
-    /// function and give a result only read it.
-    pub fn changes_receiver(self) -> bool {
-        !matches!(self, ListMethod::Has | ListMethod::Find | ListMethod::Join | ListMethod::Filter | ListMethod::Map | ListMethod::Any | ListMethod::All)
-    }
-
-    /// Whether the method takes a function and calls it for the items.
-    pub fn takes_fn(self) -> bool {
-        matches!(self, ListMethod::Filter | ListMethod::Map | ListMethod::Any | ListMethod::All | ListMethod::SortBy)
-    }
-
-    /// Whether the method changes a list's order but not its length, so it works on an array.
-    pub fn reorders(self) -> bool {
-        matches!(self, ListMethod::Sort | ListMethod::SortBy)
-    }
-}
 
 /// What a name or call expression refers to.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -171,6 +130,13 @@ pub struct FnInfo {
     /// An interface's method: a signature with no body. It is never called or checked; KIR
     /// lowers it as a stub (see `kir::lower`).
     pub is_abstract: bool,
+    /// The generic whose placeholders its types use: its own for a generic function, its
+    /// struct's or enum's for a method of a generic type; `None` for plain code.
+    pub generic: Option<GenericOwner>,
+    /// A generic function's own placeholders, in order (a method's are its type's).
+    pub type_params: Vec<ParamId>,
+    /// For a copy of a generic function or method: what it was made from.
+    pub copy: Option<CopyInfo>,
 }
 
 impl FnInfo {
@@ -196,6 +162,13 @@ pub struct StructInfo {
     pub methods: HashMap<String, FnId>,
     /// The interfaces it says it implements (`struct S: A, B`), in the order written, each once.
     pub ifaces: Vec<IfaceId>,
+    /// A generic declaration's placeholders (its fields use them); empty for everything else.
+    pub params: Vec<ParamId>,
+    /// For an instance (`Stack[int]`): its declaration and type arguments.
+    pub instance: Option<Instance<StructId>>,
+    /// No placeholder anywhere: false for a generic declaration and for an instance whose
+    /// arguments hold one (`Stack[T]` inside other generic code).
+    pub concrete: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -206,6 +179,10 @@ pub struct EnumInfo {
     pub variants: Vec<VariantInfo>,
     pub methods: HashMap<String, FnId>,
     pub ifaces: Vec<IfaceId>,
+    /// As for `StructInfo`.
+    pub params: Vec<ParamId>,
+    pub instance: Option<Instance<EnumId>>,
+    pub concrete: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -345,6 +322,8 @@ pub struct Tables {
     /// as an `int`), by id: the value is the bit pattern read as the type's signed integer
     /// (-1 there). KIR reads the literal's value from here.
     pub wrapped_literals: HashMap<ExprId, i64>,
+    /// Placeholders, type lists, instances and copies (see `generic`).
+    pub generic: Generics,
 }
 
 impl Tables {

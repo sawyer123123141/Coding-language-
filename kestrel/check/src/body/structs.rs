@@ -22,6 +22,11 @@ pub(crate) fn check_field_defaults(program: &Program, t: &mut Tables, diags: &mu
         _ => None,
     });
     for (sid, s) in structs.enumerate() {
+        // Temporary (Task 2a to Task 3a, P12): a generic struct's defaults are checked with its
+        // placeholders in scope.
+        if !s.type_params.is_empty() {
+            continue;
+        }
         for f in &s.fields {
             let Some(default) = &f.default else { continue };
             let sid = sid + BUILTIN_STRUCTS as usize;

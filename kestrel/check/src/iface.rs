@@ -5,14 +5,17 @@ use kestrel_syntax::ast::{InterfaceDecl, Item, Program};
 use kestrel_syntax::{Diagnostic, Span};
 
 use crate::collect::add_fn;
+use crate::collect_ty::TypeScope;
 use crate::tables::{EnumId, FnId, IfaceId, StructId, Tables, BUILTIN_STRUCTS};
 use crate::ty::Ty;
 
-/// Whether a value of type `ty` can stand for interface `i`: `ty` is a struct or enum that lists it.
+/// Whether a value of type `ty` can stand for interface `i`: `ty` is a struct or enum that lists it
+/// (an instance lists its declaration's), or a placeholder with `i` as a rule.
 pub fn implements(t: &Tables, ty: Ty, i: IfaceId) -> bool {
     match ty {
         Ty::Struct(s) => t.strukt(s).ifaces.contains(&i),
         Ty::Enum(e) => t.enm(e).ifaces.contains(&i),
+        Ty::Param(p) => t.generic.param(p).ifaces.contains(&i),
         _ => false,
     }
 }
@@ -37,7 +40,7 @@ pub(crate) fn add_iface_members(decl: &InterfaceDecl, item_idx: usize, id: Iface
         }
         seen.push(&m.name);
         // The `self` parameter is typed as the interface itself.
-        let fid = add_fn(m, item_idx, Some((mi, &decl.name)), t, diags);
+        let fid = add_fn(m, item_idx, Some((mi, &decl.name)), &TypeScope::NONE, t, diags);
         t.fns[fid.0 as usize].is_abstract = true;
         methods.push(fid);
     }

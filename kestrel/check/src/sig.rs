@@ -47,7 +47,11 @@ impl Tables {
     /// A function type as it reads in messages: `(int, var vec2) -> bool`, `pure (int) -> int`,
     /// and `(int)` for one that gives nothing.
     pub fn sig_name(&self, id: SigId) -> String {
-        let sig = self.sig(id);
+        self.sig_text(self.sig(id))
+    }
+
+    /// `sig_name` for a signature that may not be interned.
+    pub(crate) fn sig_text(&self, sig: &Sig) -> String {
         let params: Vec<String> =
             sig.params.iter().map(|p| format!("{}{}", if p.is_var { "var " } else { "" }, self.ty_name(p.ty))).collect();
         let ret = if sig.ret == Ty::Unit { String::new() } else { format!(" -> {}", self.ty_name(sig.ret)) };

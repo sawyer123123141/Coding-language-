@@ -19,6 +19,8 @@ impl Tables {
         match ty {
             // A closure's environment is heap memory (a function value with none holds nothing).
             Ty::Str | Ty::Array(_) | Ty::List(_) | Ty::Map(..) | Ty::Fn(_) | Ty::Iface(_) => true,
+            // R4: a placeholder may stand for a `string`, so copies may allocate.
+            Ty::Param(_) => true,
             Ty::Optional(e) => self.has_heap_below(self.elem(e), seen),
             Ty::Struct(_) | Ty::Enum(_) if seen.contains(&ty) => false,
             Ty::Struct(s) => {
@@ -37,19 +39,27 @@ impl Tables {
     /// optional. Such values can't be compared. (Rule 7b of the closures spec asks this; it
     /// doesn't look inside interface values.)
     pub fn holds_fn(&self, ty: Ty) -> bool {
+        // A placeholder never stands for a type holding a function (R3, G6).
         self.holds_where(ty, &mut Vec::new(), &|t| matches!(t, Ty::Fn(_)))
     }
 
     /// Whether `ty` is an interface type, or holds one in a field, a payload, an element, a map
     /// value or an optional.
     pub fn holds_iface(&self, ty: Ty) -> bool {
-        self.holds_where(ty, &mut Vec::new(), &|t| matches!(t, Ty::Iface(_)))
+        // R4: a placeholder may stand for an interface.
+        self.holds_where(ty, &mut Vec::new(), &|t| matches!(t, Ty::Iface(_) | Ty::Param(_)))
     }
 
     /// Whether values of `ty` can't be compared with `==`: it is, or holds, a function type or an
     /// interface type.
     pub fn holds_uncomparable(&self, ty: Ty) -> bool {
-        self.holds_where(ty, &mut Vec::new(), &|t| matches!(t, Ty::Fn(_) | Ty::Iface(_)))
+        // R4: a placeholder can be compared only with the rule `equatable` (or `ordered`, `key`).
+        let leaf = |t: Ty| match t {
+            Ty::Fn(_) | Ty::Iface(_) => true,
+            Ty::Param(p) => !self.generic.param(p).equatable,
+            _ => false,
+        };
+        self.holds_where(ty, &mut Vec::new(), &leaf)
     }
 
     /// Whether `ty` holds an interface value that a zero-filled array would leave empty: one
@@ -61,7 +71,8 @@ impl Tables {
 
     fn zero_fill_below(&self, ty: Ty, seen: &mut Vec<Ty>) -> bool {
         match ty {
-            Ty::Iface(_) => true,
+            // R4: a placeholder may stand for an interface, which zeros can't fill.
+            Ty::Iface(_) | Ty::Param(_) => true,
             Ty::Array(e) => self.zero_fill_below(self.elem(e), seen),
             Ty::Struct(_) | Ty::Enum(_) if seen.contains(&ty) => false,
             Ty::Struct(s) => {
@@ -95,6 +106,8 @@ impl Tables {
                 seen.push(ty);
                 self.enm(e).variants.iter().flat_map(|v| &v.fields).any(|f| self.holds_where(f.ty, seen, leaf))
             }
+            // A placeholder is a leaf: `leaf` has answered for it.
+            Ty::Param(_) => false,
             _ => false,
         }
     }
@@ -105,7 +118,8 @@ impl Tables {
     /// `Arena()` constant makes a new arena at each use). The checker's `is_kir_place` asks this
     /// too, so the two agree on which constants are places.
     pub fn const_read_in_place(&self, ty: Ty) -> bool {
-        !self.is_owning(ty) && self.holds_where(ty, &mut Vec::new(), &|t| matches!(t, Ty::Array(_) | Ty::List(_) | Ty::Map(..) | Ty::Iface(_)))
+        let leaf = |t: Ty| matches!(t, Ty::Array(_) | Ty::List(_) | Ty::Map(..) | Ty::Iface(_) | Ty::Param(_));
+        !self.is_owning(ty) && self.holds_where(ty, &mut Vec::new(), &leaf)
     }
 
     /// Whether `ty` holds an `Arena` or a `GpuHandle` (in fields, payloads or elements):
@@ -119,6 +133,9 @@ impl Tables {
             // Maps can't hold owning values (see `check_map_values`), and an interface value never
             // owns anything: an owning implementor can only be lent to one, not stored as one.
             Ty::Iface(_) => false,
+            // R3: a placeholder never stands for an owning type; an instance owns when its
+            // declaration does (its entry above).
+            Ty::Param(_) => false,
             _ => false,
         }
     }
@@ -133,6 +150,8 @@ impl Tables {
     fn holds_arena_below(&self, ty: Ty, seen: &mut Vec<Ty>) -> bool {
         match ty {
             Ty::Arena => true,
+            // R3: a placeholder never stands for an owning type.
+            Ty::Param(_) => false,
             Ty::Array(e) | Ty::List(e) | Ty::Optional(e) => self.holds_arena_below(self.elem(e), seen),
             Ty::Struct(_) | Ty::Enum(_) if seen.contains(&ty) => false,
             Ty::Struct(s) => {
@@ -193,6 +212,7 @@ impl Tables {
             Ty::Map(k, v) => format!("map[{}, {}]", self.ty_name(self.elem(k)), self.ty_name(self.elem(v))),
             Ty::Optional(e) => format!("{}?", self.ty_name(self.elem(e))),
             Ty::Fn(s) => self.sig_name(s),
+            Ty::Param(p) => self.param_name(p).to_string(),
             other => other.name().to_string(),
         }
     }

@@ -1,0 +1,136 @@
+//! Generics in the checker: placeholders (`Ty::Param`), interned type lists, instances of generic
+//! structs and enums (`Stack[int]`), and substitution.
+//!
+//! A generic declaration is a `StructId` / `EnumId` whose `params` aren't empty; its fields use
+//! `Ty::Param`, and as a type it means itself with its own placeholders (`Stack[T]`). Every other
+//! use is an instance, interned once per (declaration, type list) with its fields filled in, so
+//! every type question works on it unchanged (G12).
+
+use std::collections::{HashMap, HashSet};
+
+use kestrel_syntax::ast::ExprId;
+use kestrel_syntax::Span;
+
+use crate::tables::{EnumId, FnId, IfaceId, StructId, Tables};
+use crate::ty::Ty;
+
+pub(crate) mod declare;
+mod instances;
+mod subst;
+
+/// A placeholder, an index into `Generics::params`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ParamId(pub u32);
+
+/// An interned list of types, an index into `Generics::ty_lists`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TyListId(pub u32);
+
+/// The generic whose placeholders a type or function uses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum GenericOwner {
+    Struct(StructId),
+    Enum(EnumId),
+    Fn(FnId),
+}
+
+/// One placeholder: its name, its owner and position there, and its rules.
+#[derive(Clone, Debug)]
+pub struct ParamInfo {
+    pub name: String,
+    pub span: Span,
+    pub owner: GenericOwner,
+    pub index: u32,
+    /// Its interface rules, in the order written, each once.
+    pub ifaces: Vec<IfaceId>,
+    /// Set by `equatable`, and by `ordered` and `key`, which include it (G4).
+    pub equatable: bool,
+    pub ordered: bool,
+    pub key: bool,
+}
+
+/// The types for an owner's placeholders, by index.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Subst {
+    pub owner: GenericOwner,
+    pub args: TyListId,
+}
+
+/// What an instance is made of: its declaration and the types for its placeholders.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Instance<I> {
+    pub def: I,
+    pub args: TyListId,
+}
+
+/// What a copy of a generic function or method was made from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct CopyInfo {
+    pub generic: FnId,
+    pub args: TyListId,
+    pub made_at: Span,
+    pub made_by: Option<FnId>,
+}
+
+/// An instance interned while `collect` resolves fields, waiting for `fill_pending`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Pending {
+    Struct(StructId),
+    Enum(EnumId),
+}
+
+/// The generic tables (`Tables::generic`).
+#[derive(Debug, Default)]
+pub struct Generics {
+    pub params: Vec<ParamInfo>,
+    pub ty_lists: Vec<Vec<Ty>>,
+    pub ty_list_ids: HashMap<Vec<Ty>, TyListId>,
+    pub struct_instances: HashMap<(StructId, TyListId), StructId>,
+    pub enum_instances: HashMap<(EnumId, TyListId), EnumId>,
+    pub fn_copies: HashMap<(FnId, TyListId), FnId>,
+    /// For every call, method call, type call and function value whose callee is generic: the
+    /// types for the callee owner's placeholders, in the caller's terms.
+    pub type_args: HashMap<ExprId, TyListId>,
+    /// The declarations that would need endless copies: their instances keep `Error` fields.
+    pub endless: HashSet<GenericOwner>,
+    /// While `collect` resolves fields and signatures, instances are interned with no fields
+    /// and queued here (their declarations' fields may not be known yet).
+    pub(crate) collecting: bool,
+    pub(crate) pending: Vec<Pending>,
+}
+
+impl Generics {
+    pub fn param(&self, p: ParamId) -> &ParamInfo {
+        &self.params[p.0 as usize]
+    }
+}
+
+impl Tables {
+    pub fn intern_ty_list(&mut self, tys: Vec<Ty>) -> TyListId {
+        if let Some(&id) = self.generic.ty_list_ids.get(&tys) {
+            return id;
+        }
+        let id = TyListId(self.generic.ty_lists.len() as u32);
+        self.generic.ty_lists.push(tys.clone());
+        self.generic.ty_list_ids.insert(tys, id);
+        id
+    }
+
+    pub fn ty_list(&self, l: TyListId) -> &[Ty] {
+        &self.generic.ty_lists[l.0 as usize]
+    }
+
+    /// The placeholders of a generic owner, in order.
+    pub fn owner_params(&self, owner: GenericOwner) -> &[ParamId] {
+        match owner {
+            GenericOwner::Struct(s) => &self.strukt(s).params,
+            GenericOwner::Enum(e) => &self.enm(e).params,
+            GenericOwner::Fn(f) => &self.func(f).type_params,
+        }
+    }
+
+    /// A placeholder as a message writes it.
+    pub(crate) fn param_name(&self, p: ParamId) -> &str {
+        &self.generic.param(p).name
+    }
+}

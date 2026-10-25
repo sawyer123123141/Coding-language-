@@ -4,7 +4,7 @@
 use kestrel_syntax::ast::{Binding, Block, Expr, ExprKind, TypeExpr};
 
 use super::{BodyChecker, Expect};
-use crate::collect_ty::resolve_type;
+use crate::collect_ty::{resolve_type, TypeScope};
 use crate::tables::{LocalId, Res};
 use crate::ty::Ty;
 
@@ -21,7 +21,7 @@ impl<'a> BodyChecker<'a> {
     /// `let x = opt else { ... }`: `x` is the value inside the optional;
     /// the `else` block runs when it's `none`, and must leave.
     pub(crate) fn check_let_else(&mut self, is_var: bool, bind: &Binding, ty: Option<&TypeExpr>, value: &Expr, otherwise: &Block) {
-        let ann = ty.map(|t| resolve_type(t, self.t, self.diags));
+        let ann = ty.map(|t| resolve_type(t, &TypeScope::NONE, self.t, self.diags));
         let want = ann.map(|t| if t == Ty::Error { t } else { Ty::Optional(self.t.intern_elem(t)) });
         let found = self.check_value(value, want);
         let inner = match found {
