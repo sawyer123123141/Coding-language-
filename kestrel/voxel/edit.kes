@@ -75,6 +75,11 @@ pub apply_edit(var w: World, p: Player, i: Intent) -> list[ChunkRef] {
         return edit_at(var w, hit.cell, AIR)
     }
     let c = hit.before
+    // The first two tests are defence in depth: through this function they never refuse on
+    // their own. Past distance 0, `before` is the empty cell the ray was in, so not solid; a
+    // hit at distance 0 means the eye is inside a block, and `before` is then the eye's own
+    // (solid) cell, which is inside the player's box, so `box_has` refuses it as well (E57).
+    // They stay so placing is safe if the box or the eye ever changes.
     if hit.distance <= 0.0 or w.solid(c.x, c.y, c.z) or box_has(box_of(p), c) {
         return []
     }

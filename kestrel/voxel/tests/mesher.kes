@@ -1,7 +1,7 @@
 // The mesher on hand-built worlds: the columns around (0, 0) are loaded and then emptied, so
 // each case places only the blocks it needs. It checks the face count of one block, faces on
 // column borders both ways from x = 0 and z = 0, unloaded columns (solid), the top and bottom
-// of the world (the faces past y = 127 and below y = 0 come from the terrain), the face
+// of the world (above y = 127 is air; below y = 0 comes from the terrain), the face
 // shading and colours, ambient occlusion (also from the corner columns) and the diagonal each
 // quad is cut along.
 use { World, new_world, load_now from world }
@@ -189,21 +189,21 @@ main() {
     w.set_block(31, 8, 31, AIR)
     w.set_block(32, 9, 32, AIR)
 
-    // The top of the world: a block at y = 127, in the top chunk (layer 3), has a face
-    // above only where the terrain at y = 128 is air, and its vertices are chunk-local.
-    // Row z = 37 of column (-1, 1) has both kinds (it is west of x = 0 as well). x = -32 is
-    // left out: column (-2, 1) beside it is not loaded, so it counts as solid.
+    // The top of the world: a block at y = 127, in the top chunk (layer 3), always has a face
+    // above, since above the world is air (E70), also where the terrain function is solid at
+    // y = 128; its vertices are chunk-local. Row z = 37 of column (-1, 1) has both kinds of
+    // terrain above (it is west of x = 0 as well). x = -32 is left out: column (-2, 1) beside
+    // it is not loaded, so it counts as solid.
     var top = true
     var air_above = 0
     var rock_above = 0
     for x from 1 - SIZE to 0 {
         w.set_block(x, 127, 37, STONE)
         let m = mesh_chunk(w, w.slot_at(-1, 1), 3)
-        let want_faces = if solid_at(x, 128, 37, seed) { 5 } else { 6 }
-        if faces(m) != want_faces or not local_box(m) {
+        if faces(m) != 6 or not local_box(m) {
             top = false
         }
-        if want_faces == 6 { air_above += 1 } else { rock_above += 1 }
+        if solid_at(x, 128, 37, seed) { rock_above += 1 } else { air_above += 1 }
         w.set_block(x, 127, 37, AIR)
     }
     print("top of world", top, air_above, rock_above)

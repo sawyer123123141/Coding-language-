@@ -26,6 +26,9 @@ pub pure column_key(cx: int, cz: int) -> i64 {
     (i64(cx) << 32) | (i64(cz) & 0xFFFFFFFF)
 }
 
+// `column_of` and `local` are written for SIZE = 32 (`blocks.kes`): `>> 5` divides by 32 and
+// `& 31` keeps the remainder. Changing SIZE means changing both (to the new power of two).
+
 // The column a world x (or z) is in. `>>` rounds toward minus infinity, so x = -1 is in
 // column -1, not 0 (an integer division would get it wrong).
 pub pure column_of(x: int) -> int {

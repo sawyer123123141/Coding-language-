@@ -48,8 +48,8 @@ impl Directives {
     }
 }
 
-/// Reads the directives of program `name`. Panics on a malformed or unknown directive so a
-/// typo can't silently drop a check.
+/// Reads the directives of program `name`. Panics on a malformed or unknown directive, or on a
+/// comment that looks like a misspelt one (`near_miss`), so a typo can't silently drop a check.
 pub fn parse(name: &str, src: &str) -> Directives {
     let mut lines = Vec::new();
     let mut d = Directives {
@@ -96,6 +96,8 @@ pub fn parse(name: &str, src: &str) -> Directives {
             lines.push(rest.strip_prefix(' ').unwrap_or(rest).to_string());
         } else if line.starts_with("// expect") {
             panic!("{name}: unknown expect directive: {line}");
+        } else if let Some(known) = near_miss(line) {
+            panic!("{name}: unknown directive `{line}`; did you mean `// {known}`? (fix the spelling, or reword the comment)");
         }
     }
     let headless = d.env.iter().any(|(key, value)| key == "KESTREL_HEADLESS" && !value.is_empty());
@@ -105,6 +107,51 @@ pub fn parse(name: &str, src: &str) -> Directives {
     );
     d.stdout = lines.iter().map(|l| format!("{l}\n")).collect();
     d
+}
+
+/// The directive a comment line looks like a misspelling of, if any, so a typo such as
+/// `// relase` fails instead of silently dropping the release pass. Two shapes are checked:
+/// a comment that is one word (`// release`, `// only-jit`) and one whose first word ends in a
+/// colon (`// copy:`, `// replace:`, `// env:`, `// asset:`). A word counts as a misspelling when
+/// it differs from the directive by one or two letters (one for the short `copy`, `env` and
+/// `asset`), so ordinary comments never match.
+fn near_miss(line: &str) -> Option<&'static str> {
+    const ALONE: [&str; 2] = ["release", "only-jit"];
+    const COLON: [&str; 4] = ["asset", "copy", "replace", "env"];
+    let rest = line.strip_prefix("// ")?;
+    let mut words = rest.split_whitespace();
+    let first = words.next()?;
+    if let Some(word) = first.strip_suffix(':') {
+        if COLON.contains(&word) {
+            return None;
+        }
+        return COLON.into_iter().find(|k| edits(word, k) <= if k.len() <= 5 { 1 } else { 2 }).map(|k| match k {
+            "asset" => "asset:",
+            "copy" => "copy:",
+            "replace" => "replace:",
+            _ => "env:",
+        });
+    }
+    if words.next().is_some() || ALONE.contains(&first) {
+        return None;
+    }
+    ALONE.into_iter().find(|k| edits(first, k) <= 2)
+}
+
+/// How many one-letter insertions, deletions or substitutions turn `a` into `b`.
+fn edits(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut prev = row[0];
+        row[0] = i + 1;
+        for j in 0..b.len() {
+            let here = row[j + 1];
+            row[j + 1] = (here + 1).min(row[j] + 1).min(prev + usize::from(ca != b[j]));
+            prev = here;
+        }
+    }
+    row[b.len()]
 }
 
 /// The file a `// asset:` or `// copy:` line names: a path inside `base` (said in the message),

@@ -5,7 +5,9 @@
 //
 // A `Handle` is a slot number plus the slot's generation. Releasing a slot bumps its
 // generation, so a handle kept from before the release no longer matches (`alive` says
-// false) even after the slot is taken again: the old handle can't read the new owner's data.
+// false) even after the slot is taken again. Code that checks `alive` before using a handle
+// therefore never touches the new owner's item; nothing stops code that skips the check,
+// since `items` is public and indexed by slot number.
 // In GDScript terms it is `is_instance_valid` for a pooled object, checked by number.
 //
 // Nothing allocates after `pool` returns: `free` is a stack of free slot numbers filled at

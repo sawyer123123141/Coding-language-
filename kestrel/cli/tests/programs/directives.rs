@@ -94,3 +94,26 @@ fn the_engine_only_jit_directive_is_refused_here() {
 fn a_comment_that_starts_with_the_word_release_is_not_a_directive() {
     expectations("note.kes", "// release pass runs this with the proof check on\n// only-jit-ish\nmain() {}\n");
 }
+
+#[test]
+#[should_panic(expected = "e.kes: unknown directive `// relase`; did you mean `// release`?")]
+fn a_misspelt_release_panics() {
+    expectations("e.kes", "// relase\nmain() {}\n");
+}
+
+#[test]
+#[should_panic(expected = "e.kes: unknown directive `// onlyjit`; did you mean `// only-jit`?")]
+fn a_misspelt_only_jit_panics() {
+    expectations("e.kes", "// onlyjit\nmain() {}\n");
+}
+
+#[test]
+#[should_panic(expected = "e.kes: unknown directive `// replce: a.kes x => y`; did you mean `// replace:`?")]
+fn a_misspelt_replace_panics() {
+    expectations("e.kes", "// replce: a.kes x => y\nmain() {}\n");
+}
+
+#[test]
+fn ordinary_comments_are_not_near_misses() {
+    expectations("note.kes", "// relaxed\n// released into the wild\n// note: see above\n// replaced\nmain() {}\n");
+}

@@ -30,5 +30,6 @@ main() {
 }
 // replace: mesher.kes for z from 0 to SIZE { => @prove(no_checks) for z from 0 to SIZE {
 // expect-exit: 1
-// expect-stderr: can't be proven `no_checks`
+// The loop's line in `mesher.kes` (the meshing loop of `mesh_chunk`) names it in the error.
+// expect-stderr: the loop at line 227 can't be proven `no_checks`
 // release

@@ -23,3 +23,4 @@ main() {
 // copy: kestrel/bench/voxels3d/voxels3d.kes
 // replace: voxels3d.kes pure density( => pub pure density(
 // expect: same 512
+// release

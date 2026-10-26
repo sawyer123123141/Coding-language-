@@ -1,0 +1,90 @@
+// Streaming away and back after an edit on a column border (E69): a chunk that stayed loaded
+// while its neighbour column unloaded is meshed again, so it never keeps a mesh built against
+// the neighbour's old, edited blocks.
+//
+// With `view` 2, stone is placed at x = -1 (column -1) beside a solid block of column 0, which
+// hides a face of column 0's chunk. The player then moves to x = 128.5: column -1 unloads (its
+// centre is over 4 columns away) but column 0 stays loaded (3.5 columns away) and out of view,
+// so nothing re-meshes it there. Back home, column -1 is generated again without the stone (an
+// unloaded column's edits are lost, E16), and every meshed chunk must have the face count a
+// fresh mesh gives. Before the fix, column 0's chunk kept its old mesh: one face short.
+//
+// `make_mesh` and the clock need an open window: a quiet headless one (nothing appears).
+use window
+use { World, ChunkRef, new_world, CHUNK_MESHED from world }
+use { Render, new_render, mesh_step from render }
+use { Stream, new_stream, stream_step, neighbours_ready from stream }
+use { edit_at from edit }
+use { mesh_chunk, faces from mesher }
+use { STONE, LAYERS from blocks }
+
+let VIEW = 2
+// Every column within VIEW + 2 of any point (E13).
+let SLOTS = (2 * (VIEW + 2) + 1) * (2 * (VIEW + 2) + 1)
+
+// Streams and meshes at `at` until nothing starts and the queue is empty. Gives the steps it
+// took, or -1 when it hadn't settled after 1,000 (a bug: the view needs about 30).
+settle(var s: Stream, var w: World, var r: Render, at: vec3) -> int {
+    let nothing: list[ChunkRef] = []
+    for n from 0 to 1000 {
+        let st = stream_step(var s, var w, at)
+        mesh_step(var r, var w, nothing, 16, at, VIEW)
+        if st.started == 0 and w.queue.len() == 0 {
+            return n + 1
+        }
+    }
+    -1
+}
+
+// How many meshed chunks, of columns whose 9 columns are Ready, have a stored face count
+// different from a fresh mesh of the blocks now stored.
+stale(w: World, r: Render) -> int {
+    var bad = 0
+    for i from 0 to r.gens.len {
+        let slot = i / LAYERS
+        if w.chunk_state[i] == CHUNK_MESHED and r.gens[i] >= 0 and
+            neighbours_ready(w, w.columns.items[slot].cx, w.columns.items[slot].cz) {
+            arena {
+                if faces(mesh_chunk(w, slot, i % LAYERS)) != r.faces[i] {
+                    bad += 1
+                }
+            }
+        }
+    }
+    bad
+}
+
+main() {
+    window.open(64, 64, "stream return")
+    var w = new_world(1337, SLOTS)
+    var s = new_stream(VIEW, 8)
+    var r = new_render(SLOTS)
+    let home = vec3(16.5, 100.0, 16.5)
+    print("settled", settle(var s, var w, var r, home) > 0, "stale", stale(w, r))
+
+    // The lowest empty cell at x = -1 with a solid block east of it at x = 0, on z = 0 to 31.
+    var y = 0
+    var z = 0
+    for cz from 0 to 32 {
+        for cy from 1 to 120 {
+            if y == 0 and not w.solid(-1, cy, cz) and w.solid(0, cy, cz) {
+                y = cy
+                z = cz
+            }
+        }
+    }
+    let dirty = edit_at(var w, ivec3(-1, y, z), STONE)
+    mesh_step(var r, var w, dirty, 16, home, VIEW)
+    print("placed", y > 0, w.solid(-1, y, z), "stale", stale(w, r))
+
+    let away = vec3(128.5, 100.0, 16.5)
+    print("away", settle(var s, var w, var r, away) > 0, w.slot_at(-1, 0) < 0, w.slot_at(0, 0) >= 0)
+    print("back", settle(var s, var w, var r, home) > 0, "stone gone", not w.solid(-1, y, z), "stale", stale(w, r))
+}
+// env: KESTREL_HEADLESS=1
+// env: KESTREL_HEADLESS_QUIET=1
+// release
+// expect: settled true stale 0
+// expect: placed true true stale 0
+// expect: away true true true
+// expect: back true stone gone true stale 0

@@ -1,7 +1,12 @@
 // The engine's own parity (E20): the frozen benchmark's region built through the engine's
 // pipeline. Columns -1..8 by -1..8 are generated into the world's pool, and every chunk of
-// columns 0..7 is meshed by `mesh_chunk` from the stored blocks (outside the world's height
-// from the terrain function). It must count the frozen world's 463,749 faces.
+// columns 0..7 is meshed by `mesh_chunk` from the stored blocks.
+//
+// It counts 465,576 faces, 1,827 more than the frozen world's 463,749: the frozen mesher takes
+// the row above y = 127 from the terrain function, so a y = 127 block under solid terrain has no
+// top face, while the engine's mesher treats that row as air, as `World.block` (and so the
+// player and the ray) does (E70). Every extra face is such a top face. The frozen count stays
+// pinned by `tests/parity.kes` (the frozen work on the libraries) and the race (`race.kes`).
 //
 // only-jit: it generates 100 columns and meshes 256 chunks; the JIT and release passes
 // cover it, and the executable pass would do the same work again for nothing new.
@@ -29,6 +34,6 @@ main() {
     }
     print(total)
 }
-// expect: 463749
+// expect: 465576
 // release
 // only-jit

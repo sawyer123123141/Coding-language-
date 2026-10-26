@@ -6,6 +6,9 @@
 //   1. Unload every Ready column whose centre is farther than `view + 2` columns from the
 //      player: its chunk states go back to none, its key leaves the index, its slot is freed.
 //      (The renderer notices a freed or reused slot on its own and drops the old meshes.)
+//      Its 8 neighbours' meshed chunks go back to none too, keeping their meshes until then:
+//      their meshes read one block into this column, which comes back without its edits
+//      (E16) when it loads again, so they are meshed again when next in view (E69).
 //   2. Start up to `batch` jobs for the nearest missing columns: take a slot each, mark it
 //      Generating and index its key, so the next step doesn't start it again.
 //   3. Generate the jobs' columns on all cores, each into the job's own grid (E35), inside an
@@ -35,7 +38,7 @@
 // Nothing here allocates once `new_stream` has returned, except map entries for new keys
 // (the index reuses removed entries' room, so it stops growing).
 use window
-use { World, ChunkRef, CHUNK_NONE, CHUNK_QUEUED from world }
+use { World, ChunkRef, CHUNK_NONE, CHUNK_QUEUED, CHUNK_MESHED from world }
 use { Grid, grid from grid }
 use { ColumnState, column_key, column_of from column }
 use { generate from gen }
@@ -49,8 +52,9 @@ pub let CAPACITY = (2 * (VIEW + 2) + 1) * (2 * (VIEW + 2) + 1)
 // takes about 7.5 ms to generate on one core and a batch's columns run side by side, so a
 // frame that generates costs one column's time plus the copy, the meshing and the drawing.
 // GEN_BATCH 2 keeps the 99th-percentile frame under 16.7 ms while flying (the spec started
-// at 8, which took 18 to 20 ms; `bench/engine/results.md`, "Engine"); it still generates 120
-// columns a simulated second, twice what flying at 100 blocks a second needs.
+// at 8, whose 99th percentiles were 17.5 to 19.9 ms; `bench/engine/results.md`, "Engine"); it
+// still generates 120 columns a simulated second, twice what flying at 100 blocks a second
+// needs.
 pub let GEN_BATCH = 2
 pub let MESH_BATCH = 16
 
@@ -193,10 +197,29 @@ pure unload_far(var w: World, at: vec3, view: int, var st: StreamStats) {
                 for layer from 0 to LAYERS {
                     w.chunk_state[slot * LAYERS + layer] = CHUNK_NONE
                 }
+                forget_neighbour_meshes(var w, w.columns.items[slot].cx, w.columns.items[slot].cz)
                 w.index.remove(w.columns.items[slot].key)
                 w.columns.items[slot].state = ColumnState.Free
                 w.columns.release(w.columns.handle(slot))
                 st.unloaded += 1
+            }
+        }
+    }
+}
+
+// Sets the meshed chunks of the 8 Ready columns around (cx, cz) back to CHUNK_NONE, so a
+// later check queues them again. Their meshes stay drawn until the new ones replace them
+// (E61). Queued chunks are left alone: the renderer checks the neighbours when it pops them.
+pure forget_neighbour_meshes(var w: World, cx: int, cz: int) {
+    for dz from -1 to 2 {
+        for dx from -1 to 2 {
+            let n = w.slot_at(cx + dx, cz + dz)
+            if n >= 0 and (dx != 0 or dz != 0) {
+                for layer from 0 to LAYERS {
+                    if w.chunk_state[n * LAYERS + layer] == CHUNK_MESHED {
+                        w.chunk_state[n * LAYERS + layer] = CHUNK_NONE
+                    }
+                }
             }
         }
     }

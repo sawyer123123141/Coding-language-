@@ -42,3 +42,4 @@ main() {
 // expect: empty true 0
 // expect: clear 0 true
 // expect: again 6
+// release

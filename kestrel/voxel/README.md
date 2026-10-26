@@ -1,9 +1,10 @@
 # The Kestrel voxel engine
 
 A voxel engine written in Kestrel (a Kestrel program, not a Cargo crate): an endless world of
-blocks streamed around the player, who walks or flies, breaks and places blocks. It is built in
-steps; this file grows with it. The design is in
-`docs/superpowers/specs/2026-10-25-voxel-engine-design.md`.
+blocks streamed around the player, who walks or flies, breaks and places blocks. Version 1 is
+complete. The design, with every change made while building it ("As built"), is in
+`docs/superpowers/specs/2026-10-25-voxel-engine-design.md`; the measurements are in
+`kestrel/bench/engine/results.md`.
 
 The files are flat because Kestrel finds a module only next to the file that uses it.
 
@@ -91,12 +92,16 @@ file says `// release` (the release run is compared with the same `// expect...`
 - `// release`: also runs the test with `--release`.
 - `// only-jit`: skips the executable run (say why in the file).
 
+A comment that looks like a misspelt directive (`// relase`, `// replce: ...`) stops the run with
+a message, so a typo can't silently drop a pass.
+
 A program that doesn't compile exits non-zero before it runs; the runner compares that exit code
 and the messages with `// expect-exit:` and `// expect-stderr:`, so a test can expect a compile
 error.
 
 `main.kes` itself is run by the Rust test `main_smoke_runs_the_play_program_headless` (selected
-with `KESTREL_TEST_ONLY=main_smoke`): 120 frames in a quiet headless window, with and without
+with `KESTREL_TEST_ONLY=main_smoke`, which runs it alone): 120 frames in a quiet headless window, with and without
 `--release`, which must exit 0, print a stats line with columns and chunks loaded, and report no
 failed contract. Every
-window the tests open is headless; none appears.
+window the tests open is headless; none appears. Every build and run is stopped after 120 seconds
+and counted as a failure, so a hang fails the test instead of hanging the suite.

@@ -161,9 +161,12 @@ struct Builder {
 // The mesh of chunk `layer` (0 at the bottom) of the column in `slot`, which must be Ready.
 //
 // First it copies the chunk's solid flags plus a one-block border, 34 x 34 x 34, into
-// `solid`: the border comes from the 8 columns around (a column that isn't Ready is solid),
-// and the rows below y = 0 and above y = 127 from the terrain function, as the frozen world
-// samples them, so a block at y = 0 has a face below it only where the terrain there is air.
+// `solid`: the border comes from the 8 columns around (a column that isn't Ready is solid).
+// The row above y = 127 is air, as `World.block` says (the player walks on it and the ray
+// passes through it), so a block at y = 127 always has a top face (E70; the frozen world
+// takes that row from the terrain function, which left holes in cut-off peaks). The row below
+// y = 0 comes from the terrain function, as the frozen world samples it, so a block at y = 0
+// has a face below it only where the terrain there is air.
 // Then it meshes, reading the flags and, for each block with a face, its stored type for
 // the colour. The copy and the meshing are one function on purpose, like the frozen `mesh`:
 // the compiler's inlining budget is per root function, and splitting hot code into many
@@ -184,7 +187,10 @@ pub pure mesh_chunk(w: World, slot: int, layer: int) -> MeshData {
         let wy = layer * SIZE + py - 1
         for pz from 0 to PAD {
             let at = (py * PAD + pz) * PAD
-            if wy < 0 or wy >= HEIGHT {
+            if wy >= HEIGHT {
+                // Above the world: air, which `solid` already is.
+                continue
+            } else if wy < 0 {
                 for px from 0 to PAD {
                     if solid_at(cx * SIZE + px - 1, wy, cz * SIZE + pz - 1, w.seed) {
                         solid[at + px] = 1

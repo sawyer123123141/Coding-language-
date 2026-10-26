@@ -1,8 +1,9 @@
 // Contract probe (E39): `@prove(no_checks)` on `Grid.get` and `Grid.set` can't be proven in
-// either build, so the library doesn't carry it; `@prove(no_alloc)` holds in both and is in
-// `grid.kes`. This test adds `no_checks` to the scratch copy of `grid.kes` only and wants the
-// build to refuse it. When a compiler change makes it pass, this test fails: move the
-// contract into the library.
+// either build, so the library doesn't carry it. (`@prove(no_alloc)` holds for `Grid[u8]` but
+// not for a T that owns heap memory, so the library doesn't carry that either; `tests/grid.kes`
+// proves it for `Grid[u8]`, E72.) This test adds `no_checks` to the scratch copy of `grid.kes`
+// only and wants the build to refuse it, naming both methods. When a compiler change makes it
+// pass, this test fails: move the contract into the library.
 //
 // What stops it (from `kestrel check --report`): the cell's list index,
 // `(y * sz + z) * sx + x`, is any `int` to the compiler (the coordinates are the caller's),
@@ -19,5 +20,9 @@ main() {
 // replace: grid.kes     pure get(self, x: int, y: int, z: int) -> T { =>     @prove(no_checks) pure get(self, x: int, y: int, z: int) -> T {
 // replace: grid.kes     pure set(var self, x: int, y: int, z: int, v: T) { =>     @prove(no_checks) pure set(var self, x: int, y: int, z: int, v: T) {
 // expect-exit: 1
+// Each error names its method ("`Grid[u8].get` (made by `Grid[u8]` on <line>) can't be proven
+// `no_checks`: ..."); the line in this file is left out so editing the header doesn't break it.
+// expect-stderr: `Grid[u8].get` (made by `Grid[u8]` on
+// expect-stderr: `Grid[u8].set` (made by `Grid[u8]` on
 // expect-stderr: can't be proven `no_checks`
 // release

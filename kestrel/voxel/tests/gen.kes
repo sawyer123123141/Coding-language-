@@ -115,6 +115,35 @@ main() {
         }
     }
     print("negative", negative, solidity(n.blocks.items, -3, -2, seed))
+
+    // The top of the world (E51): generation reads the rows above y = 127 from the density, so
+    // a y = 127 block under terrain that is solid at y = 128 is not a top block and is stone
+    // (above the snow line every block under the top is), and one under air is snow. Column
+    // (0, 0) has no solid terrain at y = 128 for this seed; column (4, 1) has both kinds.
+    var t = new_column()
+    generate(var t.blocks, 4, 1, seed)
+    var top_ok = true
+    var under_rock = 0
+    var under_air = 0
+    for z from 0 to SIZE {
+        for x from 0 to SIZE {
+            let b = t.blocks.get(x, HEIGHT - 1, z)
+            if b != AIR {
+                if solid_at(4 * SIZE + x, HEIGHT, SIZE + z, seed) {
+                    under_rock += 1
+                    if b != STONE {
+                        top_ok = false
+                    }
+                } else {
+                    under_air += 1
+                    if b != SNOW {
+                        top_ok = false
+                    }
+                }
+            }
+        }
+    }
+    print("top rows", top_ok, under_rock, under_air)
 }
 // expect: key true true
 // expect: column_of -1 31 0 31
@@ -125,3 +154,5 @@ main() {
 // expect: block_type true true true true true true
 // expect: deterministic true
 // expect: negative true true
+// expect: top rows true 47 13
+// release

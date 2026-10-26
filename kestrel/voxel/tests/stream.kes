@@ -15,6 +15,8 @@ use { Stream, new_stream, stream_step, VIEW, CAPACITY, MESH_BATCH from stream }
 // order (the player's column, its sides, then corners by angle) and the full pool's count
 // below have enough columns to show.
 let BATCH = 8
+// The most steps one settle takes before it counts as a hang and stops (about 40 is normal).
+let SETTLE_STEPS = 1000
 use { Handle from pool }
 use { column_key, column_of from column }
 use { solid_at from gen }
@@ -34,6 +36,8 @@ struct Checks {
     dropped: int
     reset: int
     meshed: int
+    // Settles that hadn't settled after SETTLE_STEPS steps (a hang, cut short): should be 0.
+    overran: int
     // Per chunk (slot * LAYERS + layer): the column generation it was meshed for, or -1.
     meshed_gen: list[int]
 }
@@ -173,10 +177,11 @@ drain(var w: World, p: ivec2, view: int, var c: Checks) {
     }
 }
 
-// One settled step at `at`: stream until nothing starts, check, drain. Gives how many
-// columns were unloaded.
+// One settled step at `at`: stream until nothing starts (at most SETTLE_STEPS steps; more
+// is counted in `overran`), check, drain. Gives how many columns were unloaded.
 step(var s: Stream, var w: World, at: vec3, var c: Checks) -> int {
     var unloaded = 0
+    var steps = 0
     while true {
         let st = stream_step(var s, var w, at)
         unloaded += st.unloaded
@@ -186,6 +191,11 @@ step(var s: Stream, var w: World, at: vec3, var c: Checks) -> int {
             c.max_in_use = w.columns.in_use()
         }
         if st.started == 0 {
+            break
+        }
+        steps += 1
+        if steps == SETTLE_STEPS {
+            c.overran += 1
             break
         }
     }
@@ -204,7 +214,7 @@ step(var s: Stream, var w: World, at: vec3, var c: Checks) -> int {
 
 new_checks(capacity: int) -> Checks {
     var c = Checks(filled: true, full: 0, extra: 0, max_in_use: 0, indexed: true, duplicates: 0, outside: 0, far: false,
-        dropped: 0, reset: 0, meshed: 0, meshed_gen: [])
+        dropped: 0, reset: 0, meshed: 0, overran: 0, meshed_gen: [])
     for i from 0 to capacity * LAYERS {
         c.meshed_gen.add(-1)
     }
@@ -297,6 +307,7 @@ main() {
     print("no duplicates", c.duplicates == 0, c.meshed > 0)
     print("in view", c.outside == 0, c.reset == 0)
     print("unloaded", not c.far)
+    print("settled", c.overran == 0)
 
     // A full queue: the refused chunks stay CHUNK_NONE, are counted, and the next step at the
     // same place queues them (the player hasn't changed column, so only the retry does it).
@@ -309,15 +320,17 @@ main() {
     let here = vec3(16.0, 80.0, 16.0)
     var refused = 0
     var started = 1
-    while started > 0 {
+    var tries = 0
+    while started > 0 and tries < SETTLE_STEPS {
         let st = stream_step(var s3, var w3, here)
         refused += st.queue_full
         started = st.started
+        tries += 1
     }
     drain(var w3, player_column(here), 1, var c3)
     let none_yet = not filled(w3, c3.meshed_gen, here, 1)
     let again = stream_step(var s3, var w3, here)
-    print("queue full", refused > 0, none_yet, again.queued == 20, again.queue_full, filled(w3, c3.meshed_gen, here, 1))
+    print("queue full", refused > 0, tries < SETTLE_STEPS, none_yet, again.queued == 20, again.queue_full, filled(w3, c3.meshed_gen, here, 1))
 
     // A column beyond `view` isn't queued even when all 9 columns around it are Ready: with
     // view 2, column (3, 0) is loaded (within view + 1) and its east neighbours are loaded by
@@ -365,7 +378,8 @@ main() {
 // expect: no duplicates true true
 // expect: in view true true
 // expect: unloaded true
-// expect: queue full true true true 0 true
+// expect: settled true
+// expect: queue full true true true true 0 true
 // expect: beyond view true true true true
 // expect: rescan 2 true true true true
 // expect: the column pool is full (4 slots); this is a bug in the stream's capacity

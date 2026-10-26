@@ -73,7 +73,8 @@ main() {
         let t0 = window.ticks_usec()
 
         // Input to intent.
-        if input.pressed(Key.Tab) {
+        let toggled = input.pressed(Key.Tab)
+        if toggled {
             captured = not captured
             input.capture(captured)
             drag = CLICK
@@ -82,7 +83,11 @@ main() {
         var turn = vec2(0, 0)
         var place = false
         if captured {
-            turn = input.mouse_delta()
+            // The frame that captures the mouse doesn't turn: its delta can include the
+            // cursor's jump to the middle of the window.
+            if not toggled {
+                turn = input.mouse_delta()
+            }
             place = input.pressed(Key.MouseRight)
         } else {
             if input.pressed(Key.MouseRight) {
@@ -91,6 +96,9 @@ main() {
             }
             if input.held(Key.MouseRight) {
                 turn = mouse - last_mouse
+            }
+            // The release frame's movement counts toward the click rule too.
+            if input.held(Key.MouseRight) or input.released(Key.MouseRight) {
                 drag = max(drag, (mouse - press_at).length())
             }
             if input.released(Key.MouseRight) and drag < CLICK {

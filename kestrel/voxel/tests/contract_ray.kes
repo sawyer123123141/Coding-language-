@@ -25,5 +25,8 @@ main() {
 }
 // replace: ray.kes @prove(no_alloc) => @prove(no_alloc, no_checks)
 // expect-exit: 1
+// The error names the function ("`cast[world.World]` (made on <line>) can't be proven
+// `no_checks`: ..."); the line in this file is left out so editing the header doesn't break it.
+// expect-stderr: `cast[world.World]` (made on
 // expect-stderr: can't be proven `no_checks`
 // release

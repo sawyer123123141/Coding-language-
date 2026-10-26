@@ -14,7 +14,11 @@
 //!
 //! A build or check that exits non-zero is compared like a run, so a program that must fail to
 //! compile (a contract probe) says `// expect-exit: 1` and `// expect-stderr: <the message>`.
-//! `KESTREL_TEST_ONLY=a,b` runs only the tests whose file names start with `a` or `b`.
+//! `KESTREL_TEST_ONLY=a,b` runs only the tests whose file names start with `a` or `b`
+//! (`main_smoke` names the play program's smoke test, which is written here, not in a file).
+//!
+//! Every run and build is stopped after `RUN_TIMEOUT` and counted as a failure, so a test that
+//! hangs fails instead of hanging the suite.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -29,8 +33,8 @@ use common::{hermetic, output_within};
 /// What a contract's error says; see `release_runs_match_their_expectations`.
 const CONTRACT_FAILED: &str = "can't be proven";
 
-/// How long the release pass lets one program run; a run over it fails the test.
-const RELEASE_TIMEOUT: Duration = Duration::from_secs(120);
+/// How long any pass lets one program build or run; a run over it is stopped and fails the test.
+const RUN_TIMEOUT: Duration = Duration::from_secs(120);
 
 fn voxel_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../voxel")
@@ -53,14 +57,25 @@ fn kes_files(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// Every test in `kestrel/voxel/tests`, or with `KESTREL_TEST_ONLY` only the ones that match.
+/// A filter that matches only `main_smoke` (the smoke test below) gives none, not a failure.
 fn tests() -> Vec<PathBuf> {
     let dir = voxel_dir().join("tests");
     let files = kes_files(&dir);
     assert!(!files.is_empty(), "no .kes tests in {}", dir.display());
     let only = std::env::var("KESTREL_TEST_ONLY").ok();
     let files = only_prefixed(files, only.as_deref());
-    assert!(!files.is_empty(), "KESTREL_TEST_ONLY={} matches no test in {}", only.unwrap_or_default(), dir.display());
+    assert!(
+        !files.is_empty() || smoke_selected(only.as_deref()),
+        "KESTREL_TEST_ONLY={} matches no test in {} (nor main_smoke)",
+        only.unwrap_or_default(),
+        dir.display()
+    );
     files
+}
+
+/// Whether `KESTREL_TEST_ONLY` (here `only`) selects the play program's smoke test.
+fn smoke_selected(only: Option<&str>) -> bool {
+    !only_prefixed(vec![PathBuf::from("main_smoke")], only).is_empty()
 }
 
 /// Reads a test's directives. The program tests' `// asset:` and the proof-run expectations
@@ -113,18 +128,25 @@ fn prepare(pass: &str, path: &Path, exp: &Directives) -> PathBuf {
     file
 }
 
-/// `kestrel run`, with the proof check on and the test's `// env:` variables.
-fn kestrel_run(file: &Path, exp: &Directives) -> Output {
+/// `kestrel run`, with the proof check on and the test's `// env:` variables. `None` when it ran
+/// over `RUN_TIMEOUT` and was stopped.
+fn kestrel_run(file: &Path, exp: &Directives) -> Option<Output> {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_kestrel"));
     hermetic(cmd.args(["run", file.to_str().unwrap()])).envs(exp.env.iter().map(|(k, v)| (k, v))).env("KESTREL_CHECK_PROOFS", "1");
-    cmd.output().expect("run kestrel")
+    output_within(&mut cmd, RUN_TIMEOUT)
 }
 
-/// `kestrel build` of the file into `exe`, with the proof check on.
-fn kestrel_build(file: &Path, exe: &Path) -> Output {
+/// `kestrel build` of the file into `exe`, with the proof check on. `None` when it ran over
+/// `RUN_TIMEOUT` and was stopped.
+fn kestrel_build(file: &Path, exe: &Path) -> Option<Output> {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_kestrel"));
     hermetic(cmd.args(["build", file.to_str().unwrap(), "-o", exe.to_str().unwrap()])).env("KESTREL_CHECK_PROOFS", "1");
-    cmd.output().expect("run kestrel")
+    output_within(&mut cmd, RUN_TIMEOUT)
+}
+
+/// The failure line for a run or build of `name` in pass `mode` that was stopped.
+fn timed_out(name: &str, mode: &str) -> String {
+    format!("{name} [{mode}]: still running after {} seconds, so it was stopped", RUN_TIMEOUT.as_secs())
 }
 
 #[test]
@@ -134,7 +156,10 @@ fn engine_tests_run_via_jit() {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
         let exp = expectations(&name, &fs::read_to_string(&path).unwrap());
         let file = prepare("", &path, &exp);
-        failures.extend(compare(&name, "jit", &kestrel_run(&file, &exp), &exp));
+        match kestrel_run(&file, &exp) {
+            Some(out) => failures.extend(compare(&name, "jit", &out, &exp)),
+            None => failures.push(timed_out(&name, "jit")),
+        }
     }
     assert!(failures.is_empty(), "\n{}", failures.join("\n"));
 }
@@ -150,18 +175,22 @@ fn engine_tests_run_as_executables() {
         }
         let file = prepare("_exe", &path, &exp);
         let exe = file.with_extension(std::env::consts::EXE_EXTENSION);
-        let built = kestrel_build(&file, &exe);
+        let Some(built) = kestrel_build(&file, &exe) else {
+            failures.push(timed_out(&name, "exe build"));
+            continue;
+        };
         // A build that fails (a type error, a contract that can't be proven) is compared with
         // the expected exit code and messages, as a run is; it isn't a harness failure.
         if !built.status.success() {
             failures.extend(compare(&name, "exe build", &built, &exp));
             continue;
         }
-        let out = hermetic(&mut Command::new(&exe))
-            .envs(exp.env.iter().map(|(k, v)| (k, v)))
-            .env("KESTREL_CHECK_PROOFS", "1")
-            .output()
-            .expect("run built exe");
+        let mut cmd = Command::new(&exe);
+        hermetic(&mut cmd).envs(exp.env.iter().map(|(k, v)| (k, v))).env("KESTREL_CHECK_PROOFS", "1");
+        let Some(out) = output_within(&mut cmd, RUN_TIMEOUT) else {
+            failures.push(timed_out(&name, "exe"));
+            continue;
+        };
         failures.extend(compare(&name, "exe", &out, &exp));
     }
     assert!(failures.is_empty(), "\n{}", failures.join("\n"));
@@ -172,7 +201,7 @@ fn engine_tests_run_as_executables() {
 /// against the test's directives; a failed proof always fails). A test that says `// release`
 /// therefore has output that is the same in the checked and the release build (no overflow that
 /// only stops a checked run). A contract's error the test doesn't expect also fails, and so does
-/// a run over `RELEASE_TIMEOUT`, which is killed.
+/// a run over `RUN_TIMEOUT`, which is killed.
 #[test]
 fn release_runs_match_their_expectations() {
     let mut failures = Vec::new();
@@ -187,8 +216,8 @@ fn release_runs_match_their_expectations() {
         hermetic(cmd.args(["run", "--release", file.to_str().unwrap()]))
             .envs(exp.env.iter().map(|(k, v)| (k, v)))
             .env("KESTREL_CHECK_PROOFS", "1");
-        let Some(out) = output_within(&mut cmd, RELEASE_TIMEOUT) else {
-            failures.push(format!("{name} [release]: still running after {} seconds, so it was stopped", RELEASE_TIMEOUT.as_secs()));
+        let Some(out) = output_within(&mut cmd, RUN_TIMEOUT) else {
+            failures.push(timed_out(&name, "release"));
             continue;
         };
         failures.extend(compare(&name, "release", &out, &exp));
@@ -213,8 +242,7 @@ const SMOKE_FRAMES: &str = "120";
 /// `main_smoke`.
 #[test]
 fn main_smoke_runs_the_play_program_headless() {
-    let only = std::env::var("KESTREL_TEST_ONLY").ok();
-    if only_prefixed(vec![PathBuf::from("main_smoke")], only.as_deref()).is_empty() {
+    if !smoke_selected(std::env::var("KESTREL_TEST_ONLY").ok().as_deref()) {
         return;
     }
     let mut failures = Vec::new();
@@ -231,8 +259,8 @@ fn main_smoke_runs_the_play_program_headless() {
             .env("KESTREL_HEADLESS", SMOKE_FRAMES)
             .env("KESTREL_HEADLESS_QUIET", "1")
             .env("KESTREL_CHECK_PROOFS", "1");
-        let Some(out) = output_within(&mut cmd, RELEASE_TIMEOUT) else {
-            failures.push(format!("main.kes [{pass}]: still running after {} seconds, so it was stopped", RELEASE_TIMEOUT.as_secs()));
+        let Some(out) = output_within(&mut cmd, RUN_TIMEOUT) else {
+            failures.push(timed_out("main.kes", pass));
             continue;
         };
         let stdout = String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n");

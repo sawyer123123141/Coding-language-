@@ -26,5 +26,6 @@ main() {
 // replace: stream.kes for i from 0 to dst.items.len { => @assume(src.items.len == dst.items.len); @prove(no_checks) for i from 0 to dst.items.len {
 // replace: stream.kes copy_blocks(var w.columns.items[slot].blocks => @assume(slot >= 0 and slot < w.columns.items.len); copy_blocks(var w.columns.items[slot].blocks
 // expect-exit: 1
-// expect-stderr: can't be proven `no_checks`
+// The loop's line in `stream.kes` (the loop of `copy_blocks`) names it in the error.
+// expect-stderr: the loop at line 297 can't be proven `no_checks` where it is inlined into `main`
 // release

@@ -22,8 +22,11 @@ pub struct Grid[T] {
     items: list[T]
 
     // Where the cell (x, y, z) is in `items`. It does not check the bounds. `get` and `set`
-    // allocate nothing (proven); they keep the list's bounds check, see
-    // `tests/contract_grid.kes`.
+    // keep the list's bounds check, see `tests/contract_grid.kes`. They carry no `no_alloc`
+    // contract: a generic function's contract is checked for each T it is made for, and for
+    // a T that owns heap memory (a string, a struct holding one) `get` copies it. For a
+    // `Grid[u8]` they allocate nothing: `tests/grid.kes` proves it (`swap_byte`). The
+    // engine's hot loops index `items` directly (`gen.generate` carries `no_alloc`).
     pure index(self, x: int, y: int, z: int) -> int {
         (y * self.sz + z) * self.sx + x
     }
@@ -32,12 +35,10 @@ pub struct Grid[T] {
     // (like reading past the end of an `Array`). An x or z outside the grid whose
     // list index is still in range reads a neighbouring cell instead: x = sx is
     // the next row's x = 0. So call `inside` first when the cell could be outside.
-    @prove(no_alloc)
     pure get(self, x: int, y: int, z: int) -> T {
         self.items[self.index(x, y, z)]
     }
 
-    @prove(no_alloc)
     pure set(var self, x: int, y: int, z: int, v: T) {
         self.items[self.index(x, y, z)] = v
     }

@@ -1,10 +1,17 @@
-// Grid[T]: the index order, get and set, inside, fill, and the three kinds of
-// value it holds (a byte, an int, a struct), plus the Solid interface.
+// Grid[T]: the index order, get and set, inside, fill, and the kinds of value it holds (a
+// byte, an int, a struct, and values that own heap memory: a string and a struct holding one),
+// plus the Solid interface.
 use { Grid, Solid, grid from grid }
 
 struct Cell {
     a: int
     b: int
+}
+
+// A struct that owns a string, so copying it copies heap memory.
+struct Tag {
+    name: string
+    n: int
 }
 
 // A floor for the Solid test: a cell is solid when its byte is not 0.
@@ -31,6 +38,15 @@ pure count_solid[W: Solid](w: W) -> int {
     n
 }
 
+// `Grid[u8]`'s `get` and `set` allocate nothing. The library can't promise that for every T
+// (see `grid.kes`), so it is proven here, for the T the engine's columns use, in both builds.
+@prove(no_alloc)
+pure swap_byte(var g: Grid[u8], x: int, y: int, z: int, v: u8) -> u8 {
+    let old = g.get(x, y, z)
+    g.set(x, y, z, v)
+    old
+}
+
 main() {
     var g = grid[u8](4, 5, 6, 0)
     print("index", g.index(1, 2, 3) == (2 * g.sz + 3) * g.sx + 1)
@@ -38,6 +54,7 @@ main() {
     g.set(1, 2, 3, 7)
     print("get", g.get(1, 2, 3), g.get(2, 2, 3))
     print("layout", g.items[(2 * g.sz + 3) * g.sx + 1])
+    print("swap", swap_byte(var g, 1, 2, 3, 8), g.get(1, 2, 3))
     print("inside", g.inside(3, 4, 5), g.inside(4, 0, 0), g.inside(0, -1, 0), g.inside(0, 0, 6))
     g.fill(9)
     var same = true
@@ -61,6 +78,16 @@ main() {
     let c = gc.get(1, 0, 1)
     print("struct", c.a, c.b)
 
+    // Heap-holding values: `get` hands back a copy, so these must compile and run too (a
+    // library contract on `get` or `set` is checked for each T it is made for, E72).
+    var gs = grid[string](2, 1, 2, "")
+    gs.set(1, 0, 1, "stone")
+    print("string", gs.get(1, 0, 1), gs.get(0, 0, 0).len)
+    var gt = grid[Tag](2, 1, 2, Tag(name: "air", n: 0))
+    gt.set(0, 0, 1, Tag(name: "dirt", n: 2))
+    let t = gt.get(0, 0, 1)
+    print("tag", t.name, t.n, gt.get(1, 0, 0).name)
+
     var cells = grid[u8](4, 5, 6, 0)
     cells.set(0, 0, 0, 1)
     cells.set(3, 4, 5, 1)
@@ -75,9 +102,12 @@ main() {
 // expect: len 120
 // expect: get 7 0
 // expect: layout 7
+// expect: swap 7 8
 // expect: inside true false false false
 // expect: fill true
 // expect: int 42
 // expect: wrap 5
 // expect: struct 3 4
+// expect: string stone 0
+// expect: tag dirt 2 air
 // expect: solid 5

@@ -133,6 +133,11 @@ main() {
     print("cross", near(cross.box.min.x, -2.0), cross.hit)
     let back = slide(room(4, NONE, NONE, NONE), person(-1.5, 0.0, 0.2), vec3(8, 0, 0))
     print("back", near(back.box.max.x, 4.0), back.hit)
+
+    // A box thinner than twice the skin across x, lying on x = 3, still has a row of cells
+    // under it, so it lands on the floor instead of falling through everything.
+    let sliver = slide(open, Box(min: vec3(2.9995, 2.0, 0.2), max: vec3(3.0005, 3.8, 0.8)), vec3(0, -5, 0))
+    print("sliver", near(sliver.box.min.y, 0.0), sliver.hit)
 }
 // release
 // expect: fall true true ivec3(x: 0, y: -1, z: 0)
@@ -154,3 +159,4 @@ main() {
 // expect: negz true ivec3(x: 0, y: 0, z: -1)
 // expect: cross true ivec3(x: -1, y: 0, z: 0)
 // expect: back true ivec3(x: 1, y: 0, z: 0)
+// expect: sliver true ivec3(x: 0, y: -1, z: 0)

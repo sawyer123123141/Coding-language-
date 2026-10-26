@@ -22,5 +22,6 @@ main() {
 }
 // replace: gen.kes     for z from 0 to SIZE { =>     @prove(no_checks) for z from 0 to SIZE {
 // expect-exit: 1
-// expect-stderr: can't be proven `no_checks`
+// The loop's line in `gen.kes` (the outer loop of `generate`) names it in the error.
+// expect-stderr: the loop at line 50 can't be proven `no_checks`
 // release
