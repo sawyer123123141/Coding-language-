@@ -1,0 +1,235 @@
+// The player (E17, E18, E45): a box that walks with gravity and collides with blocks, or a
+// camera that flies through them. In Godot terms walking is a `CharacterBody3D` whose
+// `_physics_process` adds gravity and calls `move_and_slide`, and flying is the editor's
+// free-look camera (`demos/voxels/fly.kes`).
+//
+// The player doesn't read the keyboard: each frame it takes an `Intent` (which way to move,
+// how far the mouse turned, jump, wheel, break, place, fly toggle), built from the input by
+// `main.kes` or from a script by `bench.kes`, so the scripted runs go through the same code
+// as play.
+//
+// Walking: the box is 0.6 x 1.8 x 0.6 blocks with `pos` at the middle of its bottom (the
+// feet), the eye 1.62 above them. WASD moves at 4.3 blocks a second along the look direction
+// flattened onto the ground; gravity is 32 blocks/s², a jump starts at 9 blocks/s (about 1.27
+// blocks high, so one block can be climbed and two can't), and falling is capped at 60
+// blocks/s. A frame is cut into physics steps of at most 1/60 s, and a frame longer than 0.1
+// s counts as 0.1 s, so a hitch can't throw the player through a wall. `standing` is true
+// when the last step's fall was stopped by a block below.
+//
+// Flying: WASD moves where the camera looks, Space and Shift go straight up and down, the
+// wheel changes the speed (2 to 400 blocks a second), and nothing collides.
+use { Camera from draw3d }
+use { World from world }
+use { Box, slide from collide }
+use { column_of from column }
+use { HEIGHT from blocks }
+
+// Looking, as in the viewer: degrees of turn per pixel, and the steepest pitch.
+let LOOK = 0.2
+let MOST_PITCH = 89.0
+
+// Flying speed: the change per wheel notch, and the slowest and fastest.
+let WHEEL_STEP = 1.25
+let SLOWEST = 2.0
+let FASTEST = 400.0
+
+// Walking (blocks, seconds).
+let WALK = 4.3
+let GRAVITY = 32.0
+let JUMP = 9.0
+let FALL_CAP = 60.0
+
+// The box: half its width, its height, and the eye's height above the feet.
+let HALF = 0.3
+let TALL = 1.8
+let EYE = 1.62
+
+// The longest frame counted, and the longest physics step.
+let LONGEST_FRAME = 0.1
+let STEP = 1.0 / 60.0
+
+// How much smaller than itself the box counts as when asking which cells it is in, as in
+// `collide.kes`: a box resting exactly on a floor isn't in the floor.
+let SKIN = 0.001
+
+// What the player wants to do this frame. `move` is (right, up, forward), each -1 to 1 (up is
+// only for flying); `turn` is how far the mouse moved, in pixels; `wheel` the wheel's notches.
+pub struct Intent {
+    move: vec3
+    turn: vec2
+    jump: bool
+    wheel: float
+    break_block: bool
+    place_block: bool
+    toggle_fly: bool
+}
+
+pub struct Player {
+    // The feet: the middle of the box's bottom.
+    pos: vec3
+    vel: vec3
+    // Degrees: yaw 0 looks along +z and 90 along +x; positive pitch looks up.
+    yaw: float
+    pitch: float
+    fly: bool
+    // Flying speed, blocks a second.
+    speed: float = 20
+    standing: bool
+}
+
+// A player flying at `pos`, looking along +z.
+pub pure new_player(pos: vec3) -> Player {
+    Player(pos: pos, vel: vec3(0, 0, 0), yaw: 0, pitch: 0, fly: true, standing: false)
+}
+
+// The way a player at `yaw` and `pitch` looks, as a vector of length 1.
+pub pure forward(yaw: float, pitch: float) -> vec3 {
+    let y = yaw * PI / 180
+    let p = pitch * PI / 180
+    vec3(sin(y) * cos(p), sin(p), cos(y) * cos(p))
+}
+
+// The player's right on the ground: forward (level) crossed with up.
+pub pure right(yaw: float) -> vec3 {
+    let y = yaw * PI / 180
+    vec3(-cos(y), 0, sin(y))
+}
+
+pub pure eye(p: Player) -> vec3 {
+    p.pos + vec3(0, EYE, 0)
+}
+
+pub pure look(p: Player) -> vec3 {
+    forward(p.yaw, p.pitch)
+}
+
+// The camera that sees what the player sees.
+pub pure view(p: Player) -> Camera {
+    let e = eye(p)
+    Camera(pos: e, target: e + look(p))
+}
+
+// The player's box in the world.
+pub pure box_of(p: Player) -> Box {
+    Box(min: p.pos - vec3(HALF, 0, HALF), max: p.pos + vec3(HALF, TALL, HALF))
+}
+
+// The first and last cell a box from `lo` to `hi` is in, along one axis.
+pure first_cell(lo: float) -> int {
+    int(floor(lo + SKIN))
+}
+
+pure last_cell(hi: float) -> int {
+    int(ceil(hi - SKIN)) - 1
+}
+
+// Whether any solid block is where the box is.
+pub pure box_in_solid(w: World, b: Box) -> bool {
+    for y from first_cell(b.min.y) to last_cell(b.max.y) + 1 {
+        for z from first_cell(b.min.z) to last_cell(b.max.z) + 1 {
+            for x from first_cell(b.min.x) to last_cell(b.max.x) + 1 {
+                if w.solid(x, y, z) {
+                    return true
+                }
+            }
+        }
+    }
+    false
+}
+
+// Whether the box overlaps block `cell`.
+pub pure box_has(b: Box, cell: ivec3) -> bool {
+    cell.x >= first_cell(b.min.x) and cell.x <= last_cell(b.max.x) and
+        cell.y >= first_cell(b.min.y) and cell.y <= last_cell(b.max.y) and
+        cell.z >= first_cell(b.min.z) and cell.z <= last_cell(b.max.z)
+}
+
+// One frame for the player: turn, maybe switch mode, then move. `dt` is the frame's length in
+// seconds (see the top of the file for the cap and the steps).
+@prove(no_alloc)
+pub pure step_player(var p: Player, w: World, i: Intent, dt: float) {
+    let t = clamp(dt, 0.0, LONGEST_FRAME)
+    p.yaw -= i.turn.x * LOOK
+    p.pitch = clamp(p.pitch - i.turn.y * LOOK, -MOST_PITCH, MOST_PITCH)
+    if i.toggle_fly {
+        if not p.fly {
+            p.fly = true
+        } else if not box_in_solid(w, box_of(p)) {
+            // Leaving fly mode inside a block is refused: the box would be stuck.
+            p.fly = false
+        }
+        p.vel = vec3(0, 0, 0)
+        p.standing = false
+    }
+    var dir = i.move
+    if p.fly {
+        p.speed = clamp(p.speed * pow(WHEEL_STEP, i.wheel), SLOWEST, FASTEST)
+        if dir.length() > 1 {
+            dir = dir.normalized()
+        }
+        p.pos += (right(p.yaw) * dir.x + vec3(0, dir.y, 0) + forward(p.yaw, p.pitch) * dir.z) * p.speed * t
+        return
+    }
+    // Walking: the move on the ground, at most 1 long, along the flattened look direction.
+    var flat = vec2(dir.x, dir.z)
+    if flat.length() > 1 {
+        flat = flat.normalized()
+    }
+    let level = forward(p.yaw, 0)
+    let along = (right(p.yaw) * flat.x + level * flat.y) * WALK
+    let steps = int(ceil(t / STEP))
+    if steps <= 0 {
+        return
+    }
+    let h = t / float(steps)
+    for k from 0 to steps {
+        var vy = p.vel.y
+        if i.jump and p.standing {
+            vy = JUMP
+        }
+        vy = max(vy - GRAVITY * h, -FALL_CAP)
+        p.vel = vec3(along.x, vy, along.z)
+        let moved = slide(w, box_of(p), p.vel * h)
+        p.pos = vec3(moved.box.min.x + HALF, moved.box.min.y, moved.box.min.z + HALF)
+        p.standing = moved.hit.y == -1
+        if moved.hit.y != 0 {
+            // Landed, or hit its head: the fall (or the jump) stops.
+            p.vel = vec3(p.vel.x, 0, p.vel.z)
+        }
+    }
+}
+
+// Spawning (E45), called each frame until it gives true. While the columns under the
+// player's box aren't Ready it keeps the player flying where it is and gives false; then it
+// puts the feet on the highest solid block under the box, switches to walking and gives true.
+@prove(no_alloc)
+pub pure spawn(var p: Player, w: World) -> bool {
+    let b = box_of(p)
+    let x0 = first_cell(b.min.x)
+    let x1 = last_cell(b.max.x)
+    let z0 = first_cell(b.min.z)
+    let z1 = last_cell(b.max.z)
+    for z from z0 to z1 + 1 {
+        for x from x0 to x1 + 1 {
+            if w.slot_at(column_of(x), column_of(z)) < 0 {
+                p.fly = true
+                return false
+            }
+        }
+    }
+    var top = 0
+    for z from z0 to z1 + 1 {
+        for x from x0 to x1 + 1 {
+            var y = HEIGHT - 1
+            while y >= top and not w.solid(x, y, z) {
+                y -= 1
+            }
+            top = max(top, y + 1)
+        }
+    }
+    p.pos = vec3(p.pos.x, float(top), p.pos.z)
+    p.vel = vec3(0, 0, 0)
+    p.fly = false
+    p.standing = true
+    true
+}

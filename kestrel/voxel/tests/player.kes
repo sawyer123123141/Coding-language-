@@ -1,0 +1,193 @@
+// The player (E17, E45): walking with gravity, landing, walls, jumps, long frames, the edge
+// of the loaded world, the bottom and top of the world, flying through blocks, the fly
+// toggle refused inside a block, and spawning on the top solid block once the column is
+// Ready. The worlds are the 3 x 3 columns around (0, 0), emptied, with the blocks each case
+// needs put back by hand.
+use { World, new_world, load_now from world }
+use { Player, Intent, step_player, spawn, eye, look, box_of, new_player from player }
+use { AIR, STONE, HEIGHT from blocks }
+
+// The frame length scripted runs use.
+let FRAME = 1.0 / 60.0
+
+// Empties every loaded column (as if the world were all air).
+clear(var w: World) {
+    for s from 0 to w.columns.items.len {
+        if w.columns.used[s] {
+            for i from 0 to w.columns.items[s].blocks.items.len {
+                w.columns.items[s].blocks.items[i] = AIR
+            }
+        }
+    }
+}
+
+// A world of the 3 x 3 columns around (0, 0), empty but for a stone floor at height `y`.
+flat(y: int) -> World {
+    var w = new_world(1337, 9)
+    for cz from -1 to 2 {
+        for cx from -1 to 2 {
+            load_now(var w, cx, cz)
+        }
+    }
+    clear(var w)
+    for z from -32 to 64 {
+        for x from -32 to 64 {
+            w.set_block(x, y, z, STONE)
+        }
+    }
+    w
+}
+
+// A wall of stone across the world at x, from height y0 to y1 (both included).
+wall(var w: World, x: int, y0: int, y1: int) {
+    for z from -32 to 64 {
+        for y from y0 to y1 + 1 {
+            w.set_block(x, y, z, STONE)
+        }
+    }
+}
+
+pure idle() -> Intent {
+    Intent(move: vec3(0, 0, 0), turn: vec2(0, 0), jump: false, wheel: 0, break_block: false, place_block: false,
+        toggle_fly: false)
+}
+
+// Walking forward, and jumping if `jump`.
+pure ahead(jump: bool) -> Intent {
+    Intent(move: vec3(0, 0, 1), turn: vec2(0, 0), jump: jump, wheel: 0, break_block: false, place_block: false,
+        toggle_fly: false)
+}
+
+pure toggle() -> Intent {
+    Intent(move: vec3(0, 0, 0), turn: vec2(0, 0), jump: false, wheel: 0, break_block: false, place_block: false,
+        toggle_fly: true)
+}
+
+// A walking player at `at`, looking along +x (yaw 90).
+pure walker(at: vec3) -> Player {
+    Player(pos: at, vel: vec3(0, 0, 0), yaw: 90, pitch: 0, fly: false, standing: false)
+}
+
+// Runs `frames` frames of 1/60 s with the same intent.
+run(var p: Player, w: World, i: Intent, frames: int) {
+    for f from 0 to frames {
+        step_player(var p, w, i, FRAME)
+    }
+}
+
+pure near(a: float, b: float) -> bool {
+    abs(a - b) < 0.01
+}
+
+main() {
+    // Dropped from 10 blocks above the floor (whose top is at 21): lands on it and stands.
+    let w = flat(20)
+    var p = walker(vec3(16.5, 31, 16.5))
+    run(var p, w, idle(), 30)
+    let falling = not p.standing and p.pos.y < 31.0 and p.pos.y > 21.0
+    run(var p, w, idle(), 90)
+    print("land", falling, p.pos.y, p.standing, p.vel.y, near(p.pos.x, 16.5))
+
+    // Walking into a wall two blocks high (x = 20) stops with the box's side on it.
+    var w2 = flat(20)
+    wall(var w2, 20, 21, 22)
+    var q = walker(vec3(10.5, 21, 16.5))
+    run(var q, w2, ahead(false), 180)
+    print("wall", near(q.pos.x, 19.7), q.pos.y, q.standing, near(q.pos.z, 16.5))
+
+    // A jump clears a one-block step and lands on it; it doesn't clear the two-block wall.
+    var w3 = flat(20)
+    for x from 20 to 60 {
+        wall(var w3, x, 21, 21)
+    }
+    var j = walker(vec3(10.5, 21, 16.5))
+    run(var j, w3, ahead(true), 240)
+    run(var j, w3, ahead(false), 60)
+    var k = walker(vec3(10.5, 21, 16.5))
+    run(var k, w2, ahead(true), 180)
+    print("jump", j.pos.x > 20.5, j.pos.y, k.pos.x <= 19.71)
+
+    // A 2-second frame moves the player 0.1 s at most: 0.43 blocks at 4.3 a second.
+    var l = walker(vec3(10.5, 21, 16.5))
+    run(var l, w, idle(), 2)
+    step_player(var l, w, ahead(false), 2.0)
+    print("long frame", near(l.pos.x - 10.5, 0.43), l.pos.y, l.standing)
+
+    // Walking toward an unloaded column (2, 0), which counts as solid, stops at its edge.
+    var e = walker(vec3(50.5, 21, 16.5))
+    run(var e, w, ahead(false), 300)
+    print("edge", near(e.pos.x, 63.7), e.pos.y)
+
+    // Standing on blocks at y = 0, the bottom of the world, doesn't fall through.
+    let w0 = flat(0)
+    var b = walker(vec3(16.5, 5, 16.5))
+    run(var b, w0, idle(), 120)
+    print("bottom", b.pos.y, b.standing)
+
+    // Jumping on the top row (blocks at y = 126, feet at 127): the head goes past y = 128,
+    // where there is only air, and the player comes back down.
+    let wt = flat(126)
+    var t = walker(vec3(16.5, 127, 16.5))
+    run(var t, wt, idle(), 2)
+    var highest = 0.0
+    for f from 0 to 90 {
+        step_player(var t, wt, Intent(move: vec3(0, 0, 0), turn: vec2(0, 0), jump: f == 0, wheel: 0,
+            break_block: false, place_block: false, toggle_fly: false), FRAME)
+        highest = max(highest, t.pos.y + 1.8)
+    }
+    print("top", highest > 129.0, t.pos.y, t.standing)
+
+    // Flying passes through blocks: a second at 20 blocks a second through the wall at x = 20.
+    var fl = walker(vec3(10.5, 21.5, 16.5))
+    fl.fly = true
+    run(var fl, w2, ahead(false), 60)
+    print("fly", near(fl.pos.x, 30.5), fl.pos.y)
+
+    // Leaving fly mode inside a block is refused; in the air it switches, and back.
+    var inside = walker(vec3(20.5, 21.2, 16.5))
+    inside.fly = true
+    step_player(var inside, w2, toggle(), FRAME)
+    var air = walker(vec3(10.5, 25, 16.5))
+    air.fly = true
+    step_player(var air, w2, toggle(), FRAME)
+    let walking = not air.fly
+    step_player(var air, w2, toggle(), FRAME)
+    print("toggle", inside.fly, walking, air.fly)
+
+    // The eye is 1.62 above the feet, the look direction follows yaw and pitch, and the box is
+    // 0.6 x 1.8 x 0.6 around the feet.
+    let bx = box_of(q)
+    print("eye", near(eye(q).y - q.pos.y, 1.62), near(look(q).x, 1.0), near(bx.max.y - bx.min.y, 1.8),
+        near(bx.max.x - bx.min.x, 0.6), near((bx.min.z + bx.max.z) / 2.0, q.pos.z))
+
+    // Spawning: no column yet, so it stays flying where it is; once its column (and the
+    // columns its box reaches) are Ready, the feet go on the top solid block and it walks.
+    var ws = new_world(1337, 9)
+    var s = new_player(vec3(16.5, 140, 16.5))
+    s.fly = false
+    let early = spawn(var s, ws)
+    let waited = s.fly and s.pos.y == 140.0
+    load_now(var ws, 0, 0)
+    let late = spawn(var s, ws)
+    var top = HEIGHT - 1
+    while top >= 0 and not ws.solid(16, top, 16) {
+        top -= 1
+    }
+    print("spawn", early, waited, late, s.pos.y == float(top + 1), not s.fly, s.standing, top > 0)
+    // Standing after a second of frames: it is on the ground, not in it.
+    run(var s, ws, idle(), 60)
+    print("spawn stands", s.pos.y == float(top + 1), s.standing)
+}
+// expect: land true 21 true 0 true
+// expect: wall true 21 true true
+// expect: jump true 22 true
+// expect: long frame true 21 true
+// expect: edge true 21
+// expect: bottom 1 true
+// expect: top true 127 true
+// expect: fly true 21.5
+// expect: toggle true true true
+// expect: eye true true true true true
+// expect: spawn false true true true true true true
+// expect: spawn stands true true
+// release

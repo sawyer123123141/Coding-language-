@@ -1,0 +1,179 @@
+// Editing (E16, E45): which chunks an edit dirties (1 in a chunk's middle, 2 on a face, 4 on
+// an edge, 8 on a corner, only loaded chunks that are queued or meshed), breaking and placing
+// through the eye ray, the refusals (inside the player's box, from inside a block, above the
+// world, in an unloaded column), and a hole at the bottom of the world.
+use { World, ChunkRef, new_world, load_now, CHUNK_NONE, CHUNK_QUEUED, CHUNK_MESHED from world }
+use { Player, Intent from player }
+use { dirty_for, edit_at, apply_edit from edit }
+use { mesh_chunk, faces from mesher }
+use { solid_at from gen }
+use { MeshData from draw3d }
+use { AIR, STONE, LAYERS from blocks }
+
+// Empties every loaded column (as if the world were all air).
+clear(var w: World) {
+    for s from 0 to w.columns.items.len {
+        if w.columns.used[s] {
+            for i from 0 to w.columns.items[s].blocks.items.len {
+                w.columns.items[s].blocks.items[i] = AIR
+            }
+        }
+    }
+}
+
+// The 3 x 3 columns around (0, 0), every chunk in state `state`.
+region(state: u8) -> World {
+    var w = new_world(1337, 9)
+    for cz from -1 to 2 {
+        for cx from -1 to 2 {
+            load_now(var w, cx, cz)
+        }
+    }
+    for i from 0 to w.chunk_state.len {
+        w.chunk_state[i] = state
+    }
+    w
+}
+
+pure count(w: World, x: int, y: int, z: int) -> int {
+    dirty_for(w, ivec3(x, y, z)).len
+}
+
+// What a player does this frame: break or place, nothing else.
+pure act(break_block: bool, place_block: bool) -> Intent {
+    Intent(move: vec3(0, 0, 0), turn: vec2(0, 0), jump: false, wheel: 0, break_block: break_block,
+        place_block: place_block, toggle_fly: false)
+}
+
+pure player(at: vec3, yaw: float, pitch: float, fly: bool) -> Player {
+    Player(pos: at, vel: vec3(0, 0, 0), yaw: yaw, pitch: pitch, fly: fly, standing: not fly)
+}
+
+// The faces of chunk (0, 0, 0).
+pure faces_here(w: World) -> int {
+    faces(mesh_chunk(w, w.slot_at(0, 0), 0))
+}
+
+// Whether the mesh has a face lying in the plane y = 0 over cell (x, z) (chunk-local).
+pure floor_face(m: MeshData, x: int, z: int) -> bool {
+    var found = false
+    for f from 0 to faces(m) {
+        var inside = true
+        for k from 0 to 4 {
+            let v = m.vertices[f * 4 + k]
+            if v.y != 0.0 or v.x < float(x) or v.x > float(x + 1) or v.z < float(z) or v.z > float(z + 1) {
+                inside = false
+            }
+        }
+        if inside {
+            found = true
+        }
+    }
+    found
+}
+
+main() {
+    // Which chunks a cell's edit dirties.
+    var w = region(CHUNK_MESHED)
+    print("dirty", count(w, 16, 48, 16), count(w, 0, 48, 16), count(w, 31, 48, 16), count(w, 0, 48, 0),
+        count(w, 0, 32, 0), count(w, -1, 63, -32))
+    // y = 0 and y = 127 have no chunk below or above; column (2, 0) isn't loaded.
+    print("ends", count(w, 16, 0, 16), count(w, 16, 127, 16), count(w, 63, 48, 16))
+    // Only queued or meshed chunks: one of the corner's 8 chunks is in state none.
+    w.chunk_state[w.slot_at(-1, -1) * LAYERS + 0] = CHUNK_NONE
+    w.chunk_state[w.slot_at(0, 0) * LAYERS + 1] = CHUNK_QUEUED
+    print("states", count(w, 0, 32, 0))
+    // Each ref is the column's live handle and the chunk's layer.
+    let refs = dirty_for(w, ivec3(5, 40, 5))
+    print("ref", refs.len, refs[0].layer, w.columns.alive(refs[0].column), refs[0].column.slot == w.slot_at(0, 0))
+
+    // Breaking then placing at one cell, through the eye ray: a floor at y = 20 and a wall two
+    // blocks thick at x = 20 and 21, the player at x = 17.5 looking along +x with the eye at 22.62. The break
+    // takes (20, 22, 16); the place then hits (21, 22, 16) and puts stone back in (20, 22, 16).
+    var we = region(CHUNK_MESHED)
+    clear(var we)
+    for z from 0 to 32 {
+        for y from 0 to 26 {
+            we.set_block(20, y, z, STONE)
+            we.set_block(21, y, z, STONE)
+        }
+        for x from 0 to 20 {
+            we.set_block(x, 20, z, STONE)
+        }
+    }
+    let p = player(vec3(17.5, 21, 16.5), 90, 0, false)
+    let before = faces_here(we)
+    let broke = apply_edit(var we, p, act(true, false))
+    let hole = we.block(20, 22, 16) == AIR
+    let changed = faces_here(we) != before
+    let placed = apply_edit(var we, p, act(false, true))
+    print("restore", broke.len, hole, changed, placed.len, we.block(20, 22, 16) == STONE, faces_here(we) == before)
+
+    // Placing into the player's own box is refused: standing on the floor at y = 20 and
+    // looking down, the cell before the floor is (16, 21, 16), where the feet are.
+    let down = player(vec3(16.5, 21, 16.5), 0, -89, false)
+    let mine = apply_edit(var we, down, act(false, true))
+    print("own box", mine.len, we.block(16, 21, 16) == AIR)
+
+    // From inside a block the ray hits that block at distance 0 and has no cell before it:
+    // placing is refused (and leaves the block as it is).
+    let buried = player(vec3(20.5, 21, 10.5), 90, 0, true)
+    let stuck = apply_edit(var we, buried, act(false, true))
+    print("inside", stuck.len, we.block(20, 22, 10) == STONE)
+
+    // Above the world: a block at y = 127 seen from above puts its cell before at y = 128,
+    // which is refused; one at y = 126 lets a block go at y = 127.
+    we.set_block(5, 127, 5, STONE)
+    we.set_block(9, 126, 9, STONE)
+    let over = player(vec3(5.5, 129, 5.5), 0, -89, true)
+    let top = apply_edit(var we, over, act(false, true))
+    let under = player(vec3(9.5, 129, 9.5), 0, -89, true)
+    let below_top = apply_edit(var we, under, act(false, true))
+    print("top", top.len, below_top.len, we.block(9, 127, 9) == STONE)
+    print("edit_at", edit_at(var we, ivec3(5, 128, 5), STONE).len, edit_at(var we, ivec3(5, -1, 5), AIR).len)
+
+    // Breaking at y = 0: in an empty world, two single stones at y = 0, one where the terrain
+    // below the world (y = -1) is solid and one where it is air. Only the second has a face
+    // in the plane y = 0 (the mesher takes y = -1 from the terrain); after breaking, the
+    // cells are holes with no face at the bottom.
+    var wb = region(CHUNK_MESHED)
+    clear(var wb)
+    var solid_below = ivec2(-1, -1)
+    var air_below = ivec2(-1, -1)
+    for z from 1 to 31 {
+        for x from 1 to 31 {
+            if solid_at(x, -1, z, wb.seed) {
+                solid_below = ivec2(x, z)
+            } else {
+                air_below = ivec2(x, z)
+            }
+        }
+    }
+    print("found", solid_below.x >= 0, air_below.x >= 0)
+    wb.set_block(solid_below.x, 0, solid_below.y, STONE)
+    wb.set_block(air_below.x, 0, air_below.y, STONE)
+    let m0 = mesh_chunk(wb, wb.slot_at(0, 0), 0)
+    let a = edit_at(var wb, ivec3(solid_below.x, 0, solid_below.y), AIR)
+    let b = edit_at(var wb, ivec3(air_below.x, 0, air_below.y), AIR)
+    let m1 = mesh_chunk(wb, wb.slot_at(0, 0), 0)
+    print("bottom", floor_face(m0, solid_below.x, solid_below.y), floor_face(m0, air_below.x, air_below.y),
+        a.len, b.len, wb.block(air_below.x, 0, air_below.y) == AIR, faces(m1),
+        floor_face(m1, solid_below.x, solid_below.y), floor_face(m1, air_below.x, air_below.y))
+
+    // An edit in an unloaded column does nothing.
+    let far = edit_at(var wb, ivec3(200, 40, 200), AIR)
+    print("unloaded", far.len, wb.block(200, 40, 200) == STONE, wb.slot_at(6, 6))
+}
+// expect: dirty 1 2 2 4 8 4
+// expect: ends 1 1 1
+// expect: states 7
+// expect: ref 1 1 true true
+// expect: restore 1 true true 1 true true
+// expect: own box 0 true
+// expect: inside 0 true
+// expect: top 0 1 true
+// expect: edit_at 0 0
+// expect: found true true
+// expect: bottom false true 1 1 true 0 false false
+// expect: unloaded 0 true -1
+// release

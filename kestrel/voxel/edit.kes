@@ -1,0 +1,82 @@
+// Editing (E16, E45): breaking and placing blocks, and which chunks must be meshed again.
+// In Godot terms it is the click handler that casts a ray from the camera, changes the
+// GridMap cell it hits (or the empty cell in front of it) and marks the chunk meshes that
+// show that cell as needing a rebuild.
+//
+// A chunk's mesh reads one block past each side of the chunk (`mesher.kes`), so a cell on a
+// chunk's face is in two chunks' meshes, on an edge in four and on a corner in eight. Every
+// one of them that is loaded and has a mesh (or is waiting for one) is given back, and the
+// renderer meshes them again in the same frame (`render.kes`). Chunks that aren't meshed or
+// waiting are left alone: they read the new block when they are meshed.
+//
+// Edits are forgotten when their column unloads (there is no saving in version 1).
+use { World, ChunkRef, CHUNK_QUEUED, CHUNK_MESHED from world }
+use { Player, Intent, eye, look, box_of, box_has from player }
+use { cast from ray }
+use { column_of, local from column }
+use { AIR, STONE, SIZE, LAYERS from blocks }
+
+// How far the player reaches, in blocks.
+pub let REACH = 6.0
+
+// The chunk coordinates along one axis whose meshing region (the chunk plus one block each
+// side) holds coordinate `c`: its own, and the one before or after when `c` is on a border.
+pure first_near(c: int) -> int {
+    if local(c) == 0 { column_of(c) - 1 } else { column_of(c) }
+}
+
+pure last_near(c: int) -> int {
+    if local(c) == SIZE - 1 { column_of(c) + 1 } else { column_of(c) }
+}
+
+// Every loaded chunk whose meshing region holds `cell` and that is queued or meshed: 1 in a
+// chunk's middle, up to 8 on a corner. It builds a list, so it is for edits, not every frame.
+pub pure dirty_for(w: World, cell: ivec3) -> list[ChunkRef] {
+    var out: list[ChunkRef] = []
+    let l0 = max(first_near(cell.y), 0)
+    let l1 = min(last_near(cell.y), LAYERS - 1)
+    for cz from first_near(cell.z) to last_near(cell.z) + 1 {
+        for cx from first_near(cell.x) to last_near(cell.x) + 1 {
+            let slot = w.slot_at(cx, cz)
+            if slot >= 0 {
+                for layer from l0 to l1 + 1 {
+                    let state = w.chunk_state[slot * LAYERS + layer]
+                    if state == CHUNK_QUEUED or state == CHUNK_MESHED {
+                        out.add(ChunkRef(column: w.columns.handle(slot), layer: layer))
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+// Puts block `id` at `cell` and gives the chunks to mesh again. Refused, with an empty list,
+// outside the world's height (0 to 127) or in a column that isn't Ready.
+pub edit_at(var w: World, cell: ivec3, id: u8) -> list[ChunkRef] {
+    if not w.set_block(cell.x, cell.y, cell.z, id) {
+        return []
+    }
+    dirty_for(w, cell)
+}
+
+// The player's edit this frame, if any: break the block the eye looks at (within REACH), or
+// place stone in the empty cell in front of it. Placing is refused inside the player's box,
+// and when the eye is inside a block (the ray hits that block at distance 0, with no empty
+// cell before it). Breaking wins when both are asked for.
+pub apply_edit(var w: World, p: Player, i: Intent) -> list[ChunkRef] {
+    if not i.break_block and not i.place_block {
+        return []
+    }
+    let hit = cast(w, eye(p), look(p), REACH) else {
+        return []
+    }
+    if i.break_block {
+        return edit_at(var w, hit.cell, AIR)
+    }
+    let c = hit.before
+    if hit.distance <= 0.0 or w.solid(c.x, c.y, c.z) or box_has(box_of(p), c) {
+        return []
+    }
+    edit_at(var w, c, STONE)
+}
