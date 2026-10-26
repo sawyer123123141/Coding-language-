@@ -1,0 +1,29 @@
+// Contract probe (E39): `@prove(no_checks)` on `ray.cast` can't be proven in either build, so
+// the engine carries only `@prove(no_alloc)` on it (which holds in both). This test adds
+// `no_checks` to the scratch copy of `ray.kes` only, with the real `World` as the `Solid`, and
+// wants the build to refuse it. When a compiler change makes it pass, this test fails: move
+// the contract into the engine.
+//
+// What stops it (from `kestrel check --report`):
+// - checked build: overflow checks on `c - 1` in `start_cell` and `c + 1` in `first_border`
+//   (the cell a float position falls in is any `int` to the compiler), and in the walk's
+//   `x += sx` steps;
+// - release build: the world's own read, `World.block` indexing `self.columns.items[slot]`
+//   (nothing shows the slot is below the list's length), which is the world's check, not the
+//   ray's.
+use { new_world, load_now from world }
+use { cast from ray }
+
+main() {
+    var w = new_world(1337, 9)
+    load_now(var w, 0, 0)
+    let h = cast(w, vec3(0.5, 120.5, 0.5), vec3(0, -1, 0), 100.0) else {
+        print("none")
+        return
+    }
+    print(h.cell)
+}
+// replace: ray.kes @prove(no_alloc) => @prove(no_alloc, no_checks)
+// expect-exit: 1
+// expect-stderr: can't be proven `no_checks`
+// release

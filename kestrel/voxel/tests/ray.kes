@@ -1,0 +1,128 @@
+// ray.cast: the grid walk that finds the first solid block along a ray. Six axis rays to a
+// block 3 away, a diagonal-ish one, rays that start on a block border, rays across x = 0
+// and z = 0 into negative cells, a miss past `reach`, a zero direction.
+use { Grid, Solid, grid from grid }
+use { Hit, cast from ray }
+
+// A box of blocks whose corner is at (ox, oy, oz), so negative cells exist. Outside the box
+// is air.
+struct Room: Solid {
+    cells: Grid[u8]
+    ox: int
+    oy: int
+    oz: int
+
+    pure solid(self, x: int, y: int, z: int) -> bool {
+        let gx = x - self.ox
+        let gy = y - self.oy
+        let gz = z - self.oz
+        self.cells.inside(gx, gy, gz) and self.cells.get(gx, gy, gz) != 0
+    }
+
+    put(var self, x: int, y: int, z: int) {
+        self.cells.set(x - self.ox, y - self.oy, z - self.oz, 1)
+    }
+}
+
+// Whether two floats are within 0.001.
+pure near(a: float, b: float) -> bool {
+    abs(a - b) < 0.001
+}
+
+// Prints what a cast found: "none", or the hit cell, the cell before it and the distance.
+show(name: string, o: Hit?) {
+    let h = o else {
+        print(name, "none")
+        return
+    }
+    print(name, h.cell.x, h.cell.y, h.cell.z, h.before.x, h.before.y, h.before.z, h.distance)
+}
+
+// Prints the diagonal ray's hit, with its distance checked against 3.3541.
+show_diag(o: Hit?) {
+    let h = o else {
+        print("diag", "none")
+        return
+    }
+    print("diag", h.cell, h.before, near(h.distance, 3.3541))
+}
+
+main() {
+    var r = Room(cells: grid[u8](16, 16, 16, 0), ox: -8, oy: -8, oz: -8)
+    // Six blocks, three away from the cell (0, 0, 0) along each axis.
+    r.put(3, 0, 0)
+    r.put(-3, 0, 0)
+    r.put(0, 3, 0)
+    r.put(0, -3, 0)
+    r.put(0, 0, 3)
+    r.put(0, 0, -3)
+    // The diagonal's target.
+    r.put(3, 2, 0)
+    // A row at y = 5 for rays that start exactly on a block border.
+    r.put(-3, 5, 0)
+    r.put(0, 5, 0)
+    r.put(4, 5, 0)
+    // A row at y = 7 for rays that cross x = 0 and z = 0.
+    r.put(-2, 7, 0)
+    r.put(0, 7, -2)
+    // A block at negative y and x, for rays that start at a negative position.
+    r.put(-2, -5, 0)
+
+    let o = vec3(0.5, 0.5, 0.5)
+    show("px", cast(r, o, vec3(1, 0, 0), 6))
+    show("nx", cast(r, o, vec3(-1, 0, 0), 6))
+    show("py", cast(r, o, vec3(0, 1, 0), 6))
+    show("ny", cast(r, o, vec3(0, -1, 0), 6))
+    show("pz", cast(r, o, vec3(0, 0, 1), 6))
+    show("nz", cast(r, o, vec3(0, 0, -1), 6))
+
+    // A direction that isn't of length 1 gives the same hit and the distance in blocks.
+    show("long", cast(r, o, vec3(5, 0, 0), 6))
+
+    // Half a block up per block along: x = 0.5 + 2s, y = 0.5 + s, so the ray goes
+    // (0,0) (1,0) (1,1) (2,1) (3,1) and enters (3, 2) from below at s = 1.5, 1.5 * sqrt(5)
+    // = 3.354 blocks.
+    show_diag(cast(r, o, vec3(2, 1, 0), 6))
+
+    // Starting exactly on a border: the ray leaves the cell it starts at, not the one
+    // behind it.
+    show("edge+", cast(r, vec3(1.0, 5.5, 0.5), vec3(1, 0, 0), 6))
+    show("edge-", cast(r, vec3(0.0, 5.5, 0.5), vec3(-1, 0, 0), 6))
+    // Starting inside a solid block: a hit at distance 0, with `before` the same cell.
+    show("inside", cast(r, vec3(0.5, 5.5, 0.5), vec3(1, 0, 0), 6))
+
+    // Across x = 0 and z = 0 into negative cells.
+    show("acrossx", cast(r, vec3(2.5, 7.5, 0.5), vec3(-1, 0, 0), 6))
+    show("acrossz", cast(r, vec3(0.5, 7.5, 2.5), vec3(0, 0, -1), 6))
+
+    // The block is 2.5 away: reach 2.5 finds it, less doesn't.
+    show("reach", cast(r, o, vec3(1, 0, 0), 2.5))
+    show("short", cast(r, o, vec3(1, 0, 0), 2.4))
+    show("zero", cast(r, o, vec3(0, 0, 0), 6))
+    // A zero direction finds nothing even from inside a block.
+    show("zero in", cast(r, vec3(0.5, 5.5, 0.5), vec3(0, 0, 0), 6))
+    // Starting at a negative position: -1.5 is in cell -2 (rounded down, not toward zero),
+    // which is a block here, so the hit is at distance 0.
+    show("negstart", cast(r, vec3(-1.5, -4.5, 0.5), vec3(-1, 0, 0), 6))
+    show("empty", cast(r, vec3(0.5, 4.5, 0.5), vec3(1, 0, 0), 6))
+}
+// release
+// expect: px 3 0 0 2 0 0 2.5
+// expect: nx -3 0 0 -2 0 0 2.5
+// expect: py 0 3 0 0 2 0 2.5
+// expect: ny 0 -3 0 0 -2 0 2.5
+// expect: pz 0 0 3 0 0 2 2.5
+// expect: nz 0 0 -3 0 0 -2 2.5
+// expect: long 3 0 0 2 0 0 2.5
+// expect: diag ivec3(x: 3, y: 2, z: 0) ivec3(x: 3, y: 1, z: 0) true
+// expect: edge+ 4 5 0 3 5 0 3
+// expect: edge- -3 5 0 -2 5 0 2
+// expect: inside 0 5 0 0 5 0 0
+// expect: acrossx -2 7 0 -1 7 0 3.5
+// expect: acrossz 0 7 -2 0 7 -1 3.5
+// expect: reach 3 0 0 2 0 0 2.5
+// expect: short none
+// expect: zero none
+// expect: zero in none
+// expect: negstart -2 -5 0 -2 -5 0 0
+// expect: empty none

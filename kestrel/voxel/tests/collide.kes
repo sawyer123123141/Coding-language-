@@ -1,0 +1,156 @@
+// collide.slide: a box moving through solid blocks, one axis at a time (y, then x, then z).
+// Falls onto a floor (5 blocks and 30), sliding along a wall, a corner, a ceiling, a box
+// resting on a floor moving sideways, walls at negative x and z, and a long move that must
+// not pass through a thin wall.
+use { Grid, Solid, grid from grid }
+use { Box, Moved, slide from collide }
+
+// No wall: a cell index past the room.
+let NONE = 1000
+
+// A room of blocks whose corner is at (-8, -8, -8) and that is 48 high: a floor (every block
+// at y = -1, so its top is y = 0), and optionally a wall of blocks at x = wx, one at z = wz,
+// a ceiling of blocks at y = cy and a single block at (bx, 0, 0). Outside the room is air.
+struct Room: Solid {
+    cells: Grid[u8]
+
+    pure solid(self, x: int, y: int, z: int) -> bool {
+        let gx = x + 8
+        let gy = y + 8
+        let gz = z + 8
+        self.cells.inside(gx, gy, gz) and self.cells.get(gx, gy, gz) != 0
+    }
+}
+
+pure room(wx: int, wz: int, cy: int, bx: int) -> Room {
+    var g = grid[u8](16, 48, 16, 0)
+    for z from -8 to 8 {
+        for x from -8 to 8 {
+            g.set(x + 8, 7, z + 8, 1)
+            if cy != NONE {
+                g.set(x + 8, cy + 8, z + 8, 1)
+            }
+        }
+    }
+    for y from -8 to 40 {
+        for k from -8 to 8 {
+            if wx != NONE {
+                g.set(wx + 8, y + 8, k + 8, 1)
+            }
+            if wz != NONE {
+                g.set(k + 8, y + 8, wz + 8, 1)
+            }
+        }
+    }
+    if bx != NONE {
+        g.set(bx + 8, 8, 8, 1)
+    }
+    Room(cells: g)
+}
+
+// Whether two floats are within 0.01.
+pure near(a: float, b: float) -> bool {
+    abs(a - b) < 0.01
+}
+
+// A box 0.6 wide and deep and 1.8 high (a player) with its lowest corner at (x, y, z).
+pure person(x: float, y: float, z: float) -> Box {
+    Box(min: vec3(x, y, z), max: vec3(x + 0.6, y + 1.8, z + 0.6))
+}
+
+main() {
+    let open = room(NONE, NONE, NONE, NONE)
+
+    // Falls from 5 and from 30 blocks up stop with their feet on the floor's top, y = 0.
+    let fall = slide(open, person(0.2, 5.0, 0.2), vec3(0, -9, 0))
+    print("fall", near(fall.box.min.y, 0.0), near(fall.box.max.y, 1.8), fall.hit)
+    let drop = slide(open, person(0.2, 35.0, 0.2), vec3(0, -40, 0))
+    print("drop", near(drop.box.min.y, 0.0), drop.hit)
+
+    // A fall that ends in the air is not blocked.
+    let air = slide(open, person(0.2, 5.0, 0.2), vec3(0, -2, 0))
+    print("air", near(air.box.min.y, 3.0), air.hit)
+
+    // Sliding diagonally into a wall at x = 3: x stops at its face, z goes the whole way.
+    let wall = room(3, NONE, NONE, NONE)
+    let diag = slide(wall, person(1.9, 0.0, 0.2), vec3(2, 0, 2))
+    print("wall", near(diag.box.max.x, 3.0), near(diag.box.min.z, 2.2), diag.hit)
+
+    // A corner: walls at x = 3 and z = 3 stop both.
+    let corner = room(3, 3, NONE, NONE)
+    let into = slide(corner, person(1.9, 0.0, 1.9), vec3(2, 0, 2))
+    print("corner", near(into.box.max.x, 3.0), near(into.box.max.z, 3.0), into.hit)
+
+    // Jumping into a ceiling at y = 4: the head stops at its underside, hit.y is +1.
+    let low = room(NONE, NONE, 4, NONE)
+    let jump = slide(low, person(0.2, 0.0, 0.2), vec3(0, 5, 0))
+    print("ceiling", near(jump.box.max.y, 4.0), near(jump.box.min.y, 2.2), jump.hit)
+
+    // Resting on the floor and moving sideways: the floor does not stop it, and nothing is
+    // hit. With a little downward motion it is the floor that is hit, not the sideways move.
+    let rest = slide(open, person(0.2, 0.0, 0.2), vec3(3, 0, -2))
+    print("rest", near(rest.box.min.x, 3.2), near(rest.box.min.z, -1.8), near(rest.box.min.y, 0.0), rest.hit)
+    let press = slide(open, person(0.2, 0.0, 0.2), vec3(1, -0.05, 0))
+    print("press", near(press.box.min.x, 1.2), near(press.box.min.y, 0.0), press.hit)
+
+    // A long move can't pass through a one-block wall.
+    let thin = slide(wall, person(0.2, 0.0, 0.2), vec3(10, 0, 0))
+    print("thin", near(thin.box.max.x, 3.0), thin.hit)
+
+    // A box sunk 0.0005 into the floor by rounding (inside the skin) still slides along it.
+    let sunk = slide(open, person(0.2, -0.0005, 0.2), vec3(2, 0, 0))
+    print("sunk", near(sunk.box.min.x, 2.2), sunk.hit)
+
+    // y goes first: rising 0.5 puts the box above a one-block step before x moves, so it
+    // clears the step instead of running into it.
+    let step = room(NONE, NONE, NONE, 3)
+    let ledge = slide(step, person(1.9, 0.7, 0.2), vec3(1, 0.5, 0))
+    print("ledge", near(ledge.box.min.x, 2.9), near(ledge.box.min.y, 1.2), ledge.hit)
+    // Lower, the same step is a wall.
+    let bump = slide(step, person(1.9, 0.0, 0.2), vec3(1, 0, 0))
+    print("bump", near(bump.box.max.x, 3.0), bump.hit)
+
+    // A box that starts inside a wall (by 0.4) is not pushed out or pulled back: it moves on
+    // through the side it moves toward.
+    let inside = slide(wall, person(2.8, 0.0, 0.2), vec3(0.3, 0, 0))
+    print("inside", near(inside.box.min.x, 3.1), inside.hit)
+    let outward = slide(wall, person(3.6, 0.0, 0.2), vec3(-0.3, 0, 0))
+    print("outward", near(outward.box.min.x, 3.3), outward.hit)
+
+    // No motion changes nothing.
+    let still = slide(open, person(0.2, 0.0, 0.2), vec3(0, 0, 0))
+    print("still", near(still.box.min.x, 0.2), near(still.box.min.y, 0.0), still.hit)
+
+    // Negative cells: a wall at x = -2 (its face at x = -1 is the one the box meets, coming
+    // from x = 0.5) and the same at z = -2.
+    let negx = slide(room(-2, NONE, NONE, NONE), person(0.5, 0.0, 0.2), vec3(-2.5, 0, 0))
+    print("negx", near(negx.box.min.x, -1.0), negx.hit)
+    let negz = slide(room(NONE, -2, NONE, NONE), person(0.2, 0.0, 0.5), vec3(0, 0, -2.5))
+    print("negz", near(negz.box.min.z, -1.0), negz.hit)
+
+    // Across x = 0 toward a wall farther out, and back across it toward one on the other side.
+    let cross = slide(room(-3, NONE, NONE, NONE), person(1.0, 0.0, 0.2), vec3(-6, 0, 0))
+    print("cross", near(cross.box.min.x, -2.0), cross.hit)
+    let back = slide(room(4, NONE, NONE, NONE), person(-1.5, 0.0, 0.2), vec3(8, 0, 0))
+    print("back", near(back.box.max.x, 4.0), back.hit)
+}
+// release
+// expect: fall true true ivec3(x: 0, y: -1, z: 0)
+// expect: drop true ivec3(x: 0, y: -1, z: 0)
+// expect: air true ivec3(x: 0, y: 0, z: 0)
+// expect: wall true true ivec3(x: 1, y: 0, z: 0)
+// expect: corner true true ivec3(x: 1, y: 0, z: 1)
+// expect: ceiling true true ivec3(x: 0, y: 1, z: 0)
+// expect: rest true true true ivec3(x: 0, y: 0, z: 0)
+// expect: press true true ivec3(x: 0, y: -1, z: 0)
+// expect: thin true ivec3(x: 1, y: 0, z: 0)
+// expect: sunk true ivec3(x: 0, y: 0, z: 0)
+// expect: ledge true true ivec3(x: 0, y: 0, z: 0)
+// expect: bump true ivec3(x: 1, y: 0, z: 0)
+// expect: inside true ivec3(x: 0, y: 0, z: 0)
+// expect: outward true ivec3(x: 0, y: 0, z: 0)
+// expect: still true true ivec3(x: 0, y: 0, z: 0)
+// expect: negx true ivec3(x: -1, y: 0, z: 0)
+// expect: negz true ivec3(x: 0, y: 0, z: -1)
+// expect: cross true ivec3(x: -1, y: 0, z: 0)
+// expect: back true ivec3(x: 1, y: 0, z: 0)

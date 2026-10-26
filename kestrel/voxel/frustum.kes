@@ -1,0 +1,84 @@
+// View frustum culling (E40): which chunk boxes can the camera see at all? In Godot terms it
+// is `Camera3D.is_position_in_frustum`, and what the engine does before it draws.
+//
+// The frustum is the pyramid of space the camera sees, cut off by a near and a far plane:
+// six planes. Each plane is a `vec4` (a, b, c, d): a point (x, y, z) is on the inside when
+// a * x + b * y + c * z + d >= 0, and (a, b, c) has length 1. A box is skipped only when it
+// lies entirely outside one plane, found by testing the box's corner that is farthest toward
+// the plane's inside: if even that one is outside, the whole box is. That is conservative:
+// a box near a corner of the pyramid may pass all six planes and still be unseen, so some
+// boxes are drawn that needn't be, never the other way round.
+//
+// The planes are six fields, not a list: this is built every frame, and a list built per
+// frame would grow the program's memory (E40).
+//
+// The camera is `draw3d.Camera`: its position, the point it looks at, up, and the vertical
+// field of view in degrees, with the near plane at 0.05 and the far plane at 4,000 as
+// `draw3d` fixes them. y is up and the axes are right-handed, so a camera looking along +z
+// has +x on its left.
+//
+// This is a library file: it imports only other libraries.
+use { Camera from draw3d }
+
+// The near and far planes, as `draw3d` sets them.
+let NEAR = 0.05
+let FAR = 4000.0
+
+pub struct Frustum {
+    left: vec4
+    right: vec4
+    bottom: vec4
+    top: vec4
+    near: vec4
+    far: vec4
+
+    // Whether the box from `lo` to `hi` may be inside the frustum: false only when it is
+    // entirely outside one of the planes.
+    @prove(no_alloc, no_checks, no_panic)
+    pure sees(self, lo: vec3, hi: vec3) -> bool {
+        not (outside(self.left, lo, hi) or outside(self.right, lo, hi) or
+            outside(self.bottom, lo, hi) or outside(self.top, lo, hi) or
+            outside(self.near, lo, hi) or outside(self.far, lo, hi))
+    }
+}
+
+// The plane through `point` whose inward side is the way `normal` points (`normal` of
+// length 1).
+pure plane(normal: vec3, point: vec3) -> vec4 {
+    vec4(normal, -normal.dot(point))
+}
+
+// Whether the box is entirely on the outside of the plane: even its corner farthest along
+// the plane's normal is.
+pure outside(p: vec4, lo: vec3, hi: vec3) -> bool {
+    let best_x = if p.x >= 0 { hi.x } else { lo.x }
+    let best_y = if p.y >= 0 { hi.y } else { lo.y }
+    let best_z = if p.z >= 0 { hi.z } else { lo.z }
+    p.x * best_x + p.y * best_y + p.z * best_z + p.w < 0
+}
+
+// The six planes of the camera's view at the given aspect ratio (width over height).
+pub pure frustum_of(cam: Camera, aspect: float) -> Frustum {
+    let forward = (cam.target - cam.pos).normalized()
+    // Right-handed with y up: a camera looking along +z has its right at -x.
+    let right = forward.cross(cam.up).normalized()
+    let up = right.cross(forward)
+    // How far the view edge is from the middle, per block ahead: half the vertical field of
+    // view, then the same times the aspect for the sides.
+    let half_height = tan(cam.fov * PI / 360.0)
+    let half_width = half_height * aspect
+    // A side plane holds the camera's position and the edge of the view. Its inward normal
+    // is the camera's forward leaning toward the middle by that edge's slope.
+    let left = (right + forward * half_width).normalized()
+    let right_side = (forward * half_width - right).normalized()
+    let bottom = (up + forward * half_height).normalized()
+    let top = (forward * half_height - up).normalized()
+    Frustum(
+        left: plane(left, cam.pos),
+        right: plane(right_side, cam.pos),
+        bottom: plane(bottom, cam.pos),
+        top: plane(top, cam.pos),
+        near: plane(forward, cam.pos + forward * NEAR),
+        far: plane(-forward, cam.pos + forward * FAR)
+    )
+}

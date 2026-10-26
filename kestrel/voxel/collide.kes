@@ -1,0 +1,163 @@
+// Collision (E16): a box moving through solid blocks, as `move_and_slide` does for a
+// `CharacterBody3D`, but against blocks instead of colliders and with no physics engine.
+//
+// The box moves one axis at a time, y first, then x, then z (as Minecraft does), and each
+// axis moves in steps of at most 0.5 blocks so a fast box can't jump over a thin wall. A
+// step that would carry a face of the box into a new layer of blocks checks that layer over
+// the face's whole cross-section; if any block there is solid the face stops exactly on the
+// block's border and that axis is done for this call (`hit` says which side was blocked:
+// -1 for the low side, +1 for the high side, 0 for none). Because the axes are separate, a
+// box that runs into a wall with x and z motion keeps its z motion: it slides along the
+// wall, as `move_and_slide` does.
+//
+// A skin of 0.001 blocks makes the box count as slightly smaller than it is, so a box that
+// rests exactly on a floor (or beside a wall) is not counted as inside it, and moving
+// sideways along a floor is not blocked by the floor. A box that starts inside solid
+// blocks is not pushed out; it can still move out through the side it moves toward.
+//
+// This is a library file: it imports only other libraries. It is generic over `Solid`
+// (E6), so the world's `solid` call is direct and inlinable.
+use { Solid from grid }
+
+// How much smaller than itself the box counts as, in blocks.
+let SKIN = 0.001
+
+// The longest step along an axis, in blocks.
+let STEP = 0.5
+
+// The most a box moves along one axis in one call. Longer motions are cut here (so a
+// runaway motion can't take an unbounded number of steps); the player never moves this far
+// in one frame.
+let FARTHEST = 1024.0
+
+// A box from its lowest corner to its highest, in world coordinates.
+pub struct Box {
+    min: vec3
+    max: vec3
+}
+
+// A box after moving, and which sides were blocked: `hit.y` is -1 when the box landed on
+// something, +1 when it hit its head, and so on.
+pub struct Moved {
+    box: Box
+    hit: ivec3
+}
+
+// One axis's result: the box, and -1, 0 or 1.
+struct Axis {
+    box: Box
+    hit: int
+}
+
+// Component `a` of a vector: 0 is x, 1 is y, 2 is z.
+pure part(v: vec3, a: int) -> float {
+    if a == 0 { v.x } else if a == 1 { v.y } else { v.z }
+}
+
+// `v` moved by `s` along axis `a`.
+pure shifted(v: vec3, a: int, s: float) -> vec3 {
+    if a == 0 {
+        vec3(v.x + s, v.y, v.z)
+    } else if a == 1 {
+        vec3(v.x, v.y + s, v.z)
+    } else {
+        vec3(v.x, v.y, v.z + s)
+    }
+}
+
+// `v` with component `a` set to `s`.
+pure set_part(v: vec3, a: int, s: float) -> vec3 {
+    if a == 0 {
+        vec3(s, v.y, v.z)
+    } else if a == 1 {
+        vec3(v.x, s, v.z)
+    } else {
+        vec3(v.x, v.y, s)
+    }
+}
+
+// The first block layer a low face at `p` is in (the box counts as 0.001 smaller).
+pure low_cell(p: float) -> int {
+    int(floor(p + SKIN))
+}
+
+// The last block layer a high face at `p` is in.
+pure high_cell(p: float) -> int {
+    int(ceil(p - SKIN)) - 1
+}
+
+// The world's block at layer `c` of axis `a`, with `u` and `v` the other two coordinates in
+// the order x, y, z.
+pure solid_on[W: Solid](w: W, a: int, c: int, u: int, v: int) -> bool {
+    if a == 0 {
+        w.solid(c, u, v)
+    } else if a == 1 {
+        w.solid(u, c, v)
+    } else {
+        w.solid(u, v, c)
+    }
+}
+
+// Whether any block of layer `c` of axis `a` is solid where the box is (its cross-section
+// on the other two axes).
+pure layer_solid[W: Solid](w: W, b: Box, a: int, c: int) -> bool {
+    let ua = if a == 0 { 1 } else { 0 }
+    let va = if a == 2 { 1 } else { 2 }
+    let u0 = low_cell(part(b.min, ua))
+    let u1 = high_cell(part(b.max, ua))
+    let v0 = low_cell(part(b.min, va))
+    let v1 = high_cell(part(b.max, va))
+    for v from v0 to v1 + 1 {
+        for u from u0 to u1 + 1 {
+            if solid_on(w, a, c, u, v) {
+                return true
+            }
+        }
+    }
+    false
+}
+
+// Moves the box by `motion` along axis `a` in steps of at most 0.5, stopping on the border
+// of the first layer of blocks it can't enter.
+@prove(no_alloc)
+pure move_axis[W: Solid](w: W, b: Box, a: int, motion: float) -> Axis {
+    let m = clamp(motion, -FARTHEST, FARTHEST)
+    let n = int(ceil(abs(m) / STEP))
+    if n <= 0 {
+        return Axis(box: b, hit: 0)
+    }
+    let step = m / float(n)
+    let size = part(b.max, a) - part(b.min, a)
+    var box = b
+    for i from 0 to n {
+        if step > 0 {
+            let top = part(box.max, a)
+            let cell = high_cell(top + step)
+            if cell > high_cell(top) and layer_solid(w, box, a, cell) {
+                let face = float(cell)
+                box = Box(min: set_part(box.min, a, face - size), max: set_part(box.max, a, face))
+                return Axis(box: box, hit: 1)
+            }
+        } else {
+            let bottom = part(box.min, a)
+            let cell = low_cell(bottom + step)
+            if cell < low_cell(bottom) and layer_solid(w, box, a, cell) {
+                let face = float(cell + 1)
+                box = Box(min: set_part(box.min, a, face), max: set_part(box.max, a, face + size))
+                return Axis(box: box, hit: -1)
+            }
+        }
+        box = Box(min: shifted(box.min, a, step), max: shifted(box.max, a, step))
+    }
+    Axis(box: box, hit: 0)
+}
+
+// Moves the box by `motion` through the world `w`: y first, then x, then z. See the top of
+// the file for the rules.
+@prove(no_alloc)
+pub pure slide[W: Solid](w: W, b: Box, motion: vec3) -> Moved {
+    let ay = move_axis(w, b, 1, motion.y)
+    let ax = move_axis(w, ay.box, 0, motion.x)
+    let az = move_axis(w, ax.box, 2, motion.z)
+    Moved(box: az.box, hit: ivec3(ax.hit, ay.hit, az.hit))
+}

@@ -1,0 +1,53 @@
+// frustum_of and sees: the camera's six planes and the box test. The camera is at the origin
+// looking along +z, fov 75 degrees, aspect 16/9. In this world's axes (y up, right-handed, as
+// in Godot 3D) that camera's left is +x and its right is -x.
+use { Camera from draw3d }
+use { frustum_of from frustum }
+
+main() {
+    let cam = Camera(pos: vec3(0, 0, 0), target: vec3(0, 0, 1))
+    let f = frustum_of(cam, 16.0 / 9.0)
+
+    // A box ahead is seen; behind, far to either side, far above and below are not.
+    print("ahead", f.sees(vec3(-1, -1, 9), vec3(1, 1, 11)))
+    print("behind", f.sees(vec3(-1, -1, -11), vec3(1, 1, -9)))
+    print("left", f.sees(vec3(60, -1, 9), vec3(62, 1, 11)))
+    print("right", f.sees(vec3(-62, -1, 9), vec3(-60, 1, 11)))
+    print("above", f.sees(vec3(-1, 40, 9), vec3(1, 42, 11)))
+    print("below", f.sees(vec3(-1, -42, 9), vec3(1, -40, 11)))
+
+    // At z = 4 the picture is 5.46 blocks wide each way (tan(37.5) * 16/9 * 4) and 3.07
+    // high. A box over the left edge (x 4 to 8) or the right edge (x -8 to -4) is seen, and
+    // one just outside it (at z = 5 the edge is 6.82) is not.
+    print("edge", f.sees(vec3(4, 0, 4), vec3(8, 1, 5)), f.sees(vec3(-8, 0, 4), vec3(-4, 1, 5)))
+    print("outside", f.sees(vec3(7, 0, 4), vec3(9, 1, 5)), f.sees(vec3(-9, 0, 4), vec3(-7, 1, 5)))
+    // Over the top edge (3.07 at z = 4, 3.45 at z = 4.5) and just above it.
+    print("top", f.sees(vec3(0, 2, 4), vec3(1, 5, 5)), f.sees(vec3(0, 3.6, 4), vec3(1, 5, 4.5)))
+
+    // The far plane is 4,000 away, the near plane 0.05.
+    print("far", f.sees(vec3(-1, -1, 3990), vec3(1, 1, 3995)), f.sees(vec3(-1, -1, 4001), vec3(1, 1, 4005)))
+    print("near", f.sees(vec3(-1, -1, 0.02), vec3(1, 1, 0.03)), f.sees(vec3(-1, -1, 0.01), vec3(1, 1, 1)))
+
+    // A moved and turned camera: at (100, 50, -20) looking along +x. Its left is then -z.
+    let east = frustum_of(Camera(pos: vec3(100, 50, -20), target: vec3(101, 50, -20)), 1.0)
+    print("east", east.sees(vec3(110, 49, -21), vec3(112, 51, -19)), east.sees(vec3(90, 49, -21), vec3(92, 51, -19)),
+        east.sees(vec3(110, 49, -61), vec3(112, 51, -59)), east.sees(vec3(110, 49, 19), vec3(112, 51, 21)))
+
+    // Looking down at an angle finds the box under the camera and not one above it.
+    let down = frustum_of(Camera(pos: vec3(0, 10, 0), target: vec3(0, 0, 3)), 1.0)
+    print("down", down.sees(vec3(-1, -1, 0), vec3(1, 1, 8)), down.sees(vec3(-1, 20, 0), vec3(1, 22, 8)))
+}
+// release
+// expect: ahead true
+// expect: behind false
+// expect: left false
+// expect: right false
+// expect: above false
+// expect: below false
+// expect: edge true true
+// expect: outside false false
+// expect: top true false
+// expect: far true false
+// expect: near false true
+// expect: east true false false false
+// expect: down true false

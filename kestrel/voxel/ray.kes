@@ -1,0 +1,103 @@
+// Ray casting (E16): which block does a ray from the eye hit first? In Godot terms it is
+// `PhysicsDirectSpaceState3D.intersect_ray`, but against blocks instead of colliders, and
+// it also says which empty cell the ray came from (`before`), which is where a placed
+// block goes.
+//
+// The algorithm is Amanatides and Woo's grid walk. The ray starts in one cell; for each
+// axis we know how far along the ray it is to the next cell border on that axis (`tx`,
+// `ty`, `tz`) and how far apart that axis's borders are (`gx`, `gy`, `gz`). Each step
+// crosses the nearest border: step one cell on that axis and move its distance on by one
+// gap. Every cell the ray passes through is visited exactly once, in order, so the first
+// solid one is the hit and nothing is skipped however long the ray is (no sampling).
+//
+// Distances are in blocks: the direction is made length 1 first. A ray that starts inside a
+// solid block hits it at distance 0, and `before` is that same cell.
+//
+// This is a library file: it imports only other libraries. It is generic over `Solid`, so
+// the world's `solid` call is direct and inlinable (E6).
+use { Solid from grid }
+
+// Larger than any distance a ray can reach: the distance to a border on an axis the ray
+// doesn't move along.
+let NEVER = 1000000000.0
+
+// The first solid block along a ray: its cell, the cell the ray was in just before it, and
+// how far along the ray the block's face is.
+pub struct Hit {
+    cell: ivec3
+    before: ivec3
+    distance: float
+}
+
+// The cell coordinate a ray starts in along one axis, from position `p` going `d`. A ray
+// that starts exactly on a border and goes down leaves the cell above the border at once,
+// so it starts in the one below.
+pure start_cell(p: float, d: float) -> int {
+    let c = int(floor(p))
+    if d < 0 and p == floor(p) { c - 1 } else { c }
+}
+
+// How far along the ray (of length 1) it is from `p` in cell `c` to the border it crosses
+// first, going `d` on this axis.
+pure first_border(p: float, c: int, d: float) -> float {
+    if d > 0 {
+        (float(c + 1) - p) / d
+    } else if d < 0 {
+        (p - float(c)) / -d
+    } else {
+        NEVER
+    }
+}
+
+// How far apart the ray's crossings of this axis's borders are.
+pure border_gap(d: float) -> float {
+    if d != 0 { 1.0 / abs(d) } else { NEVER }
+}
+
+// The first solid block on the way from `origin` along `dir`, within `reach` blocks, or
+// `none`. A `dir` of length zero finds nothing. A block whose face is exactly `reach` away
+// counts.
+@prove(no_alloc)
+pub pure cast[W: Solid](w: W, origin: vec3, dir: vec3, reach: float) -> Hit? {
+    let len = dir.length()
+    if not (len > 0.0) {
+        return none
+    }
+    let d = dir / len
+    var x = start_cell(origin.x, d.x)
+    var y = start_cell(origin.y, d.y)
+    var z = start_cell(origin.z, d.z)
+    let sx = if d.x < 0 { -1 } else { 1 }
+    let sy = if d.y < 0 { -1 } else { 1 }
+    let sz = if d.z < 0 { -1 } else { 1 }
+    var tx = first_border(origin.x, x, d.x)
+    var ty = first_border(origin.y, y, d.y)
+    var tz = first_border(origin.z, z, d.z)
+    let gx = border_gap(d.x)
+    let gy = border_gap(d.y)
+    let gz = border_gap(d.z)
+    if w.solid(x, y, z) {
+        let here = ivec3(x, y, z)
+        return Hit(cell: here, before: here, distance: 0.0)
+    }
+    while min(tx, min(ty, tz)) <= reach {
+        let before = ivec3(x, y, z)
+        var t = tx
+        if tx <= ty and tx <= tz {
+            x += sx
+            tx += gx
+        } else if ty <= tz {
+            t = ty
+            y += sy
+            ty += gy
+        } else {
+            t = tz
+            z += sz
+            tz += gz
+        }
+        if w.solid(x, y, z) {
+            return Hit(cell: ivec3(x, y, z), before: before, distance: t)
+        }
+    }
+    none
+}

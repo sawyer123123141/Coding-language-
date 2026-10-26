@@ -1,0 +1,26 @@
+// Contract probe (E39): `@prove(no_checks)` on `collide.slide` and its `move_axis` can't be
+// proven in either build, so the engine carries only `@prove(no_alloc)` on them (which holds
+// in both). This test adds `no_checks` to the scratch copy of `collide.kes` only, with the
+// real `World` as the `Solid`, and expects the build to refuse it. When a compiler change
+// makes it pass, this test fails: move the contract into the engine.
+//
+// What stops it (from `kestrel check --report`):
+// - checked build: the overflow check on `int(ceil(p - SKIN)) - 1` in `high_cell` (the layer a
+//   float position falls in is any `int` to the compiler), and the `+ 8`-style index maths of
+//   whatever `Solid` is asked;
+// - release build: the world's own read, `World.block` indexing `self.columns.items[slot]`
+//   (nothing shows the slot is below the list's length), reached through `layer_solid`: the
+//   world's check, not the box's.
+use { new_world, load_now from world }
+use { Box, slide from collide }
+
+main() {
+    var w = new_world(1337, 9)
+    load_now(var w, 0, 0)
+    let m = slide(w, Box(min: vec3(1, 100, 1), max: vec3(1.6, 101.8, 1.6)), vec3(0, -10, 0))
+    print(m.hit)
+}
+// replace: collide.kes @prove(no_alloc) => @prove(no_alloc, no_checks)
+// expect-exit: 1
+// expect-stderr: can't be proven `no_checks`
+// release
