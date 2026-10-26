@@ -4,7 +4,7 @@ A compiled language for games (Rust + Cranelift). The compiler is the Cargo work
 
 ## Start here
 
-**Read `docs/superpowers/plans/2026-10-10-handoff.md` first.** Its top "Start here" section has the current status and the next task (generics are built through Task 11; next is Task 12, the final whole-round review, its fixes and the full test run; the ledger `.superpowers/sdd/2026-10-24-generics/progress.md` has every task's commits and rulings); the rest has the user's decisions and preferences and environment gotchas.
+**Read `docs/superpowers/plans/2026-10-10-handoff.md` first.** Its top "Start here" section has the current status and the next task (generics are done: built, reviewed, full suite green 2026-10-25; next is the voxel engine; the ledger `.superpowers/sdd/2026-10-24-generics/progress.md` has every task's commits and rulings); the rest has the user's decisions and preferences and environment gotchas.
 
 ## Where things are
 
