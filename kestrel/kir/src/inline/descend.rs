@@ -22,9 +22,12 @@ impl Inliner<'_> {
                 self.stmts(then_body);
                 self.stmts(else_body);
             }
+            // The condition runs every time round.
             Stmt::While { cond, body } => {
+                self.depth += 1;
                 self.expr(cond);
                 self.stmts(body);
+                self.depth -= 1;
             }
             Stmt::Assume { conds, body, .. } => {
                 for (_, c) in conds {
@@ -36,7 +39,9 @@ impl Inliner<'_> {
             Stmt::ForRange { start, end, body, .. } => {
                 self.expr(start);
                 self.expr(end);
+                self.depth += 1;
                 self.stmts(body);
+                self.depth -= 1;
             }
             Stmt::Call(_, args, _) => self.args(args),
             Stmt::CallIndirect { callee, args, .. } => {

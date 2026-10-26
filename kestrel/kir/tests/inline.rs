@@ -223,3 +223,71 @@ fn a_fan_out_chain_stays_small() {
     assert!(total < 100_000, "{total} KIR nodes after inlining");
     assert!(took < std::time::Duration::from_secs(10), "inlining took {took:?}");
 }
+
+/// `big`: a flat sum of `terms` calls to `leaf` (a 40-term sum). Small as written, and about
+/// 205 nodes a term once the calls are inlined, so with 14 terms (about 2,900 nodes) two copies
+/// fit the 8,192-node budget of a caller but three don't.
+fn leaf_and_big(terms: usize) -> String {
+    let uses: Vec<String> = (0..terms).map(|i| format!("leaf(x + {i})")).collect();
+    format!("{}pure big(x: int) -> int {{ {} }}\n", sum_fn("leaf", 40), uses.join(" + "))
+}
+
+/// The source lines (1-based) of the calls to `big` that are left in `f`.
+fn big_calls_left_in_f(m: &Module) -> Vec<u32> {
+    let name = |i: FuncIdx| m.funcs[i.0 as usize].name.as_str();
+    let mut lines: Vec<u32> = m.not_inlined.iter().filter(|n| name(n.caller) == "f" && name(n.callee) == "big").map(|n| unpack_line(n.line).0).collect();
+    lines.sort_unstable();
+    lines
+}
+
+/// The 1-based number of the first line of `src` with `text` in it.
+fn line_of(src: &str, text: &str) -> u32 {
+    src.lines().position(|l| l.contains(text)).unwrap() as u32 + 1
+}
+
+/// Rule 5: `big` is about 3,000 nodes after its own inlining, so a caller can take only two
+/// copies.
+fn assert_big_fits_twice(m: &Module) {
+    let post = nodes(&func(m, "big").body);
+    assert!(post > 8192 / 3 && post <= 4096, "`big` is {post} nodes after its own inlining");
+}
+
+#[test]
+fn calls_in_loops_win_the_last_of_the_budget() {
+    let src = format!(
+        "{}f(n: int) -> int {{\n var t = big(1)\n t += big(2)\n for i from 0 to n {{\n  t += big(3)\n }}\n t\n}}\nmain() {{}}\n",
+        leaf_and_big(14)
+    );
+    let m = lower_inlined(&src);
+    assert_big_fits_twice(&m);
+    // The call in the loop and the first call outside it are inlined; the second call outside
+    // it is the one the budget of `f` runs out on (program order alone would have left the loop's).
+    assert_eq!(calls_to(&m, &func(&m, "f").body, "big"), 1, "{:#?}", func(&m, "f").body);
+    assert_eq!(big_calls_left_in_f(&m), [line_of(&src, "big(2)")]);
+    assert_eq!(reasons(&m, "f", "big"), ["the inlining budget of `f` ran out"]);
+}
+
+#[test]
+fn deeper_loops_win_the_last_of_the_budget() {
+    let src = format!(
+        "{}f(n: int) -> int {{\n var t = 0\n for i from 0 to n {{\n  t += big(1)\n }}\n for i from 0 to n {{\n  t += big(2)\n }}\n for i from 0 to n {{\n  for j from 0 to n {{\n   t += big(3)\n  }}\n }}\n t\n}}\nmain() {{}}\n",
+        leaf_and_big(14)
+    );
+    let m = lower_inlined(&src);
+    assert_big_fits_twice(&m);
+    // The call in two loops wins, then the first of the calls in one loop.
+    assert_eq!(calls_to(&m, &func(&m, "f").body, "big"), 1, "{:#?}", func(&m, "f").body);
+    assert_eq!(big_calls_left_in_f(&m), [line_of(&src, "big(2)")]);
+}
+
+#[test]
+fn the_choice_of_calls_is_the_same_every_time() {
+    let src = format!(
+        "{}f(n: int) -> int {{\n var t = big(1)\n t += big(2)\n for i from 0 to n {{\n  t += big(3)\n }}\n t\n}}\nmain() {{}}\n",
+        leaf_and_big(14)
+    );
+    let first = format!("{:?}", lower_inlined(&src).not_inlined);
+    for _ in 0..3 {
+        assert_eq!(format!("{:?}", lower_inlined(&src).not_inlined), first);
+    }
+}

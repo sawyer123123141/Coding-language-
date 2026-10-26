@@ -9,15 +9,15 @@
 //! caller copies its callees as they are after their own inlining, without looking into the copy
 //! again. So hot code split into helpers is inlined as if it were written in one piece, and each
 //! function's cost to its callers is its size after inlining, worked out once.
+//! When a function's budget can't fit all its calls, the calls in loops get it first (see `decide`).
 
+mod decide;
 mod descend;
 mod order;
 
 use std::collections::HashMap;
 
 use crate::ir::*;
-use crate::range::report::callee_name;
-use crate::range::show::commas;
 use crate::rename::{rename_expr, rename_stmts, Subst};
 use crate::visit::{walk, Node};
 
@@ -70,8 +70,9 @@ pub fn inline_small(m: &mut Module) {
             let locals = std::mem::take(&mut m.funcs[i].locals);
             let own_locals = locals.len();
             let line = m.funcs[i].lines.0;
-            let mut cx = Inliner { m, done: &done, comp: &comp, mates: &mates, sizes: &sizes, sites: &sites, locals, budget: BUDGET, caller, line, log: Vec::new(), in_mate: false };
-            cx.stmts(&mut body);
+            let mode = decide::Mode::Plan(Vec::new());
+            let mut cx = Inliner { m, done: &done, comp: &comp, mates: &mates, sizes: &sizes, sites: &sites, locals, budget: BUDGET, caller, line, log: Vec::new(), in_mate: false, depth: 0, mode };
+            cx.run(&mut body);
             let Inliner { locals, log, .. } = cx;
             let mut size = 0;
             walk(&body, &mut |_| size += 1);
@@ -172,40 +173,15 @@ struct Inliner<'a> {
     /// The calls left in place, in the order they were decided (see `NotInlined`).
     log: Vec<NotInlined>,
     /// Inside the copy of a function from the caller's own component: calls back into the
-    /// component stay calls.
+    /// component stay calls, and the calls don't compete for the budget (see `decide`).
     in_mate: bool,
+    /// How many loops the code being walked is in.
+    depth: usize,
+    /// Whether the walk lists the calls that compete for the budget or inlines them.
+    mode: decide::Mode,
 }
 
 impl Inliner<'_> {
-    /// True when a call to `fi` (written on `line`) should be inlined; takes its size from the
-    /// budget. Otherwise notes the call and why in the log.
-    fn take(&mut self, fi: FuncIdx, line: u32) -> bool {
-        let i = fi.0 as usize;
-        let mate = self.comp[i] == self.comp[self.caller.0 as usize];
-        let reason = match self.sizes[i] {
-            Err(Why::Native) => return false,
-            Err(why) => why.text(),
-            Ok(_) if mate && self.in_mate => format!("it calls back into {}", callee_name(self.m, fi)),
-            Ok(written) => {
-                // A function of the caller's own component is copied one level, as written. Its size
-                // after inlining isn't known, so `POST_LIMIT` doesn't apply on purpose: it must be
-                // inlinable (above) and fit the budget, which bounds the copy and what it inlines.
-                let size = if mate { written } else { self.done[i].as_ref().expect("callees are inlined into first").size };
-                if !mate && size > POST_LIMIT {
-                    format!("it is {} nodes after its own inlining; the limit is {}", commas(size), commas(POST_LIMIT))
-                } else if size <= self.budget {
-                    self.budget -= size;
-                    return true;
-                } else {
-                    format!("the inlining budget of {} ran out", callee_name(self.m, self.caller))
-                }
-            }
-        };
-        let line = if line == 0 { self.line } else { line };
-        self.log.push(NotInlined { caller: self.caller, line, callee: fi, reason });
-        false
-    }
-
     fn temp(&mut self, name: String, ty: KTy, kind: LocalKind) -> LocalIdx {
         self.locals.push(Local { name, ty, kind });
         LocalIdx(self.locals.len() as u32 - 1)
