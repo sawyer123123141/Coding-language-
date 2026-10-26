@@ -691,3 +691,137 @@ timer's entries, each `pub bench(n, iters)`), `race_check.kes`; `kestrel/bench/k
 (the Rust side), `src/bin/rust.rs` (modes `race_faces`, `race_arrays`, `race_faces_plain`,
 `race_arrays_plain`, and `--verify`), `measure.py` (the "race" rows, `--rust-checks`, the
 face-total check), `Cargo.toml` and `Cargo.lock` (`block-mesh = "0.2"`).
+
+## Inlining bottom-up (2026-10-26)
+
+Question (spec `docs/superpowers/specs/2026-10-26-inliner-budget-design.md`, G1-G4): the KIR
+inliner now works bottom-up: callees first, each callee judged by its size after its own inlining
+(limit 4,096 nodes; the 256-node limit on its size as written stays), a budget of 8,192 nodes per
+function charged only for the copies made directly in it, calls in deeper loops served first. Does
+generation get the raised-budget speed without its compile-time and code-size cost, and does
+anything get slower?
+
+**How it was measured.** Two repo compilers, each built `--release` in a temporary worktree:
+**before** = 27205ee (the commit before the round: top-down, a budget of 4,096 nodes per root
+function), **after** = f098b32. Both compiled the same sources (`voxel` and `bench/voxels3d` are
+unchanged between the two commits). The methods are the spike's (`.superpowers/sdd/inliner-spike-harness`;
+its numbers are in the right-hand column below): each timing block runs the two in turn, round by
+round; exes run at normal priority, with their empty program's median (process startup, 5 to
+8 ms) subtracted from theirs; compile times are process start to exit. Raw outputs and the
+harness: `.superpowers/sdd/2026-10-26-inliner-budget/task-3-raw/` (local only: `.superpowers/sdd`
+isn't in git). **Machine and load:** as above
+(Ryzen 7 5800X, 8 cores, 16 threads), the user away. The whole machine's CPU use is given for each
+block, sampled for 2 s before and after and over the whole block ("during" includes the timed
+process itself: one busy core is 6.25%).
+
+| Measurement | before | after | change | spike (base → bottom-up) |
+|---|---:|---:|---:|---:|
+| generation, 64 columns through `load_now`, ms (pass 1) | **492** | **300** | **1.64x faster** | 489 → 296 |
+| the same, pass 2 | 492 | 300 | 1.64x | 492 → 299 |
+| frozen world `bench/voxels3d/main.kes --release`, ms (pass 1 / pass 2) | 368 / 372 | 369 / 371 | +0.3% / -0.3% | 367 → 369 |
+| compile `voxel/main.kes --release`, ms | 381 (369 to 398) | **301 (294 to 315)** | **-21%** | 346 → 272 |
+| compile `bench/voxels3d/main.kes --release`, ms | 127 (119 to 155) | 125 (113 to 151) | same | 112 → 113 |
+| exe size, `voxel/main.kes --release`, bytes | 1,128,448 | 1,116,160 | -1.1% | 1,103 → 1,091 KB |
+| exe size, `bench/voxels3d/main.kes`, bytes | 224,256 | 224,256 | same | 219 → 219 KB |
+| KIR after inlining, `voxel/main.kes` (nodes, all functions) | 37,136 | 29,701 | -20% | 37,136 → 29,701 |
+| KIR after inlining, `bench/voxels3d/main.kes` | 10,922 | 10,922 | same | 10,922 → 10,922 |
+
+Generation and the frozen world: medians of 9 (startup subtracted). The whole-run ranges were
+498 to 555 and 496 to 528 ms before, 305 to 350 and 304 to 307 ms after for generation, and 373
+to 415 and 373 to 391 against 373 to 422 and 373 to 380 ms for the frozen world (the high ends
+are pass 1's first round, cold). Every run printed the same checksum (18,500 for generation,
+463,749 faces for the frozen world). Load: pass 1 0.0% before, 6.8% during, 0.3% after; pass 2
+0.0%, 6.7%, 1.0%. Generation is now **4.69 ms a column on one core** (was 7.69), within 1.4% of
+the spike's 296 ms (G1: within 3%). Compile times: medians of 9 (range), load 0.8% before, 7.3%
+during, 0.1% after. Today's absolute compile times are higher than the spike's (381 against
+346 ms before, same machine); the ratio is the same (-21%). The KIR node counts come from a
+throwaway print of the node total at the end of `inline_small` (the patch is in the raw folder,
+not committed), built into both compilers after the timings; they equal the spike's exactly.
+
+**Kernels** (`bench/kernels/measure.py --rounds 9 --threads 1 --only <row> --old <before's build>`:
+the kernels runner embeds the compiler, so one runner per compiler, the two in turn within each
+round; ns per item, median of the rounds' medians, range):
+
+| Row | before | after | change |
+|---|---:|---:|---:|
+| race_faces.kes checked | 82,248 (81,822 to 82,376) | 82,181 (82,034 to 82,246) | -0.1% |
+| race_faces.kes `--release` | 65,936 (65,754 to 66,175) | 66,013 (65,773 to 66,230) | +0.1% |
+| race_arrays.kes checked | 127,012 (126,197 to 127,435) | 127,047 (126,800 to 127,519) | 0.0% |
+| race_arrays.kes `--release` | 103,249 (103,043 to 103,471) | 103,258 (103,097 to 103,609) | 0.0% |
+| noise_scalar.kes `--release` | 6.55 (6.54 to 6.55) | 6.55 (6.54 to 6.55) | same |
+| noise_scalar.kes checked | 6.65 (6.64 to 6.67) | 6.65 (6.64 to 6.65) | same |
+| step.kes | 4.29 (4.28 to 4.31) | 4.29 (4.29 to 4.30) | same |
+
+Load: race rows 0.4% before and 0.8% after (not sampled during); noise and step rows 0.2 to 0.3%
+before, 7.7%, 6.8% and 6.7% during, 0.1 to 0.3% after. No kernel moves (G2): they make few nested
+calls, as the spike found.
+
+**`check --report --release`, calls not inlined by reason:**
+
+| Program | before | after |
+|---|---|---|
+| `voxel/main.kes` | the inlining budget ran out 27, early `return` 47, too big as written 9 (83) | **too big after its own inlining 2**, early `return` 47, too big as written 9 (58) |
+| `bench/voxels3d/main.kes` | too big as written 1 | too big as written 1 |
+
+The 27 budget messages (G1) are gone. The 2 new ones are both `generate` ("it is 5,849 nodes after
+its own inlining; the limit is 4,096"), in the stream's `par for` body (`stream.kes:164`) and in
+`load_now` (line 119): `generate` runs once per column, so its call costs nothing, and `octave`,
+`lattice`, `mix` and `block_type` are now inlined inside it. The frozen world's report is the same
+byte for byte before and after (164 lines). In `voxel/main.kes`'s report `generate` now lists its
+own 2 bounds checks (`g.items[i]`, lines 62 and 67) once instead of in each of its two copies, so
+the totals read 155 checks, 77 removed, 78 left before and 152, 76, 76 after (`report-voxel.diff`
+in the raw folder).
+
+**`bench.kes`, 99th-percentile work time per phase** (`GEN_BATCH` 2, `MESH_BATCH` 16; `measure.py`'s
+method: `--release`, hidden window, idle priority; three single runs per compiler, before and after
+in turn, so the median and range are over 3 runs, as in a 3-run `measure.py` call; the arena runs
+were not repeated):
+
+| Phase | p99 before | **p99 after** | worst before | worst after | median before | median after |
+|---|---:|---:|---:|---:|---:|---:|
+| fill | 12.4 ms (11.9 to 15.7) | 9.7 ms (9.0 to 10.9) | 89 ms (89 to 90) | 89 ms (58 to 90) | 10.4 ms | 7.5 ms |
+| fly20 | 13.9 ms (13.8 to 14.4) | **8.4 ms (8.3 to 8.4)** | 15.0 ms (14.8 to 17.0) | 11.0 ms (10.8 to 11.4) | 0.85 ms | 0.81 ms |
+| fly100 | 14.8 ms (14.7 to 14.8) | **11.6 ms (11.3 to 11.6)** | 18.1 ms (17.4 to 20.3) | 13.8 ms (13.6 to 13.9) | 10.1 ms | 7.2 ms |
+| edits | 5.8 ms (5.8 to 6.8) | 6.8 ms (5.9 to 7.0) | (51 frames: the p99 is the worst) | | 2.99 ms | 3.05 ms |
+| circle | 14.8 ms (14.7 to 14.8) | **11.5 ms (11.4 to 11.5)** | 20.7 ms (20.4 to 21.3) | 17.0 ms (17.0 to 17.4) | 1.20 ms | 0.93 ms |
+
+Generation per column (a batch's time shared out, as in "Generate, mesh and upload"): 3.85, 3.88,
+4.60 and 3.90 ms before against **2.41, 2.46, 3.08 and 2.45 ms** after in fill, fly20, fly100 and
+circle; meshing unchanged (0.070 to 0.111 ms a chunk in both). The view fills in the same 135
+frames, **1,077 ms of real time (1,044 to 1,078) instead of 1,464 (1,447 to 1,547)**; a whole run
+takes 65 s instead of 86. Every run generated and meshed the same counts and ended with the same
+program arena (60,739,584 bytes). Load before each run: 3.7%, 0.2% and 0.3% (before), 0.1%, 0.5%
+and 1.3% (after); the rest of the machine during each run 0.9 to 1.1%. **E32 now passes with 5.1
+to 8.3 ms to spare** (the worst p99 of any run: 8.4, 11.6 and 11.5 ms in fly20, fly100 and
+circle). The spike's scratch build with the budget raised to 2^20 gave 8.7 to 12.1 ms; bottom-up
+gives the same. Today's "before" p99s are 0.5 to 1 ms lower than the table in "The pass mark"
+(15.0, 15.5 and 15.8 ms), which ran with 5 to 18% load before each run.
+
+**Slower:** the `edits` phase. Its p99 went 5.8 → 6.8 ms, the corner edit's latency 1.77 ms (1.73
+to 1.93) → 1.98 ms (1.80 to 2.04), the middle edit's 0.70 ms (0.70 to 0.70) → 0.72 ms (0.71 to
+0.73). The ranges overlap, and an edit does no generation (it re-meshes and uploads 1 or 8 chunks;
+the mesher's calls and checks are the same in both reports, and meshing in the other phases is
+unchanged), so this reads as upload noise over 51 frames, but it was not chased further.
+
+**The fan-out chain** (G3; `patho.kes` in the raw folder: 6 functions, each summing 20 calls of the
+next; prints 729,032,704 with both):
+
+| | before | after | spike (base → bottom-up) |
+|---|---:|---:|---:|
+| KIR after inlining (nodes) | 21,056 | **15,923** | 21,056 → 15,923 |
+| `check --release` (parse to range analysis, inlining included), ms, 15 runs | 18 (18 to 24) | 16 (16 to 23) | |
+| `build --release`, ms, 9 runs | 134 (91 to 157) | 175 (154 to 212) | 102 → 117 (one compile each) |
+| the same, another 15 runs | 148 (93 to 182) | 171 (123 to 204) | |
+| exe, bytes | 186,880 | 215,552 (+15%) | 182 → 210 KB |
+
+Load: 0.4%, 0.0% and 0.4% before; 6.5%, 6.5% and 11.0% during; 0.2% after. **The chain's build is
+16 to 31% slower** (the spike saw +15% from one compile each). Inlining isn't the cost (`check` is
+2 ms faster); the code generator is, on 15% more machine code: each of `f1` to `f4` now holds its
+callees' copies up to its own budget, where before `f0`'s top-down budget ran out early. It stays
+far under a second, the bound G3 asks for; the raised-budget compiler took 258 s on this chain.
+
+**Left as known** (spec rules 4 and 5): recursion through a closure or a function value now inlines
+one level, like any mutual recursion (top-down went up to 8 deep or to the budget); and the calls
+inside a copy of a function in the caller's own cycle aren't held to the 4,096 limit (the budget
+bounds them) and aren't ranked by loop depth (they take what the ranked calls left, in program
+order). Neither shape is in the engine or the benchmarks.
