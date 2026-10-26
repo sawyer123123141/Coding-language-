@@ -2,12 +2,12 @@
 //! proof check on, and the tests of the harness pieces that go with it.
 
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
-use std::time::{Duration, Instant};
+use std::process::{Command, Output};
+use std::time::Duration;
 
-use super::common::hermetic;
+use super::common::{hermetic, output_within};
 use super::{build_with, compare, expectations, only_prefixed, programs, Expect, PROOF_FAILED};
 
 /// What a contract's error says: no program test may have one, in either build (the checked runs
@@ -24,36 +24,8 @@ fn kestrel_run_release(path: &Path, exp: &Expect) -> Option<Output> {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_kestrel"));
     hermetic(cmd.args(["run", "--release", path.to_str().unwrap()]))
         .envs(exp.env.iter().map(|(k, v)| (k, v)))
-        .env("KESTREL_CHECK_PROOFS", "1")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = cmd.spawn().expect("run kestrel");
-    // Read both pipes on threads, so a program that prints a lot can't block on a full pipe.
-    fn drain(pipe: Option<impl Read + Send + 'static>) -> std::thread::JoinHandle<Vec<u8>> {
-        std::thread::spawn(move || {
-            let mut bytes = Vec::new();
-            if let Some(mut pipe) = pipe {
-                let _ = pipe.read_to_end(&mut bytes);
-            }
-            bytes
-        })
-    }
-    let (stdout, stderr) = (drain(child.stdout.take()), drain(child.stderr.take()));
-    let start = Instant::now();
-    let status = loop {
-        if let Some(status) = child.try_wait().expect("wait for kestrel") {
-            break Some(status);
-        }
-        if start.elapsed() > RELEASE_TIMEOUT {
-            let _ = child.kill();
-            let _ = child.wait();
-            break None;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    };
-    let (stdout, stderr) = (stdout.join().unwrap(), stderr.join().unwrap());
-    status.map(|status| Output { status, stdout, stderr })
+        .env("KESTREL_CHECK_PROOFS", "1");
+    output_within(&mut cmd, RELEASE_TIMEOUT)
 }
 
 /// The release pass: every program under `kestrel run --release` with the proof check on. The

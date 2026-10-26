@@ -1,0 +1,70 @@
+// A `Grid[T]` is a typed 3D array: one flat list of `sx * sy * sz` values that
+// you read and write by (x, y, z). In GDScript terms it is a 3D array over one
+// `Array` (or a `PackedByteArray` when T is `u8`), with the indexing done for you.
+//
+// The cells are laid out the way the frozen voxel benchmark lays out its
+// blocks: x runs fastest, then z, then y. So the list index of a cell is
+//
+//     index = (y * sz + z) * sx + x
+//
+// and the steps between neighbours are: x 1, z `sx`, y `sx * sz`. A hot loop
+// that walks the grid in that order can index `items` directly with a running
+// index and skip `get` and `set`; they are for the rest.
+//
+// This is a library file: it imports nothing from the engine. `Solid` lives
+// here because the ray caster and the collision code both ask the same
+// question of a world ("is this cell solid?") and shouldn't import each other.
+
+pub struct Grid[T] {
+    sx: int
+    sy: int
+    sz: int
+    items: list[T]
+
+    // Where the cell (x, y, z) is in `items`. It does not check the bounds.
+    pure index(self, x: int, y: int, z: int) -> int {
+        (y * self.sz + z) * self.sx + x
+    }
+
+    // The value in a cell. A cell outside the grid stops the program with an
+    // index error, like reading past the end of an `Array`.
+    pure get(self, x: int, y: int, z: int) -> T {
+        self.items[self.index(x, y, z)]
+    }
+
+    pure set(var self, x: int, y: int, z: int, v: T) {
+        self.items[self.index(x, y, z)] = v
+    }
+
+    // Whether (x, y, z) is a cell of this grid. Use it before `get` when the
+    // coordinates could be outside, such as the neighbour of a border cell.
+    pure inside(self, x: int, y: int, z: int) -> bool {
+        x >= 0 and x < self.sx and y >= 0 and y < self.sy and z >= 0 and z < self.sz
+    }
+
+    // Puts `v` in every cell, keeping the list it already has (no allocation),
+    // so one scratch grid can be reused for the next chunk.
+    pure fill(var self, v: T) {
+        for i from 0 to self.items.len {
+            self.items[i] = v
+        }
+    }
+}
+
+// A grid of `sx * sy * sz` cells, each starting as a copy of `fill`.
+// The list is built with `add`: `array[T](n)` is refused in generic code
+// (the compiler can't know how big a `T` is there), and `add` works for any T.
+pub pure grid[T](sx: int, sy: int, sz: int, fill: T) -> Grid[T] {
+    var items: list[T] = []
+    for i from 0 to sx * sy * sz {
+        items.add(fill)
+    }
+    Grid[T](sx: sx, sy: sy, sz: sz, items: items)
+}
+
+// Anything that can say whether a cell is solid: a world, a column, a test
+// floor. `ray.cast` and `collide.slide` are generic over it, so the call is
+// direct and the compiler can inline it (no function value in the way).
+pub interface Solid {
+    pure solid(self, x: int, y: int, z: int) -> bool
+}

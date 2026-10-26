@@ -1,10 +1,13 @@
 //! Helpers shared by the CLI test binaries.
 #![allow(dead_code)]
 
+pub mod directives;
 pub mod smoke;
 
 use std::ffi::{OsStr, OsString};
-use std::process::Command;
+use std::io::Read;
+use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
 
 /// Takes every `KESTREL_*` variable out of the child's environment, so nothing left in the
 /// shell that runs `cargo test` (`KESTREL_HEADLESS`, `KESTREL_HIDDEN`, `KESTREL_THREADS`,
@@ -28,4 +31,35 @@ pub fn scrub(cmd: &mut Command, names: impl Iterator<Item = OsString>) -> &mut C
 /// Names are case-insensitive on Windows, so `kestrel_hidden` is the same variable.
 fn is_kestrel_variable(name: &OsStr) -> bool {
     name.to_string_lossy().to_ascii_uppercase().starts_with("KESTREL_")
+}
+
+/// Runs the command with no input, killing it after `limit`. `None` when it timed out.
+pub fn output_within(cmd: &mut Command, limit: Duration) -> Option<Output> {
+    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = cmd.spawn().expect("run the command");
+    // Read both pipes on threads, so a program that prints a lot can't block on a full pipe.
+    fn drain(pipe: Option<impl Read + Send + 'static>) -> std::thread::JoinHandle<Vec<u8>> {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            if let Some(mut pipe) = pipe {
+                let _ = pipe.read_to_end(&mut bytes);
+            }
+            bytes
+        })
+    }
+    let (stdout, stderr) = (drain(child.stdout.take()), drain(child.stderr.take()));
+    let start = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("wait for the command") {
+            break Some(status);
+        }
+        if start.elapsed() > limit {
+            let _ = child.kill();
+            let _ = child.wait();
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let (stdout, stderr) = (stdout.join().unwrap(), stderr.join().unwrap());
+    status.map(|status| Output { status, stdout, stderr })
 }

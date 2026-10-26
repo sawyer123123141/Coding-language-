@@ -1,0 +1,3 @@
+// A fixture for the runner's `// copy:` and `// replace:` self-test (runner_replace.kes).
+pub let VALUE = 7
+pub let UNTOUCHED = 7

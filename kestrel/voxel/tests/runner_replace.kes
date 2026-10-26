@@ -1,0 +1,11 @@
+// Self-test of the runner's `// copy:` and `// replace:` directives: the fixture is copied
+// beside this program, its VALUE line is changed in the copy only, and UNTOUCHED shows that
+// only the named text was replaced.
+use { VALUE, UNTOUCHED from replace_value }
+
+main() {
+    print(VALUE, UNTOUCHED)
+}
+// copy: kestrel/voxel/tests/fixtures/replace_value.kes
+// replace: replace_value.kes VALUE = 7 => VALUE = 11
+// expect: 11 7

@@ -1,0 +1,249 @@
+//! The voxel engine's tests (`kestrel/voxel`). The engine is a flat folder of modules, and Kestrel
+//! finds a module only next to the file that uses it, so each test program in
+//! `kestrel/voxel/tests` runs in a scratch folder holding copies of every `kestrel/voxel/*.kes`
+//! plus the test, written there as `test_<name>.kes` (a module's name would clash with the engine
+//! file of that name, and `main.kes` is the engine's play program).
+//!
+//! The directives are the program tests' (`common/directives.rs`): `// expect:`,
+//! `// expect-exit:`, `// expect-stderr:` and `// env:`, and these for the engine:
+//! - `// copy: <repo-relative file>` copies another file into the scratch folder;
+//! - `// replace: <file> <old> => <new>` replaces literal text in that scratch copy only, before
+//!   the run (`file` is a file of the scratch folder);
+//! - `// release` also runs the program with `kestrel run --release`;
+//! - `// only-jit` skips the executable run (the file says why it is too slow).
+//!
+//! A build or check that exits non-zero is compared like a run, so a program that must fail to
+//! compile (a contract probe) says `// expect-exit: 1` and `// expect-stderr: <the message>`.
+//! `KESTREL_TEST_ONLY=a,b` runs only the tests whose file names start with `a` or `b`.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+use std::time::Duration;
+
+mod common;
+
+use common::directives::{compare, only_prefixed, parse, Directives, PROOF_FAILED};
+use common::{hermetic, output_within};
+
+/// What a contract's error says; see `release_runs_leave_proofs_and_contracts_alone`.
+const CONTRACT_FAILED: &str = "can't be proven";
+
+/// How long the release pass lets one program run (as `programs/release.rs` does).
+const RELEASE_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn voxel_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../voxel")
+}
+
+/// The repository's root, which `// copy:` paths are relative to.
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+/// The `.kes` files directly in `dir`, sorted.
+fn kes_files(dir: &Path) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("{}: {e}", dir.display()))
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|x| x == "kes"))
+        .collect();
+    files.sort();
+    files
+}
+
+/// Every test in `kestrel/voxel/tests`, or with `KESTREL_TEST_ONLY` only the ones that match.
+fn tests() -> Vec<PathBuf> {
+    let dir = voxel_dir().join("tests");
+    let files = kes_files(&dir);
+    assert!(!files.is_empty(), "no .kes tests in {}", dir.display());
+    let only = std::env::var("KESTREL_TEST_ONLY").ok();
+    let files = only_prefixed(files, only.as_deref());
+    assert!(!files.is_empty(), "KESTREL_TEST_ONLY={} matches no test in {}", only.unwrap_or_default(), dir.display());
+    files
+}
+
+/// Reads a test's directives. The program tests' `// asset:` and the proof-run expectations
+/// don't apply here, and a test that used them would silently check less than it says.
+fn expectations(name: &str, src: &str) -> Directives {
+    let exp = parse(name, src);
+    assert!(exp.assets.is_empty(), "{name}: `// asset:` is not supported in the engine's tests");
+    assert!(
+        exp.exit_proofs.is_none() && exp.stderr_proofs.is_empty(),
+        "{name}: `// expect-exit-proofs:` and `// expect-stderr-proofs:` are not supported in the engine's tests"
+    );
+    exp
+}
+
+/// What the test is called, `grid` for `tests/grid.kes`.
+fn stem(path: &Path) -> String {
+    path.file_stem().unwrap().to_string_lossy().into_owned()
+}
+
+/// A fresh scratch folder for the test in `path`, holding copies of the engine's `.kes` files,
+/// the files its `// copy:` lines name, and the test itself as `test_<name>.kes`, with its
+/// `// replace:` lines done. `pass` ("" for the JIT pass) keeps the passes, which run as separate
+/// tests in parallel, out of each other's folders. Gives the path of the test file.
+fn prepare(pass: &str, path: &Path, exp: &Directives) -> PathBuf {
+    let name = stem(path);
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("voxel_{name}{pass}"));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    for module in kes_files(&voxel_dir()) {
+        fs::copy(&module, dir.join(module.file_name().unwrap())).unwrap_or_else(|e| panic!("copy {}: {e}", module.display()));
+    }
+    for copy in &exp.copies {
+        let from = repo_root().join(copy);
+        let to = dir.join(from.file_name().unwrap());
+        fs::copy(&from, &to).unwrap_or_else(|e| panic!("{name}: can't copy {}: {e}", from.display()));
+    }
+    let file = dir.join(format!("test_{name}.kes"));
+    fs::copy(path, &file).unwrap();
+    for r in &exp.replaces {
+        let target = dir.join(&r.file);
+        let text = fs::read_to_string(&target).unwrap_or_else(|e| panic!("{name}: can't replace in {}: {e}", target.display()));
+        assert!(text.contains(&r.old), "{name}: `{}` is not in {}, so `// replace:` would change nothing", r.old, r.file);
+        fs::write(&target, text.replace(&r.old, &r.new)).unwrap();
+    }
+    file
+}
+
+/// `kestrel run`, with the proof check on and the test's `// env:` variables.
+fn kestrel_run(file: &Path, exp: &Directives) -> Output {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_kestrel"));
+    hermetic(cmd.args(["run", file.to_str().unwrap()])).envs(exp.env.iter().map(|(k, v)| (k, v))).env("KESTREL_CHECK_PROOFS", "1");
+    cmd.output().expect("run kestrel")
+}
+
+/// `kestrel build` of the file into `exe`, with the proof check on.
+fn kestrel_build(file: &Path, exe: &Path) -> Output {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_kestrel"));
+    hermetic(cmd.args(["build", file.to_str().unwrap(), "-o", exe.to_str().unwrap()])).env("KESTREL_CHECK_PROOFS", "1");
+    cmd.output().expect("run kestrel")
+}
+
+#[test]
+fn engine_tests_run_via_jit() {
+    let mut failures = Vec::new();
+    for path in tests() {
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        let exp = expectations(&name, &fs::read_to_string(&path).unwrap());
+        let file = prepare("", &path, &exp);
+        failures.extend(compare(&name, "jit", &kestrel_run(&file, &exp), &exp));
+    }
+    assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+}
+
+#[test]
+fn engine_tests_run_as_executables() {
+    let mut failures = Vec::new();
+    for path in tests() {
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        let exp = expectations(&name, &fs::read_to_string(&path).unwrap());
+        if exp.only_jit {
+            continue;
+        }
+        let file = prepare("_exe", &path, &exp);
+        let exe = file.with_extension(std::env::consts::EXE_EXTENSION);
+        let built = kestrel_build(&file, &exe);
+        // A build that fails (a type error, a contract that can't be proven) is compared with
+        // the expected exit code and messages, as a run is; it isn't a harness failure.
+        if !built.status.success() {
+            failures.extend(compare(&name, "exe build", &built, &exp));
+            continue;
+        }
+        let out = hermetic(&mut Command::new(&exe))
+            .envs(exp.env.iter().map(|(k, v)| (k, v)))
+            .env("KESTREL_CHECK_PROOFS", "1")
+            .output()
+            .expect("run built exe");
+        failures.extend(compare(&name, "exe", &out, &exp));
+    }
+    assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+}
+
+/// The release pass: the tests that say `// release` under `kestrel run --release`, with the proof
+/// check on. As in the program tests' release pass, the checked expectations don't hold there (an
+/// overflow wraps instead of stopping), so a run fails only when its standard error has the
+/// failed-proof sentence, or a contract's error that the test doesn't expect. A run over 30
+/// seconds is killed and listed, but doesn't fail the test.
+#[test]
+fn release_runs_leave_proofs_and_contracts_alone() {
+    let mut failures = Vec::new();
+    let mut timeouts = Vec::new();
+    for path in tests() {
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        let exp = expectations(&name, &fs::read_to_string(&path).unwrap());
+        if !exp.release {
+            continue;
+        }
+        let file = prepare("_release", &path, &exp);
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_kestrel"));
+        hermetic(cmd.args(["run", "--release", file.to_str().unwrap()]))
+            .envs(exp.env.iter().map(|(k, v)| (k, v)))
+            .env("KESTREL_CHECK_PROOFS", "1");
+        let Some(out) = output_within(&mut cmd, RELEASE_TIMEOUT) else {
+            timeouts.push(name);
+            continue;
+        };
+        let stderr = String::from_utf8_lossy(&out.stderr).replace("\r\n", "\n");
+        if stderr.contains(PROOF_FAILED) {
+            failures.push(format!("{name} [release]: a proof failed\n--- stderr ---\n{stderr}"));
+        }
+        if stderr.contains(CONTRACT_FAILED) && !exp.stderr.iter().any(|s| s.contains(CONTRACT_FAILED)) {
+            failures.push(format!("{name} [release]: a contract doesn't hold\n--- stderr ---\n{stderr}"));
+        }
+    }
+    if !timeouts.is_empty() {
+        // Written to the real standard error: libtest hides `eprintln!` from a passing test.
+        use std::io::Write;
+        let _ = writeln!(std::io::stderr(), "engine release pass: stopped after 30 seconds: {}", timeouts.join(", "));
+    }
+    assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+}
+
+#[test]
+fn the_engine_directives_are_read() {
+    let src = "// copy: kestrel/bench/voxels3d/voxels3d.kes\n// replace: voxels3d.kes fn density => pub fn density\n\
+               // replace: gen.kes SIZE = 32 => SIZE = 4\n// replace: gen.kes  gone =>\n// release\n// only-jit\n// expect: hi\nmain() {}\n";
+    let exp = expectations("d.kes", src);
+    assert_eq!(exp.copies, ["kestrel/bench/voxels3d/voxels3d.kes"]);
+    let replaces: Vec<(&str, &str, &str)> = exp.replaces.iter().map(|r| (&*r.file, &*r.old, &*r.new)).collect();
+    let expected = [("voxels3d.kes", "fn density", "pub fn density"), ("gen.kes", "SIZE = 32", "SIZE = 4"), ("gen.kes", "gone", "")];
+    assert_eq!(replaces, expected);
+    assert!(exp.release && exp.only_jit);
+    assert_eq!(exp.stdout, "hi\n");
+    // Comments that merely start with those words are not directives.
+    let plain = expectations("c.kes", "// release pass runs this\n// only-jit-ish\n// copying files\nmain() {}\n");
+    assert!(!plain.release && !plain.only_jit && plain.copies.is_empty() && plain.replaces.is_empty());
+}
+
+#[test]
+#[should_panic(expected = "e.kes: bad replace directive (expected <file> <old text> => <new text>): // replace: a.kes only")]
+fn a_replace_without_an_arrow_panics() {
+    expectations("e.kes", "// replace: a.kes only old text\nmain() {}\n");
+}
+
+#[test]
+#[should_panic(expected = "e.kes: bad copy directive (expected a file inside the repo): // copy: ../outside.kes")]
+fn a_copy_outside_the_repo_panics() {
+    expectations("e.kes", "// copy: ../outside.kes\nmain() {}\n");
+}
+
+#[test]
+#[should_panic(expected = "e.kes: `// asset:` is not supported in the engine's tests")]
+fn the_program_tests_asset_directive_is_refused_here() {
+    expectations("e.kes", "// asset: a.png\nmain() {}\n");
+}
+
+#[test]
+#[should_panic(expected = "is not in test_t.kes, so `// replace:` would change nothing")]
+fn a_replace_that_matches_nothing_panics() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("voxel_replace_unit");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let test = dir.join("t.kes");
+    fs::write(&test, "main() {}\n").unwrap();
+    let exp = expectations("t.kes", "// replace: test_t.kes no such text in the file => x\nmain() {}\n");
+    prepare("_unit", &test, &exp);
+}

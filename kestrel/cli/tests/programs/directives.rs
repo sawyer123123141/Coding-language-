@@ -65,3 +65,32 @@ fn an_asset_outside_the_programs_folder_panics() {
 fn an_unknown_directive_still_panics() {
     expectations("typo.kes", "// expect-asset: a.png\nmain() {}\n");
 }
+
+#[test]
+#[should_panic(expected = "e.kes: `// copy:` only works in the voxel engine's tests")]
+fn the_engine_copy_directive_is_refused_here() {
+    expectations("e.kes", "// copy: kestrel/voxel/grid.kes\nmain() {}\n");
+}
+
+#[test]
+#[should_panic(expected = "e.kes: `// replace:` only works in the voxel engine's tests")]
+fn the_engine_replace_directive_is_refused_here() {
+    expectations("e.kes", "// replace: a.kes x => y\nmain() {}\n");
+}
+
+#[test]
+#[should_panic(expected = "e.kes: `// release` only works in the voxel engine's tests")]
+fn the_engine_release_directive_is_refused_here() {
+    expectations("e.kes", "// release\nmain() {}\n");
+}
+
+#[test]
+#[should_panic(expected = "e.kes: `// only-jit` only works in the voxel engine's tests")]
+fn the_engine_only_jit_directive_is_refused_here() {
+    expectations("e.kes", "// only-jit\nmain() {}\n");
+}
+
+#[test]
+fn a_comment_that_starts_with_the_word_release_is_not_a_directive() {
+    expectations("note.kes", "// release pass runs this with the proof check on\n// only-jit-ish\nmain() {}\n");
+}

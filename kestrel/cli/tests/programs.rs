@@ -9,91 +9,27 @@ mod directives;
 #[path = "programs/release.rs"]
 mod release;
 
+use common::directives::{compare, only_prefixed, parse as parse_directives, Directives, PROOF_FAILED};
 use common::{hermetic, scrub};
 
 /// What a test program declares about itself in `// expect...` comments.
-struct Expect {
-    stdout: String,
-    exit: i32,
-    stderr: Vec<String>,
-    /// `// env: KEY=VALUE` lines: variables set for both the JIT run and the exe run.
-    env: Vec<(String, String)>,
-    /// `// asset: <file>` lines: files in `tests/programs` the program reads by a relative path.
-    /// The JIT run finds them in place; the exe run gets a copy next to the exe.
-    assets: Vec<String>,
-    /// `// expect-exit-proofs:` and `// expect-stderr-proofs:`: what a `tests/release` program's
-    /// run with the proof check expects instead (a trusted assumption is evaluated there). Its
-    /// standard output must be the same in both runs.
-    exit_proofs: Option<i32>,
-    stderr_proofs: Vec<String>,
-}
-
-impl Expect {
-    /// What the run with the proof check expects.
-    fn with_proofs(&self) -> Expect {
-        let stderr = if self.stderr_proofs.is_empty() { self.stderr.clone() } else { self.stderr_proofs.clone() };
-        Expect {
-            stdout: self.stdout.clone(),
-            exit: self.exit_proofs.unwrap_or(self.exit),
-            stderr,
-            env: self.env.clone(),
-            assets: self.assets.clone(),
-            exit_proofs: None,
-            stderr_proofs: Vec::new(),
-        }
-    }
-}
+type Expect = Directives;
 
 /// Reads the directives of program `name`. Panics on a malformed or unknown
-/// `// expect...`, `// env:` or `// asset:` line so a typo can't silently drop a check.
+/// `// expect...`, `// env:` or `// asset:` line so a typo can't silently drop a check, and on
+/// the directives that only make sense beside modules, which the voxel engine's tests run.
 fn expectations(name: &str, src: &str) -> Expect {
-    let mut lines = Vec::new();
-    let mut exit = 0;
-    let mut stderr = Vec::new();
-    let mut env = Vec::new();
-    let mut assets = Vec::new();
-    let (mut exit_proofs, mut stderr_proofs) = (None, Vec::new());
-    for line in src.lines() {
-        let line = line.trim();
-        if let Some(rest) = line.strip_prefix("// asset:") {
-            assets.push(asset_path(name, rest.trim(), line));
-        } else if let Some(rest) = line.strip_prefix("// env:") {
-            let (key, value) = rest
-                .split_once('=')
-                .map(|(key, value)| (key.trim(), value.trim()))
-                .filter(|(key, _)| !key.is_empty())
-                .unwrap_or_else(|| panic!("{name}: bad env directive (expected KEY=VALUE): {line}"));
-            env.push((key.to_string(), value.to_string()));
-        } else if let Some(rest) = line.strip_prefix("// expect-exit-proofs:") {
-            exit_proofs = Some(rest.trim().parse().unwrap_or_else(|_| panic!("{name}: bad expect-exit-proofs number: {line}")));
-        } else if let Some(rest) = line.strip_prefix("// expect-stderr-proofs:") {
-            stderr_proofs.push(rest.trim().to_string());
-        } else if let Some(rest) = line.strip_prefix("// expect-exit:") {
-            exit = rest.trim().parse().unwrap_or_else(|_| panic!("{name}: bad expect-exit number: {line}"));
-        } else if let Some(rest) = line.strip_prefix("// expect-stderr:") {
-            stderr.push(rest.trim().to_string());
-        } else if let Some(rest) = line.strip_prefix("// expect:") {
-            lines.push(rest.strip_prefix(' ').unwrap_or(rest).to_string());
-        } else if line.starts_with("// expect") {
-            panic!("{name}: unknown expect directive: {line}");
-        }
+    let exp = parse_directives(name, src);
+    let engine_only = [
+        (!exp.copies.is_empty(), "// copy:"),
+        (!exp.replaces.is_empty(), "// replace:"),
+        (exp.release, "// release"),
+        (exp.only_jit, "// only-jit"),
+    ];
+    if let Some((_, directive)) = engine_only.iter().find(|(used, _)| *used) {
+        panic!("{name}: `{directive}` only works in the voxel engine's tests (cli/tests/voxel_engine.rs), which run programs beside modules");
     }
-    let headless = env.iter().any(|(key, value)| key == "KESTREL_HEADLESS" && !value.is_empty());
-    assert!(
-        headless || !opens_a_window(src),
-        "{name}: opens a window but has no `// env: KESTREL_HEADLESS=<frames>` line, so the test would open a real window and hang the suite"
-    );
-    let stdout = lines.iter().map(|l| format!("{l}\n")).collect();
-    Expect { stdout, exit, stderr, env, assets, exit_proofs, stderr_proofs }
-}
-
-/// The file an `// asset:` line names: a path inside `tests/programs`, so not absolute and not
-/// climbing out with `..` (the exe run copies it next to the exe).
-fn asset_path(name: &str, file: &str, line: &str) -> String {
-    let path = Path::new(file);
-    let inside = path.components().all(|part| matches!(part, std::path::Component::Normal(_)));
-    assert!(!file.is_empty() && inside, "{name}: bad asset directive (expected a file inside tests/programs): {line}");
-    file.to_string()
+    exp
 }
 
 /// Copies each of `assets` from `from` to the same relative path in `to`, creating folders.
@@ -105,39 +41,8 @@ fn copy_assets(from: &Path, assets: &[String], to: &Path) {
     }
 }
 
-/// Whether the program calls `window.open` (or `open` imported from `window`), which opens a
-/// real window unless `KESTREL_HEADLESS` says otherwise. A text check, not a parse: a comment
-/// is skipped, and a call hidden in a string would be a false alarm.
-fn opens_a_window(src: &str) -> bool {
-    src.lines().map(str::trim).filter(|l| !l.starts_with("//")).any(|l| {
-        l.contains("window.open(") || (l.starts_with("use ") && l.contains("open") && l.ends_with(" from window }"))
-    })
-}
-
 fn programs_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/programs")
-}
-
-/// The sentence a failed proof check ends a program with (see `KESTREL_CHECK_PROOFS`).
-const PROOF_FAILED: &str = "range analysis removed";
-
-/// The programs whose file names start with one of the comma-separated `prefixes` (empty
-/// entries and spaces around a prefix are ignored); all of them for `None`, or when no prefix is
-/// left (`KESTREL_TEST_ONLY=` set but empty).
-pub(crate) fn only_prefixed(files: Vec<PathBuf>, prefixes: Option<&str>) -> Vec<PathBuf> {
-    let Some(prefixes) = prefixes else { return files };
-    let prefixes: Vec<&str> = prefixes.split(',').map(str::trim).filter(|p| !p.is_empty()).collect();
-    // Set but empty (`KESTREL_TEST_ONLY=`) is every program, as when it isn't set.
-    if prefixes.is_empty() {
-        return files;
-    }
-    files
-        .into_iter()
-        .filter(|f| {
-            let name = f.file_name().unwrap().to_string_lossy();
-            prefixes.iter().any(|p| name.starts_with(p))
-        })
-        .collect()
 }
 
 /// Every program in `tests/programs`, or with `KESTREL_TEST_ONLY=a,b` only those whose names
@@ -169,23 +74,6 @@ fn kestrel_run(path: &Path, exp: &Expect) -> Output {
         .envs(exp.env.iter().map(|(k, v)| (k, v)))
         .env("KESTREL_CHECK_PROOFS", "1");
     cmd.output().expect("run kestrel")
-}
-
-/// Compares one run against the program's expectations; describes any mismatch.
-fn compare(name: &str, mode: &str, out: &Output, exp: &Expect) -> Option<String> {
-    let stdout = String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n");
-    let stderr = String::from_utf8_lossy(&out.stderr).replace("\r\n", "\n");
-    let code = out.status.code().unwrap_or(-1);
-    // A run that stopped on a failed proof is a failure whatever else it printed.
-    let proof_failed = stderr.contains(PROOF_FAILED);
-    let ok = !proof_failed && stdout == exp.stdout && code == exp.exit && exp.stderr.iter().all(|s| stderr.contains(s.as_str()));
-    (!ok).then(|| {
-        let note = if proof_failed { "a proof failed: " } else { "" };
-        format!(
-            "{name} [{mode}]: {note}exit {code} (expected {})\n--- stdout ---\n{stdout}--- expected ---\n{}--- stderr ---\n{stderr}",
-            exp.exit, exp.stdout
-        )
-    })
 }
 
 #[test]

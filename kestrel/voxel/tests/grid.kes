@@ -1,0 +1,76 @@
+// Grid[T]: the index order, get and set, inside, fill, and the three kinds of
+// value it holds (a byte, an int, a struct), plus the Solid interface.
+use { Grid, Solid, grid from grid }
+
+struct Cell {
+    a: int
+    b: int
+}
+
+// A floor for the Solid test: a cell is solid when its byte is not 0.
+struct Floor: Solid {
+    cells: Grid[u8]
+
+    pure solid(self, x: int, y: int, z: int) -> bool {
+        self.cells.inside(x, y, z) and self.cells.get(x, y, z) != 0
+    }
+}
+
+// Counts the solid cells of a 4 x 5 x 6 box, through the interface alone.
+pure count_solid[W: Solid](w: W) -> int {
+    var n = 0
+    for y from 0 to 5 {
+        for z from 0 to 6 {
+            for x from 0 to 4 {
+                if w.solid(x, y, z) {
+                    n += 1
+                }
+            }
+        }
+    }
+    n
+}
+
+main() {
+    var g = grid[u8](4, 5, 6, 0)
+    print("index", g.index(1, 2, 3) == (2 * g.sz + 3) * g.sx + 1)
+    print("len", g.items.len)
+    g.set(1, 2, 3, 7)
+    print("get", g.get(1, 2, 3), g.get(2, 2, 3))
+    print("inside", g.inside(3, 4, 5), g.inside(4, 0, 0), g.inside(0, -1, 0), g.inside(0, 0, 6))
+    g.fill(9)
+    var same = true
+    for v in g.items {
+        if v != 9 {
+            same = false
+        }
+    }
+    print("fill", same)
+
+    var gi = grid[int](4, 5, 6, 0)
+    gi.set(3, 2, 1, 42)
+    print("int", gi.get(3, 2, 1))
+
+    var gc = grid[Cell](2, 2, 2, Cell(a: 0, b: 0))
+    gc.set(1, 0, 1, Cell(a: 3, b: 4))
+    let c = gc.get(1, 0, 1)
+    print("struct", c.a, c.b)
+
+    var cells = grid[u8](4, 5, 6, 0)
+    cells.set(0, 0, 0, 1)
+    cells.set(3, 4, 5, 1)
+    cells.set(1, 2, 3, 1)
+    cells.set(2, 2, 3, 1)
+    cells.set(0, 4, 0, 1)
+    let ground = Floor(cells: cells)
+    print("solid", count_solid(ground))
+}
+// release
+// expect: index true
+// expect: len 120
+// expect: get 7 0
+// expect: inside true false false false
+// expect: fill true
+// expect: int 42
+// expect: struct 3 4
+// expect: solid 5

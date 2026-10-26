@@ -1,0 +1,9 @@
+// Self-test of the runner: a program that doesn't compile exits non-zero before it runs, and
+// the runner compares that exit code and stderr with the directives (in the JIT pass and in
+// the exe pass, where it is the build that fails). Contract probes rely on this.
+main() {
+    let n: int = "not a number"
+    print(n)
+}
+// expect-exit: 1
+// expect-stderr: expected int, found string
