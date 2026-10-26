@@ -1,0 +1,34 @@
+// Contract probe (E39): `@prove(no_checks)` on the mesher's inner meshing loops (the `for z`
+// and the `for x` in it, in `mesh_chunk`) can't be proven in either build yet, so the engine
+// doesn't carry it. This test adds it to the scratch copy of `mesher.kes` only and expects
+// the build to refuse it. When a compiler change makes it pass, this test fails: move the
+// contract into the engine.
+//
+// What stops it (from `kestrel check --report`):
+// - checked build: overflow checks on `wy * 32` and `cx * SIZE + x` (the layer and the
+//   column's place are any `int` to the compiler);
+// - release build: the read of the block's type, `w.columns.items[slot].blocks.items[k]`,
+//   whose list length nothing shows and `@assume` can't name (it is reached through an
+//   index); and the six calls to `Builder.face`, which isn't inlined (258 nodes, the limit
+//   is 256) and keeps 12 bounds checks: its ambient occlusion reads `solid[front + su + sv]`,
+//   which is inside the flags only because of how `front`, `su` and `sv` relate, not by
+//   their ranges.
+//
+// The copy loop's contract (`copy_row`) does pass in both builds, with `@assume`s on the
+// lists' lengths, and is in the engine.
+use { new_world, load_now from world }
+use { mesh_chunk, faces from mesher }
+
+main() {
+    var w = new_world(1337, 9)
+    for cz from -1 to 2 {
+        for cx from -1 to 2 {
+            load_now(var w, cx, cz)
+        }
+    }
+    print(faces(mesh_chunk(w, w.slot_at(0, 0), 1)))
+}
+// replace: mesher.kes for z from 0 to SIZE { => @prove(no_checks) for z from 0 to SIZE {
+// expect-exit: 1
+// expect-stderr: can't be proven `no_checks`
+// release

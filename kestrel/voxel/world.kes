@@ -1,0 +1,125 @@
+// The world: every loaded column, in a pool of slots, found by its key (E11). It answers
+// "which block is at (x, y, z)" for the whole world, across columns and for negative x and
+// z, and takes edits. It also holds each chunk's meshing state and the queue of chunks
+// waiting for a mesh, which streaming (`stream.kes`) fills and rendering empties.
+//
+// In GDScript terms it is the node that owns the chunk dictionary, but the columns don't
+// come and go: there is a fixed number of slots (`Pool`), each with a 32 x 128 x 32 grid
+// built once, and loading a column rewrites a free slot's grid in place.
+//
+// Reads go in place through `self.columns.items[slot].blocks.items[i]`: taking a `Column`
+// out of the pool into a variable would copy its 128 KB grid.
+use { Solid from grid }
+use { Handle, Pool, pool from pool }
+use { Ring, ring from ring }
+use { Column, ColumnState, column_key, column_of, local, new_column from column }
+use { generate from gen }
+use { AIR, STONE, SIZE, LAYERS, HEIGHT, is_solid from blocks }
+
+// A chunk's meshing state, one per slot * LAYERS + layer in `World.chunk_state`: not
+// meshed and not waiting, waiting in the queue, or meshed.
+pub let CHUNK_NONE: u8 = 0
+pub let CHUNK_QUEUED: u8 = 1
+pub let CHUNK_MESHED: u8 = 2
+
+// A chunk waiting for a mesh: its column's handle (dead if the column unloaded while the
+// chunk waited) and which of the column's chunks, 0 at the bottom.
+pub struct ChunkRef {
+    column: Handle
+    layer: int
+}
+
+pub struct World: Solid {
+    seed: int
+    columns: Pool[Column]
+    // Column key (`column_key`) to slot, for every column that has a slot.
+    index: map[i64, int]
+    chunk_state: list[u8]
+    queue: Ring[ChunkRef]
+
+    // The slot of column (cx, cz), or -1 when it isn't loaded or isn't Ready yet.
+    pure slot_at(self, cx: int, cz: int) -> int {
+        let slot = self.index.get(column_key(cx, cz), -1)
+        if slot < 0 {
+            return -1
+        }
+        match self.columns.items[slot].state {
+            Ready { slot }
+            else { -1 }
+        }
+    }
+
+    // The block at world (x, y, z). Above the world is air and below it stone; a column
+    // that isn't Ready counts as stone, so nothing falls or walks into it.
+    pure block(self, x: int, y: int, z: int) -> u8 {
+        if y >= HEIGHT {
+            return AIR
+        }
+        if y < 0 {
+            return STONE
+        }
+        let slot = self.slot_at(column_of(x), column_of(z))
+        if slot < 0 {
+            return STONE
+        }
+        self.columns.items[slot].blocks.items[(y * SIZE + local(z)) * SIZE + local(x)]
+    }
+
+    pure solid(self, x: int, y: int, z: int) -> bool {
+        is_solid(self.block(x, y, z))
+    }
+
+    // Puts block `id` at (x, y, z). Returns false, changing nothing, outside the world's
+    // height (0 to 127) or in a column that isn't Ready. It doesn't re-mesh anything:
+    // the caller marks the chunks around the cell (`edit.kes`).
+    pure set_block(var self, x: int, y: int, z: int, id: u8) -> bool {
+        if y < 0 or y >= HEIGHT {
+            return false
+        }
+        let slot = self.slot_at(column_of(x), column_of(z))
+        if slot < 0 {
+            return false
+        }
+        self.columns.items[slot].blocks.items[(y * SIZE + local(z)) * SIZE + local(x)] = id
+        true
+    }
+}
+
+// An empty world with `capacity` column slots, each with its grid built, every chunk state
+// CHUNK_NONE and a queue with room for every chunk. The pool is made inside the constructor
+// call, not in a local first (E38: a struct made from a local's lists copies them): measured,
+// `new_world(1337, 441)` peaks at the same 64 MB as `pool(441, new_column())` alone.
+pub new_world(seed: int, capacity: int) -> World {
+    let nowhere = ChunkRef(column: Handle(slot: -1, gen: -1), layer: 0)
+    var w = World(seed: seed, columns: pool[Column](capacity, new_column()), index: {}, chunk_state: [],
+        queue: ring[ChunkRef](capacity * LAYERS, nowhere))
+    for i from 0 to capacity * LAYERS {
+        w.chunk_state.add(CHUNK_NONE)
+    }
+    w
+}
+
+// Loads column (cx, cz) now: takes a slot, generates the column into it in place, marks it
+// Ready and indexes it. Nothing is queued for meshing. This is for tests and for building a
+// region at once; streaming loads columns in batches across cores instead (`stream.kes`).
+// A column that already has a slot is left as it is.
+pub load_now(var w: World, cx: int, cz: int) {
+    let key = column_key(cx, cz)
+    if w.index.has(key) {
+        return
+    }
+    let h = w.columns.take() else {
+        print("load_now: the column pool is full ({w.columns.items.len} slots); make the world with a larger capacity")
+        return
+    }
+    w.columns.items[h.slot].cx = cx
+    w.columns.items[h.slot].cz = cz
+    w.columns.items[h.slot].key = key
+    w.columns.items[h.slot].state = ColumnState.Generating
+    generate(var w.columns.items[h.slot].blocks, cx, cz, w.seed)
+    w.columns.items[h.slot].state = ColumnState.Ready
+    for layer from 0 to LAYERS {
+        w.chunk_state[h.slot * LAYERS + layer] = CHUNK_NONE
+    }
+    w.index[key] = h.slot
+}

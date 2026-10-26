@@ -1,0 +1,75 @@
+// The world: columns loaded into pool slots and found by key, blocks read across columns
+// (negative x too), the top and bottom of the world, unloaded columns, edits, and the world
+// asked through the `Solid` interface the way the ray caster and collision code ask it.
+use { World, new_world, load_now, CHUNK_NONE from world }
+use { Solid from grid }
+use { solid_at from gen }
+use { AIR, STONE, SIZE, LAYERS, HEIGHT from blocks }
+
+// Asked through the interface rule, as `ray.cast` and `collide.slide` do.
+pure solid_through[W: Solid](w: W, x: int, y: int, z: int) -> bool {
+    w.solid(x, y, z)
+}
+
+// Whether the world's block at (x, y, z) is the one stored in its column's slot.
+pure agrees(w: World, slot: int, x: int, y: int, z: int) -> bool {
+    let lx = x & 31
+    let lz = z & 31
+    w.block(x, y, z) == w.columns.items[slot].blocks.items[(y * SIZE + lz) * SIZE + lx]
+}
+
+main() {
+    let seed = 1337
+    var w = new_world(seed, 4)
+    print("new", w.columns.items.len, w.chunk_state.len == 4 * LAYERS, w.queue.items.len == 4 * LAYERS, w.queue.len())
+    print("empty", w.slot_at(0, 0), w.slot_at(-1, 0), w.block(5, 5, 5) == STONE)
+
+    load_now(var w, 0, 0)
+    load_now(var w, -1, 0)
+    let s0 = w.slot_at(0, 0)
+    let s1 = w.slot_at(-1, 0)
+    print("loaded", s0 >= 0, s1 >= 0, s0 != s1, w.slot_at(1, 0), w.slot_at(0, -1), w.columns.in_use())
+    print("column", w.columns.items[s1].cx, w.columns.items[s1].cz, w.chunk_state[s0 * LAYERS] == CHUNK_NONE)
+
+    // Reads agree with the column grids, on both sides of x = 0.
+    print("agrees", agrees(w, s0, 0, 40, 0), agrees(w, s0, 31, 70, 31), agrees(w, s1, -1, 40, 5),
+        agrees(w, s1, -32, 60, 31), agrees(w, s1, -17, 0, 0), agrees(w, s0, 12, 127, 9))
+
+    // The stored blocks are solid where the terrain says (block types aside).
+    var terrain = true
+    for y from 0 to HEIGHT {
+        if (w.block(-1, y, 7) != AIR) != solid_at(-1, y, 7, seed) {
+            terrain = false
+        }
+        if (w.block(3, y, 30) != AIR) != solid_at(3, y, 30, seed) {
+            terrain = false
+        }
+    }
+    print("terrain", terrain)
+
+    // Below the world is stone, above it air, and an unloaded column is stone.
+    print("edges", w.block(5, -1, 5) == STONE, w.block(5, 128, 5) == AIR, w.block(40, 5, 5) == STONE,
+        w.block(5, 5, -1) == STONE, w.block(-33, 5, 5) == STONE)
+
+    // Edits: y = 127 is the top row; 128 is outside; an unloaded column refuses.
+    print("set", w.set_block(5, 127, 5, STONE), w.block(5, 127, 5) == STONE, w.set_block(5, 128, 5, STONE),
+        w.set_block(5, -1, 5, AIR), w.set_block(40, 5, 5, AIR), w.set_block(-1, 3, 3, AIR), w.block(-1, 3, 3) == AIR)
+
+    // Solid through the generic helper: an edit shows, as do the world's edges.
+    print("solid", solid_through(w, 5, 127, 5), not solid_through(w, -1, 3, 3), solid_through(w, 0, -1, 0),
+        not solid_through(w, 0, 128, 0), solid_through(w, 100, 50, 100))
+
+    // Loading a column that is already loaded changes nothing.
+    load_now(var w, 0, 0)
+    print("again", w.slot_at(0, 0) == s0, w.columns.in_use())
+}
+// expect: new 4 true true 0
+// expect: empty -1 -1 true
+// expect: loaded true true true -1 -1 2
+// expect: column -1 0 true
+// expect: agrees true true true true true true
+// expect: terrain true
+// expect: edges true true true true true
+// expect: set true true false false false true true
+// expect: solid true true true true true
+// expect: again true 2

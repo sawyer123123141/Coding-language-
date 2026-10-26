@@ -1,0 +1,244 @@
+// The mesher on hand-built worlds: the columns around (0, 0) are loaded and then emptied, so
+// each case places only the blocks it needs. It checks the face count of one block, faces on
+// column borders both ways from x = 0 and z = 0, unloaded columns (solid), the top and bottom
+// of the world (the faces past y = 127 and below y = 0 come from the terrain), the face
+// shading and colours, ambient occlusion (also from the corner columns) and the diagonal each
+// quad is cut along.
+use { World, new_world, load_now from world }
+use { mesh_chunk, faces, chunk_index, variation, shaded from mesher }
+use { solid_at from gen }
+use { AIR, STONE, GRASS, SIZE, LAYERS, colour from blocks }
+use { MeshData from draw3d }
+
+// Empties every loaded column (as if the world were all air).
+clear(var w: World) {
+    for s from 0 to w.columns.items.len {
+        if w.columns.used[s] {
+            for i from 0 to w.columns.items[s].blocks.items.len {
+                w.columns.items[s].blocks.items[i] = AIR
+            }
+        }
+    }
+}
+
+// The mesh of chunk (0, 0, 0).
+pure origin_mesh(w: World) -> MeshData {
+    mesh_chunk(w, w.slot_at(0, 0), 0)
+}
+
+// Whether every vertex is inside the chunk's own box, 0 to 32 on each axis.
+pure local_box(m: MeshData) -> bool {
+    var ok = true
+    for v in m.vertices {
+        if v.x < 0.0 or v.x > 32.0 or v.y < 0.0 or v.y > 32.0 or v.z < 0.0 or v.z > 32.0 {
+            ok = false
+        }
+    }
+    ok
+}
+
+// The face whose first two corners are `a` and `b`, or -1.
+pure face_at(m: MeshData, a: vec3, b: vec3) -> int {
+    var found = -1
+    for f from 0 to faces(m) {
+        if m.vertices[f * 4] == a and m.vertices[f * 4 + 1] == b {
+            found = f
+        }
+    }
+    found
+}
+
+// How bright corner k of face f is next to `base` (its colour with no shading), in hundredths.
+pure bright(m: MeshData, f: int, k: int, base: float) -> int {
+    int(m.colors[f * 4 + k].g / base * 100.0 + 0.5)
+}
+
+// Which diagonal face f is cut along: "ac" (triangles a b c and a c d) or "bd".
+pure cut(m: MeshData, f: int) -> string {
+    if m.indices[f * 6] == f * 4 { "ac" } else { "bd" }
+}
+
+// The top face of the block at (16, 16, 16): its four corners' brightness and its cut.
+top_face(w: World, base: float) {
+    let m = origin_mesh(w)
+    let f = face_at(m, vec3(16, 17, 16), vec3(17, 17, 16))
+    print("top", bright(m, f, 0, base), bright(m, f, 1, base), bright(m, f, 2, base), bright(m, f, 3, base), cut(m, f))
+}
+
+main() {
+    let seed = 1337
+    var w = new_world(seed, 9)
+    for cz from -1 to 2 {
+        for cx from -1 to 2 {
+            load_now(var w, cx, cz)
+        }
+    }
+    clear(var w)
+    print("index", chunk_index(0, 0), chunk_index(2, 3), chunk_index(5, 1) == 5 * LAYERS + 1)
+    print("empty", faces(origin_mesh(w)))
+
+    // One block in the middle of the chunk: 6 faces of 4 corners and 2 triangles each.
+    w.set_block(16, 16, 16, STONE)
+    let one = origin_mesh(w)
+    print("one", faces(one), one.vertices.len, one.indices.len, one.colors.len, local_box(one))
+
+    // Face shading, from the corner a of each face (no block touches it): x sides 0.8,
+    // top 1.0, bottom 0.5, z sides 0.7, all on the block's variation of stone.
+    let base = shaded(colour(STONE), variation(16, 16, 16)).g
+    print("shade", bright(one, 0, 0, base), bright(one, 1, 0, base), bright(one, 2, 0, base),
+        bright(one, 3, 0, base), bright(one, 4, 0, base), bright(one, 5, 0, base))
+
+    // The block's stored type gives its colour.
+    w.set_block(16, 16, 16, GRASS)
+    let green = origin_mesh(w)
+    let want = shaded(colour(GRASS), variation(16, 16, 16))
+    let got = green.colors[face_at(green, vec3(16, 17, 16), vec3(17, 17, 16)) * 4]
+    print("colour", got.r == want.r, got.g == want.g, got.b == want.b)
+    w.set_block(16, 16, 16, STONE)
+
+    // Away from the origin the type comes from the block's own height and the variation
+    // from its world place: a grass block at (-5, 40, 3), in chunk 1 of column (-1, 0), whose
+    // top face starts at local (27, 9, 3).
+    w.set_block(-5, 40, 3, GRASS)
+    let far = mesh_chunk(w, w.slot_at(-1, 0), 1)
+    let far_want = shaded(colour(GRASS), variation(-5, 40, 3))
+    let far_got = far.colors[face_at(far, vec3(27, 9, 3), vec3(28, 9, 3)) * 4]
+    print("colour far", faces(far), far_got.r == far_want.r, far_got.g == far_want.g, far_got.b == far_want.b)
+    w.set_block(-5, 40, 3, AIR)
+
+    // Ambient occlusion on the top face (corners a (16, 17, 16), b (17, 17, 16),
+    // c (17, 17, 17), d (16, 17, 17)): a corner is 0.55 + 0.15 * ao, ao 3 with nothing
+    // around it. One side block beside b and c darkens both to 0.85; the quad keeps the a c cut.
+    top_face(w, base)
+    w.set_block(17, 17, 16, STONE)
+    top_face(w, base)
+    // A side and the block between the sides: 0.7.
+    w.set_block(17, 17, 15, STONE)
+    top_face(w, base)
+    w.set_block(17, 17, 15, AIR)
+    // Both sides of b: a nook, 0.55 whatever the block between them is.
+    w.set_block(16, 17, 15, STONE)
+    top_face(w, base)
+    w.set_block(17, 17, 16, AIR)
+    w.set_block(16, 17, 15, AIR)
+    // Only the diagonal block of a: a is 0.85, so the brighter diagonal is b d and the
+    // quad is cut along it.
+    w.set_block(15, 17, 15, STONE)
+    top_face(w, base)
+    w.set_block(15, 17, 15, AIR)
+    w.set_block(16, 16, 16, AIR)
+
+    // Column borders: x = 31 next to x = 32 in column (1, 0), and x = 0 next to x = -1 in
+    // column (-1, 0), hide the face between them.
+    w.set_block(31, 8, 7, STONE)
+    w.set_block(32, 8, 7, STONE)
+    let east = origin_mesh(w)
+    w.set_block(31, 8, 7, AIR)
+    w.set_block(32, 8, 7, AIR)
+    w.set_block(0, 8, 7, STONE)
+    w.set_block(-1, 8, 7, STONE)
+    let west = origin_mesh(w)
+    w.set_block(0, 8, 7, AIR)
+    w.set_block(-1, 8, 7, AIR)
+    print("borders", faces(east), faces(west), local_box(east), local_box(west))
+
+    // The same along z: z = 31 next to z = 32 in column (0, 1), and z = 0 next to z = -1 in
+    // column (0, -1).
+    w.set_block(7, 8, 31, STONE)
+    w.set_block(7, 8, 32, STONE)
+    let south = faces(origin_mesh(w))
+    w.set_block(7, 8, 31, AIR)
+    w.set_block(7, 8, 32, AIR)
+    w.set_block(7, 8, 0, STONE)
+    w.set_block(7, 8, -1, STONE)
+    let north = faces(origin_mesh(w))
+    w.set_block(7, 8, 0, AIR)
+    w.set_block(7, 8, -1, AIR)
+    print("borders z", south, north)
+
+    // A column that isn't loaded counts as solid: the block at x = -32, in column (-1, 0), has
+    // no face toward column (-2, 0), and the one at z = 63, in column (0, 1), none toward
+    // column (0, 2).
+    w.set_block(-32, 8, 7, STONE)
+    let unloaded_west = faces(mesh_chunk(w, w.slot_at(-1, 0), 0))
+    w.set_block(-32, 8, 7, AIR)
+    w.set_block(5, 8, 63, STONE)
+    let unloaded_south = faces(mesh_chunk(w, w.slot_at(0, 1), 0))
+    w.set_block(5, 8, 63, AIR)
+    print("unloaded", unloaded_west, unloaded_south)
+
+    // The corner columns: only ambient occlusion looks into them. A block at (-1, 9, -1),
+    // in column (-1, -1), shades corner a of the top face of (0, 8, 0) to 0.85 and moves
+    // the cut to b d; one at (32, 9, 32), in column (1, 1), shades corner c of (31, 8, 31).
+    w.set_block(0, 8, 0, STONE)
+    w.set_block(-1, 9, -1, STONE)
+    let nw = origin_mesh(w)
+    let fa = face_at(nw, vec3(0, 9, 0), vec3(1, 9, 0))
+    let base_a = shaded(colour(STONE), variation(0, 8, 0)).g
+    print("corner nw", bright(nw, fa, 0, base_a), bright(nw, fa, 1, base_a), bright(nw, fa, 2, base_a),
+        bright(nw, fa, 3, base_a), cut(nw, fa))
+    w.set_block(0, 8, 0, AIR)
+    w.set_block(-1, 9, -1, AIR)
+    w.set_block(31, 8, 31, STONE)
+    w.set_block(32, 9, 32, STONE)
+    let se = origin_mesh(w)
+    let fc = face_at(se, vec3(31, 9, 31), vec3(32, 9, 31))
+    let base_c = shaded(colour(STONE), variation(31, 8, 31)).g
+    print("corner se", bright(se, fc, 0, base_c), bright(se, fc, 1, base_c), bright(se, fc, 2, base_c),
+        bright(se, fc, 3, base_c), cut(se, fc))
+    w.set_block(31, 8, 31, AIR)
+    w.set_block(32, 9, 32, AIR)
+
+    // The top of the world: a block at y = 127, in the top chunk (layer 3), has a face
+    // above only where the terrain at y = 128 is air, and its vertices are chunk-local.
+    // Row z = 37 of column (-1, 1) has both kinds (it is west of x = 0 as well). x = -32 is
+    // left out: column (-2, 1) beside it is not loaded, so it counts as solid.
+    var top = true
+    var air_above = 0
+    var rock_above = 0
+    for x from 1 - SIZE to 0 {
+        w.set_block(x, 127, 37, STONE)
+        let m = mesh_chunk(w, w.slot_at(-1, 1), 3)
+        let want_faces = if solid_at(x, 128, 37, seed) { 5 } else { 6 }
+        if faces(m) != want_faces or not local_box(m) {
+            top = false
+        }
+        if want_faces == 6 { air_above += 1 } else { rock_above += 1 }
+        w.set_block(x, 127, 37, AIR)
+    }
+    print("top of world", top, air_above, rock_above)
+
+    // The bottom of the world: a block at y = 0 has a face below only where the terrain
+    // at y = -1 is air. Row z = 2 has both kinds.
+    var bottom = true
+    var open = 0
+    var shut = 0
+    for x from 0 to SIZE {
+        w.set_block(x, 0, 2, STONE)
+        let want_faces = if solid_at(x, -1, 2, seed) { 5 } else { 6 }
+        if faces(origin_mesh(w)) != want_faces {
+            bottom = false
+        }
+        if want_faces == 6 { open += 1 } else { shut += 1 }
+        w.set_block(x, 0, 2, AIR)
+    }
+    print("bottom", bottom, open, shut)
+}
+// expect: index 0 11 true
+// expect: empty 0
+// expect: one 6 24 36 24 true
+// expect: shade 80 80 100 50 70 70
+// expect: colour true true true
+// expect: colour far 6 true true true
+// expect: top 100 100 100 100 ac
+// expect: top 100 85 85 100 ac
+// expect: top 100 70 85 100 ac
+// expect: top 85 55 85 100 ac
+// expect: top 85 100 100 100 bd
+// expect: borders 5 5 true true
+// expect: borders z 5 5
+// expect: unloaded 5 5
+// expect: corner nw 85 100 100 100 bd
+// expect: corner se 100 100 85 100 bd
+// expect: top of world true 24 7
+// expect: bottom true 4 28

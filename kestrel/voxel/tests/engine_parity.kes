@@ -1,0 +1,34 @@
+// The engine's own parity (E20): the frozen benchmark's region built through the engine's
+// pipeline. Columns -1..8 by -1..8 are generated into the world's pool, and every chunk of
+// columns 0..7 is meshed by `mesh_chunk` from the stored blocks (outside the world's height
+// from the terrain function). It must count the frozen world's 463,749 faces.
+//
+// only-jit: it generates 100 columns and meshes 256 chunks; the JIT and release passes
+// cover it, and the executable pass would do the same work again for nothing new.
+use { World, new_world, load_now from world }
+use { mesh_chunk, faces from mesher }
+use { LAYERS from blocks }
+
+main() {
+    var w = new_world(1337, 100)
+    for cz from -1 to 9 {
+        for cx from -1 to 9 {
+            load_now(var w, cx, cz)
+        }
+    }
+    var total = 0
+    for cx from 0 to 8 {
+        for layer from 0 to LAYERS {
+            for cz from 0 to 8 {
+                let slot = w.slot_at(cx, cz)
+                arena {
+                    total += faces(mesh_chunk(w, slot, layer))
+                }
+            }
+        }
+    }
+    print(total)
+}
+// expect: 463749
+// release
+// only-jit
