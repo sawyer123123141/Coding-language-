@@ -108,23 +108,29 @@ pub fn range_text(i: Interval, ty: KTy) -> String {
 /// A number as the report writes it: commas from five digits (10,000; 9999).
 pub fn number(n: i128) -> String {
     let digits = n.unsigned_abs().to_string();
-    let grouped = if digits.len() < 5 {
-        digits
-    } else {
-        let mut out = String::new();
-        for (i, c) in digits.chars().enumerate() {
-            if i > 0 && (digits.len() - i).is_multiple_of(3) {
-                out.push(',');
-            }
-            out.push(c);
-        }
-        out
-    };
+    let grouped = if digits.len() < 5 { digits } else { group(&digits) };
     if n < 0 {
         format!("-{grouped}")
     } else {
         grouped
     }
+}
+
+/// A size as the inliner's reasons write it: commas from four digits (4,096; 256).
+pub fn commas(n: usize) -> String {
+    group(&n.to_string())
+}
+
+/// `digits` with a comma before every three from the right.
+fn group(digits: &str) -> String {
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// A local's name as the source wrote it: the inliner's `callee.` prefix taken off; `(...)` for a

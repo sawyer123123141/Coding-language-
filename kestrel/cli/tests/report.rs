@@ -142,6 +142,20 @@ fn an_item_in_another_file_names_it() {
 }
 
 #[test]
+fn a_call_back_into_a_module_function_names_it_as_the_report_does() {
+    // `walk` and `step` call each other: each inlines the other one level, and the call back stays.
+    let geom = "pub walk(n: int) -> int {\n    if n <= 0 { 0 } else { step(n - 1) + 1 }\n}\n\npub step(n: int) -> int {\n    if n <= 0 { 1 } else { walk(n - 1) * 2 }\n}\n";
+    let main = "use { walk from geom }\n\nmain() {\n    print(walk(5))\n}\n";
+    let dir = project("call_back", &[("main.kes", main), ("geom.kes", geom)]);
+    let out = kestrel(&["check", "--report"], &dir.join("main.kes"));
+    assert!(out.status.success(), "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(text.contains("call: `walk` isn't inlined: it calls back into `walk`"), "{text}");
+    // (The expression text still writes `geom.walk(...)`: that is the report's own naming, not the inliner's.)
+    assert!(!text.contains("into `geom."), "{text}");
+}
+
+#[test]
 fn an_inlined_item_names_its_function() {
     let src = "density(seed: int) -> int {\n    seed + 1\n}\n\npub solids(seed: int) -> int {\n    density(seed) * 2\n}\n\nmain() {}\n";
     let dir = project("inlined", &[("world.kes", src)]);

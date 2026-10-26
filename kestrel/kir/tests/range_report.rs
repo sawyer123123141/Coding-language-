@@ -201,6 +201,28 @@ fn the_budget_and_the_size_after_inlining_are_recorded() {
 }
 
 #[test]
+fn a_call_back_through_a_closure_names_the_closure() {
+    // `r` -> `filter` -> the closure -> `r`: one cycle, so `r` copies `filter` one level and the call
+    // to the closure inside the copy stays.
+    let src = "pub r(xs: list[int], d: int) -> int {\n if d <= 0 { 0 } else { xs.filter((x) { r(xs, d - 1) > x }).len }\n}";
+    let (m, r) = reported(src, Checked);
+    assert!(m.not_inlined.iter().any(|n| n.reason == "it calls back into the closure at line 2"), "{:?}", m.not_inlined);
+    assert!(m.not_inlined.iter().all(|n| !n.reason.contains("__kestrel")), "{:?}", m.not_inlined);
+    let text = render(&r, &m, &|_| true);
+    assert!(text.contains("call: the closure at line 2 isn't inlined: it calls back into the closure at line 2"), "{text}");
+    assert!(!text.contains("__kestrel"), "{text}");
+}
+
+#[test]
+fn a_closure_whose_budget_runs_out_is_named_as_the_report_names_it() {
+    let calls: Vec<String> = (0..80).map(|i| format!("mid(x + {i})")).collect();
+    let src = format!("{}pub all(xs: list[int]) -> list[int] {{\n xs.map((x) {{ {} }})\n}}", sum_fn("mid", 35), calls.join(" + "));
+    let (m, _) = reported(&src, Checked);
+    assert!(m.not_inlined.iter().any(|n| n.reason == "the inlining budget of the closure at line 3 ran out"), "{:?}", m.not_inlined);
+    assert!(m.not_inlined.iter().all(|n| !n.reason.contains("__kestrel")), "{:?}", m.not_inlined);
+}
+
+#[test]
 fn a_function_inlined_everywhere_is_never_called() {
     let src = "helper(a: int, b: int) -> int {\n a * b\n}\npub f(a: int, b: int) -> int {\n helper(a, b)\n}";
     let (m, r) = reported(src, Checked);

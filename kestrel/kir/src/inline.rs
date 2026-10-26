@@ -16,6 +16,8 @@ mod order;
 use std::collections::HashMap;
 
 use crate::ir::*;
+use crate::range::report::callee_name;
+use crate::range::show::commas;
 use crate::rename::{rename_expr, rename_stmts, Subst};
 use crate::visit::{walk, Node};
 
@@ -68,7 +70,7 @@ pub fn inline_small(m: &mut Module) {
             let locals = std::mem::take(&mut m.funcs[i].locals);
             let own_locals = locals.len();
             let line = m.funcs[i].lines.0;
-            let mut cx = Inliner { funcs: &m.funcs, done: &done, comp: &comp, mates: &mates, sizes: &sizes, sites: &sites, locals, budget: BUDGET, caller, line, log: Vec::new(), in_mate: false };
+            let mut cx = Inliner { m, done: &done, comp: &comp, mates: &mates, sizes: &sizes, sites: &sites, locals, budget: BUDGET, caller, line, log: Vec::new(), in_mate: false };
             cx.stmts(&mut body);
             let Inliner { locals, log, .. } = cx;
             let mut size = 0;
@@ -145,9 +147,9 @@ fn inlinable(idx: FuncIdx, f: &Func) -> Result<usize, Why> {
 }
 
 struct Inliner<'a> {
-    /// The module's functions: every one outside the caller's component is already inlined into
-    /// (the caller's own body and locals are taken out while it is).
-    funcs: &'a [Func],
+    /// The module: every function outside the caller's component is already inlined into (the
+    /// caller's own body and locals are taken out while it is).
+    m: &'a Module,
     /// What callers see of each function already inlined into.
     done: &'a [Option<Done>],
     /// Each function's component (see `order::callee_first`).
@@ -183,9 +185,11 @@ impl Inliner<'_> {
         let reason = match self.sizes[i] {
             Err(Why::Native) => return false,
             Err(why) => why.text(),
-            Ok(_) if mate && self.in_mate => format!("it calls back into `{}`", self.funcs[i].name),
+            Ok(_) if mate && self.in_mate => format!("it calls back into {}", callee_name(self.m, fi)),
             Ok(written) => {
-                // A function of the caller's own component is copied one level, as written.
+                // A function of the caller's own component is copied one level, as written. Its size
+                // after inlining isn't known, so `POST_LIMIT` doesn't apply on purpose: it must be
+                // inlinable (above) and fit the budget, which bounds the copy and what it inlines.
                 let size = if mate { written } else { self.done[i].as_ref().expect("callees are inlined into first").size };
                 if !mate && size > POST_LIMIT {
                     format!("it is {} nodes after its own inlining; the limit is {}", commas(size), commas(POST_LIMIT))
@@ -193,7 +197,7 @@ impl Inliner<'_> {
                     self.budget -= size;
                     return true;
                 } else {
-                    format!("the inlining budget of `{}` ran out", self.funcs[self.caller.0 as usize].name)
+                    format!("the inlining budget of {} ran out", callee_name(self.m, self.caller))
                 }
             }
         };
@@ -239,7 +243,7 @@ impl Inliner<'_> {
     fn expand(&mut self, fi: FuncIdx, args: Vec<Arg>, line: u32) -> (Vec<Stmt>, Option<Expr>) {
         // As `take` notes a call with no line of its own.
         let at = if line == 0 { self.line } else { line };
-        let (funcs, mates) = (self.funcs, self.mates);
+        let (funcs, mates) = (&self.m.funcs, self.mates);
         let done = if self.comp[fi.0 as usize] == self.comp[self.caller.0 as usize] { None } else { self.done[fi.0 as usize].as_ref() };
         let callee = match done {
             Some(_) => &funcs[fi.0 as usize],
@@ -374,19 +378,6 @@ fn no_effect(e: &Expr) -> bool {
         ExprKind::FnEnv(p) | ExprKind::Load(p) => p.path.is_empty(),
         _ => false,
     }
-}
-
-/// `n` with a comma every three digits (4,096).
-fn commas(n: usize) -> String {
-    let digits = n.to_string();
-    let mut out = String::new();
-    for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    out
 }
 
 fn local_kind(ty: KTy) -> LocalKind {

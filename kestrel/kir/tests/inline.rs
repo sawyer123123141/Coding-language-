@@ -146,19 +146,6 @@ fn reasons(m: &Module, caller: &str, callee: &str) -> Vec<String> {
     m.not_inlined.iter().filter(|n| name(n.caller) == caller && name(n.callee) == callee).map(|n| n.reason.clone()).collect()
 }
 
-/// A number with a comma every three digits, as the inliner's reasons write sizes.
-fn commas(n: usize) -> String {
-    let digits = n.to_string();
-    let mut out = String::new();
-    for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    out
-}
-
 /// `mid`: a loop of 30 calls to `leaf` (a 40-term sum): small as written, over 4,096 nodes once
 /// its calls are inlined.
 fn leaf_and_mid() -> String {
@@ -175,7 +162,7 @@ fn a_big_middle_function_stays_a_call_and_keeps_its_leaves_inlined() {
     let post = nodes(&mid.body);
     assert!(post > 4096, "`mid` is {post} nodes after its own inlining");
     assert_eq!(calls_to(&m, &func(&m, "root").body, "mid"), 1);
-    let want = format!("it is {} nodes after its own inlining; the limit is 4,096", commas(post));
+    let want = format!("it is {} nodes after its own inlining; the limit is 4,096", kestrel_kir::range::show::commas(post));
     assert_eq!(reasons(&m, "root", "mid"), [want]);
 }
 
