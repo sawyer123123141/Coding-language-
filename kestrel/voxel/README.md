@@ -15,6 +15,7 @@ The files are flat because Kestrel finds a module only next to the file that use
 - `gen.kes`: the world's density, `solid_at`, `block_type` and `generate`, which fills a column's grid in place (a library).
 - `ring.kes`: `Ring[T]`, a fixed-size first-in first-out queue (a library).
 - `pool.kes`: `Pool[T]` and `Handle`, fixed slots handed out with generation-checked handles (a library).
+- `parity.kes` and `parity_*.kes`: the frozen voxel benchmark rebuilt on `Grid[T]` (a benchmark module, not a library), with its entry files; timed by `bench/engine/run_parity.ps1`, results in `bench/engine/results.md`.
 - `tests/`: test programs, one per library or engine part (`tests/grid.kes`, ...), plus the
   runner's own self-tests (`tests/runner_*.kes`, with `tests/fixtures/`).
 

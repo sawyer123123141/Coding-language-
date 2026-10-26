@@ -1,0 +1,8 @@
+// Parity entry (E42): an empty world, to measure process startup. Prints what main0.kes prints.
+use { parity_faces, PARITY_ITEMS from parity }
+
+let WIDTH = 0
+
+main() {
+    print(parity_faces(1337, WIDTH, PARITY_ITEMS))
+}

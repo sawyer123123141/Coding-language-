@@ -1,0 +1,15 @@
+// Parity with the frozen benchmark (E19, E36, E42): the library-built world meshes to the
+// same face count as `bench/voxels3d` (463,749 faces at width 8, seed 1337) in every variant:
+// indexing `items` directly, going through `Grid.get`, reusing one grid, and across cores.
+// The timing is in `bench/engine`; this test pins the count.
+use { parity_faces, parity_faces_par, PARITY_ITEMS, PARITY_GET, PARITY_REUSE from parity }
+
+main() {
+    let items = parity_faces(1337, 8, PARITY_ITEMS)
+    let get = parity_faces(1337, 8, PARITY_GET)
+    let reuse = parity_faces(1337, 8, PARITY_REUSE)
+    let cores = parity_faces_par(1337, 8)
+    print(items, get, reuse, cores)
+}
+// expect: 463749 463749 463749 463749
+// release

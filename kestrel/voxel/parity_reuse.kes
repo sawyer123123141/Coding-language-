@@ -1,0 +1,8 @@
+// Parity entry (E42): one grid cleared per chunk (PARITY_REUSE). Prints the face count.
+use { parity_faces, PARITY_REUSE from parity }
+
+let WIDTH = 8
+
+main() {
+    print(parity_faces(1337, WIDTH, PARITY_REUSE))
+}

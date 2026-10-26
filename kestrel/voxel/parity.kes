@@ -1,0 +1,243 @@
+// Parity with the frozen benchmark (E19, E36, E42): the frozen 3D voxel world
+// (`bench/voxels3d`) rebuilt on the engine's library pieces, so the benchmark can say what
+// the library costs. Every variant meshes the same 8 x 4 x 8 chunks and returns the same
+// face count (463,749 for width 8, seed 1337). The difference between the frozen code and
+// these is where the chunk's solid flags live: the frozen code has an `array[u8]`, here
+// they are a `Grid[u8]` (a `list[u8]` inside) made with the library's `grid[T]`.
+//
+// The variants, chosen with `how` (E42):
+//   PARITY_ITEMS  every chunk samples into a fresh `Grid[u8]` and the mesher reads
+//                 `g.items[i]` with the frozen code's own index maths and steps. This is the
+//                 line that has to match the frozen copy (within 5%).
+//   PARITY_GET    the same, through `g.get(x, y, z)`: what the generic method costs.
+//   PARITY_REUSE  one grid made once and cleared per chunk with `fill(0)` (outside the
+//                 chunk's `arena { }`, where a generic store is allowed), not made again.
+//
+// Each chunk's mesh lives in its own `arena { }`, freed when the block ends. This is a
+// benchmark module, not the engine: it is not a library file.
+use { Grid, grid from grid }
+use { density from gen }
+use { SIZE, PAD, LAYERS from blocks }
+
+pub let PARITY_ITEMS = 0
+pub let PARITY_GET = 1
+pub let PARITY_REUSE = 2
+
+// Sets g's cell to 1 where chunk (cx, cy, cz) plus a one-block border is solid, the frozen
+// `solids`. Cells that stay 0 are not written, so the grid must be all 0 on entry. It
+// writes `g.items[i]` directly (a plain store, allowed inside an arena) with a running
+// index, x fastest, then z, then y, which is the grid's layout.
+pure sample(var g: Grid[u8], cx: int, cy: int, cz: int, seed: int) {
+    var i = 0
+    for y from 0 to PAD {
+        for z from 0 to PAD {
+            for x from 0 to PAD {
+                if density(cx * SIZE + x - 1, cy * SIZE + y - 1, cz * SIZE + z - 1, seed) > 0.0 {
+                    g.items[i] = 1
+                }
+                i += 1
+            }
+        }
+    }
+}
+
+struct Mesh {
+    vertices: list[vec3] = []
+    normals: list[vec3] = []
+    indices: list[int] = []
+
+    // One square face, corners a b c d in Godot's front-face order
+    // (clockwise seen from outside), as two triangles.
+    pure quad(var self, n: vec3, a: vec3, b: vec3, c: vec3, d: vec3) {
+        let base = self.vertices.len
+        self.vertices.add(a); self.vertices.add(b); self.vertices.add(c); self.vertices.add(d)
+        for k from 0 to 4 { self.normals.add(n) }
+        self.indices.add(base); self.indices.add(base + 1); self.indices.add(base + 2)
+        self.indices.add(base); self.indices.add(base + 2); self.indices.add(base + 3)
+    }
+}
+
+// Samples chunk (cx, cy, cz) into `g` (all 0 on entry) and meshes it, reading `g.items[i]`
+// the way the frozen mesher reads its array: a face for each solid block side that touches
+// air. Sampling and meshing are one function, as the frozen `mesh` is, because the compiler
+// spends its inlining budget per function: split in two, the sampler's noise was inlined
+// into the caller, which ran out of budget and left the noise calls un-inlined.
+pure mesh_items(var g: Grid[u8], cx: int, cy: int, cz: int, seed: int) -> Mesh {
+    sample(var g, cx, cy, cz, seed)
+    var m = Mesh()
+    for y from 0 to SIZE {
+        for z from 0 to SIZE {
+            for x from 0 to SIZE {
+                let i = ((y + 1) * PAD + z + 1) * PAD + x + 1
+                if g.items[i] == 1 {
+                    let p = vec3(cx * SIZE + x, cy * SIZE + y, cz * SIZE + z)
+                    if g.items[i + 1] == 0 {
+                        m.quad(vec3(1, 0, 0), p + vec3(1, 0, 0), p + vec3(1, 0, 1), p + vec3(1, 1, 1), p + vec3(1, 1, 0))
+                    }
+                    if g.items[i - 1] == 0 {
+                        m.quad(vec3(-1, 0, 0), p + vec3(0, 0, 1), p, p + vec3(0, 1, 0), p + vec3(0, 1, 1))
+                    }
+                    if g.items[i + PAD * PAD] == 0 {
+                        m.quad(vec3(0, 1, 0), p + vec3(0, 1, 0), p + vec3(1, 1, 0), p + vec3(1, 1, 1), p + vec3(0, 1, 1))
+                    }
+                    if g.items[i - PAD * PAD] == 0 {
+                        m.quad(vec3(0, -1, 0), p, p + vec3(0, 0, 1), p + vec3(1, 0, 1), p + vec3(1, 0, 0))
+                    }
+                    if g.items[i + PAD] == 0 {
+                        m.quad(vec3(0, 0, 1), p + vec3(1, 0, 1), p + vec3(0, 0, 1), p + vec3(0, 1, 1), p + vec3(1, 1, 1))
+                    }
+                    if g.items[i - PAD] == 0 {
+                        m.quad(vec3(0, 0, -1), p, p + vec3(1, 0, 0), p + vec3(1, 1, 0), p + vec3(0, 1, 0))
+                    }
+                }
+            }
+        }
+    }
+    m
+}
+
+// The same, asking the grid for each cell with `g.get(x, y, z)` (a cell's neighbours are
+// one more or less in x, y or z).
+pure mesh_get(var g: Grid[u8], cx: int, cy: int, cz: int, seed: int) -> Mesh {
+    sample(var g, cx, cy, cz, seed)
+    var m = Mesh()
+    for y from 0 to SIZE {
+        for z from 0 to SIZE {
+            for x from 0 to SIZE {
+                let gx = x + 1
+                let gy = y + 1
+                let gz = z + 1
+                if g.get(gx, gy, gz) == 1 {
+                    let p = vec3(cx * SIZE + x, cy * SIZE + y, cz * SIZE + z)
+                    if g.get(gx + 1, gy, gz) == 0 {
+                        m.quad(vec3(1, 0, 0), p + vec3(1, 0, 0), p + vec3(1, 0, 1), p + vec3(1, 1, 1), p + vec3(1, 1, 0))
+                    }
+                    if g.get(gx - 1, gy, gz) == 0 {
+                        m.quad(vec3(-1, 0, 0), p + vec3(0, 0, 1), p, p + vec3(0, 1, 0), p + vec3(0, 1, 1))
+                    }
+                    if g.get(gx, gy + 1, gz) == 0 {
+                        m.quad(vec3(0, 1, 0), p + vec3(0, 1, 0), p + vec3(1, 1, 0), p + vec3(1, 1, 1), p + vec3(0, 1, 1))
+                    }
+                    if g.get(gx, gy - 1, gz) == 0 {
+                        m.quad(vec3(0, -1, 0), p, p + vec3(0, 0, 1), p + vec3(1, 0, 1), p + vec3(1, 0, 0))
+                    }
+                    if g.get(gx, gy, gz + 1) == 0 {
+                        m.quad(vec3(0, 0, 1), p + vec3(1, 0, 1), p + vec3(0, 0, 1), p + vec3(0, 1, 1), p + vec3(1, 1, 1))
+                    }
+                    if g.get(gx, gy, gz - 1) == 0 {
+                        m.quad(vec3(0, 0, -1), p, p + vec3(1, 0, 0), p + vec3(1, 1, 0), p + vec3(0, 1, 0))
+                    }
+                }
+            }
+        }
+    }
+    m
+}
+
+// Builds chunk (cx, cy, cz) into a fresh grid and returns its face count. The grid and
+// the mesh live in a temporary arena, freed when the block ends.
+pure fresh_faces(cx: int, cy: int, cz: int, seed: int, how: int) -> int {
+    var faces = 0
+    arena {
+        var g = grid[u8](PAD, PAD, PAD, 0)
+        if how == PARITY_GET {
+            faces = mesh_get(var g, cx, cy, cz, seed).indices.len / 6
+        } else {
+            faces = mesh_items(var g, cx, cy, cz, seed).indices.len / 6
+        }
+    }
+    faces
+}
+
+// Builds chunk (cx, cy, cz) into the grid `scratch`, which is all 0 on entry, and returns
+// its face count. Only the mesh lives in the arena.
+pure reuse_faces(var scratch: Grid[u8], cx: int, cy: int, cz: int, seed: int) -> int {
+    var faces = 0
+    arena {
+        faces = mesh_items(var scratch, cx, cy, cz, seed).indices.len / 6
+    }
+    faces
+}
+
+// The chunk loops of the three variants, one function each.
+pure items_world(seed: int, width: int) -> int {
+    var faces = 0
+    for cx from 0 to width {
+        for cy from 0 to LAYERS {
+            for cz from 0 to width {
+                faces += fresh_faces(cx, cy, cz, seed, PARITY_ITEMS)
+            }
+        }
+    }
+    faces
+}
+
+pure get_world(seed: int, width: int) -> int {
+    var faces = 0
+    for cx from 0 to width {
+        for cy from 0 to LAYERS {
+            for cz from 0 to width {
+                faces += fresh_faces(cx, cy, cz, seed, PARITY_GET)
+            }
+        }
+    }
+    faces
+}
+
+pure reuse_world(seed: int, width: int) -> int {
+    var scratch = grid[u8](PAD, PAD, PAD, 0)
+    var faces = 0
+    for cx from 0 to width {
+        for cy from 0 to LAYERS {
+            for cz from 0 to width {
+                scratch.fill(0)
+                faces += reuse_faces(var scratch, cx, cy, cz, seed)
+            }
+        }
+    }
+    faces
+}
+
+// Builds every chunk of a world `width` chunks wide and deep, one after another, and
+// returns the total face count. `how` is PARITY_ITEMS, PARITY_GET or PARITY_REUSE.
+pub pure parity_faces(seed: int, width: int, how: int) -> int {
+    if how == PARITY_GET {
+        get_world(seed, width)
+    } else if how == PARITY_REUSE {
+        reuse_world(seed, width)
+    } else {
+        items_world(seed, width)
+    }
+}
+
+struct Chunk {
+    x: int
+    y: int
+    z: int
+    faces: int = 0
+
+    pure build(var self, seed: int) {
+        self.faces = fresh_faces(self.x, self.y, self.z, seed, PARITY_ITEMS)
+    }
+}
+
+// The PARITY_ITEMS work across all cores, like `main_par.kes`: each chunk builds its own
+// grid and mesh on any core.
+pub parity_faces_par(seed: int, width: int) -> int {
+    var chunks = list[Chunk]()
+    for cx from 0 to width {
+        for cy from 0 to LAYERS {
+            for cz from 0 to width {
+                chunks.add(Chunk(x: cx, y: cy, z: cz))
+            }
+        }
+    }
+    par for c in chunks {
+        c.build(seed)
+    }
+    var faces = 0
+    for c in chunks {
+        faces += c.faces
+    }
+    faces
+}

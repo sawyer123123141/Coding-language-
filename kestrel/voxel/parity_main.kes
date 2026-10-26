@@ -1,0 +1,8 @@
+// Parity entry (E42): the frozen main.kes on the library grid, one thread (PARITY_ITEMS). Prints the face count.
+use { parity_faces, PARITY_ITEMS from parity }
+
+let WIDTH = 8
+
+main() {
+    print(parity_faces(1337, WIDTH, PARITY_ITEMS))
+}

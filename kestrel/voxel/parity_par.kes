@@ -1,0 +1,8 @@
+// Parity entry (E42): PARITY_ITEMS with par for, across all cores. Prints the face count.
+use { parity_faces_par from parity }
+
+let WIDTH = 8
+
+main() {
+    print(parity_faces_par(1337, WIDTH))
+}

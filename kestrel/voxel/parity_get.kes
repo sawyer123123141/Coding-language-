@@ -1,0 +1,8 @@
+// Parity entry (E42): the same through Grid.get (PARITY_GET). Prints the face count.
+use { parity_faces, PARITY_GET from parity }
+
+let WIDTH = 8
+
+main() {
+    print(parity_faces(1337, WIDTH, PARITY_GET))
+}
