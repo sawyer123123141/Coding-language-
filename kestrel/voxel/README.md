@@ -9,6 +9,10 @@ The files are flat because Kestrel finds a module only next to the file that use
 ## Files so far
 
 - `grid.kes`: `Grid[T]`, a typed 3D array over one list, and the `Solid` interface (a library).
+- `noise.kes`: the frozen world's 3D value noise, copied bit for bit (a library).
+- `blocks.kes`: block ids, the world's sizes (`SIZE`, `LAYERS`, `HEIGHT`, `PAD`, `DIRT_DEPTH`, `SNOW_LINE`), colours and solidity (a library).
+- `column.kes`: `Column`, `ColumnState`, column keys and the world-to-column maths, which is right for negative x (a library).
+- `gen.kes`: the world's density, `solid_at`, `block_type` and `generate`, which fills a column's grid in place (a library).
 - `tests/`: test programs, one per library or engine part (`tests/grid.kes`, ...), plus the
   runner's own self-tests (`tests/runner_*.kes`, with `tests/fixtures/`).
 

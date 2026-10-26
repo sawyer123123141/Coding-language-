@@ -1,0 +1,127 @@
+// Column keys, negative columns, and the generated block types: what a column holds is
+// decided at generation, from depth, and agrees with the density everywhere.
+use { column_key, column_of, local, new_column from column }
+use { generate, solid_at, block_type from gen }
+use { AIR, STONE, DIRT, GRASS, SNOW, SIZE, HEIGHT, DIRT_DEPTH, SNOW_LINE from blocks }
+
+// Whether every block of the column at (cx, cz) is solid exactly where the density says.
+pure solidity(blocks: list[u8], cx: int, cz: int, seed: int) -> bool {
+    var ok = true
+    for y from 0 to HEIGHT {
+        for z from 0 to SIZE {
+            for x from 0 to SIZE {
+                let b = blocks[(y * SIZE + z) * SIZE + x]
+                if (b != AIR) != solid_at(cx * SIZE + x, y, cz * SIZE + z, seed) {
+                    ok = false
+                }
+            }
+        }
+    }
+    ok
+}
+
+main() {
+    let k1 = column_key(1, -1)
+    let k2 = column_key(-1, 1)
+    let kn = column_key(-1, -1)
+    print("key", k1 != k2, (kn >> 32) == -1 and ((kn << 32) >> 32) == -1)
+    print("column_of", column_of(-1), local(-1), column_of(31), local(31))
+
+    let seed = 1337
+    var c = new_column()
+    print("fresh", c.blocks.sx, c.blocks.sy, c.blocks.sz, c.blocks.items.len == 32 * 128 * 32, c.blocks.get(5, 5, 5) == AIR)
+    generate(var c.blocks, 0, 0, seed)
+    let g = c.blocks
+
+    // Types: grass and snow only on top of air (or under open sky at y = 127); dirt only
+    // within DIRT_DEPTH - 1 under grass; stone directly under snow.
+    var types = true
+    var seen_grass = false
+    var seen_dirt = false
+    var seen_stone = false
+    for y from 0 to HEIGHT {
+        for z from 0 to SIZE {
+            for x from 0 to SIZE {
+                let b = g.get(x, y, z)
+                let open_above = if y == HEIGHT - 1 { not solid_at(x, y + 1, z, seed) } else { g.get(x, y + 1, z) == AIR }
+                if b == GRASS or b == SNOW {
+                    if not open_above {
+                        types = false
+                    }
+                    if b == GRASS and y >= SNOW_LINE {
+                        types = false
+                    }
+                    if b == SNOW and y < SNOW_LINE {
+                        types = false
+                    }
+                    if b == GRASS {
+                        seen_grass = true
+                    }
+                }
+                if b == DIRT {
+                    seen_dirt = true
+                    var under_grass = false
+                    for k from 1 to DIRT_DEPTH {
+                        if y + k < HEIGHT and g.get(x, y + k, z) == GRASS {
+                            under_grass = true
+                        }
+                    }
+                    if not under_grass {
+                        types = false
+                    }
+                }
+                if b == STONE {
+                    seen_stone = true
+                }
+                if b == SNOW {
+                    for k from 1 to DIRT_DEPTH {
+                        if y - k >= 0 and g.get(x, y - k, z) != AIR and g.get(x, y - k, z) != STONE {
+                            types = false
+                        }
+                    }
+                }
+            }
+        }
+    }
+    print("types", types)
+    print("kinds", seen_grass, seen_dirt, seen_stone)
+    print("solidity", solidity(g.items, 0, 0, seed))
+
+    // block_type directly: depth 0 is grass (snow from the snow line), the next two dirt
+    // (stone under snow), deeper is stone.
+    print("block_type", block_type(0, 10) == GRASS, block_type(0, SNOW_LINE) == SNOW,
+        block_type(1, 10) == DIRT, block_type(2, 10) == DIRT, block_type(3, 10) == STONE,
+        block_type(1, SNOW_LINE) == STONE)
+
+    // Generating twice into a dirty grid gives the same blocks.
+    var d = new_column()
+    d.blocks.fill(STONE)
+    generate(var d.blocks, 0, 0, seed)
+    var same = true
+    for i from 0 to g.items.len {
+        if g.items[i] != d.blocks.items[i] {
+            same = false
+        }
+    }
+    print("deterministic", same)
+
+    // A column with negative coordinates agrees with the density at its world position.
+    var n = new_column()
+    generate(var n.blocks, -3, -2, seed)
+    var negative = true
+    for y from 0 to HEIGHT {
+        if (n.blocks.get(0, y, 0) != AIR) != solid_at(-96, y, -64, seed) {
+            negative = false
+        }
+    }
+    print("negative", negative, solidity(n.blocks.items, -3, -2, seed))
+}
+// expect: key true true
+// expect: column_of -1 31 0 31
+// expect: fresh 32 128 32 true true
+// expect: types true
+// expect: kinds true true true
+// expect: solidity true
+// expect: block_type true true true true true true
+// expect: deterministic true
+// expect: negative true true

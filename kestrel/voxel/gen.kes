@@ -1,0 +1,72 @@
+// World generation: the frozen world's density, and the block types decided from it. The
+// world is the one in `bench/voxels3d` and the viewer: three octaves of 3D noise, pulled
+// toward air higher up, so there are hills, caves and overhangs.
+//
+// This is a library file: it imports only other libraries.
+use { Grid from grid }
+use { octave from noise }
+use { AIR, STONE, DIRT, GRASS, SNOW, SIZE, HEIGHT, DIRT_DEPTH, SNOW_LINE from blocks }
+
+// Solid where above zero: noise, pulled toward air higher up. Same operations, same
+// order, as the frozen world (`tests/noise.kes` pins it).
+pub pure density(x: int, y: int, z: int, seed: int) -> float {
+    let n = octave(x, y, z, 5, seed) * 0.5 + octave(x, y, z, 4, seed + 1) * 0.3 +
+        octave(x, y, z, 3, seed + 2) * 0.2
+    n - 0.5 - float(y - HEIGHT / 2) / float(HEIGHT * 2)
+}
+
+pub pure solid_at(x: int, y: int, z: int, seed: int) -> bool {
+    density(x, y, z, seed) > 0.0
+}
+
+// The type of a solid block `depth` blocks down from the top of its column (0 is the top
+// block, with air right above it), at world height y. The top block is grass, or snow from
+// the snow line up; the DIRT_DEPTH - 1 blocks under it are dirt, or stone under snow, so
+// peaks are snow on rock; deeper is stone. So a cliff shows grass on its edge, a band of
+// dirt, then rock, as in Minecraft. This is the viewer's `layer`, returning an id.
+pub pure block_type(depth: int, y: int) -> u8 {
+    if depth == 0 {
+        if y >= SNOW_LINE { SNOW } else { GRASS }
+    } else if depth < DIRT_DEPTH and y + depth < SNOW_LINE {
+        DIRT
+    } else {
+        STONE
+    }
+}
+
+// Fills the 32 x 128 x 32 grid `g` with column (cx, cz) of the world, in place. It writes
+// `g.items[i]` directly rather than calling `set`: a generic store is refused inside an
+// `arena { }` (E31), where generation runs. Every block is written, so a grid with old
+// contents needs no clearing.
+//
+// Each (x, z) is decided top-down: `depth` counts the solid blocks in a row above the
+// current one (at most DIRT_DEPTH), starting from the rows above the world (y = 128 and
+// up, from the density), so the top of the world is typed the way the viewer types the
+// top of a chunk.
+pub pure generate(var g: Grid[u8], cx: int, cz: int, seed: int) {
+    for z from 0 to SIZE {
+        for x from 0 to SIZE {
+            let wx = cx * SIZE + x
+            let wz = cz * SIZE + z
+            var depth = 0
+            while depth < DIRT_DEPTH and solid_at(wx, HEIGHT + depth, wz, seed) {
+                depth += 1
+            }
+            var i = ((HEIGHT - 1) * SIZE + z) * SIZE + x
+            var y = HEIGHT - 1
+            while y >= 0 {
+                if solid_at(wx, y, wz, seed) {
+                    g.items[i] = block_type(depth, y)
+                    if depth < DIRT_DEPTH {
+                        depth += 1
+                    }
+                } else {
+                    g.items[i] = AIR
+                    depth = 0
+                }
+                i -= SIZE * SIZE
+                y -= 1
+            }
+        }
+    }
+}

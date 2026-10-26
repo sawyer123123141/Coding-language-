@@ -1,0 +1,51 @@
+// The block ids and the world's sizes. A block is a `u8` id stored in a column's grid, and
+// it keeps its type once stored: digging a hole shows stone, not new grass (E4).
+//
+// This is a library file: it imports nothing from the engine (only the standard `draw`).
+use { Color from draw }
+
+// Block ids. Air is 0 so a fresh grid is empty.
+pub let AIR: u8 = 0
+pub let STONE: u8 = 1
+pub let DIRT: u8 = 2
+pub let GRASS: u8 = 3
+pub let SNOW: u8 = 4
+
+// A chunk is SIZE blocks on a side; a column stacks LAYERS chunks (HEIGHT blocks high).
+pub let SIZE = 32
+pub let LAYERS = 4
+pub let HEIGHT = LAYERS * SIZE
+
+// A chunk's solid flags with a one-block border all round.
+pub let PAD = SIZE + 2
+
+// How deep the soil is: the top block of a column and the dirt under it, DIRT_DEPTH blocks
+// in all, with rock below.
+pub let DIRT_DEPTH = 3
+
+// Top blocks from this world height up are snow (88 of the 128).
+pub let SNOW_LINE = HEIGHT * 11 / 16
+
+// The block colours, as in the viewer (`demos/voxels/world.kes`).
+pub let STONE_COLOUR = Color(0.52, 0.52, 0.55)
+pub let DIRT_COLOUR = Color(0.47, 0.34, 0.22)
+pub let GRASS_COLOUR = Color(0.33, 0.62, 0.27)
+pub let SNOW_COLOUR = Color(0.93, 0.95, 0.97)
+
+// The colour of a block id. Air has none and gets stone's (it is never drawn).
+pub pure colour(id: u8) -> Color {
+    if id == DIRT {
+        DIRT_COLOUR
+    } else if id == GRASS {
+        GRASS_COLOUR
+    } else if id == SNOW {
+        SNOW_COLOUR
+    } else {
+        STONE_COLOUR
+    }
+}
+
+// Everything but air is solid.
+pub pure is_solid(id: u8) -> bool {
+    id != AIR
+}

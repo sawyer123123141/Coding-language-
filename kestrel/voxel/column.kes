@@ -1,0 +1,43 @@
+// A column is a 32 x 128 x 32 stack of blocks at a (cx, cz) place in the world: the unit
+// the world loads, generates and unloads (E8). The `blocks` grid is built once per pool
+// slot and rewritten in place by generation (E9), so walking around allocates nothing.
+//
+// This is a library file: it imports only other libraries.
+use { Grid, grid from grid }
+use { AIR, SIZE, HEIGHT from blocks }
+
+pub enum ColumnState {
+    Free
+    Generating
+    Ready
+}
+
+pub struct Column {
+    cx: int
+    cz: int
+    key: i64
+    state: ColumnState
+    blocks: Grid[u8]
+}
+
+// One number for a column place, for the world's lookup map. `cx` takes the high 32 bits
+// and `cz` the low 32, so negative columns have their own keys: (1, -1) and (-1, 1) differ.
+pub pure column_key(cx: int, cz: int) -> i64 {
+    (i64(cx) << 32) | (i64(cz) & 0xFFFFFFFF)
+}
+
+// The column a world x (or z) is in. `>>` rounds toward minus infinity, so x = -1 is in
+// column -1, not 0 (an integer division would get it wrong).
+pub pure column_of(x: int) -> int {
+    x >> 5
+}
+
+// Where a world x (or z) is inside its column, 0 to 31, also right for negative x.
+pub pure local(x: int) -> int {
+    x & 31
+}
+
+// A free column holding a 32 x 128 x 32 grid of air.
+pub pure new_column() -> Column {
+    Column(cx: 0, cz: 0, key: 0, state: ColumnState.Free, blocks: grid[u8](SIZE, HEIGHT, SIZE, AIR))
+}

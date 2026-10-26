@@ -1,0 +1,25 @@
+// The engine's noise is the frozen world's noise, bit for bit. The frozen benchmark file is
+// copied into the scratch folder and its `density` made public in the copy only (E33), then
+// compared with `gen.density` at 512 points (negative coordinates included) and two seeds.
+use gen
+use voxels3d
+
+main() {
+    var same = 0
+    for s from 0 to 2 {
+        let seed = if s == 0 { 1337 } else { 7 }
+        for i from 0 to 256 {
+            // x and z run over -40..40, y over -1..129, spread by different strides.
+            let x = (i * 37) % 81 - 40
+            let z = (i * 53) % 81 - 40
+            let y = (i * 11) % 131 - 1
+            if gen.density(x, y, z, seed) == voxels3d.density(x, y, z, seed) {
+                same += 1
+            }
+        }
+    }
+    print("same", same)
+}
+// copy: kestrel/bench/voxels3d/voxels3d.kes
+// replace: voxels3d.kes pure density( => pub pure density(
+// expect: same 512

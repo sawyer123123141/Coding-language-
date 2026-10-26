@@ -1,0 +1,49 @@
+// 3D value noise, the same maths as the frozen world in `bench/voxels3d/voxels3d.kes`,
+// copied operation for operation (same order, same constants) so the engine's terrain is
+// bit-identical to the world the benchmarks and the viewer build. Do not "tidy" it: a
+// different order of the same float operations can change the last bit. The test
+// `tests/noise.kes` compares it with the frozen file at 512 points.
+//
+// There is no 2D noise: nothing in version 1 uses it. This is a library file: it imports
+// nothing from the engine.
+
+// A hash of a lattice point and the seed, 31 bits.
+pub pure hash(x: int, y: int, z: int, seed: int) -> int {
+    var h = i64(x) * 73856093 ^ i64(y) * 19349663 ^ i64(z) * 83492791 ^ i64(seed) * 1610612741
+    h = h & 0x7FFFFFFF
+    h = (h ^ (h >> 13)) * 0x5BD1E995 & 0x7FFFFFFF
+    int(h ^ (h >> 15))
+}
+
+// The random value at a lattice point, from 0 to 1.
+pub pure lattice(x: int, y: int, z: int, seed: int) -> float {
+    float(hash(x, y, z, seed) & 0xFFFF) / 65535.0
+}
+
+// The smoothstep curve, so the blend has no creases at the lattice points.
+pub pure smooth(t: float) -> float {
+    t * t * (3.0 - 2.0 * t)
+}
+
+// A blend from `a` to `b` (GDScript's `lerp`).
+pub pure mix(a: float, b: float, t: float) -> float {
+    a + (b - a) * t
+}
+
+// One octave: lattice values every 2^shift blocks, blended smoothly
+// between the 8 corners of the cell around (x, y, z).
+pub pure octave(x: int, y: int, z: int, shift: int, seed: int) -> float {
+    let mask = (1 << shift) - 1
+    let scale = float(1 << shift)
+    let cx = x >> shift
+    let cy = y >> shift
+    let cz = z >> shift
+    let fx = smooth(float(x & mask) / scale)
+    let fy = smooth(float(y & mask) / scale)
+    let fz = smooth(float(z & mask) / scale)
+    let x00 = mix(lattice(cx, cy, cz, seed), lattice(cx + 1, cy, cz, seed), fx)
+    let x10 = mix(lattice(cx, cy + 1, cz, seed), lattice(cx + 1, cy + 1, cz, seed), fx)
+    let x01 = mix(lattice(cx, cy, cz + 1, seed), lattice(cx + 1, cy, cz + 1, seed), fx)
+    let x11 = mix(lattice(cx, cy + 1, cz + 1, seed), lattice(cx + 1, cy + 1, cz + 1, seed), fx)
+    mix(mix(x00, x10, fy), mix(x01, x11, fy), fz)
+}
