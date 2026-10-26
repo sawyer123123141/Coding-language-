@@ -4,7 +4,7 @@ A compiled language for games (Rust + Cranelift). The compiler is the Cargo work
 
 ## Start here
 
-**Read `docs/superpowers/plans/2026-10-10-handoff.md` first.** Its top "Start here" section has the current status and the next task (generics are done, 2026-10-25; the voxel engine version 1 is built, reviewed and measured, 2026-10-26, in `kestrel/voxel/`, with its spec `docs/superpowers/specs/2026-10-25-voxel-engine-design.md` and plan `docs/superpowers/plans/2026-10-25-voxel-engine.md`; next are the user's play test of `voxel/main.kes` and three decisions to confirm, race round 2, and compiler rounds picked from the engine's findings, the inliner budget first); the rest has the user's decisions and preferences and environment gotchas.
+**Read `docs/superpowers/plans/2026-10-10-handoff.md` first.** Its top "Start here" section has the current status and the next task (generics are done, 2026-10-25; the voxel engine version 1 is built, reviewed and measured, 2026-10-26, in `kestrel/voxel/`, with its spec `docs/superpowers/specs/2026-10-25-voxel-engine-design.md` and plan `docs/superpowers/plans/2026-10-25-voxel-engine.md`; the KIR inliner now works bottom-up, 2026-10-26, so generation runs 1.64 times faster; next are the user's play test of `voxel/main.kes`, then race round 2 and save/load (both the user's call: they need new syntax or natives) or more compiler rounds from the engine's findings: `list.add` and `clear()`, lists in structs, dead functions after inlining); the rest has the user's decisions and preferences and environment gotchas.
 
 ## Where things are
 

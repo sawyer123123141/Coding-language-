@@ -37,7 +37,7 @@ const BUDGET: usize = 8192;
 /// How deep copies may nest in a function after its inlining: a copy of a function holding copies
 /// that nest `n` deep nests `n + 1` deep. A call whose copy would nest deeper stays a call. Without
 /// it, each function of a long chain of small calls (`h0` calls `h1`, which calls `h2`, ...) grows to
-/// about `POST_LIMIT`, and a chain 2,000 long took 14 seconds to compile (2026-10-26).
+/// about `POST_LIMIT`, and a chain 2,000 long took 15.6 seconds to compile (2026-10-26).
 const MAX_NEST: usize = 16;
 
 /// What the callers of a function already inlined into see of it.

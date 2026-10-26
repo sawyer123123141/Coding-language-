@@ -426,6 +426,8 @@ program: 1,749 checks, 1,481 removed, 268 left, checked; 151, 75 removed, 76 lef
 
 `Grid.get`/`set` don't appear: `main.kes` never calls them (the hot loops index `items`).
 
+Note (2026-10-26, after the bottom-up inliner): the generation row above is as measured on 2026-10-25. Since the bottom-up inliner, `octave` is inlined into `generate` (and no "isn't inlined" is left for it), so the shift and `c + 1` checks inside `octave` fold away, and the checked build's first failure in generation is the overflow check `cx * 32` (see the Contracts note just above).
+
 **The inlining budget, in `--release`:** the report has **27** "isn't inlined: the inlining
 budget of ... ran out" messages, all from generation: 13 in the stream's `par for` body
 (`__kestrel_par_171`) and 14 in `world.load_now`, for `octave` in `density` (`gen.kes:14`),
