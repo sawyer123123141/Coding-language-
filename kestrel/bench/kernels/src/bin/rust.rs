@@ -13,13 +13,19 @@
 //! modes `noise_scalar` (one sample at a time) and `noise_wide` (four at once, SSE4.1), in
 //! `src/noise4.rs`.
 //!
-//!   rust <step|pow|copy|filter|map|sort_by|dyn_hp|dyn_step|direct_hp|direct_step|noise_scalar|noise_wide> [--n N] [--iters K] [--reps R]
+//! The race against Kestrel's block-face meshing (E26) is the modes `race_faces` and `race_arrays`,
+//! the `block-mesh` crate on the frozen world's 256 chunks, in `src/race.rs` (`--n 256`; ns per
+//! chunk; `--verify` prints the check value `voxel/race_check.kes` prints instead of timing).
+//!
+//!   rust <step|pow|copy|filter|map|sort_by|dyn_hp|dyn_step|direct_hp|direct_step|noise_scalar|noise_wide|race_faces|race_arrays|race_faces_plain|race_arrays_plain> [--n N] [--iters K] [--reps R]
 
 use std::hint::black_box;
 use std::time::Instant;
 
 #[path = "../noise4.rs"]
 mod noise4;
+#[path = "../race.rs"]
+mod race;
 
 const WIDTH: f32 = 1280.0;
 const HEIGHT: f32 = 720.0;
@@ -297,6 +303,9 @@ fn main() {
     }
     if matches!(mode.as_str(), "dyn_hp" | "dyn_step" | "direct_hp" | "direct_step") {
         return iface_kernel(&mode, n, iters, reps);
+    }
+    if matches!(mode.as_str(), "race_faces" | "race_arrays" | "race_faces_plain" | "race_arrays_plain") {
+        return race::race(&mode, n, iters, reps, args.iter().any(|a| a == "--verify"));
     }
     if matches!(mode.as_str(), "noise_scalar" | "noise_wide") {
         return noise_kernel(&mode, n, iters, reps);

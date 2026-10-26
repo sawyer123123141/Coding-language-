@@ -526,3 +526,13 @@ total_hp[T: Damageable](xs: list[T]) -> int { ... for d in xs { sum += d.hp() } 
   The generic copy runs like the hand-written loop (0.56 against 0.55, inside each other's ranges, as the identical `--dump bench` said it would), and about 9 times faster than going through the interface.
 - **Compile time of the voxel world, old (236d238, the commit before the first generics code) against new,** 9 runs each taking turns, median (range): `kestrel build` 203 (191-259) against 202 (197-293) ms; `--release` 182 (177-210) against 180 (175-192) ms; `kestrel check` 24 (22-43) against 24 (22-29) ms. No measurable cost from P16's final walk or the collection pass for a program without generics. The built voxel exe is 222.5 KB against 219.0 KB (+3.5 KB, likely the runtime's new string compare and other non-generic additions; not investigated).
 - **The editor's cost per edit (P30),** measured as a whole `kestrel check` process, not an in-process `analyze` loop (so it includes process start): `generic_closures.kes`, the largest generic program test, 20 ms median (19-45); the voxel world 24 ms, the same as before generics.
+
+## The race against `block-mesh` (2026-10-26)
+
+The voxel engine's race, round 1 (block-face meshing, Kestrel against the `block-mesh` crate on the
+frozen world's 256 chunks) runs on this timer: `voxel/race_faces.kes` and `voxel/race_arrays.kes`
+against the Rust modes `race_faces` and `race_arrays` (`src/race.rs`, with `race_faces_plain` and
+`race_arrays_plain`, the Kestrel kernels written out in Rust), through `py measure.py --only race
+--rust-checks target/ovf/release`. Rust is faster: Kestrel `--release` takes 1.38 times (faces) and
+1.83 times (faces and mesh arrays) Rust release's time per chunk. The table, the setup
+subtraction, the fairness notes and the causes are in `bench/engine/results.md`, "Race, round 1".

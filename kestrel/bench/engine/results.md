@@ -441,3 +441,175 @@ window library (raylib).
 
 **Findings:** 26, in `docs/superpowers/plans/2026-10-09-core-2a-followups.md`, "Found while
 building the voxel engine (2026-10-25)".
+
+## Race, round 1: block-face meshing against `block-mesh` (E26)
+
+Question: how fast is Kestrel's block-face meshing (a face for each side of a solid block that
+touches air) against Rust's `block-mesh` crate (0.2.0, `visible_block_faces`, the simple mesher)
+on the same input? Round 1 is the one with the same algorithm, so it measures the language and
+the compiler, not the algorithm. **Result: Rust is faster, by 1.38 times for the faces and 1.83
+times for the faces plus the mesh arrays** (Kestrel `--release` against Rust release).
+
+### What each side does
+
+**Input.** The frozen world's 256 chunks (8 x 4 x 8, seed 1337) as padded 34^3 solid flags, from
+the frozen world's noise: Kestrel `race.kes` (`octave` from `noise.kes`, with `gen.solid_at`
+written out in the file, because `gen` and `blocks` import `draw`, whose natives the timer's JIT
+doesn't link), Rust `src/race.rs` (a port of `hash`/`lattice`/`smooth`/`mix`/`octave`/`density`
+in `f32`, the same order of operations as `voxtuned/rust/voxels3d.rs`). Both find **463,749
+faces** (1,811.5 a chunk). A different total is an error, not a number: Rust `assert_eq!`s it on
+the first pass, Kestrel's `expect` stops the program ("index N out of bounds for length 1", exit
+101; tried with a wrong constant), and `measure.py` refuses any "race" row whose checksum isn't
+463,749.
+
+**The same algorithm.** Per chunk, for each of the 32^3 interior blocks (the border of the 34^3
+is only read, as neighbours): if the block is solid, for each of the six sides (in block-mesh's
+order: -x -y -z +x +y +z) emit a face if the neighbour is air.
+
+| | Kestrel (`voxel/race.kes`) | Rust (`bench/kernels/src/race.rs`) |
+|---|---|---|
+| block type | `Grid[u8]` (a `list[u8]`), 1 = solid | a newtype `Solid(u8)` implementing `Voxel` (`get_visibility`: `Empty` or `Opaque`), in a `Vec<Solid>` per chunk |
+| layout | one `Grid[u8]` of 34 x (34 * 256) x 34, the chunks one after another along y; index `(y * 34 + z) * 34 + x` | one `Vec` per chunk, `ConstShape3u32<34, 34, 34>`: index `x + 34 y + 1156 z` |
+| loops | y, z, x | `Extent::iter3`: z, y, x (memory order in both) |
+| neighbour reads | `world.items[i +- 1 / 34 / 1156]`, bounds-checked | `voxels.get_unchecked(...)` inside the crate: no bounds checks |
+| kernel 1 output | six `list[int]`, one per side, each `x \| y << 6 \| z << 12` of the block in padded coordinates | a `UnitQuadBuffer`: six `Vec<UnorientedUnitQuad>` (`minimum: [u32; 3]`, 12 bytes a face) |
+| kernel 2 output | three lists: positions and normals (`list[vec3]`, 12 bytes each, like Rust's `[f32; 3]`) and indices (`list[int]`), 4, 4 and 6 a face, with the corners and winding of `RIGHT_HANDED_Y_UP_CONFIG` written out | three `Vec`s: `quad_mesh_positions`, `quad_mesh_normals` and `quad_mesh_indices` of each face appended with `extend_from_slice` |
+
+**List management (E26), the same on both sides.** The lists are made once per call (Kestrel) or
+once per run (Rust) and **cleared and reused for every chunk**: Kestrel `xs.clear()`, Rust
+`UnitQuadBuffer::reset()` (its six `Vec::clear`s) and `Vec::clear`. After the first chunks have
+grown them nothing allocates per chunk. Kestrel's whole call, input included, is inside one
+`arena { }` (freed at the end of the call, so a call keeps nothing); the six face lists are
+separate local `var`s (see the struct variant below).
+
+**Beyond the totals.** `voxel/race_check.kes` and `rust ... --verify` print a checksum of every
+packed face (kernel 1) and of every position, normal and index (kernel 2, weighted by corner and
+by place in the six): **194,649 and 10,449,332 on Kestrel, block-mesh and the plain Rust port
+alike.** So the two sides make the same faces with the same corners and winding. (It caught
+nothing: the first version matched.)
+
+### How it was measured
+
+`kestrel/bench/kernels`' timer and `measure.py`: `py measure.py --rounds 9 --only race --threads 1
+--rust-checks target/ovf/release`, from `kestrel/bench/kernels` after `cargo build --release`
+(and a second build, `RUSTFLAGS="-C overflow-checks=on" cargo build --release --target-dir
+target/ovf --bin rust`, whose overflow checks include the crate). Each round runs every row once,
+in turn; a row is the median of 5 repetitions (after a warm-up one); the table is the median of
+the 9 rounds with the range of the 9 medians. Idle priority, one thread (`KESTREL_THREADS=1`; the
+Rust side is one thread). Kestrel is the JIT (compiled before the clock starts, after a warm-up
+call); the Rust modes are an ordinary release build (`opt-level` 3, default `x86-64` target like
+Cranelift's baseline, no `target-cpu=native`). "Overflow checks" is the same code built with
+`-C overflow-checks=on`.
+
+**Setup subtraction.** Each Kestrel call builds the 256 chunks' flags and then runs `iters`
+passes; the timer runs the call with `iters` and with 0 and takes `(t - base) / (n * iters)`
+with `n` = 256 chunks (the Rust side builds its inputs once, outside the clock). The setup,
+measured as a whole-process difference (`kestrel run --release` with 256 chunks against 1 chunk,
+9 runs): 584 ms against 221 ms, **363 ms**; ranges 581-589 and 219-225, so about +-4 ms. `iters`
+is 60 for kernel 1 and 40 for kernel 2, so the timed kernel work is about 1.0 s in `--release`
+(1.3 s with checks on), 2.8 to 3.6 times the setup, and the setup's jitter is about 0.4% of it.
+The rounds' own ranges (0.4% to 0.9% of the median) say the same.
+
+**Machine and load.** Windows 11, 16 logical cores, otherwise idle: CPU of the whole machine
+before the run, 8 samples of 3 s: mean 0.2%; during the run, 136 samples of 5 s: mean 6.7%, max
+10.9% (one busy core of 16 is 6.25%, so about 0.4% was other load). A first, identical run is
+within 0.3% of every number below (kernel 1 `--release` 65,967 and kernel 2 103,075 ns; Rust
+47,773 and 56,247).
+
+### Results (ns per chunk of 32^3 blocks, 1,811.5 faces; median of 9 rounds, range)
+
+| | Kestrel, checks on | **Kestrel `--release`** | **Rust release** | Rust, overflow checks | Rust, the Kestrel kernel written out (release) |
+|---|---:|---:|---:|---:|---:|
+| **Kernel 1: faces** | 82,175 (81,937-82,500) | **66,012** (65,813-66,399) | **47,791** (47,532-47,966) | 53,114 (52,967-53,390) | 41,109 (41,017-41,212) |
+| **Kernel 2: faces, then positions, normals, indices** | 126,907 (126,671-127,646) | **103,177** (102,897-103,454) | **56,255** (56,207-56,423) | 66,372 (66,074-66,554) | 56,199 (56,038-56,384) |
+
+| Ratio, Kestrel over Rust | Kernel 1 | Kernel 2 |
+|---|---:|---:|
+| **`--release` over release (the headline)** | **1.38** | **1.83** |
+| checks on over Rust with overflow checks (checks against checks) | 1.55 | 1.91 |
+| checks on over Rust release | 1.72 | 2.26 |
+| `--release` over the same code written in Rust | 1.61 | 1.84 |
+
+- A face costs kernel 1 36.4 ns on Kestrel, 26.4 on block-mesh and 22.7 on the plain port.
+  Kernel 2's array stage alone (kernel 2 minus kernel 1) is **37.2 us a chunk on Kestrel (20.5 ns
+  a face) against 8.5 us on block-mesh (4.7 ns a face)**, 4.4 times; the plain port's
+  push-by-push version of that stage is 15.1 us.
+- Kestrel's checks cost 24% (kernel 1) and 23% (kernel 2) over `--release`. Rust's overflow
+  checks cost 11% and 18% on block-mesh's code (the crate's index arithmetic) and nothing on the
+  plain port.
+- **The plain Rust port** (`race_faces_plain`, `race_arrays_plain`: not part of the race, a
+  diagnostic) is `race.kes`'s kernels written in Rust: the same layout, loops and checked
+  indexing into a `Vec<u8>`, six `Vec<u32>` of the same packed faces, the same corners, a push
+  per entry. It prints the same checksums. It shows the gap is not only block-mesh's own tuning:
+  written like Kestrel's code, Rust is still 1.61 and 1.84 times faster. Its kernel 1 is faster
+  than block-mesh's (41.1 against 47.8 us: its 4-byte packed faces move less memory than
+  block-mesh's 12-byte `UnitQuad`s), its kernel 2 equal.
+
+### Where Kestrel loses, and what is not known
+
+Not profiled: these are differences in what the two sides do, not measured shares.
+
+- **Bounds checks.** block-mesh reads voxels with `get_unchecked`. Kestrel keeps a check on the
+  list index of the neighbour reads (the compiler can't show `i + 34 * 34` is below
+  `items.len`; `check --report --release` lists 6 checks left in `find_faces`). The plain port
+  has checked reads too and still beats Kestrel, so that is not the whole gap.
+- **`clear()` zeroes.** Kestrel's `xs.clear()` writes zeros over the old items
+  (`kestrel_rt_list_clear` does a `write_bytes`); `Vec::clear` doesn't. In kernel 2 that is about
+  225 KB a chunk (87 KB each of positions and normals, 43 KB of indices, 7 KB of faces), roughly
+  6 to 10 us of the 103 (an estimate from the byte count, not measured).
+- **Many small pushes.** Kernel 2's array stage is 14 `add`s a face on Kestrel (each a capacity
+  check, a store and a length update); block-mesh appends 4, 4 and 6 at once with
+  `extend_from_slice`. The plain port, which pushes one entry at a time, is still 2.5 times
+  faster than Kestrel on that stage, so that is not the whole gap either.
+- **Six lists in a struct are slower than six locals.** The first version kept the six face lists
+  in a struct (`faces.neg_x.add(p)`): kernel 1 `--release` measured 74.6 us against 65.6 us for
+  six local `var`s, run back to back with 5 repetitions each (14% slower); kernel 2 110.2 against
+  103.2 (earlier, not run alongside the final version). The raced code is the faster form. A list
+  reached through a struct field is probably reloaded on every `add`; the engine's `Mesh` struct
+  does it.
+- **Inliner budget: none.** `kestrel check --report --release` on `race_faces.kes` and
+  `race_arrays.kes` has no "inlining budget ... ran out" message. The only "isn't inlined" lines
+  are for `build_arrays` ("it is 657 nodes; the limit is 256", a size limit, so a call per chunk).
+  `find_faces` and the set-up's noise are inlined into `bench`. (`race_check.kes`, which is never
+  timed, does run out of budget; it only builds the checksums.)
+
+### The whole frozen world against the straight Rust port (`C:\kt\voxtuned\rust`)
+
+It builds: `rustc -C opt-level=3 voxels3d.rs` (and with `-C overflow-checks=on`), rustc 1.97.0,
+output in a scratch folder (the folder itself is untouched); it prints 463,749. Against the
+frozen `bench/voxels3d/main.kes` and `voxels3d_tuned.kes` built with today's compiler (HEAD,
+`--release`, exes in a scratch folder), 11 rounds in turn, whole runs, `bench.py` from
+`C:\kt\voxtuned`, idle priority, machine idle (CPU 0 to 1% after):
+
+| Whole run | median (range) | minus startup (6 ms) | against Rust release |
+|---|---:|---:|---:|
+| Rust, release | 328 ms (327-333) | 322 | 1.00 |
+| Rust, overflow checks | 340 ms (338-376) | 334 | 1.04 |
+| Kestrel frozen, `--release` | 375 ms (374-379) | 369 | **1.15** |
+| Kestrel tuned, `--release` | 303 ms (302-322) | 297 | **0.92** |
+
+Over the whole world (the noise is nearly all of it) Kestrel is level with Rust: 1.15 for the
+frozen code and 0.92 for the hand-tuned copy, as in the earlier sessions (1.13 and 0.92). The
+meshing alone is where Kestrel is behind. This is not the race (it is mostly the noise), only the
+check that the machine and the Rust port still say what they said.
+
+### What round 2 would need (greedy meshing against `binary-greedy-meshing`)
+
+Written from the plan and from knowing the crate in outline, not from reading it. The crate works
+on columns of bits (a `u64` a column), so a Kestrel version needs `u64` bit operations and
+counting the set bits of a word (no `trailing_zeros` or `count_ones` is in the syntax document; a
+loop is the fallback and would be the first thing to lose). Its chunk is 62^3 (64^3 padded), not
+32^3, so the input would be rebuilt at that size on both sides. Its output (quads with a width and
+a height, merged by block type) has a different shape from round 1's unit faces, so the face
+total and the check value would be new. block-mesh's own `greedy_quads` on the same input would
+be an intermediate round (the same crate, the 34^3 chunks of this one). The findings above are the
+first things round 2 will meet: bounds checks on the bit-array reads, `clear()` zeroing, lists
+held in structs, and `add` one entry at a time.
+
+### Files
+
+`kestrel/voxel/race.kes` (the kernels and the input), `race_faces.kes` and `race_arrays.kes` (the
+timer's entries, each `pub bench(n, iters)`), `race_check.kes`; `kestrel/bench/kernels/src/race.rs`
+(the Rust side), `src/bin/rust.rs` (modes `race_faces`, `race_arrays`, `race_faces_plain`,
+`race_arrays_plain`, and `--verify`), `measure.py` (the "race" rows, `--rust-checks`, the
+face-total check), `Cargo.toml` and `Cargo.lock` (`block-mesh = "0.2"`).

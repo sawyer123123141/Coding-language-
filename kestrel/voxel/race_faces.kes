@@ -1,0 +1,11 @@
+// Race entry (E26), kernel 1: padded solid flags to the six lists of packed faces. The timer's
+// file: `kernels race_faces.kes --release --n 256 --iters K` (see race.kes).
+use { faces_run from race }
+
+pub bench(n: int, iters: int) -> float {
+    faces_run(n, iters)
+}
+
+main() {
+    print(bench(256, 1))
+}

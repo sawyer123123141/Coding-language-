@@ -10,6 +10,7 @@ edition = "2021"
 [dependencies]
 kestrel-driver = { path = "../../driver" }
 kestrel-codegen = { path = "../../codegen" }
+block-mesh = "0.2"
 
 [profile.release]
 debug = false

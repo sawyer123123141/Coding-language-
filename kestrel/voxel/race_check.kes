@@ -1,0 +1,18 @@
+// Race check (E26): not a timing. `kernels race_check.kes --release --n 256 --iters 1 --reps 1`
+// prints kernel 1's check value as the checksum, `--iters 2` kernel 2's; `rust race_faces
+// --verify` and `rust race_arrays --verify` print the same numbers when the two sides make the
+// same faces, corners, normals and indices (see race.kes).
+use { faces_check, arrays_check from race }
+
+pub bench(n: int, which: int) -> float {
+    if which == 1 {
+        float(faces_check(n))
+    } else {
+        float(arrays_check(n))
+    }
+}
+
+main() {
+    print(bench(256, 1))
+    print(bench(256, 2))
+}

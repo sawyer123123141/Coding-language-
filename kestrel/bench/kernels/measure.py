@@ -8,6 +8,11 @@ KESTREL_THREADS for the Kestrel kernels (their `par for`); the Rust kernels are 
 `--only TEXT` runs just the kernels whose label contains TEXT (case-insensitive), e.g. `--only iface`
 for the interface kernels, Kestrel and Rust.
 
+`--rust-checks DIR` adds a column for the Rust kernels, run from DIR: a build with overflow checks
+(`RUSTFLAGS="-C overflow-checks=on" cargo build --release --target-dir target/ovf`, then
+`--rust-checks target/ovf/release`). The race kernels (labels with "race") must print the face
+total 463,749 as their checksum, or the run stops.
+
 `--keep-checks` and `--old` add columns, run in turns with the first within each round:
 `--keep-checks` is the same compiler with `remove_checks: false` (every check the range analysis
 removes stays); `--old DIR` is a `bench/kernels` build made with an older compiler (its
@@ -56,7 +61,20 @@ KERNELS = [
     ("Rust iface direct step (Vec<Goblin>)", ["rust", "direct_step", "--n", "1000000"], 20),
     ("Rust noise_scalar", ["rust", "noise_scalar", "--n", "262144"], 10),
     ("Rust noise_wide (SSE4.1)", ["rust", "noise_wide", "--n", "262144"], 10),
+    # The race against block-mesh (E26), ns per chunk of the frozen world's 256 chunks: Kestrel
+    # builds the chunks' solid flags in each call (and the timer takes that out), Rust once. Each
+    # prints the face total of a pass as its checksum, and it must be 463,749 (checked below).
+    ("race_faces.kes checked (six lists of packed faces)", ["kernels", "../../voxel/race_faces.kes", "--n", "256", "--reps", "5"], 60),
+    ("race_faces.kes --release", ["kernels", "../../voxel/race_faces.kes", "--release", "--n", "256", "--reps", "5"], 60),
+    ("race_arrays.kes checked (faces, then positions, normals, indices)", ["kernels", "../../voxel/race_arrays.kes", "--n", "256", "--reps", "5"], 40),
+    ("race_arrays.kes --release", ["kernels", "../../voxel/race_arrays.kes", "--release", "--n", "256", "--reps", "5"], 40),
+    ("Rust race_faces (block-mesh visible_block_faces)", ["rust", "race_faces", "--n", "256", "--reps", "5"], 60),
+    ("Rust race_arrays (visible_block_faces, quad_mesh_*)", ["rust", "race_arrays", "--n", "256", "--reps", "5"], 40),
+    # Not part of the race: race.kes's kernels written out in Rust (checked indexing, six Vec<u32>s).
+    ("Rust race_faces_plain (race.kes's kernel in Rust)", ["rust", "race_faces_plain", "--n", "256", "--reps", "5"], 60),
+    ("Rust race_arrays_plain (race.kes's kernels in Rust)", ["rust", "race_arrays_plain", "--n", "256", "--reps", "5"], 40),
 ]
+RACE_FACES = 463749
 
 
 def main():
@@ -66,6 +84,7 @@ def main():
     ap.add_argument("--only", default="")
     ap.add_argument("--keep-checks", action="store_true", help="also run with every proven check kept")
     ap.add_argument("--old", default="", help="also run the kernels built in DIR (an older compiler's target/release)")
+    ap.add_argument("--rust-checks", default="", help="also run the Rust kernels built in DIR (with overflow checks on)")
     a = ap.parse_args()
     env = dict(os.environ, KESTREL_THREADS=str(a.threads))
     # (column, directory of the binaries, extra flags for the Kestrel kernels)
@@ -74,13 +93,17 @@ def main():
         columns.append(("new --keep-checks", BIN, ["--keep-checks"]))
     if a.old:
         columns.append(("old", os.path.abspath(a.old), []))
+    if a.rust_checks:
+        columns.append(("overflow checks", os.path.abspath(a.rust_checks), []))
     kernels = [k for k in KERNELS if a.only.lower() in k[0].lower()]
     results = {(label, c[0]): [] for label, _, _ in kernels for c in columns}
     for _ in range(a.rounds):
         for label, cmd, iters in kernels:
             for name, directory, extra in columns:
                 is_rust = cmd[0] == "rust"
-                if is_rust and name != "new":
+                if is_rust and name not in ("new", "overflow checks"):
+                    continue
+                if not is_rust and name == "overflow checks":
                     continue
                 exe = os.path.join(directory, cmd[0] + (".exe" if os.name == "nt" else ""))
                 args = [exe, *cmd[1:], *([] if is_rust else extra), "--iters", str(iters)]
@@ -88,6 +111,10 @@ def main():
                 m = re.search(r"([\d.]+) ns per item", out.stdout)
                 if not m:
                     raise SystemExit(f"{label} ({name}) failed:\n{out.stdout}{out.stderr}")
+                if "race" in label.lower():
+                    total = re.search(r"checksum ([\d.]+)", out.stdout)
+                    if not total or float(total.group(1)) != RACE_FACES:
+                        raise SystemExit(f"{label} ({name}) found {total and total.group(1)} faces, not {RACE_FACES}:\n{out.stdout}")
                 results[(label, name)].append(float(m.group(1)))
     print(f"{a.threads} thread(s) for Kestrel, {a.rounds} rounds")
     for label, _, _ in kernels:

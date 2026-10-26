@@ -1,0 +1,304 @@
+// The race against Rust, round 1 (E26): block-face meshing on the same input as the `block-mesh`
+// crate, timed by `bench/kernels`' timer (`kernels race_faces.kes --release --n 256`) next to the
+// Rust modes `race_faces` and `race_arrays` (`bench/kernels/src/race.rs`).
+//
+// The input is the frozen world's 256 chunks (8 x 4 x 8) as padded 34^3 solid flags, seed 1337.
+// Kestrel has no globals, so each call builds them again inside an `arena { }` (freed at the end
+// of the call) and the timer takes the cost of that out by running the call once with
+// `iters = 0` (the set-up alone) and once with `iters` passes (the set-up and the passes).
+//
+// The kernels, which are what is timed:
+//   1 (`race_faces`)   from the flags to six lists of packed ints, one per side, each
+//                      `x | y << 6 | z << 12` of a face's block in padded coordinates (1 to 32),
+//                      like block-mesh's `UnitQuadBuffer` groups. The six lists are made once per
+//                      call and cleared for each chunk (`clear()` keeps the list's memory).
+//   2 (`race_arrays`)  kernel 1, then the lists turned into positions, normals and indices (4, 4
+//                      and 6 per face) in three more lists, cleared for each chunk the same way.
+// The lists are separate local `var`s, passed to the functions as `var` parameters: six lists
+// in a struct (`faces.neg_x.add(p)`) measured 14% slower for kernel 1 (74.6 against 65.6 us a
+// chunk, `--release`; see results.md), so the faster form is the one raced.
+// Both kernels do what `visible_block_faces` does: a face where a solid block touches air, the
+// block's six sides in block-mesh's order (-x, -y, -z, +x, +y, +z), the corners and the
+// triangles' winding as `RIGHT_HANDED_Y_UP_CONFIG` has them. The result of a call is the face
+// total of one pass as a `float` (463,749 for all 256 chunks, exact below 2^24), checked on the
+// call's first pass: a different total stops the program, it is not a number to time.
+//
+// `race_check.kes` is a check, not a timing: one pass, then a checksum of the lists' contents
+// that the Rust side prints the same way (`rust race_arrays --verify`), so a wrong corner or a
+// wrong winding shows up as different numbers. Its code lives here but is not in the timed
+// entries' way (they never call it).
+//
+// Like the parity benchmark this is not a library file. The kernels share one file because the
+// compiler spends its inlining budget per root function (see parity.kes); `kestrel check
+// --report --release` says if the budget ran out.
+use { Grid, grid from grid }
+use { octave from noise }
+
+// The sizes of `blocks.kes` and the terrain of `gen.kes`, written out here: importing either
+// links the `draw` module (`blocks.kes` imports its `Color`), and the timer runs programs
+// through the JIT without the window's natives, so a file that imports them cannot run in it.
+// The face total (463,749) is the check that `solid_at` is `gen.solid_at`.
+let SIZE = 32
+let PAD = SIZE + 2
+let HEIGHT = 128
+let SEED = 1337
+let FACES_ALL = 463749
+
+// `gen.density` and `gen.solid_at`, the frozen world's terrain.
+pure solid_at(x: int, y: int, z: int, seed: int) -> bool {
+    let n = octave(x, y, z, 5, seed) * 0.5 + octave(x, y, z, 4, seed + 1) * 0.3 +
+        octave(x, y, z, 3, seed + 2) * 0.2
+    n - 0.5 - float(y - HEIGHT / 2) / float(HEIGHT * 2) > 0.0
+}
+
+// One face with corners a b c d (block-mesh's order: a is the minimum corner, b is a plus the
+// u side, c is a plus the v side, d is both) and the triangles a b c, b d c, which block-mesh
+// winds this way for the sides where the normal's sign times the axes' permutation sign is
+// positive.
+pure quad_up(var pos: list[vec3], var nor: list[vec3], var idx: list[int], n: vec3, a: vec3, b: vec3, c: vec3, d: vec3) {
+    let base = pos.len
+    pos.add(a); pos.add(b); pos.add(c); pos.add(d)
+    nor.add(n); nor.add(n); nor.add(n); nor.add(n)
+    idx.add(base); idx.add(base + 1); idx.add(base + 2)
+    idx.add(base + 1); idx.add(base + 3); idx.add(base + 2)
+}
+
+// The same face for the other sides, wound the other way: a c b, b c d.
+pure quad_down(var pos: list[vec3], var nor: list[vec3], var idx: list[int], n: vec3, a: vec3, b: vec3, c: vec3, d: vec3) {
+    let base = pos.len
+    pos.add(a); pos.add(b); pos.add(c); pos.add(d)
+    nor.add(n); nor.add(n); nor.add(n); nor.add(n)
+    idx.add(base); idx.add(base + 2); idx.add(base + 1)
+    idx.add(base + 1); idx.add(base + 2); idx.add(base + 3)
+}
+
+// Stops the program with "index N out of bounds for length 1" (N is how far `got` is from
+// `want`) when they differ: the language has no `assert`, and a wrong total is an error.
+expect(got: int, want: int) {
+    var ok = [0]
+    ok[0] = ok[got - want]
+}
+
+// Sets the solid flag of each of the first `n` chunks of the frozen world (chunk c is column
+// (c / 32, c % 8) and layer c / 8 % 4, the order of the frozen loops) in `world`, whose chunks
+// lie one after the other along y, each PAD^3 cells (a Grid[u8] of PAD x (PAD * n) x PAD).
+// It writes `items[i]` directly with a running index; the grid is all 0 on entry.
+pure fill_world(var world: Grid[u8], n: int, seed: int) {
+    for c from 0 to n {
+        let cx = c / 32
+        let cy = c / 8 % 4
+        let cz = c % 8
+        var i = c * PAD * PAD * PAD
+        for y from 0 to PAD {
+            for z from 0 to PAD {
+                for x from 0 to PAD {
+                    if solid_at(cx * SIZE + x - 1, cy * SIZE + y - 1, cz * SIZE + z - 1, seed) {
+                        world.items[i] = 1
+                    }
+                    i += 1
+                }
+            }
+        }
+    }
+}
+
+// Kernel 1 for the chunk whose cells start at `base`: its faces into the six lists (which are
+// empty), the sides in block-mesh's order. The cell (x, y, z) of the chunk is at
+// base + (y * PAD + z) * PAD + x, so a step in x is 1, in z PAD and in y PAD * PAD. The loops run
+// y, z, x like the frozen mesher.
+pure find_faces(world: Grid[u8], base: int, var nx: list[int], var ny: list[int], var nz: list[int], var px: list[int], var py: list[int], var pz: list[int]) {
+    for y from 0 to SIZE {
+        for z from 0 to SIZE {
+            for x from 0 to SIZE {
+                let i = base + ((y + 1) * PAD + z + 1) * PAD + x + 1
+                if world.items[i] == 1 {
+                    let p = (x + 1) | (y + 1) << 6 | (z + 1) << 12
+                    if world.items[i - 1] == 0 {
+                        nx.add(p)
+                    }
+                    if world.items[i - PAD * PAD] == 0 {
+                        ny.add(p)
+                    }
+                    if world.items[i - PAD] == 0 {
+                        nz.add(p)
+                    }
+                    if world.items[i + 1] == 0 {
+                        px.add(p)
+                    }
+                    if world.items[i + PAD * PAD] == 0 {
+                        py.add(p)
+                    }
+                    if world.items[i + PAD] == 0 {
+                        pz.add(p)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Kernel 2's second half: the arrays of the six lists' faces into `pos`, `nor` and `idx` (which
+// are empty), side by side in block-mesh's order. A face's block is (x, y, z); the corners are
+// block-mesh's `quad_corners` for each side (the +x, +y and +z sides start one block further
+// along their axis).
+pure build_arrays(nx: list[int], ny: list[int], nz: list[int], px: list[int], py: list[int], pz: list[int], var pos: list[vec3], var nor: list[vec3], var idx: list[int]) {
+    let ex = vec3(1, 0, 0)
+    let ey = vec3(0, 1, 0)
+    let ez = vec3(0, 0, 1)
+    for p in nx {
+        let q = vec3(float(p & 63), float(p >> 6 & 63), float(p >> 12))
+        quad_up(var pos, var nor, var idx, -ex, q, q + ez, q + ey, q + ey + ez)
+    }
+    for p in ny {
+        let q = vec3(float(p & 63), float(p >> 6 & 63), float(p >> 12))
+        quad_down(var pos, var nor, var idx, -ey, q, q + ez, q + ex, q + ex + ez)
+    }
+    for p in nz {
+        let q = vec3(float(p & 63), float(p >> 6 & 63), float(p >> 12))
+        quad_down(var pos, var nor, var idx, -ez, q, q + ex, q + ey, q + ex + ey)
+    }
+    for p in px {
+        let q = vec3(float(p & 63) + 1.0, float(p >> 6 & 63), float(p >> 12))
+        quad_down(var pos, var nor, var idx, ex, q, q + ez, q + ey, q + ey + ez)
+    }
+    for p in py {
+        let q = vec3(float(p & 63), float(p >> 6 & 63) + 1.0, float(p >> 12))
+        quad_up(var pos, var nor, var idx, ey, q, q + ez, q + ex, q + ex + ez)
+    }
+    for p in pz {
+        let q = vec3(float(p & 63), float(p >> 6 & 63), float(p >> 12) + 1.0)
+        quad_up(var pos, var nor, var idx, ez, q, q + ex, q + ey, q + ex + ey)
+    }
+}
+
+// The timer's entry for kernel 1: builds the first `n` chunks' flags, then runs `iters` passes
+// over them (`iters = 0` is the set-up alone). Returns the face total of one pass; the first
+// pass checks it.
+pub faces_run(n: int, iters: int) -> float {
+    var result = 0
+    arena {
+        var world = grid[u8](PAD, PAD * n, PAD, 0)
+        fill_world(var world, n, SEED)
+        var nx: list[int] = []
+        var ny: list[int] = []
+        var nz: list[int] = []
+        var px: list[int] = []
+        var py: list[int] = []
+        var pz: list[int] = []
+        for k from 0 to iters {
+            var total = 0
+            for c from 0 to n {
+                nx.clear(); ny.clear(); nz.clear(); px.clear(); py.clear(); pz.clear()
+                find_faces(world, c * PAD * PAD * PAD, var nx, var ny, var nz, var px, var py, var pz)
+                total += nx.len + ny.len + nz.len + px.len + py.len + pz.len
+            }
+            if k == 0 and n == 256 {
+                expect(total, FACES_ALL)
+            }
+            result = total
+        }
+    }
+    float(result)
+}
+
+// The same for kernel 2. The first pass also checks the three lists' lengths after each chunk
+// (4 + 4 + 6 = 14 entries a face).
+pub arrays_run(n: int, iters: int) -> float {
+    var result = 0
+    arena {
+        var world = grid[u8](PAD, PAD * n, PAD, 0)
+        fill_world(var world, n, SEED)
+        var nx: list[int] = []
+        var ny: list[int] = []
+        var nz: list[int] = []
+        var px: list[int] = []
+        var py: list[int] = []
+        var pz: list[int] = []
+        var pos: list[vec3] = []
+        var nor: list[vec3] = []
+        var idx: list[int] = []
+        for k from 0 to iters {
+            var total = 0
+            var size = 0
+            for c from 0 to n {
+                nx.clear(); ny.clear(); nz.clear(); px.clear(); py.clear(); pz.clear()
+                pos.clear(); nor.clear(); idx.clear()
+                find_faces(world, c * PAD * PAD * PAD, var nx, var ny, var nz, var px, var py, var pz)
+                build_arrays(nx, ny, nz, px, py, pz, var pos, var nor, var idx)
+                total += nx.len + ny.len + nz.len + px.len + py.len + pz.len
+                size += pos.len + nor.len + idx.len
+            }
+            if k == 0 {
+                expect(size, total * 14)
+                if n == 256 {
+                    expect(total, FACES_ALL)
+                }
+            }
+            result = total
+        }
+    }
+    float(result)
+}
+
+// The check values of `race_check.kes` (kernel 1's and kernel 2's) for the first `n` chunks:
+// the contents of the lists, which the Rust side sums the same way (`rust race_faces --verify`,
+// `rust race_arrays --verify`). Kernel 1's is every packed face, weighted by its side, summed
+// below 2^24; kernel 2's is every position (weighted by its corner and its coordinates), normal
+// and index (weighted by its place in the face's six), summed below 2^24.
+pub faces_check(n: int) -> int {
+    var sum = 0
+    arena {
+        var world = grid[u8](PAD, PAD * n, PAD, 0)
+        fill_world(var world, n, SEED)
+        var nx: list[int] = []
+        var ny: list[int] = []
+        var nz: list[int] = []
+        var px: list[int] = []
+        var py: list[int] = []
+        var pz: list[int] = []
+        for c from 0 to n {
+            nx.clear(); ny.clear(); nz.clear(); px.clear(); py.clear(); pz.clear()
+            find_faces(world, c * PAD * PAD * PAD, var nx, var ny, var nz, var px, var py, var pz)
+            for p in nx { sum = (sum + p) & 0xFFFFFF }
+            for p in ny { sum = (sum + p * 2) & 0xFFFFFF }
+            for p in nz { sum = (sum + p * 3) & 0xFFFFFF }
+            for p in px { sum = (sum + p * 4) & 0xFFFFFF }
+            for p in py { sum = (sum + p * 5) & 0xFFFFFF }
+            for p in pz { sum = (sum + p * 6) & 0xFFFFFF }
+        }
+    }
+    sum
+}
+
+pub arrays_check(n: int) -> int {
+    var sum = 0
+    arena {
+        var world = grid[u8](PAD, PAD * n, PAD, 0)
+        fill_world(var world, n, SEED)
+        var nx: list[int] = []
+        var ny: list[int] = []
+        var nz: list[int] = []
+        var px: list[int] = []
+        var py: list[int] = []
+        var pz: list[int] = []
+        var pos: list[vec3] = []
+        var nor: list[vec3] = []
+        var idx: list[int] = []
+        for c from 0 to n {
+            nx.clear(); ny.clear(); nz.clear(); px.clear(); py.clear(); pz.clear()
+            pos.clear(); nor.clear(); idx.clear()
+            find_faces(world, c * PAD * PAD * PAD, var nx, var ny, var nz, var px, var py, var pz)
+            build_arrays(nx, ny, nz, px, py, pz, var pos, var nor, var idx)
+            for k from 0 to pos.len {
+                let v = pos[k]
+                sum = (sum + ((k & 3) + 1) * (int(v.x) + 3 * int(v.y) + 7 * int(v.z))) & 0xFFFFFF
+                let w = nor[k]
+                sum = (sum + (int(w.x) + 2 * int(w.y) + 4 * int(w.z)) * ((k & 3) + 1)) & 0xFFFFFF
+            }
+            for k from 0 to idx.len {
+                sum = (sum + idx[k] * (k % 6 + 1)) & 0xFFFFFF
+            }
+        }
+    }
+    sum
+}

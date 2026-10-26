@@ -1,0 +1,11 @@
+// Race entry (E26), kernel 2: kernel 1, then positions, normals and indices. The timer's file:
+// `kernels race_arrays.kes --release --n 256 --iters K` (see race.kes).
+use { arrays_run from race }
+
+pub bench(n: int, iters: int) -> float {
+    arrays_run(n, iters)
+}
+
+main() {
+    print(bench(256, 1))
+}

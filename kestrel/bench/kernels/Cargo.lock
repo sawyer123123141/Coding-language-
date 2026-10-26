@@ -27,6 +27,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
+name = "block-mesh"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c0345520b5aa77d7d154bd578a18e7a974350931b5f41f641a7844e951b978f"
+dependencies = [
+ "ilattice",
+ "ndcopy",
+ "ndshape",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -268,6 +279,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "glam"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b8509e6791516e81c1a630d0bd7fbac36d2fa8712a9da8662e716b52d5051ca"
+
+[[package]]
 name = "hashbrown"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -289,6 +306,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
+name = "ilattice"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3db9046391c0e0658a18e23877706d16e48cc8b4711702b9f703776410c2b84"
+dependencies = [
+ "glam",
+]
+
+[[package]]
 name = "indexmap"
 version = "2.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -302,6 +328,7 @@ dependencies = [
 name = "kernels"
 version = "0.1.0"
 dependencies = [
+ "block-mesh",
  "kestrel-codegen",
  "kestrel-driver",
 ]
@@ -398,6 +425,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6b0ca1155a9ecc25aa12e8313a119f32edf0255fea2f44839c4ac0a12b2ac157"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "ndcopy"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24f4e41b81e3f7a4b742755be1bb368a6faafc43af555fe135c36b0efe095c59"
+dependencies = [
+ "ndshape",
+]
+
+[[package]]
+name = "ndshape"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "975bce586ad637e27f6dc26ee907c07050686a588695bfd64b7873a9d48a700c"
+dependencies = [
+ "static_assertions",
 ]
 
 [[package]]
@@ -502,6 +547,12 @@ name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
+
+[[package]]
+name = "static_assertions"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "syn"

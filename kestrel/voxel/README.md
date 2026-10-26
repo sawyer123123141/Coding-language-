@@ -64,6 +64,7 @@ The entry programs:
   `bench/engine/measure.py`, which also samples memory; results in `bench/engine/results.md`.
   `tests/bench_smoke.kes` runs it headless with every timed phase cut to one second.
 - `parity.kes` and `parity_*.kes`: the frozen voxel benchmark rebuilt on `Grid[T]` (a benchmark module, not a library), with its entry files; timed by `bench/engine/run_parity.ps1`, results in `bench/engine/results.md`.
+- `race.kes` and the entry files `race_faces.kes`, `race_arrays.kes` and `race_check.kes`: the race against Rust's `block-mesh` (E26), round 1: block-face meshing of the frozen world's 256 chunks, timed by `bench/kernels`' timer (`py measure.py --only race`), results in `bench/engine/results.md` ("Race, round 1"). Benchmark files, not libraries; they import only `grid` and `noise` because the timer has no window natives.
 
 `tests/` holds the test programs, one per library or engine part (`tests/grid.kes`, ...), plus
 the runner's own self-tests (`tests/runner_*.kes`, with `tests/fixtures/`) and the contract
