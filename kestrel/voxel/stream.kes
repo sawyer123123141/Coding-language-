@@ -45,8 +45,13 @@ use { AIR, SIZE, LAYERS, HEIGHT from blocks }
 pub let VIEW = 8
 // Column slots: every column within VIEW + 2 of any point (E13).
 pub let CAPACITY = (2 * (VIEW + 2) + 1) * (2 * (VIEW + 2) + 1)
-// Columns generated per step, and chunks meshed per frame (the renderer's batch).
-pub let GEN_BATCH = 8
+// Columns generated per step, and chunks meshed per frame (the renderer's batch). One column
+// takes about 7.5 ms to generate on one core and a batch's columns run side by side, so a
+// frame that generates costs one column's time plus the copy, the meshing and the drawing.
+// GEN_BATCH 2 keeps the 99th-percentile frame under 16.7 ms while flying (the spec started
+// at 8, which took 18 to 20 ms; `bench/engine/results.md`, "Engine"); it still generates 120
+// columns a simulated second, twice what flying at 100 blocks a second needs.
+pub let GEN_BATCH = 2
 pub let MESH_BATCH = 16
 
 // A column place no column has: `column_of` of an `int` is at most 2^26.

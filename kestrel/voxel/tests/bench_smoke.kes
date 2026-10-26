@@ -1,0 +1,27 @@
+// The benchmark's script runs to the end (E18b): `bench.kes` with every timed phase cut to one
+// simulated second, in a quiet headless window. The fill and the edits' settling end on their
+// own. Every phase line, the fill time, the edits line, the circle's marks and `done` appear.
+// The headless clock is fake (each frame is 1/60 s, the work takes no time), so the timings
+// here are zeros; the counts are real: 269 columns and 788 chunks fill the view, and the
+// edits mesh 450 chunks (25 middle cells at 1 chunk and 25 corner cells at 8, each twice)
+// besides the 24 the stream queued while the view settled. 369 of the 400 frames are used.
+use { run_bench from bench }
+
+main() {
+    run_bench()
+}
+// env: KESTREL_HEADLESS=400
+// env: KESTREL_HEADLESS_QUIET=1
+// replace: bench.kes let FLY20_SECONDS = 20 => let FLY20_SECONDS = 1
+// replace: bench.kes let FLY100_SECONDS = 20 => let FLY100_SECONDS = 1
+// replace: bench.kes let CIRCLE_SECONDS = 300 => let CIRCLE_SECONDS = 1
+// expect: phase fill frames 135 work_med 0 work_p99 0 work_max 0 wall_med 16.667 generated 269 meshed 788 gen_ms 0 mesh_ms 0 upload_ms 0
+// expect: fill_ms 2233.334
+// expect: phase fly20 frames 60 work_med 0 work_p99 0 work_max 0 wall_med 16.667 generated 19 meshed 68 gen_ms 0 mesh_ms 0 upload_ms 0
+// expect: phase fly100 frames 60 work_med 0 work_p99 0 work_max 0 wall_med 16.667 generated 50 meshed 180 gen_ms 0 mesh_ms 0 upload_ms 0
+// expect: phase edits frames 54 work_med 0 work_p99 0 work_max 0 wall_med 16.667 generated 7 meshed 474 gen_ms 0 mesh_ms 0 upload_ms 0
+// expect: edits mid_ms 0 corner_ms 0
+// expect: mark 0
+// expect: mark 1
+// expect: phase circle frames 60 work_med 0 work_p99 0 work_max 0 wall_med 16.667 generated 19 meshed 68 gen_ms 0 mesh_ms 0 upload_ms 0
+// expect: done

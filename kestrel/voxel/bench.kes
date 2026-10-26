@@ -1,0 +1,261 @@
+// The engine's benchmark (E18b, E32): the play loop of `main.kes` in a window, driven by a
+// fixed script instead of the keyboard and mouse, printing machine-readable lines that
+// `bench/engine/measure.py` reads. Run it in a hidden window, which times for real:
+//
+//   KESTREL_HIDDEN=1 kestrel run --release voxel/bench.kes
+//
+// (A headless window, `KESTREL_HEADLESS=<frames>`, runs it too, as `tests/bench_smoke.kes`
+// does, but its clock is fake, so its timings mean nothing.)
+//
+// Every frame steps the simulation by a fixed 1/60 s, so every run takes the same path and
+// does the same work whatever the machine does (E32). A frame's work time is the clock from
+// the frame's start to just before `window.frame()`; its wall time is from its start to the
+// next frame's start, which may be capped by the display's vsync.
+//
+// The script, in phases (the lengths are the constants below, so a quick run can shorten
+// them):
+//   fill    standing at the start until the queue is empty and every chunk within VIEW is
+//           meshed (spawning first, as `main.kes` does);
+//   fly20   flying straight along +z at 20 blocks a second, at height CRUISE;
+//   fly100  the same at 100 blocks a second;
+//   edits   hovering until the view is filled again, then one cell a frame: broken (set to
+//           air) and put back, each timed from the edit to its chunks' upload. The first
+//           EDIT_CELLS cells are in chunk middles (1 chunk to mesh again), the rest on chunk
+//           corners (8 chunks), on a 5 x 5 grid of columns around the player;
+//   circle  flying a circle of radius RADIUS at 50 blocks a second, so streaming never stops
+//           (the memory check: `measure.py` samples the working set from outside).
+//
+// It prints, one line each:
+//   phase <name> frames <n> work_med <ms> work_p99 <ms> work_max <ms> wall_med <ms>
+//       generated <n> meshed <n> gen_ms <f> mesh_ms <f> upload_ms <f>
+//   (at the end of each phase; `gen_ms` is per column and `mesh_ms` and `upload_ms` per chunk,
+//   medians over the frames that did some; a batch runs on all cores, so these are the
+//   batch's time shared out, not one item's time on one core)
+//   fill_ms <ms>                 the real time the fill phase took
+//   edits mid_ms <f> corner_ms <f>   medians, edit to upload done
+//   mark <seconds>               every 10 simulated seconds of the circle
+//   done
+//
+// The speeds, the cruising height and the circle's heading are set on the player directly;
+// everything else goes through an `Intent` and `step_player`, as in play. The bench never
+// captures the mouse. Its sample buffers are sized before the run and written by index, so
+// the frame loop allocates nothing of its own (E40).
+use window
+use draw
+use { Color from draw }
+use { ChunkRef, new_world from world }
+use { new_stream, stream_step, column_at, VIEW, CAPACITY, GEN_BATCH, MESH_BATCH from stream }
+use { Intent, new_player, step_player, spawn, eye, look, view from player }
+use { edit_at, REACH from edit }
+use { new_render, mesh_step, draw_world, meshed_chunks from render }
+use { draw_hud from hud }
+use { cast from ray }
+use { AIR from blocks }
+use { new_samples, restart, record, add_frame, add_edit, report_phase, report_edits, filled, edit_cell, ms,
+    three from script }
+
+// Phase lengths, in simulated seconds (60 frames each), and the most frames the fill and the
+// edits' settling may take before the bench says so and moves on.
+let FLY20_SECONDS = 20
+let FLY100_SECONDS = 20
+let CIRCLE_SECONDS = 300
+let FILL_LIMIT = 3600
+let SETTLE_LIMIT = 3600
+
+// The sample buffers hold this many frames whatever the phases' lengths (the full circle's),
+// so a run with a shortened circle (`measure.py`'s 100 s one) has the same buffers, and its
+// program arena compares like for like with the full run's.
+let BUFFER_FRAMES = 18000
+
+// Cells edited of each kind (middle, corner): at most 25, the 5 x 5 columns around the player.
+let EDIT_CELLS = 25
+
+// The script's numbers: speeds in blocks a second, the flying height and the circle's radius.
+let SLOW = 20.0
+let FAST = 100.0
+let CIRCLING = 50.0
+let CRUISE = 100.0
+let RADIUS = 1000.0
+
+let DT = 1.0 / 60.0
+let SEED = 1337
+let SCREEN_WIDTH = 1280
+let SCREEN_HEIGHT = 720
+let SKY = Color(0.55, 0.75, 0.95)
+let START = vec3(16.5, 140, 16.5)
+
+// The phases, in order.
+let FILL = 0
+let FLY20 = 1
+let FLY100 = 2
+let EDITS = 3
+let CIRCLE = 4
+let DONE = 5
+
+pure phase_name(phase: int) -> string {
+    if phase == FILL { "fill" } else if phase == FLY20 { "fly20" } else if phase == FLY100 { "fly100" } else if phase == EDITS {
+        "edits"
+    } else {
+        "circle"
+    }
+}
+
+// Frames in a phase of `seconds` simulated seconds.
+pure frames_of(seconds: int) -> int {
+    seconds * 60
+}
+
+// An intent that does nothing, and one that flies forward.
+pure still() -> Intent {
+    Intent(move: vec3(0, 0, 0), turn: vec2(0, 0), jump: false, wheel: 0, break_block: false, place_block: false,
+        toggle_fly: false)
+}
+
+pure forward_intent(toggle: bool) -> Intent {
+    Intent(move: vec3(0, 0, 1), turn: vec2(0, 0), jump: false, wheel: 0, break_block: false, place_block: false,
+        toggle_fly: toggle)
+}
+
+// Runs the whole script in an open window (see the top of the file).
+pub run_bench() {
+    window.open(SCREEN_WIDTH, SCREEN_HEIGHT, "Kestrel voxel bench")
+    var w = new_world(SEED, CAPACITY)
+    var s = new_stream(VIEW, GEN_BATCH)
+    var r = new_render(CAPACITY)
+    var p = new_player(START)
+    var spawned = false
+    let longest = max(max(max(FILL_LIMIT, frames_of(FLY20_SECONDS)), max(frames_of(FLY100_SECONDS), frames_of(CIRCLE_SECONDS))),
+        max(SETTLE_LIMIT + EDIT_CELLS * 2, BUFFER_FRAMES))
+    var b = new_samples(longest, EDIT_CELLS * 2)
+    let no_edits: list[ChunkRef] = []
+
+    var phase = FILL
+    // Frames into the phase, and the edits done (each cell is one edit: broken and put back).
+    var k = 0
+    var edits = 0
+    var settled = false
+    var edit_base = ivec2(0, 0)
+    var circle_frames = 0
+    var last_t0: i64 = -1
+    var first_t0: i64 = 0
+
+    while window.frame() {
+        let t0 = window.ticks_usec()
+        if last_t0 >= 0 {
+            record(var b, ms(t0 - last_t0))
+        } else {
+            first_t0 = t0
+        }
+        last_t0 = t0
+
+        // The script: this phase's intent.
+        var i = still()
+        if phase == FILL {
+            if not spawned {
+                spawned = spawn(var p, w)
+            }
+        } else if phase == FLY20 or phase == FLY100 {
+            if k == 0 {
+                // Into fly mode (from walking) at the cruising height, at this phase's speed.
+                i = forward_intent(phase == FLY20)
+                p.pos = vec3(p.pos.x, CRUISE, p.pos.z)
+            } else {
+                i = forward_intent(false)
+            }
+            p.speed = if phase == FLY20 { SLOW } else { FAST }
+        } else if phase == CIRCLE {
+            // Heading along the circle through the start point whose centre is RADIUS along
+            // -x: after the angle `a` round it, the heading is -a (yaw 0 is +z).
+            p.speed = CIRCLING
+            let a = (float(k) + 0.5) * CIRCLING * DT / RADIUS
+            p.yaw = -a * 180.0 / PI
+            i = forward_intent(false)
+            if k % 600 == 0 {
+                print("mark {k / 60}")
+            }
+        }
+        step_player(var p, w, i, DT)
+
+        // The edits: one cell a frame once the view is filled again.
+        if phase == EDITS and settled and edits < EDIT_CELLS * 2 {
+            let corner = edits >= EDIT_CELLS
+            let cell = edit_cell(edit_base, edits % EDIT_CELLS, corner)
+            let was = w.block(cell.x, cell.y, cell.z)
+            let a = window.ticks_usec()
+            let gone = edit_at(var w, cell, AIR)
+            let m1 = mesh_step(var r, var w, gone, 0, p.pos, VIEW)
+            let a2 = window.ticks_usec()
+            let back = edit_at(var w, cell, was)
+            let m2 = mesh_step(var r, var w, back, 0, p.pos, VIEW)
+            let a3 = window.ticks_usec()
+            let expected = if corner { 8 } else { 1 }
+            if gone.len != expected or back.len != expected {
+                print("note: the edit at {cell.x} {cell.y} {cell.z} dirtied {gone.len} and {back.len} chunks, not {expected}")
+            }
+            add_edit(var b, corner, ms(a2 - a))
+            add_edit(var b, corner, ms(a3 - a2))
+            b.meshed += m1.meshed + m2.meshed
+            edits += 1
+        }
+
+        // The world, as in play.
+        let st = stream_step(var s, var w, p.pos)
+        let m = mesh_step(var r, var w, no_edits, MESH_BATCH, p.pos, VIEW)
+
+        // Drawing, as in play (the HUD's numbers are not kept up to date here).
+        draw.clear(SKY)
+        let size = window.size()
+        draw_world(r, w, view(p), size.x / size.y)
+        draw_hud(cast(w, eye(p), look(p), REACH), p, 0.0, 0.0, w.columns.in_use(), meshed_chunks(r), r.total_faces,
+            w.queue.len(), false)
+        add_frame(var b, ms(window.ticks_usec() - t0), st.generated, st.gen_us, m.meshed, m.mesh_us, m.upload_us)
+
+        // The end of a phase: its line, then the next phase.
+        k += 1
+        var end = false
+        if phase == FILL {
+            end = (spawned and filled(w, p.pos, VIEW)) or k >= FILL_LIMIT
+            if end and k >= FILL_LIMIT {
+                print("note: the view wasn't filled in {FILL_LIMIT} frames")
+            }
+        } else if phase == FLY20 {
+            end = k >= frames_of(FLY20_SECONDS)
+        } else if phase == FLY100 {
+            end = k >= frames_of(FLY100_SECONDS)
+        } else if phase == EDITS {
+            if not settled and filled(w, p.pos, VIEW) {
+                settled = true
+                edit_base = column_at(p.pos)
+            }
+            end = edits >= EDIT_CELLS * 2 or k >= SETTLE_LIMIT + EDIT_CELLS * 2
+            if end and edits < EDIT_CELLS * 2 {
+                print("note: only {edits} of {EDIT_CELLS * 2} edits were done")
+            }
+        } else {
+            end = k >= frames_of(CIRCLE_SECONDS)
+        }
+        if end {
+            if phase == CIRCLE {
+                print("mark {k / 60}")
+            }
+            report_phase(phase_name(phase), b)
+            if phase == FILL {
+                print("fill_ms {three(ms(window.ticks_usec() - first_t0))}")
+            }
+            if phase == EDITS {
+                report_edits(b)
+            }
+            restart(var b)
+            phase += 1
+            k = 0
+        }
+        if phase == DONE {
+            print("done")
+            break
+        }
+    }
+}
+
+main() {
+    run_bench()
+}

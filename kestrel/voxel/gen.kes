@@ -43,6 +43,9 @@ pub pure block_type(depth: int, y: int) -> u8 {
 // current one (at most DIRT_DEPTH), starting from the rows above the world (y = 128 and
 // up, from the density), so the top of the world is typed the way the viewer types the
 // top of a chunk.
+//
+// It allocates nothing (proven); its loops keep checks, see `tests/contract_gen.kes`.
+@prove(no_alloc)
 pub pure generate(var g: Grid[u8], cx: int, cz: int, seed: int) {
     for z from 0 to SIZE {
         for x from 0 to SIZE {

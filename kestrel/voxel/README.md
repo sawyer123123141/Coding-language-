@@ -57,10 +57,17 @@ The engine:
 The entry programs:
 
 - `main.kes`: play, in a window (above).
+- `bench.kes` (with `script.kes`, its bookkeeping): the play loop driven by a fixed script, for
+  measuring: filling the view, flying straight at 20 and 100 blocks a second, 100 edits and a
+  300 s circle, one machine-readable line per phase. Run it hidden:
+  `KESTREL_HIDDEN=1 kestrel run --release voxel/bench.kes`, or through
+  `bench/engine/measure.py`, which also samples memory; results in `bench/engine/results.md`.
+  `tests/bench_smoke.kes` runs it headless with every timed phase cut to one second.
 - `parity.kes` and `parity_*.kes`: the frozen voxel benchmark rebuilt on `Grid[T]` (a benchmark module, not a library), with its entry files; timed by `bench/engine/run_parity.ps1`, results in `bench/engine/results.md`.
 
 `tests/` holds the test programs, one per library or engine part (`tests/grid.kes`, ...), plus
-the runner's own self-tests (`tests/runner_*.kes`, with `tests/fixtures/`).
+the runner's own self-tests (`tests/runner_*.kes`, with `tests/fixtures/`) and the contract
+probes (`tests/contract_*.kes`: a `@prove` the compiler can't prove yet, expected to fail).
 
 ## Running the tests
 
@@ -89,5 +96,6 @@ error.
 
 `main.kes` itself is run by the Rust test `main_smoke_runs_the_play_program_headless` (selected
 with `KESTREL_TEST_ONLY=main_smoke`): 120 frames in a quiet headless window, with and without
-`--release`, which must exit 0 and print a stats line with columns and chunks loaded. Every
+`--release`, which must exit 0, print a stats line with columns and chunks loaded, and report no
+failed contract. Every
 window the tests open is headless; none appears.

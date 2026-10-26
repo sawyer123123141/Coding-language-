@@ -1,0 +1,26 @@
+// Contract probe (E39): `@prove(no_checks)` on generation's loops (`generate`, the column's
+// 32 x 32 rows of 128 blocks) can't be proven in either build, so the engine doesn't carry it;
+// `@prove(no_alloc)` on `generate` holds in both and is in `gen.kes`. This test adds
+// `no_checks` to the scratch copy of `gen.kes` only and wants the build to refuse it. When a
+// compiler change makes it pass, this test fails: move the contract into the engine.
+//
+// What stops it (the builds' errors):
+// - checked build: the loop calls `octave`, which isn't inlined there (the inlining budget of
+//   the caller ran out, see the findings) and so keeps its shift check, `1 << shift` with
+//   `shift` any `int` (inlined, `shift` would be the constant 5, 4 or 3);
+// - release build: the writes `g.items[i]`: `i` counts down from the top row by
+//   `SIZE * SIZE`, so it is at most 131,071, but nothing shows it is below `g.items.len`
+//   (a list's length isn't known to the compiler).
+use { grid from grid }
+use { generate from gen }
+use { AIR, SIZE, HEIGHT from blocks }
+
+main() {
+    var g = grid[u8](SIZE, HEIGHT, SIZE, AIR)
+    generate(var g, 0, 0, 1337)
+    print(g.items.len)
+}
+// replace: gen.kes     for z from 0 to SIZE { =>     @prove(no_checks) for z from 0 to SIZE {
+// expect-exit: 1
+// expect-stderr: can't be proven `no_checks`
+// release

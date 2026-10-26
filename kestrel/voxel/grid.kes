@@ -21,7 +21,9 @@ pub struct Grid[T] {
     sz: int
     items: list[T]
 
-    // Where the cell (x, y, z) is in `items`. It does not check the bounds.
+    // Where the cell (x, y, z) is in `items`. It does not check the bounds. `get` and `set`
+    // allocate nothing (proven); they keep the list's bounds check, see
+    // `tests/contract_grid.kes`.
     pure index(self, x: int, y: int, z: int) -> int {
         (y * self.sz + z) * self.sx + x
     }
@@ -30,10 +32,12 @@ pub struct Grid[T] {
     // (like reading past the end of an `Array`). An x or z outside the grid whose
     // list index is still in range reads a neighbouring cell instead: x = sx is
     // the next row's x = 0. So call `inside` first when the cell could be outside.
+    @prove(no_alloc)
     pure get(self, x: int, y: int, z: int) -> T {
         self.items[self.index(x, y, z)]
     }
 
+    @prove(no_alloc)
     pure set(var self, x: int, y: int, z: int, v: T) {
         self.items[self.index(x, y, z)] = v
     }

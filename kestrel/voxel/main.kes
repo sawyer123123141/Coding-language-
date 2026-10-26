@@ -24,9 +24,9 @@ use draw
 use input
 use { Color from draw }
 use { Key from input }
-use { World, new_world from world }
-use { Stream, new_stream, stream_step, VIEW, CAPACITY, GEN_BATCH, MESH_BATCH from stream }
-use { Player, Intent, new_player, step_player, spawn, eye, look, view from player }
+use { new_world from world }
+use { new_stream, stream_step, VIEW, CAPACITY, GEN_BATCH, MESH_BATCH from stream }
+use { Intent, new_player, step_player, spawn, eye, look, view from player }
 use { apply_edit, REACH from edit }
 use { new_render, mesh_step, draw_world, meshed_chunks from render }
 use { draw_hud, two from hud }

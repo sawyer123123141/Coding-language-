@@ -9,7 +9,12 @@
 // test opens a quiet headless one (nothing appears; its clock is fake, so `gen_us` is 0 here).
 use window
 use { World, ChunkRef, new_world, load_now, CHUNK_NONE, CHUNK_QUEUED, CHUNK_MESHED from world }
-use { Stream, new_stream, stream_step, VIEW, CAPACITY, GEN_BATCH, MESH_BATCH from stream }
+use { Stream, new_stream, stream_step, VIEW, CAPACITY, MESH_BATCH from stream }
+
+// Columns started a step in these tests: 8, not the engine's GEN_BATCH, so the first step's
+// order (the player's column, its sides, then corners by angle) and the full pool's count
+// below have enough columns to show.
+let BATCH = 8
 use { Handle from pool }
 use { column_key, column_of from column }
 use { solid_at from gen }
@@ -209,7 +214,7 @@ new_checks(capacity: int) -> Checks {
 main() {
     window.open(64, 64, "stream")
     var w = new_world(1337, CAPACITY)
-    var s = new_stream(VIEW, GEN_BATCH)
+    var s = new_stream(VIEW, BATCH)
     var c = new_checks(CAPACITY)
 
     // The first step starts the 8 nearest columns: the player's, its 4 sides, then 3 of the
@@ -296,7 +301,7 @@ main() {
     // A full queue: the refused chunks stay CHUNK_NONE, are counted, and the next step at the
     // same place queues them (the player hasn't changed column, so only the retry does it).
     var w3 = new_world(1337, 30)
-    var s3 = new_stream(1, GEN_BATCH)
+    var s3 = new_stream(1, BATCH)
     var c3 = new_checks(30)
     let dead = ChunkRef(column: Handle(slot: -1, gen: -1), layer: 0)
     while w3.queue.push(dead) {
@@ -318,7 +323,7 @@ main() {
     // view 2, column (3, 0) is loaded (within view + 1) and its east neighbours are loaded by
     // hand first; the player stands at the east edge of column 0 so they aren't unloaded.
     var w4 = new_world(1337, 60)
-    var s4 = new_stream(2, GEN_BATCH)
+    var s4 = new_stream(2, BATCH)
     var c4 = new_checks(60)
     load_now(var w4, 4, -1)
     load_now(var w4, 4, 0)
@@ -343,7 +348,7 @@ main() {
     // A pool too small for the view: the step loads what fits, counts the failed take and
     // says so, rather than stopping the program.
     var small = new_world(1337, 4)
-    var s2 = new_stream(VIEW, GEN_BATCH)
+    var s2 = new_stream(VIEW, BATCH)
     let st = stream_step(var s2, var small, vec3(16.0, 80.0, 16.0))
     print("pool full", st.started, st.out_of_slots, small.columns.in_use())
 }

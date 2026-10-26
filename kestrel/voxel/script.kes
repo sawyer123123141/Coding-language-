@@ -1,0 +1,188 @@
+// The benchmark's bookkeeping (`bench.kes`): the per-frame samples of a phase, kept in
+// buffers sized before the run and written by index (so the frame loop allocates nothing,
+// E40), the lines printed at the end of a phase, and the script's questions about the world
+// (is the view filled, which cell is the n-th edit).
+use { World, CHUNK_MESHED from world }
+use { column_at from stream }
+use { SIZE, LAYERS from blocks }
+
+// One phase's samples. The lists are as long as the longest phase; the counts say how many
+// of their first items this phase has written.
+pub struct Samples {
+    // Milliseconds per frame: the work, and the wall time from the frame's start to the next's.
+    work: list[float]
+    wall: list[float]
+    // Milliseconds per column generated and per chunk meshed or uploaded, one sample for each
+    // frame that did some.
+    gen: list[float]
+    mesh: list[float]
+    upload: list[float]
+    frames: int
+    walls: int
+    gens: int
+    meshes: int
+    generated: int
+    meshed: int
+    // The edits' times (milliseconds, edit to upload done), for the whole run.
+    mid: list[float]
+    corner: list[float]
+    mids: int
+    corners: int
+}
+
+// Buffers for phases of up to `frames` frames and `edits` edits of each kind.
+pub new_samples(frames: int, edits: int) -> Samples {
+    var s = Samples(work: [], wall: [], gen: [], mesh: [], upload: [], frames: 0, walls: 0, gens: 0, meshes: 0,
+        generated: 0, meshed: 0, mid: [], corner: [], mids: 0, corners: 0)
+    for i from 0 to frames {
+        s.work.add(0.0)
+        s.wall.add(0.0)
+        s.gen.add(0.0)
+        s.mesh.add(0.0)
+        s.upload.add(0.0)
+    }
+    for i from 0 to edits {
+        s.mid.add(0.0)
+        s.corner.add(0.0)
+    }
+    s
+}
+
+// Starts a new phase: forgets the frame samples (the edits' are kept).
+pub pure restart(var s: Samples) {
+    s.frames = 0
+    s.walls = 0
+    s.gens = 0
+    s.meshes = 0
+    s.generated = 0
+    s.meshed = 0
+}
+
+// Microseconds to milliseconds.
+pub pure ms(us: i64) -> float {
+    float(us) / 1000.0
+}
+
+// Rounds to three decimals for printing.
+pub pure three(x: float) -> float {
+    round(x * 1000) / 1000
+}
+
+// A wall time (the last frame's length). A sample past the buffer's end is dropped; the
+// phases are sized so that doesn't happen.
+pub pure record(var s: Samples, wall: float) {
+    if s.walls < s.wall.len {
+        s.wall[s.walls] = wall
+        s.walls += 1
+    }
+}
+
+// One frame's work time and what its stream step and mesh step did (microseconds).
+pub pure add_frame(var s: Samples, work: float, generated: int, gen_us: i64, meshed: int, mesh_us: i64, upload_us: i64) {
+    if s.frames >= s.work.len {
+        return
+    }
+    s.work[s.frames] = work
+    s.frames += 1
+    s.generated += generated
+    s.meshed += meshed
+    if generated > 0 {
+        s.gen[s.gens] = ms(gen_us) / float(generated)
+        s.gens += 1
+    }
+    if meshed > 0 {
+        s.mesh[s.meshes] = ms(mesh_us) / float(meshed)
+        s.upload[s.meshes] = ms(upload_us) / float(meshed)
+        s.meshes += 1
+    }
+}
+
+// One edit's time, in the middle or corner list.
+pub pure add_edit(var s: Samples, corner: bool, time: float) {
+    if corner {
+        if s.corners < s.corner.len {
+            s.corner[s.corners] = time
+            s.corners += 1
+        }
+    } else if s.mids < s.mid.len {
+        s.mid[s.mids] = time
+        s.mids += 1
+    }
+}
+
+// The value at fraction `q` (0 to 1) of the first `n` of `xs` in order (nearest rank): 0.5 is
+// the median, 0.99 the 99th percentile, 1 the worst. 0 when there are none. It sorts a copy,
+// so call it inside an `arena { }`.
+pure rank(xs: list[float], n: int, q: float) -> float {
+    if n == 0 {
+        return 0.0
+    }
+    var sorted: list[float] = []
+    for i from 0 to n {
+        sorted.add(xs[i])
+    }
+    sorted.sort()
+    let at = int(ceil(q * float(n))) - 1
+    sorted[clamp(at, 0, n - 1)]
+}
+
+// The phase line (see `bench.kes`). The sorting copies live in an arena freed here.
+pub report_phase(name: string, s: Samples) {
+    arena {
+        let work_med = three(rank(s.work, s.frames, 0.5))
+        let work_p99 = three(rank(s.work, s.frames, 0.99))
+        let work_max = three(rank(s.work, s.frames, 1.0))
+        let wall_med = three(rank(s.wall, s.walls, 0.5))
+        let gen = three(rank(s.gen, s.gens, 0.5))
+        let mesh = three(rank(s.mesh, s.meshes, 0.5))
+        let upload = three(rank(s.upload, s.meshes, 0.5))
+        print("phase {name} frames {s.frames} work_med {work_med} work_p99 {work_p99} work_max {work_max} wall_med {wall_med} generated {s.generated} meshed {s.meshed} gen_ms {gen} mesh_ms {mesh} upload_ms {upload}")
+    }
+}
+
+// The edits line: the median time of the middle and the corner edits.
+pub report_edits(s: Samples) {
+    arena {
+        let mid = three(rank(s.mid, s.mids, 0.5))
+        let corner = three(rank(s.corner, s.corners, 0.5))
+        print("edits mid_ms {mid} corner_ms {corner}")
+    }
+}
+
+// Whether the view around `at` is filled: the queue is empty and every chunk of every column
+// within `view` of the player's column is meshed.
+pub pure filled(w: World, at: vec3, view: int) -> bool {
+    if w.queue.len() > 0 {
+        return false
+    }
+    let p = column_at(at)
+    for dz from -view to view + 1 {
+        for dx from -view to view + 1 {
+            if dx * dx + dz * dz <= view * view {
+                let slot = w.slot_at(p.x + dx, p.y + dz)
+                if slot < 0 {
+                    return false
+                }
+                for layer from 0 to LAYERS {
+                    if w.chunk_state[slot * LAYERS + layer] != CHUNK_MESHED {
+                        return false
+                    }
+                }
+            }
+        }
+    }
+    true
+}
+
+// The n-th edited cell (n from 0 to 24) around column `base`, on a 5 x 5 grid of columns:
+// the middle of the column's second chunk (y 48: its chunk alone is meshed again), or the
+// corner where the column's first two chunks meet (y 32, x and z on the column's low edge:
+// the 8 chunks around it are).
+pub pure edit_cell(base: ivec2, n: int, corner: bool) -> ivec3 {
+    let cx = base.x + n % 5 - 2
+    let cz = base.y + n / 5 - 2
+    if corner {
+        return ivec3(cx * SIZE, SIZE, cz * SIZE)
+    }
+    ivec3(cx * SIZE + SIZE / 2, SIZE + SIZE / 2, cz * SIZE + SIZE / 2)
+}
