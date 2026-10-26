@@ -26,8 +26,10 @@ pub struct Grid[T] {
         (y * self.sz + z) * self.sx + x
     }
 
-    // The value in a cell. A cell outside the grid stops the program with an
-    // index error, like reading past the end of an `Array`.
+    // The value in a cell. Only a list index outside `items` stops the program
+    // (like reading past the end of an `Array`). An x or z outside the grid whose
+    // list index is still in range reads a neighbouring cell instead: x = sx is
+    // the next row's x = 0. So call `inside` first when the cell could be outside.
     pure get(self, x: int, y: int, z: int) -> T {
         self.items[self.index(x, y, z)]
     }

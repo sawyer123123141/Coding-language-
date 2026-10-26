@@ -23,14 +23,14 @@ use std::time::Duration;
 
 mod common;
 
-use common::directives::{compare, only_prefixed, parse, Directives, PROOF_FAILED};
+use common::directives::{compare, only_prefixed, parse, Directives};
 use common::{hermetic, output_within};
 
-/// What a contract's error says; see `release_runs_leave_proofs_and_contracts_alone`.
+/// What a contract's error says; see `release_runs_match_their_expectations`.
 const CONTRACT_FAILED: &str = "can't be proven";
 
-/// How long the release pass lets one program run (as `programs/release.rs` does).
-const RELEASE_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long the release pass lets one program run; a run over it fails the test.
+const RELEASE_TIMEOUT: Duration = Duration::from_secs(120);
 
 fn voxel_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../voxel")
@@ -95,6 +95,11 @@ fn prepare(pass: &str, path: &Path, exp: &Directives) -> PathBuf {
     for copy in &exp.copies {
         let from = repo_root().join(copy);
         let to = dir.join(from.file_name().unwrap());
+        assert!(
+            !to.exists() && to != dir.join(format!("test_{name}.kes")),
+            "{name}: `// copy: {copy}` would overwrite {} in the scratch folder, an engine module or the test itself; rename the copy's source",
+            to.file_name().unwrap().to_string_lossy()
+        );
         fs::copy(&from, &to).unwrap_or_else(|e| panic!("{name}: can't copy {}: {e}", from.display()));
     }
     let file = dir.join(format!("test_{name}.kes"));
@@ -162,15 +167,15 @@ fn engine_tests_run_as_executables() {
     assert!(failures.is_empty(), "\n{}", failures.join("\n"));
 }
 
-/// The release pass: the tests that say `// release` under `kestrel run --release`, with the proof
-/// check on. As in the program tests' release pass, the checked expectations don't hold there (an
-/// overflow wraps instead of stopping), so a run fails only when its standard error has the
-/// failed-proof sentence, or a contract's error that the test doesn't expect. A run over 30
-/// seconds is killed and listed, but doesn't fail the test.
+/// The release pass: the tests that say `// release`, run with `kestrel run --release` and the
+/// proof check on, compared like the other passes (standard output, exit code and messages
+/// against the test's directives; a failed proof always fails). A test that says `// release`
+/// therefore has output that is the same in the checked and the release build (no overflow that
+/// only stops a checked run). A contract's error the test doesn't expect also fails, and so does
+/// a run over `RELEASE_TIMEOUT`, which is killed.
 #[test]
-fn release_runs_leave_proofs_and_contracts_alone() {
+fn release_runs_match_their_expectations() {
     let mut failures = Vec::new();
-    let mut timeouts = Vec::new();
     for path in tests() {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
         let exp = expectations(&name, &fs::read_to_string(&path).unwrap());
@@ -183,21 +188,14 @@ fn release_runs_leave_proofs_and_contracts_alone() {
             .envs(exp.env.iter().map(|(k, v)| (k, v)))
             .env("KESTREL_CHECK_PROOFS", "1");
         let Some(out) = output_within(&mut cmd, RELEASE_TIMEOUT) else {
-            timeouts.push(name);
+            failures.push(format!("{name} [release]: still running after {} seconds, so it was stopped", RELEASE_TIMEOUT.as_secs()));
             continue;
         };
+        failures.extend(compare(&name, "release", &out, &exp));
         let stderr = String::from_utf8_lossy(&out.stderr).replace("\r\n", "\n");
-        if stderr.contains(PROOF_FAILED) {
-            failures.push(format!("{name} [release]: a proof failed\n--- stderr ---\n{stderr}"));
-        }
         if stderr.contains(CONTRACT_FAILED) && !exp.stderr.iter().any(|s| s.contains(CONTRACT_FAILED)) {
             failures.push(format!("{name} [release]: a contract doesn't hold\n--- stderr ---\n{stderr}"));
         }
-    }
-    if !timeouts.is_empty() {
-        // Written to the real standard error: libtest hides `eprintln!` from a passing test.
-        use std::io::Write;
-        let _ = writeln!(std::io::stderr(), "engine release pass: stopped after 30 seconds: {}", timeouts.join(", "));
     }
     assert!(failures.is_empty(), "\n{}", failures.join("\n"));
 }
@@ -246,4 +244,16 @@ fn a_replace_that_matches_nothing_panics() {
     fs::write(&test, "main() {}\n").unwrap();
     let exp = expectations("t.kes", "// replace: test_t.kes no such text in the file => x\nmain() {}\n");
     prepare("_unit", &test, &exp);
+}
+
+#[test]
+#[should_panic(expected = "`// copy: kestrel/voxel/grid.kes` would overwrite grid.kes in the scratch folder")]
+fn a_copy_over_an_engine_module_panics() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("voxel_copy_unit");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let test = dir.join("t.kes");
+    fs::write(&test, "main() {}\n").unwrap();
+    let exp = expectations("t.kes", "// copy: kestrel/voxel/grid.kes\nmain() {}\n");
+    prepare("_unit2", &test, &exp);
 }

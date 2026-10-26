@@ -37,6 +37,7 @@ main() {
     print("len", g.items.len)
     g.set(1, 2, 3, 7)
     print("get", g.get(1, 2, 3), g.get(2, 2, 3))
+    print("layout", g.items[(2 * g.sz + 3) * g.sx + 1])
     print("inside", g.inside(3, 4, 5), g.inside(4, 0, 0), g.inside(0, -1, 0), g.inside(0, 0, 6))
     g.fill(9)
     var same = true
@@ -50,6 +51,10 @@ main() {
     var gi = grid[int](4, 5, 6, 0)
     gi.set(3, 2, 1, 42)
     print("int", gi.get(3, 2, 1))
+    // An x past the row's end is not checked: it reads the next row (z + 1), so `inside`
+    // must come first. This pins that, so changing it is a decision.
+    gi.set(0, 0, 1, 5)
+    print("wrap", gi.get(4, 0, 0))
 
     var gc = grid[Cell](2, 2, 2, Cell(a: 0, b: 0))
     gc.set(1, 0, 1, Cell(a: 3, b: 4))
@@ -69,8 +74,10 @@ main() {
 // expect: index true
 // expect: len 120
 // expect: get 7 0
+// expect: layout 7
 // expect: inside true false false false
 // expect: fill true
 // expect: int 42
+// expect: wrap 5
 // expect: struct 3 4
 // expect: solid 5

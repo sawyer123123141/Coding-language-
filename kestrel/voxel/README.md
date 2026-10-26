@@ -22,9 +22,10 @@ KESTREL_TEST_ONLY=grid cargo test -p kestrel-cli --test voxel_engine    # tests 
 ```
 
 `cli/tests/voxel_engine.rs` runs each `tests/<name>.kes` in a scratch folder under `target/tmp`
-(`voxel_<name>`), as `test_<name>.kes` beside copies of every `kestrel/voxel/*.kes`: once with
-`kestrel run`, once as an executable (`kestrel build`), and with `--release` when the file says
-`// release`. The directives at the end of a test are the program tests' (`// expect:`,
+(`voxel_<name>` for the `kestrel run` pass, `voxel_<name>_exe` and `voxel_<name>_release` for the
+others), as `test_<name>.kes` beside copies of every `kestrel/voxel/*.kes`: once with
+`kestrel run`, once as an executable (`kestrel build`), and with `kestrel run --release` when the
+file says `// release` (the release run is compared with the same `// expect...` lines). The directives at the end of a test are the program tests' (`// expect:`,
 `// expect-exit:`, `// expect-stderr:`, `// env:`) and these:
 
 - `// copy: <repo-relative file>`: copies another file into the scratch folder.
