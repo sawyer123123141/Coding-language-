@@ -29,8 +29,8 @@
 // entries' way (they never call it).
 //
 // Like the parity benchmark this is not a library file. The kernels share one file because the
-// compiler spends its inlining budget per root function (see parity.kes); `kestrel check
-// --report --release` says if the budget ran out.
+// compiler spent its inlining budget per root function (see parity.kes; before the bottom-up
+// inliner, 2026-10-26); `kestrel check --report --release` says if the budget ran out.
 use { Grid, grid from grid }
 use { octave from noise }
 

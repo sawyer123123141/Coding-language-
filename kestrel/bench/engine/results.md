@@ -406,6 +406,8 @@ as "the loop at line 50 can't be proven `no_checks`"):
 | `contract_collide.kes` | `no_checks` on `slide`/`move_axis` | overflow on `int(ceil(p - SKIN)) - 1` | `World.block`'s check, through `layer_solid` |
 | `contract_stream.kes` | `no_checks` on `copy_blocks` | passes with one `stream_step` call in a function, fails with two (the second inlined copy loses its `@assume`) | the same |
 
+Note (2026-10-26, after the bottom-up inliner): `contract_gen.kes` still fails in both builds, but the checked build's reason changed. `octave`, `lattice`, `mix` and `hash` are now inlined into `generate` and their checks fold away (no shift check is left); the error is now the overflow check on line 52, `cx * 32` (`cx` any `int`), and `generate` also keeps `cz * 32`, the density's `seed + 1` and `seed + 2`, and the two `g.items[i]` bounds checks. The release build's reason is unchanged (`g.items[i]` on line 62). The probe's header says so.
+
 **Checks left in the hot functions of `main.kes`** (`kestrel check --report` and
 `--report --release`, saved as `out/report_main.txt` and `out/report_main_release.txt`; whole
 program: 1,749 checks, 1,481 removed, 268 left, checked; 151, 75 removed, 76 left, `--release`):
@@ -819,6 +821,8 @@ Load: 0.4%, 0.0% and 0.4% before; 6.5%, 6.5% and 11.0% during; 0.2% after. **The
 2 ms faster); the code generator is, on 15% more machine code: each of `f1` to `f4` now holds its
 callees' copies up to its own budget, where before `f0`'s top-down budget ran out early. It stays
 far under a second, the bound G3 asks for; the raised-budget compiler took 258 s on this chain.
+
+**The fan-out chain is not the only worst case** (found in the final review, 2026-10-26): a linear chain of small calls (`h0` calls `h1`, ..., 150, 400 or 2,000 deep) made every function in it grow to about the 4,096-node limit once the old depth limit was gone. `run --release` took 231, 1,977 and 15,630 ms (median of 5) with this round's compiler as first committed (33e7291), against 70, 95 and 294 ms before the round (27205ee, the review's numbers), most of it code generation of functions no call reaches after inlining (followups entry 35). With a nesting cap of 16 measured on finished bodies (fe52588; "inlined calls nest more than 16 deep") it takes **43, 75 and 300 ms** (`check` 31, 118, 814 → 24, 27, 56 ms; load 3.5% before, 10.8% during, 2.3% after). The cap changes nothing measured here: the engine's report, the frozen world's reports and the fan-out chain's report and exe are byte-identical, generation 301 → 304 ms and the frozen world 369 → 376 ms with the same machine code (medians of 9, startup subtracted; the exes differ only in their timestamps and the raylib build paths baked into them).
 
 **Left as known** (spec rules 4 and 5): recursion through a closure or a function value now inlines
 one level, like any mutual recursion (top-down went up to 8 deep or to the budget); and the calls

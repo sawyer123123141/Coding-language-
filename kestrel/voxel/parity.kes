@@ -60,8 +60,8 @@ struct Mesh {
 // Samples chunk (cx, cy, cz) into `g` (all 0 on entry) and meshes it, reading `g.items[i]`
 // the way the frozen mesher reads its array: a face for each solid block side that touches
 // air. Sampling and meshing are one function, as the frozen `mesh` is, because the compiler
-// spends its inlining budget per function: split in two, the sampler's noise was inlined
-// into the caller, which ran out of budget and left the noise calls un-inlined.
+// spent its inlining budget per function (before the bottom-up inliner, 2026-10-26): split in
+// two, the sampler's noise was inlined into the caller, which ran out of budget and left the noise calls un-inlined.
 pure mesh_items(var g: Grid[u8], cx: int, cy: int, cz: int, seed: int) -> Mesh {
     sample(var g, cx, cy, cz, seed)
     var m = Mesh()

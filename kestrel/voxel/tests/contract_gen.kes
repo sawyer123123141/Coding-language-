@@ -5,9 +5,12 @@
 // compiler change makes it pass, this test fails: move the contract into the engine.
 //
 // What stops it (the builds' errors):
-// - checked build: the loop calls `octave`, which isn't inlined there (the inlining budget of
-//   the caller ran out, see the findings) and so keeps its shift check, `1 << shift` with
-//   `shift` any `int` (inlined, `shift` would be the constant 5, 4 or 3);
+// - checked build: the overflow checks of the column's world position, first `cx * 32` on
+//   line 52 (`cx` can be any `int`), then `cz * 32` and the density's `seed + 1` and
+//   `seed + 2`, and the writes as in the release build. (Before the bottom-up inliner, 2026-10-26, it was
+//   `octave`'s shift check, `1 << shift` with `shift` any `int`: the inlining budget ran out
+//   before `octave`. Now `octave`, `lattice`, `mix` and `hash` are inlined into `generate`
+//   and their checks fold away, so the error moved to line 52; the probe still fails.)
 // - release build: the writes `g.items[i]`: `i` counts down from the top row by
 //   `SIZE * SIZE`, so it is at most 131,071, but nothing shows it is below `g.items.len`
 //   (a list's length isn't known to the compiler).

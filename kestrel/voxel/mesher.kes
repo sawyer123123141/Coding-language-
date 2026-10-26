@@ -169,9 +169,9 @@ struct Builder {
 // has a face below it only where the terrain there is air.
 // Then it meshes, reading the flags and, for each block with a face, its stored type for
 // the colour. The copy and the meshing are one function on purpose, like the frozen `mesh`:
-// the compiler's inlining budget is per root function, and splitting hot code into many
-// small functions called from one root ran it out and cost 26-70% (Task 4). `Builder.face`
-// isn't inlined (258 nodes, the limit is 256), as in the viewer.
+// the compiler's inlining budget was per root function before the bottom-up inliner
+// (2026-10-26), and splitting hot code into many small functions called from one root ran it out
+// and cost 26-70% (Task 4). `Builder.face` isn't inlined (258 nodes, the limit is 256), as in the viewer.
 pub pure mesh_chunk(w: World, slot: int, layer: int) -> MeshData {
     let cx = w.columns.items[slot].cx
     let cz = w.columns.items[slot].cz
