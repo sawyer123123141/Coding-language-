@@ -1,0 +1,76 @@
+// A `Pool[T]` is a fixed set of slots that are handed out and given back, with handles that
+// notice when they are out of date. The world's columns live in one: each slot holds a
+// column whose big grid is built once and rewritten in place, so loading and unloading
+// allocate nothing.
+//
+// A `Handle` is a slot number plus the slot's generation. Releasing a slot bumps its
+// generation, so a handle kept from before the release no longer matches (`alive` says
+// false) even after the slot is taken again: the old handle can't read the new owner's data.
+// In GDScript terms it is `is_instance_valid` for a pooled object, checked by number.
+//
+// Nothing allocates after `pool` returns: `free` is a stack of free slot numbers filled at
+// creation (lowest on top, so slots are handed out 0, 1, 2, ...), and `take`/`release`
+// only move its end. `items` is public: change an item in place with
+// `p.items[h.slot] = v`.
+//
+// This is a library file: it imports nothing from the engine.
+
+pub struct Handle {
+    slot: int
+    gen: int
+}
+
+pub struct Pool[T] {
+    items: list[T]
+    gens: list[int]
+    used: list[bool]
+    free: list[int]
+
+    // Hands out a free slot, or `none` when every slot is in use.
+    pure take(var self) -> Handle? {
+        let slot = self.free.pop() else { return none }
+        self.used[slot] = true
+        Handle(slot: slot, gen: self.gens[slot])
+    }
+
+    // Gives a slot back and makes its old handles dead. Does nothing for a handle that
+    // isn't alive (already released, or from before a release).
+    pure release(var self, h: Handle) {
+        if not self.alive(h) {
+            return
+        }
+        self.used[h.slot] = false
+        self.gens[h.slot] += 1
+        self.free.add(h.slot)
+    }
+
+    // Whether `h` is the current handle of a slot in use.
+    pure alive(self, h: Handle) -> bool {
+        h.slot >= 0 and h.slot < self.items.len and self.used[h.slot] and self.gens[h.slot] == h.gen
+    }
+
+    // The current handle of a slot (alive only if the slot is in use).
+    pure handle(self, slot: int) -> Handle {
+        Handle(slot: slot, gen: self.gens[slot])
+    }
+
+    // How many slots are taken.
+    pure in_use(self) -> int {
+        self.items.len - self.free.len
+    }
+}
+
+// A pool of `capacity` slots, every item a copy of `fill`, all free. The items are added
+// one by one, straight into the pool's own lists (E38). Building the lists first and then
+// writing `Pool[T](items: items, ...)` copies every item again when the struct is made:
+// measured, 441 columns took 116 MB that way and 58 MB this way.
+pub pure pool[T](capacity: int, fill: T) -> Pool[T] {
+    var p = Pool[T](items: [], gens: [], used: [], free: [])
+    for i from 0 to capacity {
+        p.items.add(fill)
+        p.gens.add(0)
+        p.used.add(false)
+        p.free.add(capacity - 1 - i)
+    }
+    p
+}

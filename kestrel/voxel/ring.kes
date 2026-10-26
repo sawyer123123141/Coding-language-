@@ -1,0 +1,66 @@
+// A `Ring[T]` is a fixed-size queue, first in, first out: the world's queue of chunks
+// waiting for a mesh is one. In GDScript terms it is an `Array` you use as a circular
+// buffer, with the head and count kept for you.
+//
+// The list is made once, at `capacity`, and never grows: `push` into a full ring is
+// refused (it returns false) rather than growing, so a queue that is meant to be bounded
+// stays bounded. `head` is where the oldest value is, and the newest goes at
+// `(head + count) % capacity`, so the ends wrap round the list.
+//
+// This is a library file: it imports nothing from the engine.
+
+pub struct Ring[T] {
+    items: list[T]
+    head: int
+    count: int
+
+    // Adds `v` at the back. Returns false, changing nothing, when the ring is full.
+    pure push(var self, v: T) -> bool {
+        let cap = self.items.len
+        if self.count == cap {
+            return false
+        }
+        var at = self.head + self.count
+        if at >= cap {
+            at -= cap
+        }
+        self.items[at] = v
+        self.count += 1
+        true
+    }
+
+    // Takes the oldest value off the front, or `none` when the ring is empty.
+    pure pop(var self) -> T? {
+        if self.count == 0 {
+            return none
+        }
+        let v = self.items[self.head]
+        self.head += 1
+        if self.head == self.items.len {
+            self.head = 0
+        }
+        self.count -= 1
+        v
+    }
+
+    // How many values are waiting.
+    pure len(self) -> int {
+        self.count
+    }
+
+    // Forgets every waiting value (the list keeps its size and its old contents).
+    pure clear(var self) {
+        self.head = 0
+        self.count = 0
+    }
+}
+
+// An empty ring that holds up to `capacity` values. The list is built with `add` (every
+// slot a copy of `fill`), because `array[T](n)` is refused in generic code.
+pub pure ring[T](capacity: int, fill: T) -> Ring[T] {
+    var items: list[T] = []
+    for i from 0 to capacity {
+        items.add(fill)
+    }
+    Ring[T](items: items, head: 0, count: 0)
+}

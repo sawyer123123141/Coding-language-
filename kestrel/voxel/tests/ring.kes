@@ -1,0 +1,44 @@
+// Ring[T]: a fixed-size first-in first-out queue. Full pushes are refused, an empty pop gives
+// none, and the ends wrap around the list.
+use { Ring, ring from ring }
+
+// The value of a pop, or -1 for none.
+pure val(o: int?) -> int {
+    let v = o else { return -1 }
+    v
+}
+
+pure is_none(o: int?) -> bool {
+    let v = o else { return true }
+    false
+}
+
+main() {
+    var r = ring[int](3, 0)
+    let a = r.push(1)
+    let b = r.push(2)
+    let c = r.push(3)
+    let d = r.push(4)
+    print("push", a, b, c, d)
+    print("pop", val(r.pop()), val(r.pop()))
+    // One is left (3). Two more pushes go past the end of the list and wrap.
+    r.push(4)
+    r.push(5)
+    print("len", r.len())
+    print("wrap", val(r.pop()), val(r.pop()), val(r.pop()))
+    print("empty", is_none(r.pop()), r.len())
+    r.push(8)
+    r.push(9)
+    r.clear()
+    print("clear", r.len(), is_none(r.pop()))
+    // After a clear the ring works again from the start.
+    r.push(6)
+    print("again", val(r.pop()))
+}
+// expect: push true true true false
+// expect: pop 1 2
+// expect: len 3
+// expect: wrap 3 4 5
+// expect: empty true 0
+// expect: clear 0 true
+// expect: again 6

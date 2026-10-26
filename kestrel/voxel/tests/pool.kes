@@ -1,0 +1,59 @@
+// Pool[T]: a fixed set of slots handed out as generation-checked handles. A released slot
+// is reused with a new generation, so an old handle to it is dead, not a view of the new
+// owner.
+use { Handle, Pool, pool from pool }
+
+// The slot of a take, or -1 for none.
+pure slot_of(h: Handle?) -> int {
+    let v = h else { return -1 }
+    v.slot
+}
+
+pure is_none(h: Handle?) -> bool {
+    let v = h else { return true }
+    false
+}
+
+main() {
+    var p = pool[int](3, 0)
+    let h0 = p.take() else { return }
+    let h1 = p.take() else { return }
+    let h2 = p.take() else { return }
+    let full = p.take()
+    print("take", h0.slot, h1.slot, h2.slot, is_none(full))
+    print("alive", p.alive(h1), p.in_use() == 3)
+
+    p.release(h1)
+    print("dead", not p.alive(h1))
+    print("in_use", p.in_use())
+
+    let again = p.take() else { return }
+    print("reuse", again.slot, again.gen == h1.gen + 1)
+    print("stale", not p.alive(h1), p.alive(again))
+    print("current", p.handle(1).gen == again.gen, p.handle(0).gen == h0.gen)
+
+    // Releasing a handle that is not alive does nothing: the stale one, then a second
+    // release of the live one.
+    p.release(h1)
+    print("in_use", p.in_use())
+    p.release(again)
+    p.release(again)
+    print("twice", p.in_use())
+    let third = p.take() else { return }
+    let next = p.take()
+    print("after", third.slot, slot_of(next), p.in_use())
+
+    p.items[third.slot] = 7
+    print("in place", p.items[third.slot])
+}
+// expect: take 0 1 2 true
+// expect: alive true true
+// expect: dead true
+// expect: in_use 2
+// expect: reuse 1 true
+// expect: stale true true
+// expect: current true true
+// expect: in_use 3
+// expect: twice 2
+// expect: after 1 -1 3
+// expect: in place 7
