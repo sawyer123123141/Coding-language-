@@ -472,7 +472,7 @@ under the 400-line guideline):
 | libraries | `grid` 77, `noise` 49, `ring` 66, `pool` 78, `ray` 103, `collide` 171, `frustum` 84 |
 | engine | `blocks` 51, `column` 46, `gen` 75, `world` 125, `mesher` 257, `stream` 325, `player` 235, `edit` 87, `render` 205, `hud` 72 |
 | entry programs | `main` 143, `bench` 261 and `script` 188, `parity` 243 and five 8-line `parity_*` entries |
-| total | 2,981 lines in 26 files (and the race's 4 files, 344 lines); the tests (`voxel/tests`, 27 files) 2,585 lines |
+| total | 2,981 lines in 26 files (and the race's 4 files, 344 lines); the tests (`voxel/tests`, 27 files) 2,594 lines |
 
 **Findings:** 34 (26 at Task 10, 6 from the race, 2 from the final review), in `docs/superpowers/plans/2026-10-09-core-2a-followups.md`, "Found while
 building the voxel engine (2026-10-25)".
@@ -484,7 +484,7 @@ touches air) against Rust's `block-mesh` crate (0.2.0, `visible_block_faces`, th
 on the same input? Round 1 is the one with the same algorithm, so it measures the language and
 the compiler, not the algorithm. **Result: Rust is faster, by 1.39 times for the faces and 1.84
 times for the faces plus the mesh arrays** (Kestrel `--release` against Rust release), **1.36 and
-1.78 times against Rust built for this CPU** (`-C target-cpu=native`, which was 2 to 3% slower
+1.78 times against Rust built for this CPU** (`-C target-cpu=native`, which was 2 to 4% slower
 than the baseline build here). Re-measured in the final review, with the native column added
 and the plain port corrected (first run: 1.38 and 1.83).
 
@@ -563,8 +563,9 @@ CPU of the whole machine before the run, 8 samples of 3 s: mean 0.2%, max 0.4%; 
 165 samples of 5 s: mean 7.3%, max 21.3% (one busy core of 16 is 6.25%, so about 1% was other
 load, in short spikes; the one wide range below, kernel 1 checks on up to 107 us, is one round
 in such a spike). The first run of this race (Task 11, the same machine idle, mean 6.7%) is
-within 0.7% of every row both runs have (kernel 1 `--release` 66,012 and kernel 2 103,177 ns then;
-Rust 47,791 and 56,255).
+within 0.7% of the rows both runs have for Kestrel and for Rust release (kernel 1 `--release`
+66,012 and kernel 2 103,177 ns then; Rust 47,791 and 56,255), but the Rust rows with overflow
+checks are 2.5% and 1.6% lower then than now (53,114 and 66,372 ns then; 54,422 and 67,458 now).
 
 ### Results (ns per chunk of 32^3 blocks, 1,811.5 faces; median of 9 rounds, range)
 
@@ -651,7 +652,7 @@ It builds: `rustc -C opt-level=3 voxels3d.rs` (and with `-C overflow-checks=on`)
 output in a scratch folder (the folder itself is untouched); it prints 463,749. Against the
 frozen `bench/voxels3d/main.kes` and `voxels3d_tuned.kes` built with today's compiler (HEAD,
 `--release`, exes in a scratch folder), 11 rounds in turn, whole runs, `bench.py` from
-`C:\ktoxtuned`, idle priority. Re-run in the final review with an empty program on each side,
+`C:\kt\voxtuned`, idle priority. Re-run in the final review with an empty program on each side,
 so each subtracts **its own** startup (the first run subtracted the 6 ms of the Kestrel empty
 program from both). Machine idle: 0.3% before, 5.2% during (mean of 5 s samples, the benchmark
 itself about 6% of 16 threads). The first round's runs are slow for every variant (cold files),

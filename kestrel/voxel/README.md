@@ -29,6 +29,13 @@ The player starts flying above column (0, 0) and lands on its top block once it 
 The window shows a stats line at the top, and the program prints one once a second:
 `voxel fps <f> work_ms <f> columns <n> chunks <n> faces <n> queue <n> mode <walk|fly>`.
 
+## What it is, and its limits
+
+- The world is columns of 32 x 32 blocks, 128 blocks high (4 chunks of 32 each), made from the frozen viewer's noise. The player's surroundings load within `VIEW` = 8 columns (269 columns, 441 slots in the pool), nearest first, `GEN_BATCH` = 2 columns a frame (see the spec's E65 for why not 8).
+- **Edits are not saved:** a column that unloads and comes back is generated again without them.
+- The mesher treats everything at y = 128 and above as air, like the player and the ray do (E70), so a peak cut off by the world's ceiling gets a top face.
+- Looking and walking have only been run headless, never in a visible window (see the handoff); the numbers are in `kestrel/bench/engine/results.md`.
+
 ## Files
 
 Libraries import nothing from the engine (only other libraries and Kestrel's built-in modules),
