@@ -86,6 +86,8 @@ pub fn symbols() -> Vec<(&'static str, *const u8)> {
         kestrel_input_released,
         kestrel_input_mouse,
         kestrel_input_wheel,
+        kestrel_input_capture,
+        kestrel_input_mouse_delta,
     ]
 }
 

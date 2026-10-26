@@ -71,6 +71,15 @@ pub native released(key: Key) -> bool
 pub native mouse() -> vec2
 pub native wheel() -> float
 
+// Locks the mouse to the window and hides it (Godot's Input.mouse_mode = MOUSE_MODE_CAPTURED),
+// or gives it back with `false`. While it is locked, `mouse()` stops being useful (the pointer
+// is stuck); read `mouse_delta()` instead. Does nothing in a headless window.
+pub native capture(on: bool)
+
+// How far the mouse moved since the last frame, in pixels (Godot's InputEventMouseMotion.relative
+// summed over the frame). Works with the mouse captured or not; (0, 0) in a headless window.
+pub native mouse_delta() -> vec2
+
 // -1, 0 or 1, like Godot's Input.get_axis.
 pub axis(negative: Key, positive: Key) -> float {
     var v = 0.0

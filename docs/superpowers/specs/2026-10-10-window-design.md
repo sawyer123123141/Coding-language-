@@ -88,12 +88,15 @@ input.pressed(key: Key) -> bool
 input.released(key: Key) -> bool
 input.mouse() -> vec2
 input.wheel() -> float
+input.capture(on: bool)
+input.mouse_delta() -> vec2
 input.axis(negative: Key, positive: Key) -> float
 ```
 
 - `pressed` and `released` mean "since the last frame" (Godot's `is_action_just_pressed`).
 - `Key` is an enum in `input`: `A`–`Z`, `Digit0`–`Digit9` (names can't start with a digit), `Space Enter Escape Tab Backspace Shift Ctrl Alt Up Down Left Right`, `F1`–`F12`, and the mouse buttons `MouseLeft MouseRight MouseMiddle`. `Shift`, `Ctrl` and `Alt` match either side.
 - `mouse()` is in window pixels. `wheel()` is this frame's scroll, positive away from the user.
+- `capture(true)` locks and hides the mouse (Godot's `MOUSE_MODE_CAPTURED`) and `capture(false)` gives it back; `mouse_delta()` is how far the mouse moved since the last frame, in pixels, captured or not (added for the voxel engine, E34). Headless or closed: `capture` does nothing and `mouse_delta()` is (0, 0). Before `window.open` they fail like the other input natives.
 - `axis` is -1, 0 or 1, like Godot's `Input.get_axis`; it's written in Kestrel inside `input.kes`.
 
 ## Global math and random numbers

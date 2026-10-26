@@ -126,6 +126,12 @@ fn headless_queries_print_nothing_and_read_as_idle() {
             kestrel_input_mouse(&mut at);
             assert_eq!(at, v2(0.0, 0.0));
             assert_eq!(kestrel_input_wheel(), 0.0);
+            // Capture does nothing here, and the mouse never moves.
+            let mut by = v2(9.0, 9.0);
+            kestrel_input_capture(1);
+            kestrel_input_mouse_delta(&mut by);
+            assert_eq!(by, v2(0.0, 0.0));
+            kestrel_input_capture(0);
 
             // The same after the last frame: queries keep the final values.
             assert_eq!(kestrel_window_frame(), 1);
@@ -203,11 +209,11 @@ fn closing_prints_and_ends_the_frame_loop() {
 #[test]
 fn symbols_are_complete() {
     let table = symbols();
-    assert_eq!(table.len(), 36);
+    assert_eq!(table.len(), 38);
     let names: HashSet<&str> = table.iter().map(|&(name, _)| name).collect();
-    assert_eq!(names.len(), 36, "names are distinct");
+    assert_eq!(names.len(), 38, "names are distinct");
     let addresses: HashSet<usize> = table.iter().map(|&(_, address)| address as usize).collect();
-    assert_eq!(addresses.len(), 36, "each name has its own function");
+    assert_eq!(addresses.len(), 38, "each name has its own function");
     for &(name, address) in &table {
         assert!(
             ["kestrel_window_", "kestrel_draw_", "kestrel_draw3d_", "kestrel_input_"].iter().any(|prefix| name.starts_with(prefix)),
@@ -235,6 +241,6 @@ fn symbols_cover_every_native_the_modules_declare() {
         }
     }
     let provided: HashSet<String> = symbols().iter().map(|&(name, _)| name.to_string()).collect();
-    assert_eq!(declared.len(), 36);
+    assert_eq!(declared.len(), 38);
     assert_eq!(provided, declared);
 }

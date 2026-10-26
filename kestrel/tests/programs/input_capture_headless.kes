@@ -1,0 +1,21 @@
+// input.capture and input.mouse_delta in a headless window: capture does nothing and the mouse
+// delta is (0, 0) on every frame, whether or not capture was asked for.
+// env: KESTREL_HEADLESS=2
+// expect: window.open 64 64 "capture"
+// expect: delta vec2(x: 0, y: 0)
+// expect: delta vec2(x: 0, y: 0)
+// expect: done 2
+use window
+use input
+
+main() {
+    window.open(64, 64, "capture")
+    input.capture(true)
+    var n = 0
+    while window.frame() {
+        n += 1
+        print("delta", input.mouse_delta())
+    }
+    input.capture(false)
+    print("done", n)
+}

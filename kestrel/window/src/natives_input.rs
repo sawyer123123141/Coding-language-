@@ -2,7 +2,8 @@
 //!
 //! Each one is `kestrel_input_<name>`. A `Key` arrives as a pointer to its tag
 //! byte (see `keys.rs`). A headless window, and a window that has closed, read
-//! as nothing held, nothing pressed, the mouse at (0, 0) and no scroll.
+//! as nothing held, nothing pressed, the mouse at (0, 0), no mouse movement and no scroll,
+//! and `capture` does nothing there.
 
 use std::ffi::c_int;
 
@@ -79,4 +80,37 @@ pub extern "C" fn kestrel_input_wheel() -> f32 {
         // SAFETY: the window is open.
         View::Real { .. } => unsafe { rl::GetMouseWheelMove() },
     }
+}
+
+/// Locks and hides the mouse (`on` is not 0), or gives it back.
+#[no_mangle]
+pub extern "C" fn kestrel_input_capture(on: u8) {
+    match state::view("input.capture") {
+        View::Fixed(_) => {}
+        View::Real { .. } => {
+            // SAFETY: the window is open.
+            unsafe {
+                if on != 0 {
+                    rl::DisableCursor();
+                } else {
+                    rl::EnableCursor();
+                }
+            }
+        }
+    }
+}
+
+/// # Safety
+/// `out` must be valid for writing a `vec2`.
+#[no_mangle]
+pub unsafe extern "C" fn kestrel_input_mouse_delta(out: *mut V2) {
+    let by = match state::view("input.mouse_delta") {
+        View::Fixed(_) => V2 { x: 0.0, y: 0.0 },
+        View::Real { .. } => {
+            // SAFETY: the window is open.
+            let d = unsafe { rl::GetMouseDelta() };
+            V2 { x: d.x, y: d.y }
+        }
+    };
+    write(out, by);
 }

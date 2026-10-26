@@ -1,0 +1,9 @@
+// input.capture fails before window.open, like the other input natives.
+// env: KESTREL_HEADLESS=1
+// expect-exit: 101
+// expect-stderr: input.capture was called before window.open on line 8
+use input
+
+main() {
+    input.capture(true)
+}

@@ -226,6 +226,9 @@ extern "C" {
     pub fn IsMouseButtonReleased(button: c_int) -> bool;
     pub fn GetMousePosition() -> Vector2;
     pub fn GetMouseWheelMove() -> f32;
+    pub fn GetMouseDelta() -> Vector2;
+    pub fn DisableCursor();
+    pub fn EnableCursor();
 
     // Shapes (rshapes.c).
     pub fn DrawRectangleV(position: Vector2, size: Vector2, color: Color);
