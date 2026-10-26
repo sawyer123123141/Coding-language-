@@ -367,7 +367,8 @@ pub struct NotInlined {
     pub callee: FuncIdx,
     /// Why, as a clause: "it calls itself", "it is 912 nodes; the limit is 256", "it is 5,812 nodes
     /// after its own inlining; the limit is 4,096", "it has an early `return`", "the inlining budget
-    /// of `bench` ran out", "it calls back into `walk`" (a call back into a cycle of calls, left in
+    /// of `bench` ran out", "inlined calls nest more than 16 deep" (the callee already holds copies
+    /// nesting 16 deep), "it calls back into `walk`" (a call back into a cycle of calls, left in
     /// the one-level copy of a function of the cycle; it names the function called). A native's call
     /// isn't listed.
     pub reason: String,

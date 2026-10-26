@@ -10,6 +10,8 @@
 //! again. So hot code split into helpers is inlined as if it were written in one piece, and each
 //! function's cost to its callers is its size after inlining, worked out once.
 //! When a function's budget can't fit all its calls, the calls in loops get it first (see `decide`).
+//! Copies nest at most `MAX_NEST` deep in any function, so a long chain of calls doesn't make every
+//! function in it as big as the limits allow.
 
 mod decide;
 mod descend;
@@ -32,6 +34,11 @@ const POST_LIMIT: usize = 4096;
 /// the biggest callee fit. With it, a function after inlining is about its own size plus this at
 /// most, so code size grows only linearly in the number of functions.
 const BUDGET: usize = 8192;
+/// How deep copies may nest in a function after its inlining: a copy of a function holding copies
+/// that nest `n` deep nests `n + 1` deep. A call whose copy would nest deeper stays a call. Without
+/// it, each function of a long chain of small calls (`h0` calls `h1`, which calls `h2`, ...) grows to
+/// about `POST_LIMIT`, and a chain 2,000 long took 14 seconds to compile (2026-10-26).
+const MAX_NEST: usize = 16;
 
 /// What the callers of a function already inlined into see of it.
 struct Done {
@@ -41,6 +48,8 @@ struct Done {
     own_locals: usize,
     /// The calls left in it, in the order decided. A copy of it leaves them in its caller too.
     left: Vec<NotInlined>,
+    /// How deep the copies in it nest: 0 with none, else one more than the deepest copy's own.
+    nest: usize,
 }
 
 /// Inlines small functions everywhere in `m`.
@@ -71,14 +80,14 @@ pub fn inline_small(m: &mut Module) {
             let own_locals = locals.len();
             let line = m.funcs[i].lines.0;
             let mode = decide::Mode::Plan(Vec::new());
-            let mut cx = Inliner { m, done: &done, comp: &comp, mates: &mates, sizes: &sizes, sites: &sites, locals, budget: BUDGET, caller, line, log: Vec::new(), in_mate: false, depth: 0, mode };
+            let mut cx = Inliner { m, done: &done, comp: &comp, mates: &mates, sizes: &sizes, sites: &sites, locals, budget: BUDGET, caller, line, log: Vec::new(), in_mate: false, depth: 0, nest: 0, mode };
             cx.run(&mut body);
-            let Inliner { locals, log, .. } = cx;
+            let Inliner { locals, log, nest, .. } = cx;
             let mut size = 0;
             walk(&body, &mut |_| size += 1);
             m.funcs[i].body = body;
             m.funcs[i].locals = locals;
-            done[i] = Some(Done { size, own_locals, left: log });
+            done[i] = Some(Done { size, own_locals, left: log, nest });
         }
     }
     // Function by function, each in the order decided.
@@ -177,6 +186,8 @@ struct Inliner<'a> {
     in_mate: bool,
     /// How many loops the code being walked is in.
     depth: usize,
+    /// How deep the copies made so far nest (see `Done::nest`).
+    nest: usize,
     /// Whether the walk lists the calls that compete for the budget or inlines them.
     mode: decide::Mode,
 }
@@ -221,6 +232,8 @@ impl Inliner<'_> {
         let at = if line == 0 { self.line } else { line };
         let (funcs, mates) = (&self.m.funcs, self.mates);
         let done = if self.comp[fi.0 as usize] == self.comp[self.caller.0 as usize] { None } else { self.done[fi.0 as usize].as_ref() };
+        // A copy inside the copy of a function of the caller's own component is one deeper.
+        self.nest = self.nest.max(usize::from(self.in_mate) + 1 + done.map_or(0, |d| d.nest));
         let callee = match done {
             Some(_) => &funcs[fi.0 as usize],
             None => &mates.iter().find(|(g, _)| *g == fi).expect("a function of the caller's component").1,

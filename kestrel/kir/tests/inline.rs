@@ -224,6 +224,67 @@ fn a_fan_out_chain_stays_small() {
     assert!(took < std::time::Duration::from_secs(10), "inlining took {took:?}");
 }
 
+/// A chain of `n` small functions `{name}0`, `{name}1`, ..., each calling the next with its
+/// argument plus one.
+fn chain(name: &str, n: usize) -> String {
+    let mut src = format!("pure {name}{}(x: int) -> int {{ x * 3 }}\n", n - 1);
+    for i in (0..n - 1).rev() {
+        src.push_str(&format!("pure {name}{i}(x: int) -> int {{ {name}{}(x + 1) }}\n", i + 1));
+    }
+    src
+}
+
+/// `chain("h", n)`, with `main` calling `h0`.
+fn linear_chain(n: usize) -> String {
+    chain("h", n) + "main() { print(h0(1)) }\n"
+}
+
+#[test]
+fn a_linear_chain_stays_small() {
+    let src = linear_chain(2000);
+    let (p, _) = parse(&src);
+    let (t, _) = kestrel_check::check(&p);
+    let written: usize = lower(&p, &t.unwrap(), &LineIndex::new(&src)).funcs.iter().map(|f| nodes(&f.body)).sum();
+    let start = std::time::Instant::now();
+    let m = lower_inlined(&src);
+    let took = start.elapsed();
+    // Copies nest at most 16 deep, so a function holds at most 17 of the bodies as written (and a
+    // copy adds a parameter's `let` or so to each).
+    let total: usize = m.funcs.iter().map(|f| nodes(&f.body)).sum();
+    assert!(total < written * 17 * 2, "{total} KIR nodes after inlining, {written} as written");
+    assert!(took < std::time::Duration::from_secs(10), "inlining took {took:?}");
+}
+
+#[test]
+fn calls_nested_past_sixteen_deep_stay_calls() {
+    // `h3` is 16 copies deep once inlined into (`h4` .. `h19`), so `h2` keeps its call to it, and
+    // so do `h1`, `h0` and `main`, which copy `h2`.
+    let m = lower_inlined(&linear_chain(20));
+    assert_eq!(calls(&func(&m, "h3").body), 0, "{:#?}", func(&m, "h3").body);
+    assert_eq!(calls_to(&m, &func(&m, "main").body, "h3"), 1, "{:#?}", func(&m, "main").body);
+    assert_eq!(calls(&func(&m, "main").body), 1, "{:#?}", func(&m, "main").body);
+    let name = |i: FuncIdx| m.funcs[i.0 as usize].name.as_str();
+    let left: Vec<(&str, &str, &str)> = m.not_inlined.iter().map(|n| (name(n.caller), name(n.callee), n.reason.as_str())).collect();
+    let why = "inlined calls nest more than 16 deep";
+    let mut want = vec![("h2", "h3", why), ("h1", "h3", why), ("h0", "h3", why), ("main", "h3", why)];
+    let mut got = left.clone();
+    got.sort_unstable();
+    want.sort_unstable();
+    assert_eq!(got, want, "{left:?}");
+}
+
+#[test]
+fn a_copy_of_a_mutually_recursive_function_counts_toward_the_nesting() {
+    // `g0` holds copies nesting 15 deep, so `b` takes it (16 deep). `a` copies `b` one level as
+    // written, and a copy of `g0` inside that copy would nest 17 deep: it stays a call there.
+    let src = chain("g", 16)
+        + "a(n: int) -> int { if n <= 0 { 0 } else { b(n - 1) + 1 } }\nb(n: int) -> int { if n <= 0 { g0(n) } else { a(n - 1) * 2 } }\nmain() { print(a(5)) }\n";
+    let m = lower_inlined(&src);
+    assert_eq!(calls_to(&m, &func(&m, "b").body, "g0"), 0, "{:#?}", func(&m, "b").body);
+    assert_eq!(calls_to(&m, &func(&m, "a").body, "g0"), 1, "{:#?}", func(&m, "a").body);
+    assert_eq!(reasons(&m, "a", "g0"), ["inlined calls nest more than 16 deep"]);
+}
+
 /// `big`: a flat sum of `terms` calls to `leaf` (a 40-term sum). Small as written, and about
 /// 205 nodes a term once the calls are inlined, so with 14 terms (about 2,900 nodes) two copies
 /// fit the 8,192-node budget of a caller but three don't.

@@ -11,7 +11,7 @@
 
 use std::cmp::Reverse;
 
-use super::{Inliner, Why, POST_LIMIT};
+use super::{Inliner, Why, MAX_NEST, POST_LIMIT};
 use crate::ir::*;
 use crate::range::report::callee_name;
 use crate::range::show::commas;
@@ -69,8 +69,9 @@ impl Inliner<'_> {
         let (granted, left) = grant(&sites, self.budget);
         self.mode = Mode::Run { granted, next: 0 };
         self.budget = left;
-        // What the first walk noted, the second notes again.
+        // What the first walk noted, the second notes again (it copied nothing).
         self.log.clear();
+        self.nest = 0;
         self.line = line;
         self.stmts(body);
     }
@@ -84,14 +85,18 @@ impl Inliner<'_> {
             Ok(_) if mate && self.in_mate => Verdict::Stays(format!("it calls back into {}", callee_name(self.m, fi))),
             // A function of the caller's own component is copied one level, as written. Its size
             // after inlining isn't known, so `POST_LIMIT` doesn't apply on purpose: it must be
-            // inlinable (above) and fit the budget, which bounds the copy and what it inlines.
+            // inlinable (above) and fit the budget, which bounds the copy and what it inlines. Its
+            // copy nests one deep, and the copies inlined inside it count one deeper against
+            // `MAX_NEST` (below).
             Ok(written) if mate => Verdict::Fits(written),
             Ok(_) => {
-                let size = self.done[i].as_ref().expect("callees are inlined into first").size;
-                if size > POST_LIMIT {
-                    Verdict::Stays(format!("it is {} nodes after its own inlining; the limit is {}", commas(size), commas(POST_LIMIT)))
+                let done = self.done[i].as_ref().expect("callees are inlined into first");
+                if done.size > POST_LIMIT {
+                    Verdict::Stays(format!("it is {} nodes after its own inlining; the limit is {}", commas(done.size), commas(POST_LIMIT)))
+                } else if usize::from(self.in_mate) + 1 + done.nest > MAX_NEST {
+                    Verdict::Stays(format!("inlined calls nest more than {MAX_NEST} deep"))
                 } else {
-                    Verdict::Fits(size)
+                    Verdict::Fits(done.size)
                 }
             }
         }
