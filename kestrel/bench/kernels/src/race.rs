@@ -19,8 +19,12 @@
 //!
 //! `race_faces_plain` and `race_arrays_plain` are not part of the race: they are `race.kes`'s
 //! kernels written out in Rust (the same loops over y, z, x with checked indexing into a flat
-//! `Vec<u8>` laid out as `Grid[u8]` is, six `Vec<u32>`s of packed faces, the same corners), to
-//! tell how much of a gap to `block-mesh` is the crate's code and how much is the compiler's.
+//! `Vec<u8>` laid out as `Grid[u8]` is, six `Vec<u32>`s of packed faces, the same corners, and a
+//! `push` for each of a face's 14 array entries as `race.kes` has an `add` for each), to tell how
+//! much of a gap to `block-mesh` is the crate's code and how much is the compiler's.
+//!
+//! `bench/engine/results.md` also runs these modes built with `-C target-cpu=native` (a separate
+//! target folder), since Kestrel compiles for the host CPU (`cranelift_native`).
 
 use std::hint::black_box;
 use std::time::Instant;
@@ -260,7 +264,8 @@ fn find_faces_plain(world: &[u8], sides: &mut [Vec<u32>; 6]) {
     }
 }
 
-/// `race.kes`'s `build_arrays`, in Rust, with `Vec<[f32; 3]>` for the positions and normals.
+/// `race.kes`'s `build_arrays`, in Rust, with `Vec<[f32; 3]>` for the positions and normals, one
+/// `push` per entry.
 #[inline(never)]
 fn build_arrays_plain(sides: &[Vec<u32>; 6], pos: &mut Vec<[f32; 3]>, nor: &mut Vec<[f32; 3]>, idx: &mut Vec<u32>) {
     // For each side: its normal, the offsets of its corners b, c and d from a, the offset of a
@@ -277,17 +282,32 @@ fn build_arrays_plain(sides: &[Vec<u32>; 6], pos: &mut Vec<[f32; 3]>, nor: &mut 
     for (side, &(n, d, o, up)) in sides.iter().zip(SIDES.iter()) {
         for &p in side {
             let q = [(p & 63) as f32 + o[0], (p >> 6 & 63) as f32 + o[1], (p >> 12) as f32 + o[2]];
+            // One `push` per entry, 14 a face (4 positions, 4 normals, 6 indices), as `race.kes`
+            // does 14 `add`s: this port compares element by element, not `extend_from_slice`.
             let base = pos.len() as u32;
             pos.push(q);
-            for k in d {
-                pos.push([q[0] + k[0], q[1] + k[1], q[2] + k[2]]);
-            }
-            nor.extend_from_slice(&[n; 4]);
-            idx.extend_from_slice(&if up {
-                [base, base + 1, base + 2, base + 1, base + 3, base + 2]
+            pos.push([q[0] + d[0][0], q[1] + d[0][1], q[2] + d[0][2]]);
+            pos.push([q[0] + d[1][0], q[1] + d[1][1], q[2] + d[1][2]]);
+            pos.push([q[0] + d[2][0], q[1] + d[2][1], q[2] + d[2][2]]);
+            nor.push(n);
+            nor.push(n);
+            nor.push(n);
+            nor.push(n);
+            if up {
+                idx.push(base);
+                idx.push(base + 1);
+                idx.push(base + 2);
+                idx.push(base + 1);
+                idx.push(base + 3);
+                idx.push(base + 2);
             } else {
-                [base, base + 2, base + 1, base + 1, base + 2, base + 3]
-            });
+                idx.push(base);
+                idx.push(base + 2);
+                idx.push(base + 1);
+                idx.push(base + 1);
+                idx.push(base + 2);
+                idx.push(base + 3);
+            }
         }
     }
 }

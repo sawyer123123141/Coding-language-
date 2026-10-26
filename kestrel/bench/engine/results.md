@@ -17,82 +17,87 @@ same index maths and the same `Mesh.quad`, with each chunk's mesh in its own `ar
 - `PARITY_GET`: the same through `g.get(x, y, z)`: what the generic method costs.
 - `PARITY_REUSE`: one grid made once and `fill(0)`ed per chunk outside the arena.
 
-**How it was measured.** `bench/engine/run_parity.ps1` (checks on and `--release` builds of the
-frozen `main.kes`, `main_par.kes`, `main0.kes` and the five parity entry files; compiler
-`target/release/kestrel.exe` at HEAD 473556b plus this task's files). All 32 exes run in turn,
-11 rounds, so a busy spell hits every variant alike; the table is the median of 11 with the matching
-empty program's median startup subtracted (frozen `main0.kes` for the frozen ones, `parity_empty`
-for the parity ones: 10 to 11 ms against 14 to 15 ms; see "Startup" below), and the range is min to max of the 11. The one-thread rows run with
-`KESTREL_THREADS=1`. The script runs at idle priority.
+**How it was measured.** `bench/engine/run_parity.ps1`: checks on and `--release` builds of the
+frozen `main.kes`, `main_par.kes` and `main0.kes` and the five parity entry files, 16 exes
+(compiler `target/release/kestrel.exe` at 5ed0343 plus the final review's fixes, which change no
+code the parity programs compile except `grid.kes`'s removed contract). Each round runs every exe
+once with `KESTREL_THREADS=1` (the empty ones too) and the four `par for` exes once more with all
+threads, 20 runs a round, **in an order rotated by one place each round** (so no exe always
+follows the same neighbour or sits at the same point of a busy spell); 11 rounds. The table is
+the median of 11 with the matching empty program's median startup subtracted (frozen `main0.kes`
+for the frozen ones, `parity_empty` for the parity ones), and the range is min to max of the 11.
+The script runs at idle priority.
 
-**Machine and load.** Windows 11, 16 logical cores. The machine was in use (the user gaming): CPU
-sampled for 1 s before each round, without this run, was a mean of 38% and a max of 44% (the first
-run, below, 37% and 49%). Idle priority means the other load wins, so the ranges are wide.
-
-**Two runs.** The script was run twice. The first run (an earlier shape of `parity.kes`, Finding 1)
-gave world medians in ms, checks on / `--release`: frozen 580 / 500, PARITY_ITEMS 851 / 850,
-PARITY_GET 905 / 865, PARITY_REUSE 542 / 527, par for 1 thread 578 vs 578 / 515 vs 533, all threads
-98 vs 102 / 89 vs 94 (frozen vs parity). The table below is the **second run**, of the code as
-committed. The frozen rows moved by 1.4% (checks on) and 3% (`--release`) between the runs, so
-about 3% is the noise level of a median here.
+**Machine and load.** Windows 11, AMD Ryzen 7 5800X, 16 logical cores, **idle**: CPU of the whole
+machine sampled for 1 s before each round, without this run, mean 1% and max 6% (and 0.9% over 15
+s before the script started). This is the final review's re-run (2026-10-26); it replaces the
+table Task 4 made while the machine was in use (the user gaming, 38% mean load), whose runs went
+in a fixed order and were about 40% slower across the board (frozen `--release` 515 ms then, 370
+ms now).
 
 | Variant | Mode | Whole run (median) | Startup | World (median) | World range (min to max) |
 |---|---|---:|---:|---:|---:|
-| frozen main.kes | checks on | 598 ms | 10 ms | 588 ms | 578 to 601 ms |
-| PARITY_ITEMS | checks on | 605 ms | 14 ms | 591 ms | 579 to 615 ms |
-| PARITY_GET | checks on | 653 ms | 14 ms | 639 ms | 631 to 658 ms |
-| PARITY_REUSE | checks on | 604 ms | 14 ms | 590 ms | 572 to 603 ms |
-| frozen par for, 1 thread | checks on | 595 ms | 10 ms | 585 ms | 574 to 601 ms |
-| parity par for, 1 thread | checks on | 607 ms | 14 ms | 593 ms | 584 to 603 ms |
-| frozen par for, all threads | checks on | 111 ms | 10 ms | 101 ms | 86 to 112 ms |
-| parity par for, all threads | checks on | 111 ms | 14 ms | 97 ms | 92 to 127 ms |
-| frozen main.kes | --release | 525 ms | 10 ms | 515 ms | 511 to 528 ms |
-| PARITY_ITEMS | --release | 545 ms | 14 ms | 531 ms | 524 to 580 ms |
-| PARITY_GET | --release | 559 ms | 14 ms | 545 ms | 534 to 554 ms |
-| PARITY_REUSE | --release | 540 ms | 14 ms | 526 ms | 516 to 547 ms |
-| frozen par for, 1 thread | --release | 528 ms | 10 ms | 518 ms | 509 to 527 ms |
-| parity par for, 1 thread | --release | 554 ms | 14 ms | 540 ms | 527 to 566 ms |
-| frozen par for, all threads | --release | 101 ms | 10 ms | 91 ms | 82 to 105 ms |
-| parity par for, all threads | --release | 110 ms | 14 ms | 96 ms | 84 to 115 ms |
+| frozen main.kes | checks on | 432 ms | 7 ms | 425 ms | 424 to 436 ms |
+| PARITY_ITEMS | checks on | 435 ms | 9 ms | 426 ms | 424 to 455 ms |
+| PARITY_GET | checks on | 469 ms | 9 ms | 460 ms | 459 to 492 ms |
+| PARITY_REUSE | checks on | 429 ms | 9 ms | 420 ms | 418 to 451 ms |
+| frozen par for, 1 thread | checks on | 430 ms | 7 ms | 423 ms | 422 to 439 ms |
+| parity par for, 1 thread | checks on | 435 ms | 9 ms | 426 ms | 425 to 464 ms |
+| frozen par for, all threads | checks on | 55 ms | 7 ms | 48 ms | 48 to 94 ms |
+| parity par for, all threads | checks on | 62 ms | 9 ms | 53 ms | 50 to 73 ms |
+| frozen main.kes | --release | 376 ms | 7 ms | 370 ms | 368 to 396 ms |
+| PARITY_ITEMS | --release | 388 ms | 9 ms | 379 ms | 378 to 389 ms |
+| PARITY_GET | --release | 400 ms | 9 ms | 391 ms | 390 to 400 ms |
+| PARITY_REUSE | --release | 382 ms | 9 ms | 373 ms | 372 to 394 ms |
+| frozen par for, 1 thread | --release | 379 ms | 7 ms | 372 ms | 370 to 399 ms |
+| parity par for, 1 thread | --release | 391 ms | 9 ms | 382 ms | 380 to 389 ms |
+| frozen par for, all threads | --release | 51 ms | 7 ms | 45 ms | 44 to 50 ms |
+| parity par for, all threads | --release | 56 ms | 9 ms | 47 ms | 47 to 49 ms |
 
 Against the frozen copy, the gap of the world time (startup subtracted) and, in brackets, of the
-whole run (startup not subtracted, so it includes parity's ~4 ms slower start):
+whole run (startup not subtracted, so it includes parity's ~2 ms slower start):
 
 | Variant | checks on | --release |
 |---|---:|---:|
-| PARITY_ITEMS | +0.5% (+7 ms, +1.2%) | +3.1% (+20 ms, +3.8%) |
-| PARITY_GET | +8.7% (+55 ms, +9.2%) | +5.8% (+34 ms, +6.5%) |
-| PARITY_REUSE | +0.3% (+6 ms, +1.0%) | +2.1% (+15 ms, +2.9%) |
-| par for, 1 thread | +1.4% (+12 ms, +2.0%) | +4.2% (+26 ms, +4.9%) |
-| par for, all threads | -4% (0 ms, 0%) | +5.5% (+9 ms, +8.9%) |
+| PARITY_ITEMS | +0.2% (+3 ms, +0.7%) | +2.4% (+12 ms, +3.2%) |
+| PARITY_GET | +8.2% (+37 ms, +8.6%) | +5.7% (+24 ms, +6.4%) |
+| PARITY_REUSE | -1.2% (-3 ms, -0.7%) | +0.8% (+6 ms, +1.6%) |
+| par for, 1 thread | +0.7% (+5 ms, +1.2%) | +2.7% (+12 ms, +3.2%) |
+| par for, all threads | +10% (+7 ms, +13%) | +4.4% (+5 ms, +10%) |
 
-The rows near or over 5% are the `par for` ones in `--release` (1 thread +4.2%, all threads +5.5%;
-the all-threads ranges overlap, 84 to 115 against 82 to 105 ms, and a 9 ms gap on a 100 ms run is
-inside the noise of a shared machine) and `PARITY_GET`, which is the generic method on purpose.
-The `par for` rows run the `PARITY_ITEMS` work, so their gap is the same few percent, seen through
-a noisier measurement; they were not given a separate verdict.
+The all-threads rows are 45 to 53 ms runs, where a 2 to 5 ms gap is a few scheduler hiccups (the
+checks-on ranges, 48 to 94 and 50 to 73 ms, overlap); they run the `PARITY_ITEMS` work and were
+not given a separate verdict. `PARITY_GET` is the generic method on purpose.
+
+**The noise level.** Task 4's two runs of the frozen rows moved 1.4% (checks on) and 3% (`--release`)
+under load, so about 3% was the noise of a median there. On the idle machine the ranges are
+tighter: 368 to 396 ms for the frozen `--release` row (one slow run) and 378 to 389 ms for
+`PARITY_ITEMS`.
 
 ### Startup
 
-The parity exes start about 4 ms slower than the frozen ones (10.9 against 15.2 ms for the two
-empty programs, median of 21 in a separate probe). The cause is `blocks.kes`, which `parity.kes`
-imports for `SIZE`, `PAD` and `LAYERS`: it has `use { Color from draw }`, and that links the
-drawing library into the exe. A two-line program that only imports `Color from draw` is 665,600
-bytes and starts in 14.8 ms, against 162,816 bytes and 10.4 ms for one that does not
-(`rel_parity_empty.exe` is 785,920 bytes against 224,256 for the frozen empty program). So the 4 ms
-is the engine's `draw` import, not generics; the table subtracts each family's own startup. Taking
-the whole-run gap instead adds about 4 ms (0.8%) to each parity row.
+The parity exes start about 2 ms slower than the frozen ones in this run (9 against 7 ms for the
+two empty programs, medians of 11; under load in Task 4: 14 to 15 against 10 to 11 ms, and 15.2
+against 10.9 ms, median of 21, in a separate probe then; load not sampled for that probe, the
+machine in use as above, so those are single medians). The cause is `blocks.kes`, which
+`parity.kes` imports for `SIZE`, `PAD` and `LAYERS`: it has `use { Color from draw }`, and that
+links the drawing library into the exe. A two-line program that only imports `Color from draw` is
+665,600 bytes and starts in 14.8 ms, against 162,816 bytes and 10.4 ms for one that does not (same
+probe; `rel_parity_empty.exe` is 785,920 bytes against 224,256 for the frozen empty program). So
+the gap is the engine's `draw` import, not generics; the table subtracts each family's own
+startup.
 
-**Verdict: `PARITY_ITEMS` --release is 3.1% slower than the frozen copy (+3.8% of the whole
-run), inside the 5% target. That depends on the sampling and the meshing sharing one function,
-`mesh_items`, as the frozen `mesh` does with `solids`: split into two, the same code ran +70% slower
-because of the compiler's inlining budget, not because of generics (Finding 1).**
-The ranges overlap (524 to 580 against 511 to 528 ms: one slow round in 11 in the parity row), so
-the gap is real but small. `PARITY_REUSE` (+2.1%) is 5 ms faster than `PARITY_ITEMS` in release:
-making the grid per chunk (39,304 `add`s into a list, 256 times) costs about 1% in the full
-program, and the rest of the gap (+2.1%) is probably the sampling and meshing code, where the
-length of a `list` is unknown to the prover (below; not isolated). `PARITY_GET` is 2.6% (release) slower than the `items`
-line: the generic method call costs a few percent at most.
+**Verdict: `PARITY_ITEMS` --release is +2.4% on the median against the frozen copy (+9 ms of world
+time; +3.2% of the whole run), inside the 5% target, so parity passes.** The gap is small but looks real, not
+noise: the fastest runs differ by as much (378 against 368 ms, +2.7%) and the checks-on rows,
+which run the same code with checks, are level (+0.2%). It depends on the sampling and the
+meshing sharing one function, `mesh_items`, as the frozen `mesh` does with `solids`: split into
+two, the same code ran +70% slower because of the compiler's inlining budget, not because of
+generics (Finding 1). `PARITY_REUSE` (+0.8%) is 6 ms faster than `PARITY_ITEMS` in release:
+making the grid per chunk (39,304 `add`s into a list, 256 times) costs about 1.6% of the world in
+the full program, and the rest of the gap is probably the sampling and meshing code, where the
+length of a `list` is unknown to the prover (below; not isolated). `PARITY_GET` is 3.2%
+(release) slower than the `items` line: the generic method call costs a few percent.
 
 ### What the checks report says
 
@@ -152,6 +157,8 @@ cheap and predicted); it was not isolated. `mesh_get` has seven more (every `Gri
    `main.kes` in `bench/engine/out/split*` and `unsplit*`, `--release`, the frozen folder
    untouched). The split copy has `chunk_faces` call `solids` and pass the array to `mesh(solid,
    cx, cy, cz)`, instead of `mesh` calling `solids`.
+   (These are whole runs, median and range of 5 rounds in turn; load not sampled, on the same
+   machine in use as the parity runs above.)
    - One `bench(1337, 8)` in `main`: split 627 ms (615 to 639) against unsplit 615 ms (614 to 622),
      5 rounds in turn, +2%; the report has no inlining message. A single split does not hurt.
    - `main` calling `bench` for three seeds: split **1,980 ms (1,918 to 2,132) against unsplit
@@ -195,9 +202,13 @@ the phase's frames). Raw lines: `out/measure_<n>.txt`; everything parsed: `out/m
 
 **Machine and load.** Windows 11, AMD Ryzen 7 5800X (8 cores, 16 threads), 16 GB, NVIDIA
 RTX 3070. The user was away; nothing else heavy ran. The whole machine's CPU use, sampled for 2 s
-before each run: 5.0%, 18.5% (a file copy of mine, finished before the run's phases) and 11.4%;
-during each run, the machine's CPU time minus the benchmark's own: 8.2%, 9.1% and 7.9% (this
-includes `measure.py` itself).
+before each run: 5.0%, 18.5% and 11.4%; during each run, the machine's CPU time minus the
+benchmark's own: 8.2%, 9.1% and 7.9% (this includes `measure.py` itself). The 18.5% before run 2
+was the builder's own file copying: a copy of the compiler source, and a 3.5 GB folder copy
+started by mistake and stopped; when that one stopped against run 2's phases was not recorded,
+but the others' load during run 2 (9.1%) is within a point of the other runs'. Run 2 has the
+worst 99th percentiles of the three in `fly20` and `fly100` (15.3 and 16.2 ms), so the copy can
+only have made E32's margin look smaller, not passed it.
 
 ### The pass mark (E32): passes with `GEN_BATCH` 2, failed with the spec's 8
 
@@ -216,6 +227,14 @@ worst run of `fly100` and `circle`), and the worst frames are over: 16.3, 17.8 a
 first `make_mesh`), not streaming. Wall time per frame: median 0.92, 10.4 and 1.68 ms in the
 three flights (no vsync in a hidden window).
 
+**After the final review's fixes** (spec E69, a column's unload re-meshes its neighbours when next
+in view; E70, the y = 127 top faces, 0.5% more faces), one hidden run of `bench.kes` `--release`
+(not the three-run `measure.py`; load 2.6% before, the whole machine 11.9% during, the benchmark
+included): p99 **14.5, 15.5 and 14.8 ms** in `fly20`, `fly100` and `circle` (worst 15.7, 20.2 and
+21.7 ms), inside the ranges above; fill 135 frames, 1,466 ms; edits 0.70 and 1.93 ms. Every
+phase generated and meshed exactly the counts in the table (also in a full-length headless run),
+so the fixes add no per-frame work in the scripted phases and the table stands.
+
 That is with **`GEN_BATCH` = 2** (spec E65). With the spec's starting value of 8 (the same
 script, three runs of the code before the change; load before 6.7 to 9.5%, others during 7.0 to
 8.7%), **E32 failed**: p99 **17.5 ms (16.8 to 17.9)** in `fly20`, **19.9 ms (19.6 to 19.9)** in
@@ -227,7 +246,10 @@ items; see the findings), meshing 16 chunks about 1 ms and uploading them 2 to 3
 0.8 to 1.3 ms. One column takes **7.48 ms** to generate on one core (`KESTREL_THREADS=1`: 7.47
 to 7.49 ms a column in every phase), so a frame that generates anything costs at least that;
 8 at once on 16 hardware threads took 1.55 times one column's time (they share cores and
-memory bandwidth). Batch sizes tried (circle cut to 100 s, two runs each; the p99 of each run):
+memory bandwidth). (The 7.48 ms and the per-part times are single runs; their load was not
+sampled, on the same otherwise idle machine.) Batch sizes tried (circle cut to 100 s, two runs
+each; the p99 of each run; load not sampled for these tuning runs, the machine otherwise idle as
+above):
 
 | `GEN_BATCH` / `MESH_BATCH` | fly20 p99 | fly100 p99 | circle p99 | fill frames |
 |---|---|---|---|---:|
@@ -260,11 +282,13 @@ batch's time shared out, not one item's time on one core (those are below):
 | mesh, ms per chunk | 0.127 (0.112 to 0.132) | 0.085 (0.084 to 0.096) | 0.086 (0.084 to 0.098) | 0.090 (0.090 to 0.091) |
 | upload, ms per chunk | 0.190 (0.156 to 0.191) | 0.143 (0.141 to 0.161) | 0.147 (0.145 to 0.164) | 0.100 (0.096 to 0.154) |
 
-On one core (`KESTREL_THREADS=1`, `GEN_BATCH` 8, one run): **7.48 ms a column** (131,072
+On one core (`KESTREL_THREADS=1`, `GEN_BATCH` 8, one run, load not sampled): **7.48 ms a column** (131,072
 blocks, about 57 ns a block, three octaves of 3D noise each) and **0.25 ms a chunk** to mesh.
 Upload (`make_mesh`) is on the main thread either way: 0.10 to 0.19 ms a chunk. A chunk has
 1,866 faces on average (1,470,349 faces in the 788 chunks of the filled view, from the headless
-smoke run): 7,464 vertices and 11,196 indices.
+smoke run): 7,464 vertices and 11,196 indices. Since the final review's mesher fix (spec E70: the
+top faces of y = 127 blocks under solid terrain), the filled view has 1,477,817 faces, 0.5% more
+(1,875 a chunk; `main.kes` headless, 400 frames).
 
 **Columns per simulated second:** 11.6 at 20 blocks a second, 59.7 at 100, 30.1 on the circle
 at 50 (the same in every run: the script fixes the work).
@@ -274,7 +298,7 @@ to 1,568)** in a hidden window that doesn't wait for vsync (with `GEN_BATCH` 8: 
 to 760 ms). At 60 fps that is 2.25 s (0.85 s with 8).
 
 **Edit latency** (from `edit_at` to the upload of every chunk it dirtied, in the same frame;
-50 breaks and 50 places of each kind; medians): **chunk middle 0.71 ms (0.70 to 0.77), 1 chunk
+25 breaks and 25 places of each kind, 100 edits in all; medians): **chunk middle 0.71 ms (0.70 to 0.77), 1 chunk
 meshed again; chunk corner 1.82 ms (1.69 to 1.86), 8 chunks**. Every edit showed in the frame it
 was made.
 
@@ -303,7 +327,12 @@ length, so the two builds had different buffers; they are now sized for 18,000 f
 | run 2 | 1.8 | 470.1 | 501.7 | 529.1 | 537.5 | 539.7 | 514.6 / 540.8 | 2.21% |
 | run 3 | 1.8 | 470.3 | 513.7 | 538.7 | 505.3 | 507.7 | 478.7 / 551.2 | 2.33% |
 
-("rise" is the highest sample over the last 200 s against the sample at its start.) The
+("rise" is the highest sample over the last 200 s against the sample at its start, the rule
+`measure.py` applies for E31's 5%; the last sample taken at or before the `mark 100` line is the
+start.) Measured peak against trough instead, the window's highest against its lowest sample, the
+working set moved 5.0% and 5.1% in runs 1 and 2 and 15.2% in run 3 (Windows trimming it), so
+the pass rests on the rule's reading; private bytes, which a trim doesn't lower, rose 1.6%, 1.8%
+and 1.7% by the same rule (peak against trough 4.0%, 3.7% and 4.6%), which supports it. The
 working set climbs from 454 to 470 MB after the fill to 540 to 550 MB by the circle's 150 s and
 then stays there (run 3 dropped 40 MB at about 180 s: Windows trimmed it). Private bytes follow
 the same shape: 639 to 669 MB after the fill, 744 to 765 MB from the circle's 50 s on.
@@ -318,15 +347,18 @@ matches the code: assigning to a place that holds a GPU object drops the old val
 `window.frame()` unloads it (`window/src/gpu.rs`, `drain`). No fix was needed.
 
 **The plateau, sized.** Only 61 MB of the 540 MB is the program arena. A headless run of the same
-build (no GPU, so no driver memory; 0.1 s samples) shows what the runtime itself holds: working
+build (no GPU, so no driver memory; 0.1 s samples; one run, load not sampled, the machine
+otherwise idle) shows what the runtime itself holds: working
 set 304 MB after the fill, 315 MB at the circle's start, 337 MB at 100 s, 352 MB at 200 s and
 356 MB at 300 s (private bytes 325, 331, 341, 352, 355 MB). So about **240 to 295 MB of runtime
 memory beyond the program arena**: the per-thread spare-block caches (freed blocks of the
 per-frame meshing and generation arenas, kept for reuse, up to 256 MiB a thread,
 `runtime/src/blocks.rs`) and the threads' stacks. The other ~190 MB of the hidden run's working
 set is the GPU driver's and raylib's. **The headless curve had not quite levelled off**: it rose
-5.9% from the circle's 100 s to its 300 s (1.2% in the last 100 s), more than E31's 5%, where the
-hidden run's (with the driver's memory in the total) rose 2.2%. It is slowing and the caches have
+5.6% from the circle's 100 s sample to its 300 s one (337 to 356 MB; 1.1% in the last 100 s, 352
+to 356 MB; private bytes 4.1%, 341 to 355 MB), more than E31's 5%, where the hidden run's (with
+the driver's memory in the total) rose 2.2%. (This section first said 5.9%, which those samples
+don't give; the run's raw samples weren't kept, so the listed ones are what remains.) It is slowing and the caches have
 a cap, but the cap is 256 MiB per thread on 17 threads, so this is the known runtime gap E31
 predicted, reported rather than hidden: per-thread caches of freed blocks let a long run creep
 up while different threads end up holding blocks of different sizes. `mesh_step` still builds
@@ -354,14 +386,16 @@ exe and, where marked, `--release`; `main.kes` and `bench.kes` pass `check` and
 | Hot code | Contract | Notes |
 |---|---|---|
 | generation, `gen.generate` | `@prove(no_alloc)` | added in Task 10 |
-| `Grid.get`, `Grid.set` | `@prove(no_alloc)` | added in Task 10; the engine's hot loops index `items` directly instead |
-| mesher, `copy_row` (the padded copy's inner loop, 32 of each row's 34 cells) | `@prove(no_checks)` | with `@assume`s on both lists' lengths and on the row's start (`mesher.kes:80-82`) and on the slot at the call (`mesher.kes:210`) |
+| `Grid.get`, `Grid.set` on `Grid[u8]` | `@prove(no_alloc)`, in `tests/grid.kes` | added to the library in Task 10 and moved out in the final review (E72): a generic contract is checked for each T, and `get` copies a T that owns memory (`grid[string]` failed to compile). The engine's hot loops index `items` directly |
+| mesher, `copy_row` (the padded copy's inner loop, 32 of each row's 34 cells) | `@prove(no_checks)` | with `@assume`s on both lists' lengths and on the row's start (`mesher.kes:80-82`) and on the slot at the call (`mesher.kes:216`) |
 | `ray.cast` | `@prove(no_alloc)` | |
 | `collide.slide`, `collide.move_axis` | `@prove(no_alloc)` | |
 | `Frustum.sees` | `@prove(no_alloc, no_checks, no_panic)` | pure float maths |
 | `player.step_player`, `player.spawn` | `@prove(no_alloc)` | |
 
-**Probes** (contracts that fail; each test expects exit 1 and "can't be proven `no_checks`"):
+**Probes** (contracts that fail; each test expects exit 1 and the error naming the function, such
+as "`cast[world.World]` (made on ...) can't be proven `no_checks`", or, for a loop, its line, such
+as "the loop at line 50 can't be proven `no_checks`"):
 
 | Probe | Contract | What stops it, checked build | What stops it, `--release` |
 |---|---|---|---|
@@ -378,8 +412,8 @@ program: 1,749 checks, 1,481 removed, 268 left, checked; 151, 75 removed, 76 lef
 
 | Function | checked: left (removed) | `--release`: left | What is left, and why |
 |---|---:|---:|---|
-| generation (the stream's `par for` body: `generate` with `density`, `solid_at` inlined) | 10, plus `octave` 14 and `block_type` 1 as calls | 2 | release: the two `j.blocks.items[i]` writes (`gen.kes:59`, `64`): the grid list's length is unknown. Checked: the overflow checks on `cx * SIZE + x` and the like (a column's place is any `int`), and inside `octave` (not inlined: the budget) the shift and `c + 1` checks |
-| `mesh_chunk` | 32 (394) | 6 | release: `w.columns.items[slot]` (`slot` is a parameter), the block reads in `flag` (4: slot and `blocks.items[k]`, lengths unknown) and the type read on line 226. Checked: overflow on the world-place arithmetic (`cx * 32 + px`, `layer * 32`, `wy * 32`): the column's place and layer are any `int` |
+| generation (the stream's `par for` body: `generate` with `density`, `solid_at` inlined) | 10, plus `octave` 14 and `block_type` 1 as calls | 2 | release: the two `j.blocks.items[i]` writes (`gen.kes:62`, `67`): the grid list's length is unknown. Checked: the overflow checks on `cx * SIZE + x` and the like (a column's place is any `int`), and inside `octave` (not inlined: the budget) the shift and `c + 1` checks |
+| `mesh_chunk` | 32 (394) | 6 | release: `w.columns.items[slot]` (`slot` is a parameter), the block reads in `flag` (4: slot and `blocks.items[k]`, lengths unknown) and the type read (`mesher.kes:232`). Checked: overflow on the world-place arithmetic (`cx * 32 + px`, `layer * 32`, `wy * 32`): the column's place and layer are any `int` |
 | `Builder.face` | 40 (34) | 12 | the 12 occlusion reads `solid[front + su + sv]`: in bounds only because of how `front`, `su` and `sv` relate, which ranges can't show; checked, also the overflow on the steps from `int(u.x)` etc. |
 | `copy_row` (inlined into `mesh_chunk`) | 0 | 0 | proven (`no_checks`) |
 | `World.block` / `World.slot_at` | 2 (7) / 1 (4) | 2 / 1 | `self.columns.items[slot]` and the grid read: the pool's list length is unknown |
@@ -393,7 +427,7 @@ program: 1,749 checks, 1,481 removed, 268 left, checked; 151, 75 removed, 76 lef
 **The inlining budget, in `--release`:** the report has **27** "isn't inlined: the inlining
 budget of ... ran out" messages, all from generation: 13 in the stream's `par for` body
 (`__kestrel_par_171`) and 14 in `world.load_now`, for `octave` in `density` (`gen.kes:14`),
-`lattice` and `mix` in `octave` (`noise.kes:45-48`) and `block_type` (`gen.kes:59`).
+`lattice` and `mix` in `octave` (`noise.kes:44-48`) and `block_type` (`gen.kes:62`).
 
 **What the budget costs (an A/B, not a fix).** A scratch copy of the compiler with the budget
 (`kir/src/inline.rs`, `GROWTH_BUDGET`) raised from 4,096 to 2^20 added nodes, built into a
@@ -430,16 +464,17 @@ priority, timed from outside (process start to exit, so each includes about 16 m
 The exes are 1,141,248 bytes (checks on) and 1,126,912 bytes (`--release`); most of it is the
 window library (raylib).
 
-**Lines per file** (`kestrel/voxel`, with comments; every file is under the 400-line guideline):
+**Lines per file** (`kestrel/voxel`, with comments, as of the final review's fixes; every file is
+under the 400-line guideline):
 
 | Kind | Files (lines) |
 |---|---|
-| libraries | `grid` 76, `noise` 49, `ring` 66, `pool` 76, `ray` 103, `collide` 163, `frustum` 84 |
-| engine | `blocks` 51, `column` 43, `gen` 75, `world` 125, `mesher` 251, `stream` 302, `player` 235, `edit` 82, `render` 205, `hud` 72 |
-| entry programs | `main` 135, `bench` 261 and `script` 188, `parity` 243 and five 8-line `parity_*` entries |
-| total | 2,925 lines in 26 files; the tests (`voxel/tests`, 26 files) 2,400 lines |
+| libraries | `grid` 77, `noise` 49, `ring` 66, `pool` 78, `ray` 103, `collide` 171, `frustum` 84 |
+| engine | `blocks` 51, `column` 46, `gen` 75, `world` 125, `mesher` 257, `stream` 325, `player` 235, `edit` 87, `render` 205, `hud` 72 |
+| entry programs | `main` 143, `bench` 261 and `script` 188, `parity` 243 and five 8-line `parity_*` entries |
+| total | 2,981 lines in 26 files (and the race's 4 files, 344 lines); the tests (`voxel/tests`, 27 files) 2,585 lines |
 
-**Findings:** 26, in `docs/superpowers/plans/2026-10-09-core-2a-followups.md`, "Found while
+**Findings:** 34 (26 at Task 10, 6 from the race, 2 from the final review), in `docs/superpowers/plans/2026-10-09-core-2a-followups.md`, "Found while
 building the voxel engine (2026-10-25)".
 
 ## Race, round 1: block-face meshing against `block-mesh` (E26)
@@ -447,8 +482,11 @@ building the voxel engine (2026-10-25)".
 Question: how fast is Kestrel's block-face meshing (a face for each side of a solid block that
 touches air) against Rust's `block-mesh` crate (0.2.0, `visible_block_faces`, the simple mesher)
 on the same input? Round 1 is the one with the same algorithm, so it measures the language and
-the compiler, not the algorithm. **Result: Rust is faster, by 1.38 times for the faces and 1.83
-times for the faces plus the mesh arrays** (Kestrel `--release` against Rust release).
+the compiler, not the algorithm. **Result: Rust is faster, by 1.39 times for the faces and 1.84
+times for the faces plus the mesh arrays** (Kestrel `--release` against Rust release), **1.36 and
+1.78 times against Rust built for this CPU** (`-C target-cpu=native`, which was 2 to 3% slower
+than the baseline build here). Re-measured in the final review, with the native column added
+and the plain port corrected (first run: 1.38 and 1.83).
 
 ### What each side does
 
@@ -473,7 +511,7 @@ order: -x -y -z +x +y +z) emit a face if the neighbour is air.
 | loops | y, z, x | `Extent::iter3`: z, y, x (memory order in both) |
 | neighbour reads | `world.items[i +- 1 / 34 / 1156]`, bounds-checked | `voxels.get_unchecked(...)` inside the crate: no bounds checks |
 | kernel 1 output | six `list[int]`, one per side, each `x \| y << 6 \| z << 12` of the block in padded coordinates | a `UnitQuadBuffer`: six `Vec<UnorientedUnitQuad>` (`minimum: [u32; 3]`, 12 bytes a face) |
-| kernel 2 output | three lists: positions and normals (`list[vec3]`, 12 bytes each, like Rust's `[f32; 3]`) and indices (`list[int]`), 4, 4 and 6 a face, with the corners and winding of `RIGHT_HANDED_Y_UP_CONFIG` written out | three `Vec`s: `quad_mesh_positions`, `quad_mesh_normals` and `quad_mesh_indices` of each face appended with `extend_from_slice` |
+| kernel 2 output | three lists: positions and normals (`list[vec3]`, 12 bytes each, like Rust's `[f32; 3]`) and indices (`list[int]`), 4, 4 and 6 a face, with the corners and winding of `RIGHT_HANDED_Y_UP_CONFIG` written out | three `Vec`s: `quad_mesh_positions`, `quad_mesh_normals` and `quad_mesh_indices` of each face appended with `extend_from_slice` (the plain port: one `push` per entry, 14 a face, as Kestrel's `add`s) |
 
 **List management (E26), the same on both sides.** The lists are made once per call (Kestrel) or
 once per run (Rust) and **cleared and reused for every chunk**: Kestrel `xs.clear()`, Rust
@@ -491,15 +529,25 @@ nothing: the first version matched.)
 ### How it was measured
 
 `kestrel/bench/kernels`' timer and `measure.py`: `py measure.py --rounds 9 --only race --threads 1
---rust-checks target/ovf/release`, from `kestrel/bench/kernels` after `cargo build --release`
-(and a second build, `RUSTFLAGS="-C overflow-checks=on" cargo build --release --target-dir
-target/ovf --bin rust`, whose overflow checks include the crate). Each round runs every row once,
-in turn; a row is the median of 5 repetitions (after a warm-up one); the table is the median of
-the 9 rounds with the range of the 9 medians. Idle priority, one thread (`KESTREL_THREADS=1`; the
-Rust side is one thread). Kestrel is the JIT (compiled before the clock starts, after a warm-up
-call); the Rust modes are an ordinary release build (`opt-level` 3, default `x86-64` target like
-Cranelift's baseline, no `target-cpu=native`). "Overflow checks" is the same code built with
-`-C overflow-checks=on`.
+--rust-checks target/ovf/release --rust-native target/native/release`, from `kestrel/bench/kernels`
+after `cargo build --release` and two more builds of the Rust binary into their own target
+folders: `RUSTFLAGS="-C overflow-checks=on" cargo build --release --target-dir target/ovf --bin
+rust` (overflow checks, the crate's included) and `RUSTFLAGS="-C target-cpu=native" cargo build
+--release --target-dir target/native --bin rust` (for this machine's CPU). Each round runs every
+row once, in turn; a row is the median of 5 repetitions (after a warm-up one); the table is the
+median of the 9 rounds with the range of the 9 medians. Idle priority, one thread
+(`KESTREL_THREADS=1`; the Rust side is one thread). Kestrel is the JIT (compiled before the clock
+starts, after a warm-up call).
+
+**Build settings: the CPU target tilts toward Kestrel unless both use the host CPU.** Kestrel
+compiles for the machine it runs on (`cranelift_native::builder()`, `kestrel/codegen/src/isa.rs:18`:
+here a Zen 3 with AVX2, BMI and the rest), while an ordinary Rust release build targets the
+baseline `x86-64` (SSE2 only). So "Rust release" (`opt-level` 3, baseline target) is the
+crate as most users build it but has fewer instructions to choose from than Kestrel; "Rust
+native" (`-C target-cpu=native`) gives both sides the same CPU, and **the headline compares
+against both**. (An earlier version of this section said the Rust build used "the default `x86-64`
+target like Cranelift's baseline"; that was wrong: Kestrel doesn't use Cranelift's baseline.)
+"Overflow checks" is the baseline build with `-C overflow-checks=on`.
 
 **Setup subtraction.** Each Kestrel call builds the 256 chunks' flags and then runs `iters`
 passes; the timer runs the call with `iters` and with 0 and takes `(t - base) / (n * iters)`
@@ -510,40 +558,61 @@ is 60 for kernel 1 and 40 for kernel 2, so the timed kernel work is about 1.0 s 
 (1.3 s with checks on), 2.8 to 3.6 times the setup, and the setup's jitter is about 0.4% of it.
 The rounds' own ranges (0.4% to 0.9% of the median) say the same.
 
-**Machine and load.** Windows 11, 16 logical cores, otherwise idle: CPU of the whole machine
-before the run, 8 samples of 3 s: mean 0.2%; during the run, 136 samples of 5 s: mean 6.7%, max
-10.9% (one busy core of 16 is 6.25%, so about 0.4% was other load). A first, identical run is
-within 0.3% of every number below (kernel 1 `--release` 65,967 and kernel 2 103,075 ns; Rust
-47,773 and 56,247).
+**Machine and load.** Windows 11, AMD Ryzen 7 5800X (Zen 3), 16 logical cores, otherwise idle:
+CPU of the whole machine before the run, 8 samples of 3 s: mean 0.2%, max 0.4%; during the run,
+165 samples of 5 s: mean 7.3%, max 21.3% (one busy core of 16 is 6.25%, so about 1% was other
+load, in short spikes; the one wide range below, kernel 1 checks on up to 107 us, is one round
+in such a spike). The first run of this race (Task 11, the same machine idle, mean 6.7%) is
+within 0.7% of every row both runs have (kernel 1 `--release` 66,012 and kernel 2 103,177 ns then;
+Rust 47,791 and 56,255).
 
 ### Results (ns per chunk of 32^3 blocks, 1,811.5 faces; median of 9 rounds, range)
 
-| | Kestrel, checks on | **Kestrel `--release`** | **Rust release** | Rust, overflow checks | Rust, the Kestrel kernel written out (release) |
+| | Kestrel, checks on | **Kestrel `--release`** | **Rust release** | **Rust native** | Rust, overflow checks |
 |---|---:|---:|---:|---:|---:|
-| **Kernel 1: faces** | 82,175 (81,937-82,500) | **66,012** (65,813-66,399) | **47,791** (47,532-47,966) | 53,114 (52,967-53,390) | 41,109 (41,017-41,212) |
-| **Kernel 2: faces, then positions, normals, indices** | 126,907 (126,671-127,646) | **103,177** (102,897-103,454) | **56,255** (56,207-56,423) | 66,372 (66,074-66,554) | 56,199 (56,038-56,384) |
+| **Kernel 1: faces** | 82,174 (82,028-106,955) | **66,218** (65,810-66,525) | **47,681** (47,613-48,005) | **48,831** (48,756-49,007) | 54,422 (54,210-55,705) |
+| **Kernel 2: faces, then positions, normals, indices** | 127,429 (126,616-128,235) | **103,486** (102,943-104,209) | **56,383** (56,190-56,495) | **58,005** (57,879-58,438) | 67,458 (67,299-67,567) |
+
+The Kestrel kernels written out in Rust (the plain port, not part of the race; same rounds):
+
+| | release | native | overflow checks |
+|---|---:|---:|---:|
+| Kernel 1 | 41,204 (41,041-41,351) | 42,987 (42,897-43,323) | 41,044 (40,997-41,172) |
+| Kernel 2 | 56,030 (55,388-56,571) | 57,575 (57,163-58,119) | 57,760 (56,521-58,335) |
 
 | Ratio, Kestrel over Rust | Kernel 1 | Kernel 2 |
 |---|---:|---:|
-| **`--release` over release (the headline)** | **1.38** | **1.83** |
-| checks on over Rust with overflow checks (checks against checks) | 1.55 | 1.91 |
+| **`--release` over release (the headline)** | **1.39** | **1.84** |
+| **`--release` over native (both for this CPU)** | **1.36** | **1.78** |
+| checks on over Rust with overflow checks (checks against checks) | 1.51 | 1.89 |
 | checks on over Rust release | 1.72 | 2.26 |
-| `--release` over the same code written in Rust | 1.61 | 1.84 |
+| `--release` over the same code written in Rust (release / native) | 1.61 / 1.54 | 1.85 / 1.80 |
 
-- A face costs kernel 1 36.4 ns on Kestrel, 26.4 on block-mesh and 22.7 on the plain port.
-  Kernel 2's array stage alone (kernel 2 minus kernel 1) is **37.2 us a chunk on Kestrel (20.5 ns
-  a face) against 8.5 us on block-mesh (4.7 ns a face)**, 4.4 times; the plain port's
-  push-by-push version of that stage is 15.1 us.
+**Rust built for this CPU was not faster.** Every native row is 2 to 4% slower than the baseline
+build (block-mesh 48,831 against 47,681 ns, 58,005 against 56,383; the plain port 42,987 against
+41,204, 57,575 against 56,030), with ranges that don't overlap, so it is not noise; why was not
+looked into (the code generator's choices for AVX2, or layout). So the host-CPU target that
+Kestrel always uses was not what made it closer here; the headline is given against both.
+
+- A face costs kernel 1 36.6 ns on Kestrel, 26.3 on block-mesh and 22.7 on the plain port.
+  Kernel 2's array stage alone (kernel 2 minus kernel 1) is **37.3 us a chunk on Kestrel (20.6 ns
+  a face) against 8.7 us on block-mesh (4.8 ns a face)**, 4.3 times, and **14.8 us on the plain
+  port (8.2 ns a face), which pushes the same 14 entries one at a time: Kestrel takes 2.5 times
+  its time** (14.6 us native).
 - Kestrel's checks cost 24% (kernel 1) and 23% (kernel 2) over `--release`. Rust's overflow
-  checks cost 11% and 18% on block-mesh's code (the crate's index arithmetic) and nothing on the
-  plain port.
+  checks cost 14% and 20% on block-mesh's code (the crate's index arithmetic); on the plain port
+  nothing on kernel 1 (41,044 against 41,204 ns, inside the ranges) and 3% on kernel 2 (57,760
+  against 56,030: the index arithmetic of the 14 pushes).
 - **The plain Rust port** (`race_faces_plain`, `race_arrays_plain`: not part of the race, a
   diagnostic) is `race.kes`'s kernels written in Rust: the same layout, loops and checked
-  indexing into a `Vec<u8>`, six `Vec<u32>` of the same packed faces, the same corners, a push
-  per entry. It prints the same checksums. It shows the gap is not only block-mesh's own tuning:
-  written like Kestrel's code, Rust is still 1.61 and 1.84 times faster. Its kernel 1 is faster
-  than block-mesh's (41.1 against 47.8 us: its 4-byte packed faces move less memory than
-  block-mesh's 12-byte `UnitQuad`s), its kernel 2 equal.
+  indexing into a `Vec<u8>`, six `Vec<u32>` of the same packed faces, the same corners, and one
+  `push` for each of a face's 14 array entries, as Kestrel has an `add` for each. (The first run
+  of this race appended the normals and indices with `extend_from_slice`, 6 appends a face; the
+  final review made it push every entry and re-ran it: 56,030 ns for kernel 2 against 56,199
+  then, the same.) It prints the same checksums. It shows the gap is not only block-mesh's own
+  tuning: written like Kestrel's code, Rust is still 1.61 and 1.85 times faster (1.54 and 1.80
+  native). Its kernel 1 is faster than block-mesh's (41.2 against 47.7 us: its 4-byte packed
+  faces move less memory than block-mesh's 12-byte `UnitQuad`s), its kernel 2 level with it.
 
 ### Where Kestrel loses, and what is not known
 
@@ -559,12 +628,15 @@ Not profiled: these are differences in what the two sides do, not measured share
   6 to 10 us of the 103 (an estimate from the byte count, not measured).
 - **Many small pushes.** Kernel 2's array stage is 14 `add`s a face on Kestrel (each a capacity
   check, a store and a length update); block-mesh appends 4, 4 and 6 at once with
-  `extend_from_slice`. The plain port, which pushes one entry at a time, is still 2.5 times
-  faster than Kestrel on that stage, so that is not the whole gap either.
+  `extend_from_slice`. The plain port makes the same 14 single pushes and is 2.5 times faster
+  than Kestrel on that stage (14.8 against 37.3 us a chunk), so the count of appends is not the
+  cause: a Kestrel `add` costs more than a Rust `push` (followups, entry 28). Measured, the
+  push-at-a-time port is level with block-mesh's whole kernel 2 (56,030 against 56,383 ns).
 - **Six lists in a struct are slower than six locals.** The first version kept the six face lists
   in a struct (`faces.neg_x.add(p)`): kernel 1 `--release` measured 74.6 us against 65.6 us for
-  six local `var`s, run back to back with 5 repetitions each (14% slower); kernel 2 110.2 against
-  103.2 (earlier, not run alongside the final version). The raced code is the faster form. A list
+  six local `var`s, run back to back with 5 repetitions each (14% slower; single runs, the
+  machine idle as for the race, load not sampled for them); kernel 2 110.2 against 103.2 (earlier,
+  not run alongside the final version). The raced code is the faster form. A list
   reached through a struct field is probably reloaded on every `add`; the engine's `Mesh` struct
   does it.
 - **Inliner budget: none.** `kestrel check --report --release` on `race_faces.kes` and
@@ -579,19 +651,24 @@ It builds: `rustc -C opt-level=3 voxels3d.rs` (and with `-C overflow-checks=on`)
 output in a scratch folder (the folder itself is untouched); it prints 463,749. Against the
 frozen `bench/voxels3d/main.kes` and `voxels3d_tuned.kes` built with today's compiler (HEAD,
 `--release`, exes in a scratch folder), 11 rounds in turn, whole runs, `bench.py` from
-`C:\kt\voxtuned`, idle priority, machine idle (CPU 0 to 1% after):
+`C:\ktoxtuned`, idle priority. Re-run in the final review with an empty program on each side,
+so each subtracts **its own** startup (the first run subtracted the 6 ms of the Kestrel empty
+program from both). Machine idle: 0.3% before, 5.2% during (mean of 5 s samples, the benchmark
+itself about 6% of 16 threads). The first round's runs are slow for every variant (cold files),
+which the medians ignore.
 
-| Whole run | median (range) | minus startup (6 ms) | against Rust release |
-|---|---:|---:|---:|
-| Rust, release | 328 ms (327-333) | 322 | 1.00 |
-| Rust, overflow checks | 340 ms (338-376) | 334 | 1.04 |
-| Kestrel frozen, `--release` | 375 ms (374-379) | 369 | **1.15** |
-| Kestrel tuned, `--release` | 303 ms (302-322) | 297 | **0.92** |
+| Whole run | median (range) | empty program | minus its own startup | against Rust release |
+|---|---:|---:|---:|---:|
+| Rust, release | 334 ms (333-370) | 5 ms (Rust) | 329 | 1.00 |
+| Rust, overflow checks | 340 ms (339-374) | 5 ms (Rust) | 335 | 1.02 |
+| Kestrel frozen, `--release` | 376 ms (374-419) | 6 ms (Kestrel) | 370 | **1.12** |
+| Kestrel tuned, `--release` | 304 ms (303-345) | 6 ms (Kestrel) | 298 | **0.91** |
 
-Over the whole world (the noise is nearly all of it) Kestrel is level with Rust: 1.15 for the
-frozen code and 0.92 for the hand-tuned copy, as in the earlier sessions (1.13 and 0.92). The
-meshing alone is where Kestrel is behind. This is not the race (it is mostly the noise), only the
-check that the machine and the Rust port still say what they said.
+Over the whole world (the noise is nearly all of it) Kestrel is level with Rust: 1.12 for the
+frozen code and 0.91 for the hand-tuned copy (the first run, with 6 ms subtracted from both:
+1.15 and 0.92; earlier sessions 1.13 and 0.92). The meshing alone is where Kestrel is behind.
+This is not the race (it is mostly the noise), only the check that the machine and the Rust port
+still say what they said.
 
 ### What round 2 would need (greedy meshing against `binary-greedy-meshing`)
 

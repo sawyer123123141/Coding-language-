@@ -68,7 +68,8 @@ foreach ($m in $modes) {
 
 # The runs: every exe (the empties too) once per round, the order rotated by one place each round
 # so no exe always runs right after the same neighbour or at the same point of a busy spell.
-# (Added after the table in results.md was made; its runs went in a fixed order.)
+# (Task 4's first table ran in a fixed order; the table in results.md now is the final review's
+# re-run, rotated.)
 $jobs = @()
 foreach ($m in $modes) {
     foreach ($p in $programs) { $jobs += ,@("$($m[1])$($p[0])", "$out\$($m[1])$($p[0]).exe", "1") }

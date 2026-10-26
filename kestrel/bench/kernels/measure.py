@@ -10,7 +10,9 @@ for the interface kernels, Kestrel and Rust.
 
 `--rust-checks DIR` adds a column for the Rust kernels, run from DIR: a build with overflow checks
 (`RUSTFLAGS="-C overflow-checks=on" cargo build --release --target-dir target/ovf`, then
-`--rust-checks target/ovf/release`). The race kernels (labels with "race") must print the face
+`--rust-checks target/ovf/release`). `--rust-native DIR` adds one for a build for the host CPU, as
+Kestrel compiles for it (`RUSTFLAGS="-C target-cpu=native" cargo build --release --target-dir
+target/native`, then `--rust-native target/native/release`). The race kernels (labels with "race") must print the face
 total 463,749 as their checksum, or the run stops.
 
 `--keep-checks` and `--old` add columns, run in turns with the first within each round:
@@ -85,6 +87,7 @@ def main():
     ap.add_argument("--keep-checks", action="store_true", help="also run with every proven check kept")
     ap.add_argument("--old", default="", help="also run the kernels built in DIR (an older compiler's target/release)")
     ap.add_argument("--rust-checks", default="", help="also run the Rust kernels built in DIR (with overflow checks on)")
+    ap.add_argument("--rust-native", default="", help="also run the Rust kernels built in DIR (with -C target-cpu=native)")
     a = ap.parse_args()
     env = dict(os.environ, KESTREL_THREADS=str(a.threads))
     # (column, directory of the binaries, extra flags for the Kestrel kernels)
@@ -95,15 +98,18 @@ def main():
         columns.append(("old", os.path.abspath(a.old), []))
     if a.rust_checks:
         columns.append(("overflow checks", os.path.abspath(a.rust_checks), []))
+    if a.rust_native:
+        columns.append(("native", os.path.abspath(a.rust_native), []))
+    rust_only = ("overflow checks", "native")
     kernels = [k for k in KERNELS if a.only.lower() in k[0].lower()]
     results = {(label, c[0]): [] for label, _, _ in kernels for c in columns}
     for _ in range(a.rounds):
         for label, cmd, iters in kernels:
             for name, directory, extra in columns:
                 is_rust = cmd[0] == "rust"
-                if is_rust and name not in ("new", "overflow checks"):
+                if is_rust and name not in ("new", *rust_only):
                     continue
-                if not is_rust and name == "overflow checks":
+                if not is_rust and name in rust_only:
                     continue
                 exe = os.path.join(directory, cmd[0] + (".exe" if os.name == "nt" else ""))
                 args = [exe, *cmd[1:], *([] if is_rust else extra), "--iters", str(iters)]

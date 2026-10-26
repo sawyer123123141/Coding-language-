@@ -533,6 +533,8 @@ The voxel engine's race, round 1 (block-face meshing, Kestrel against the `block
 frozen world's 256 chunks) runs on this timer: `voxel/race_faces.kes` and `voxel/race_arrays.kes`
 against the Rust modes `race_faces` and `race_arrays` (`src/race.rs`, with `race_faces_plain` and
 `race_arrays_plain`, the Kestrel kernels written out in Rust), through `py measure.py --only race
---rust-checks target/ovf/release`. Rust is faster: Kestrel `--release` takes 1.38 times (faces) and
-1.83 times (faces and mesh arrays) Rust release's time per chunk. The table, the setup
+--rust-checks target/ovf/release --rust-native target/native/release`. Rust is faster: Kestrel
+`--release` takes 1.39 times (faces) and 1.84 times (faces and mesh arrays) Rust release's time per
+chunk, and 1.36 and 1.78 times Rust built with `-C target-cpu=native` (re-measured in the voxel
+engine's final review). The table, the setup
 subtraction, the fairness notes and the causes are in `bench/engine/results.md`, "Race, round 1".

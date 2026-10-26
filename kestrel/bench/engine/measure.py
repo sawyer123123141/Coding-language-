@@ -14,8 +14,8 @@ Run from kestrel/bench/engine after `cargo build --release -p kestrel-cli` in ke
    on screen), sampling the process's working set and private bytes every 250 ms
    (`GetProcessMemoryInfo`) and its dedicated GPU memory (Windows' "GPU Process Memory"
    counters, through `pdh.dll`), and timestamping every line it prints, so the `mark` lines
-   place the samples in the circle (the hidden window doesn't wait for the display, so 300
-   simulated seconds take about 45 real ones);
+   place the samples in the circle (the hidden window doesn't wait for the display, so the
+   circle's 300 simulated seconds take about 77 real ones, and a whole run about 90);
 3. runs the 100 s and the 300 s copy once more each with `KESTREL_ARENA_REPORT=1`: the program
    arena's size at exit (the runtime reports it only then) must be the same for both (E31: no
    growth over the flight). The timed runs report it too.
