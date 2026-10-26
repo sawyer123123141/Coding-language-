@@ -1,23 +1,66 @@
 # The Kestrel voxel engine
 
-A voxel engine written in Kestrel (a Kestrel program, not a Cargo crate). It is built in
+A voxel engine written in Kestrel (a Kestrel program, not a Cargo crate): an endless world of
+blocks streamed around the player, who walks or flies, breaks and places blocks. It is built in
 steps; this file grows with it. The design is in
 `docs/superpowers/specs/2026-10-25-voxel-engine-design.md`.
 
 The files are flat because Kestrel finds a module only next to the file that uses it.
 
-## Files so far
+## Playing
 
-- `grid.kes`: `Grid[T]`, a typed 3D array over one list, and the `Solid` interface (a library).
-- `noise.kes`: the frozen world's 3D value noise, copied bit for bit (a library).
-- `blocks.kes`: block ids, the world's sizes (`SIZE`, `LAYERS`, `HEIGHT`, `PAD`, `DIRT_DEPTH`, `SNOW_LINE`), colours and solidity (a library).
-- `column.kes`: `Column`, `ColumnState`, column keys and the world-to-column maths, which is right for negative x (a library).
-- `gen.kes`: the world's density, `solid_at`, `block_type` and `generate`, which fills a column's grid in place (a library).
-- `ring.kes`: `Ring[T]`, a fixed-size first-in first-out queue (a library).
-- `pool.kes`: `Pool[T]` and `Handle`, fixed slots handed out with generation-checked handles (a library).
+Run this in `kestrel/` (it opens a 1280 x 720 window):
+
+```
+cargo run -q --release -p kestrel-cli -- run --release voxel/main.kes
+```
+
+- **WASD** moves; **Space** jumps (walking) or goes up (flying); **Shift** goes down (flying).
+- **F** switches between walking and flying. Leaving fly mode inside a block is refused.
+- **Mouse wheel** changes the flying speed (2 to 400 blocks a second).
+- **Left click** breaks the block under the crosshair (within 6 blocks); **right click** places
+  stone in front of it (not inside the player).
+- **Looking:** the mouse starts free; hold the right button and drag to look (a right click
+  that moves less than 4 pixels places a block instead). **Tab** captures the mouse, as in a
+  first-person game: moving it looks, and Tab frees it again.
+
+The player starts flying above column (0, 0) and lands on its top block once it has loaded.
+The window shows a stats line at the top, and the program prints one once a second:
+`voxel fps <f> work_ms <f> columns <n> chunks <n> faces <n> queue <n> mode <walk|fly>`.
+
+## Files
+
+Libraries import nothing from the engine (only other libraries and Kestrel's built-in modules),
+so they can be used on their own:
+
+- `grid.kes`: `Grid[T]`, a typed 3D array over one list, and the `Solid` interface.
+- `noise.kes`: the frozen world's 3D value noise, copied bit for bit.
+- `blocks.kes`: block ids, the world's sizes (`SIZE`, `LAYERS`, `HEIGHT`, `PAD`, `DIRT_DEPTH`, `SNOW_LINE`), colours and solidity.
+- `column.kes`: `Column`, `ColumnState`, column keys and the world-to-column maths, which is right for negative x.
+- `gen.kes`: the world's density, `solid_at`, `block_type` and `generate`, which fills a column's grid in place.
+- `ring.kes`: `Ring[T]`, a fixed-size first-in first-out queue.
+- `pool.kes`: `Pool[T]` and `Handle`, fixed slots handed out with generation-checked handles.
+- `ray.kes`: `cast`, the first solid block along a ray (a grid walk), generic over `Solid`.
+- `collide.kes`: `Box` and `slide`, a box moving through blocks one axis at a time, generic over `Solid`.
+- `frustum.kes`: `Frustum` and `frustum_of`, which chunk boxes a camera may see.
+
+The engine:
+
+- `world.kes`: `World`, the loaded columns in a pool, blocks read and set across columns, each chunk's meshing state and the queue of chunks waiting for a mesh.
+- `mesher.kes`: `mesh_chunk`, one chunk's mesh with ambient occlusion, in chunk-local coordinates.
+- `stream.kes`: `stream_step`, loading the columns around the player on all cores and unloading the ones left behind; `VIEW`, `CAPACITY` and the batch sizes.
+- `player.kes`: `Player` and `Intent`, walking with gravity and collision or flying, and `spawn`.
+- `edit.kes`: `apply_edit` (break or place through the eye ray), `edit_at` (an exact cell) and `dirty_for` (the chunks an edit changes).
+- `render.kes`: `Render`, the chunk meshes on the GPU: `mesh_step` drops meshes of reused slots and meshes dirty and queued chunks in one arena a frame; `draw_world` draws the ones the camera sees.
+- `hud.kes`: the crosshair, the target block's outline and the text lines.
+
+The entry programs:
+
+- `main.kes`: play, in a window (above).
 - `parity.kes` and `parity_*.kes`: the frozen voxel benchmark rebuilt on `Grid[T]` (a benchmark module, not a library), with its entry files; timed by `bench/engine/run_parity.ps1`, results in `bench/engine/results.md`.
-- `tests/`: test programs, one per library or engine part (`tests/grid.kes`, ...), plus the
-  runner's own self-tests (`tests/runner_*.kes`, with `tests/fixtures/`).
+
+`tests/` holds the test programs, one per library or engine part (`tests/grid.kes`, ...), plus
+the runner's own self-tests (`tests/runner_*.kes`, with `tests/fixtures/`).
 
 ## Running the tests
 
@@ -43,3 +86,8 @@ file says `// release` (the release run is compared with the same `// expect...`
 A program that doesn't compile exits non-zero before it runs; the runner compares that exit code
 and the messages with `// expect-exit:` and `// expect-stderr:`, so a test can expect a compile
 error.
+
+`main.kes` itself is run by the Rust test `main_smoke_runs_the_play_program_headless` (selected
+with `KESTREL_TEST_ONLY=main_smoke`): 120 frames in a quiet headless window, with and without
+`--release`, which must exit 0 and print a stats line with columns and chunks loaded. Every
+window the tests open is headless; none appears.

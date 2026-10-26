@@ -1,0 +1,226 @@
+// Rendering (E15, E44): a reused slot never draws the old column's mesh and is meshed again
+// for the new one; an all-air chunk stores `none`; stale, unmeshable and out-of-view refs
+// popped from the queue; chunks an edit dirtied are meshed in the same frame, once; and the
+// frustum decides what is drawn.
+//
+// `make_mesh` and the clock need an open window: a quiet headless one (nothing appears).
+use window
+use { World, ChunkRef, new_world, load_now, CHUNK_NONE, CHUNK_QUEUED, CHUNK_MESHED from world }
+use { Render, new_render, mesh_step, draw_world, has_mesh, meshed_chunks from render }
+use { edit_at from edit }
+use { Camera from draw3d }
+use { ColumnState, column_key from column }
+use { AIR, STONE, LAYERS from blocks }
+
+// The player's position for `mesh_step`: column (0, 0), seeing 8 columns.
+let HERE = vec3(16, 80, 16)
+let VIEW = 8
+
+// Loads the 3 x 3 columns around (cx, cz).
+around(var w: World, cx: int, cz: int) {
+    for dz from -1 to 2 {
+        for dx from -1 to 2 {
+            load_now(var w, cx + dx, cz + dz)
+        }
+    }
+}
+
+// Queues every chunk of column (cx, cz), as streaming does.
+queue(var w: World, cx: int, cz: int) {
+    let slot = w.slot_at(cx, cz)
+    for layer from 0 to LAYERS {
+        if w.queue.push(ChunkRef(column: w.columns.handle(slot), layer: layer)) {
+            w.chunk_state[slot * LAYERS + layer] = CHUNK_QUEUED
+        }
+    }
+}
+
+// Unloads column (cx, cz), as streaming does: chunk states cleared, key removed, slot freed.
+unload(var w: World, cx: int, cz: int) {
+    let slot = w.slot_at(cx, cz)
+    for layer from 0 to LAYERS {
+        w.chunk_state[slot * LAYERS + layer] = CHUNK_NONE
+    }
+    w.index.remove(column_key(cx, cz))
+    w.columns.items[slot].state = ColumnState.Free
+    w.columns.release(w.columns.handle(slot))
+}
+
+// Whether every chunk of the column in `slot` is in state `state`.
+pure all_in(w: World, slot: int, state: u8) -> bool {
+    for layer from 0 to LAYERS {
+        if w.chunk_state[slot * LAYERS + layer] != state {
+            return false
+        }
+    }
+    true
+}
+
+// Whether every chunk of the column in `slot` has no mesh and is marked as having none.
+pure none_built(r: Render, slot: int) -> bool {
+    for layer from 0 to LAYERS {
+        let i = slot * LAYERS + layer
+        if has_mesh(r, i) or r.gens[i] != -1 or r.faces[i] != 0 {
+            return false
+        }
+    }
+    true
+}
+
+// A camera above column (0, 0), looking down at it from the south.
+pure looking() -> Camera {
+    Camera(pos: vec3(16, 150, -60), target: vec3(16, 40, 16))
+}
+
+pure away() -> Camera {
+    Camera(pos: vec3(16, 150, -60), target: vec3(16, 150, -200))
+}
+
+main() {
+    window.open(64, 64, "render")
+    let none_dirty: list[ChunkRef] = []
+
+    // A chunk meshed, then its column unloaded and the slot reused for column (5, 5).
+    var w = new_world(1337, 20)
+    var r = new_render(20)
+    around(var w, 0, 0)
+    queue(var w, 0, 0)
+    let first = mesh_step(var r, var w, none_dirty, 16, HERE, VIEW)
+    let slot = w.slot_at(0, 0)
+    let old_gen = w.columns.gens[slot]
+    let built = all_in(w, slot, CHUNK_MESHED) and r.gens[slot * LAYERS] == old_gen and r.total_faces > 0
+    let drawn = draw_world(r, w, looking(), 1.0)
+    print("meshed", first.meshed, built, drawn > 0, draw_world(r, w, away(), 1.0), meshed_chunks(r))
+    // (5, 5) is loaded first so it takes the freed slot (the pool hands out the last freed).
+    unload(var w, 0, 0)
+    load_now(var w, 5, 5)
+    around(var w, 5, 5)
+    let reused = w.slot_at(5, 5) == slot
+    // The old mesh is never drawn, even before the next mesh step, and that step drops it.
+    let before = draw_world(r, w, looking(), 1.0)
+    let none_step = mesh_step(var r, var w, none_dirty, 16, vec3(176, 80, 176), VIEW)
+    print("dropped", reused, before, none_step.meshed, none_built(r, slot), r.total_faces, meshed_chunks(r))
+    queue(var w, 5, 5)
+    let again = mesh_step(var r, var w, none_dirty, 16, vec3(176, 80, 176), VIEW)
+    print("regen", again.meshed, w.columns.gens[slot] != old_gen, r.gens[slot * LAYERS] == w.columns.gens[slot],
+        all_in(w, slot, CHUNK_MESHED), r.total_faces > 0)
+
+    // An all-air chunk stores none: column (0, 0)'s top chunk emptied by hand.
+    var we = new_world(1337, 9)
+    var re = new_render(9)
+    around(var we, 0, 0)
+    let s0 = we.slot_at(0, 0)
+    for i from 96 * 32 * 32 to 128 * 32 * 32 {
+        we.columns.items[s0].blocks.items[i] = AIR
+    }
+    queue(var we, 0, 0)
+    mesh_step(var re, var we, none_dirty, 16, HERE, VIEW)
+    let top = s0 * LAYERS + 3
+    print("empty", if has_mesh(re, top) { "mesh" } else { "none" }, re.gens[top] == we.columns.gens[s0],
+        re.faces[top], we.chunk_state[top] == CHUNK_MESHED, has_mesh(re, s0 * LAYERS))
+
+    // A stale ref: queued, then its column unloaded and the slot reused. The pop skips it and
+    // leaves the new column's chunk alone.
+    var ws = new_world(1337, 20)
+    var rs = new_render(20)
+    around(var ws, 0, 0)
+    queue(var ws, 0, 0)
+    let stale_slot = ws.slot_at(0, 0)
+    unload(var ws, 0, 0)
+    load_now(var ws, 0, 0)
+    let skipped = mesh_step(var rs, var ws, none_dirty, 16, HERE, VIEW)
+    print("stale skipped", ws.slot_at(0, 0) == stale_slot, skipped.meshed == 0, all_in(ws, stale_slot, CHUNK_NONE),
+        none_built(rs, stale_slot), ws.queue.len())
+    // The same with the new column queued behind the stale refs: they are skipped and the new
+    // refs mesh the chunks for the new column's generation.
+    var wq = new_world(1337, 20)
+    var rq = new_render(20)
+    around(var wq, 0, 0)
+    queue(var wq, 0, 0)
+    unload(var wq, 0, 0)
+    load_now(var wq, 0, 0)
+    queue(var wq, 0, 0)
+    let fresh = mesh_step(var rq, var wq, none_dirty, 16, HERE, VIEW)
+    let sq = wq.slot_at(0, 0)
+    print("stale then fresh", fresh.meshed, rq.gens[sq * LAYERS] == wq.columns.gens[sq], all_in(wq, sq, CHUNK_MESHED))
+
+    // A queued ref whose neighbour unloaded goes back to none, so a later check queues it.
+    var wn = new_world(1337, 20)
+    var rn = new_render(20)
+    around(var wn, 0, 0)
+    queue(var wn, 0, 0)
+    unload(var wn, 1, 0)
+    let reset = mesh_step(var rn, var wn, none_dirty, 16, HERE, VIEW)
+    let sn = wn.slot_at(0, 0)
+    print("reset", reset.meshed == 0 and all_in(wn, sn, CHUNK_NONE) and none_built(rn, sn))
+
+    // A queued ref whose column is now beyond view of the player goes back to none too.
+    var wv = new_world(1337, 20)
+    var rv = new_render(20)
+    around(var wv, 0, 0)
+    queue(var wv, 0, 0)
+    let gone = mesh_step(var rv, var wv, none_dirty, 16, vec3(16 + 32 * 9, 80, 16), VIEW)
+    print("beyond view", gone.meshed, all_in(wv, wv.slot_at(0, 0), CHUNK_NONE))
+
+    // The batch: a step meshes at most `batch` chunks; the rest wait in the queue.
+    var wb = new_world(1337, 9)
+    var rb = new_render(9)
+    around(var wb, 0, 0)
+    queue(var wb, 0, 0)
+    let one = mesh_step(var rb, var wb, none_dirty, 3, HERE, VIEW)
+    let left = wb.queue.len()
+    let two = mesh_step(var rb, var wb, none_dirty, 3, HERE, VIEW)
+    print("batch", one.meshed, left, two.meshed, wb.queue.len())
+
+    // Dirty chunks are meshed in the same frame, once, and a queued one isn't meshed again
+    // when its ref is popped: break a block on chunk (0, 1, 0)'s bottom face, so chunks
+    // (0, 0, 0) and (0, 1, 0) are dirty; (0, 1, 0) is also still queued.
+    var wd = new_world(1337, 20)
+    var rd = new_render(20)
+    around(var wd, 0, 0)
+    queue(var wd, 0, 0)
+    mesh_step(var rd, var wd, none_dirty, 1, HERE, VIEW)
+    let sd = wd.slot_at(0, 0)
+    let faces0 = rd.faces[sd * LAYERS]
+    wd.set_block(16, 31, 16, STONE)
+    wd.set_block(16, 32, 16, STONE)
+    var dirty = edit_at(var wd, ivec3(16, 32, 16), AIR)
+    for d in edit_at(var wd, ivec3(16, 32, 16), AIR) {
+        dirty.add(d)
+    }
+    let edited = mesh_step(var rd, var wd, dirty, 16, HERE, VIEW)
+    print("dirty", dirty.len, edited.meshed, rd.faces[sd * LAYERS] != faces0, wd.chunk_state[sd * LAYERS + 1] == CHUNK_MESHED,
+        wd.queue.len(), rd.gens[sd * LAYERS + 1] == wd.columns.gens[sd])
+    var summed = 0
+    for n in rd.faces {
+        summed += n
+    }
+    print("total", rd.total_faces == summed, summed > 0)
+
+    // A dirty ref whose neighbour has unloaded since goes back to none and isn't meshed.
+    unload(var wd, 1, 0)
+    let lonely = mesh_step(var rd, var wd, dirty, 16, HERE, VIEW)
+    print("dirty unmeshable", lonely.meshed, wd.chunk_state[sd * LAYERS] == CHUNK_NONE, wd.chunk_state[sd * LAYERS + 1] == CHUNK_NONE)
+    // A dirty ref whose column has unloaded since (its slot now another column's) is dropped.
+    load_now(var wd, 1, 0)
+    unload(var wd, 0, 0)
+    load_now(var wd, 0, 0)
+    let dead = mesh_step(var rd, var wd, dirty, 16, HERE, VIEW)
+    print("dirty stale", wd.slot_at(0, 0) == sd, dead.meshed, all_in(wd, sd, CHUNK_NONE))
+}
+// env: KESTREL_HEADLESS=10
+// env: KESTREL_HEADLESS_QUIET=1
+// release
+// expect: meshed 4 true true 0 4
+// expect: dropped true 0 0 true 0 0
+// expect: regen 4 true true true true
+// expect: empty none true 0 true true
+// expect: stale skipped true true true true 0
+// expect: stale then fresh 4 true true
+// expect: reset true
+// expect: beyond view 0 true
+// expect: batch 3 1 1 0
+// expect: dirty 4 4 true true 0 true
+// expect: total true true
+// expect: dirty unmeshable 0 true true
+// expect: dirty stale true 0 true

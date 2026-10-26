@@ -107,11 +107,40 @@ main() {
     run(var k, w2, ahead(true), 180)
     print("jump", j.pos.x > 20.5, j.pos.y, k.pos.x <= 19.71)
 
+    // A jump under a ceiling (blocks at y = 23, the head reaches 23 at feet 21.2): the head
+    // stops on it, which isn't standing, so holding jump doesn't jump again in the air.
+    var wc = flat(20)
+    for x from 0 to 32 {
+        wall(var wc, x, 23, 23)
+    }
+    var c = walker(vec3(16.5, 21, 16.5))
+    run(var c, wc, idle(), 2)
+    var touched = false
+    var stood_in_air = false
+    for f from 0 to 40 {
+        step_player(var c, wc, ahead(true), FRAME)
+        if near(c.pos.y + 1.8, 23.0) {
+            touched = true
+        }
+        if c.standing and c.pos.y > 21.01 {
+            stood_in_air = true
+        }
+    }
+    print("ceiling", touched, stood_in_air)
+
     // A 2-second frame moves the player 0.1 s at most: 0.43 blocks at 4.3 a second.
     var l = walker(vec3(10.5, 21, 16.5))
     run(var l, w, idle(), 2)
     step_player(var l, w, ahead(false), 2.0)
     print("long frame", near(l.pos.x - 10.5, 0.43), l.pos.y, l.standing)
+
+    // A frame of 0.1 s is six physics steps: a fall from rest ends where six frames of 1/60 s
+    // end, not where one 0.1 s step would (0.32 blocks down).
+    var once = walker(vec3(16.5, 40, 16.5))
+    step_player(var once, w, idle(), 0.1)
+    var six = walker(vec3(16.5, 40, 16.5))
+    run(var six, w, idle(), 6)
+    print("steps", once.pos.y == six.pos.y, near(40.0 - once.pos.y, 0.1867))
 
     // Walking toward an unloaded column (2, 0), which counts as solid, stops at its edge.
     var e = walker(vec3(50.5, 21, 16.5))
@@ -123,6 +152,23 @@ main() {
     var b = walker(vec3(16.5, 5, 16.5))
     run(var b, w0, idle(), 120)
     print("bottom", b.pos.y, b.standing)
+
+    // A fall from y = 125 to that floor: the speed stops growing at 60 blocks a second, and
+    // the player lands on the floor however fast it falls (no tunnelling).
+    var fall = walker(vec3(16.5, 125, 16.5))
+    var fastest = 0.0
+    for f from 0 to 240 {
+        step_player(var fall, w0, idle(), FRAME)
+        fastest = min(fastest, fall.vel.y)
+    }
+    print("fall cap", fastest, fall.pos.y, fall.standing)
+
+    // Walking while looking down goes as fast as looking ahead: the look is flattened.
+    var down = walker(vec3(10.5, 21, 16.5))
+    down.pitch = -60
+    run(var down, w, idle(), 2)
+    run(var down, w, ahead(false), 60)
+    print("look down", near(down.pos.x - 10.5, 4.3))
 
     // Jumping on the top row (blocks at y = 126, feet at 127): the head goes past y = 128,
     // where there is only air, and the player comes back down.
@@ -177,17 +223,29 @@ main() {
     // Standing after a second of frames: it is on the ground, not in it.
     run(var s, ws, idle(), 60)
     print("spawn stands", s.pos.y == float(top + 1), s.standing)
+
+    // Over a column that is air all the way down, the feet go on the bottom of the world.
+    var we = new_world(1337, 9)
+    load_now(var we, 0, 0)
+    clear(var we)
+    var e0 = new_player(vec3(16.5, 140, 16.5))
+    print("spawn empty", spawn(var e0, we), e0.pos.y)
 }
 // expect: land true 21 true 0 true
 // expect: wall true 21 true true
 // expect: jump true 22 true
+// expect: ceiling true false
 // expect: long frame true 21 true
+// expect: steps true true
 // expect: edge true 21
 // expect: bottom 1 true
+// expect: fall cap -60 1 true
+// expect: look down true
 // expect: top true 127 true
 // expect: fly true 21.5
 // expect: toggle true true true
 // expect: eye true true true true true
 // expect: spawn false true true true true true true
 // expect: spawn stands true true
+// expect: spawn empty true 0
 // release

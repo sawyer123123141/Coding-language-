@@ -1,0 +1,72 @@
+// The HUD: a crosshair in the middle of the window, the outline of the block the player is
+// looking at (its 12 edges, drawn in 3D so they sit on the block), the stats line at the top
+// and the controls at the bottom. In Godot terms it is a `CanvasLayer` over the 3D view plus
+// an `ImmediateMesh` of lines for the outline.
+use window
+use draw
+use draw3d
+use { Color from draw }
+use { Hit from ray }
+use { Player from player }
+
+let TEXT = Color(0.05, 0.05, 0.1)
+let CROSS = Color(0.1, 0.1, 0.1)
+let OUTLINE = Color(0.05, 0.05, 0.05)
+
+// Half a crosshair arm, and its width, in pixels.
+let ARM = 8.0
+let ARM_WIDTH = 2.0
+
+// How much bigger than the block its outline is, so the lines aren't hidden in its faces.
+let GROW = 0.005
+
+// Rounds to two decimals for printing.
+pub pure two(x: float) -> float {
+    round(x * 100) / 100
+}
+
+// The 12 edges of block `cell`. Needs the 3D camera set (`render.draw_world` sets it).
+pub draw_outline(cell: ivec3) {
+    let lo = vec3(float(cell.x) - GROW, float(cell.y) - GROW, float(cell.z) - GROW)
+    let s = 1.0 + 2.0 * GROW
+    let x = vec3(s, 0, 0)
+    let y = vec3(0, s, 0)
+    let z = vec3(0, 0, s)
+    // The four edges along x, then along y, then along z.
+    draw3d.line(lo, lo + x, OUTLINE)
+    draw3d.line(lo + y, lo + y + x, OUTLINE)
+    draw3d.line(lo + z, lo + z + x, OUTLINE)
+    draw3d.line(lo + y + z, lo + y + z + x, OUTLINE)
+    draw3d.line(lo, lo + y, OUTLINE)
+    draw3d.line(lo + x, lo + x + y, OUTLINE)
+    draw3d.line(lo + z, lo + z + y, OUTLINE)
+    draw3d.line(lo + x + z, lo + x + z + y, OUTLINE)
+    draw3d.line(lo, lo + z, OUTLINE)
+    draw3d.line(lo + x, lo + x + z, OUTLINE)
+    draw3d.line(lo + y, lo + y + z, OUTLINE)
+    draw3d.line(lo + x + y, lo + x + y + z, OUTLINE)
+}
+
+// The HUD for this frame: the outline of `target` if the player looks at a block, the
+// crosshair, the stats line (frames a second and work time as last measured, then the
+// world's counts, the mode and where the player is) and the controls.
+pub draw_hud(target: Hit?, p: Player, fps: float, work_ms: float, columns: int, chunks: int, faces: int, queue: int,
+    captured: bool) {
+    if_target(target)
+    let size = window.size()
+    let c = size / 2.0
+    draw.line(c - vec2(ARM, 0), c + vec2(ARM, 0), ARM_WIDTH, CROSS)
+    draw.line(c - vec2(0, ARM), c + vec2(0, ARM), ARM_WIDTH, CROSS)
+    let mode = if p.fly { "fly" } else { "walk" }
+    draw.text("{two(fps)} fps   {two(work_ms)} ms work   {columns} columns   {chunks} chunks   {faces} faces   queue {queue}   {mode}   at {int(floor(p.pos.x))} {int(floor(p.pos.y))} {int(floor(p.pos.z))}",
+        vec2(10, 10), 20, TEXT)
+    let look = if captured { "mouse looks (Tab frees it)" } else { "right drag looks (Tab captures the mouse)" }
+    draw.text("{look}   WASD move   Space jump or up   Shift down   F fly   left click break   right click place   wheel fly speed ({two(p.speed)})",
+        vec2(10, size.y - 28), 20, TEXT)
+}
+
+// The target's outline, when there is a target.
+if_target(target: Hit?) {
+    let h = target else { return }
+    draw_outline(h.cell)
+}

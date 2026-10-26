@@ -1,0 +1,135 @@
+// The voxel engine, played: an endless world streamed around the player, which walks or flies,
+// breaks and places blocks.
+//
+//   kestrel run --release voxel/main.kes
+//
+// Controls: WASD to move; Space jumps (walking) or goes up (flying) and Shift goes down; F
+// switches between walking and flying; the wheel changes the flying speed. Left click breaks
+// the block under the crosshair and right click places stone. The mouse starts free: drag
+// with the right button held to look (a right click that moves less than 4 pixels places a
+// block instead). Tab captures the mouse, as in a first-person game: moving it looks, and
+// Tab frees it again.
+//
+// Each frame, in order (as a Godot `_process` would): input to an `Intent`, spawning until the
+// first column is ready, the player, the edit, streaming, meshing and uploading, drawing, the
+// HUD. A stats line is printed once a second:
+//
+//   voxel fps <f> work_ms <f> columns <n> chunks <n> faces <n> queue <n> mode <walk|fly>
+//
+// `work_ms` is the frame's own work, timed from the start of the frame to just before
+// `window.frame()`, averaged over the second (the rest of the frame is waiting for the display).
+// Everything the game keeps lives in `main`'s variables: there are no globals.
+use window
+use draw
+use input
+use { Color from draw }
+use { Key from input }
+use { World, new_world from world }
+use { Stream, new_stream, stream_step, VIEW, CAPACITY, GEN_BATCH, MESH_BATCH from stream }
+use { Player, Intent, new_player, step_player, spawn, eye, look, view from player }
+use { apply_edit, REACH from edit }
+use { new_render, mesh_step, draw_world, meshed_chunks from render }
+use { draw_hud, two from hud }
+use { cast from ray }
+
+let SEED = 1337
+let SCREEN_WIDTH = 1280
+let SCREEN_HEIGHT = 720
+let SKY = Color(0.55, 0.75, 0.95)
+
+// Where the player starts: above the middle of column (0, 0), flying until it is ready.
+let START = vec3(16.5, 140, 16.5)
+
+// A right click that moves the mouse less than this many pixels (uncaptured) places a block;
+// more is a drag that looks.
+let CLICK = 4.0
+
+// Seconds between the printed stats lines.
+let REPORT = 1.0
+
+main() {
+    window.open(SCREEN_WIDTH, SCREEN_HEIGHT, "Kestrel voxels")
+    var w = new_world(SEED, CAPACITY)
+    var s = new_stream(VIEW, GEN_BATCH)
+    var r = new_render(CAPACITY)
+    var p = new_player(START)
+    var spawned = false
+
+    // The mouse: captured or not, where it was last frame, and the right button's press so far
+    // (where it went down and how far the mouse has gone from there).
+    var captured = false
+    var last_mouse = input.mouse()
+    var press_at = vec2(0, 0)
+    var drag = 0.0
+
+    // Sums over the current second, and the values the last stats line printed.
+    var frames = 0
+    var work_sum: i64 = 0
+    var interval_start = window.time()
+    var fps = 0.0
+    var work_ms = 0.0
+
+    while window.frame() {
+        let t0 = window.ticks_usec()
+
+        // Input to intent.
+        if input.pressed(Key.Tab) {
+            captured = not captured
+            input.capture(captured)
+            drag = CLICK
+        }
+        let mouse = input.mouse()
+        var turn = vec2(0, 0)
+        var place = false
+        if captured {
+            turn = input.mouse_delta()
+            place = input.pressed(Key.MouseRight)
+        } else {
+            if input.pressed(Key.MouseRight) {
+                press_at = mouse
+                drag = 0.0
+            }
+            if input.held(Key.MouseRight) {
+                turn = mouse - last_mouse
+                drag = max(drag, (mouse - press_at).length())
+            }
+            if input.released(Key.MouseRight) and drag < CLICK {
+                place = true
+            }
+        }
+        last_mouse = mouse
+        let i = Intent(move: vec3(input.axis(Key.A, Key.D), input.axis(Key.Shift, Key.Space), input.axis(Key.S, Key.W)),
+            turn: turn, jump: input.held(Key.Space), wheel: input.wheel(), break_block: input.pressed(Key.MouseLeft),
+            place_block: place, toggle_fly: input.pressed(Key.F))
+
+        // The world.
+        if not spawned {
+            spawned = spawn(var p, w)
+        }
+        step_player(var p, w, i, window.delta())
+        let dirty = apply_edit(var w, p, i)
+        stream_step(var s, var w, p.pos)
+        mesh_step(var r, var w, dirty, MESH_BATCH, p.pos, VIEW)
+
+        // Drawing.
+        draw.clear(SKY)
+        let size = window.size()
+        draw_world(r, w, view(p), size.x / size.y)
+        draw_hud(cast(w, eye(p), look(p), REACH), p, fps, work_ms, w.columns.in_use(), meshed_chunks(r), r.total_faces,
+            w.queue.len(), captured)
+
+        // Stats, once a second.
+        frames += 1
+        work_sum += window.ticks_usec() - t0
+        let elapsed = window.time() - interval_start
+        if elapsed >= REPORT {
+            fps = float(frames) / elapsed
+            work_ms = float(work_sum) / float(frames) / 1000.0
+            let mode = if p.fly { "fly" } else { "walk" }
+            print("voxel fps {two(fps)} work_ms {two(work_ms)} columns {w.columns.in_use()} chunks {meshed_chunks(r)} faces {r.total_faces} queue {w.queue.len()} mode {mode}")
+            frames = 0
+            work_sum = i64(0)
+            interval_start += elapsed
+        }
+    }
+}

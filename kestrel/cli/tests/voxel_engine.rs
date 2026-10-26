@@ -200,6 +200,75 @@ fn release_runs_match_their_expectations() {
     assert!(failures.is_empty(), "\n{}", failures.join("\n"));
 }
 
+/// How many headless frames the play program's smoke run lasts: 2 seconds of the headless
+/// clock. Kept low because `hermetic`'s `KESTREL_POISON=1` never reuses freed memory, so every
+/// frame's meshing arena stays allocated.
+const SMOKE_FRAMES: &str = "120";
+
+/// The play program, `main.kes`, run in a quiet headless window for `SMOKE_FRAMES` frames with
+/// `kestrel run` and `kestrel run --release`: it exits 0 (the headless window closes after its
+/// frames; `main.kes` has no exit of its own) and prints a stats line once a second, in the
+/// documented shape, with columns and chunks above 0. A test file can't run another program's
+/// `main`, so this one is written here. `KESTREL_TEST_ONLY` runs it when a prefix matches
+/// `main_smoke`.
+#[test]
+fn main_smoke_runs_the_play_program_headless() {
+    let only = std::env::var("KESTREL_TEST_ONLY").ok();
+    if only_prefixed(vec![PathBuf::from("main_smoke")], only.as_deref()).is_empty() {
+        return;
+    }
+    let mut failures = Vec::new();
+    for (pass, flags) in [("", &[][..]), ("_release", &["--release"][..])] {
+        let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("voxel_main_smoke{pass}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        for module in kes_files(&voxel_dir()) {
+            fs::copy(&module, dir.join(module.file_name().unwrap())).unwrap();
+        }
+        let main = dir.join("main.kes");
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_kestrel"));
+        hermetic(cmd.arg("run").args(flags).arg(&main))
+            .env("KESTREL_HEADLESS", SMOKE_FRAMES)
+            .env("KESTREL_HEADLESS_QUIET", "1")
+            .env("KESTREL_CHECK_PROOFS", "1");
+        let Some(out) = output_within(&mut cmd, RELEASE_TIMEOUT) else {
+            failures.push(format!("main.kes [{pass}]: still running after {} seconds, so it was stopped", RELEASE_TIMEOUT.as_secs()));
+            continue;
+        };
+        let stdout = String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n");
+        let stderr = String::from_utf8_lossy(&out.stderr).replace("\r\n", "\n");
+        let lines: Vec<&str> = stdout.lines().filter(|l| l.starts_with("voxel fps ")).collect();
+        let loaded = lines.iter().any(|l| stat(l, "columns").is_some_and(|n| n > 0.0) && stat(l, "chunks").is_some_and(|n| n > 0.0));
+        let shaped = lines.iter().all(|l| stats_shaped(l));
+        if !out.status.success() || lines.is_empty() || !loaded || !shaped {
+            failures.push(format!(
+                "main.kes [{pass}]: exit {:?}, {} stats lines, loaded {loaded}, shaped {shaped}\n--- stdout ---\n{stdout}--- stderr ---\n{stderr}",
+                out.status.code(),
+                lines.len()
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+}
+
+/// The number after `key` in a stats line, if it is there.
+fn stat(line: &str, key: &str) -> Option<f64> {
+    let words: Vec<&str> = line.split_whitespace().collect();
+    words.windows(2).find(|w| w[0] == key).and_then(|w| w[1].parse().ok())
+}
+
+/// Whether a stats line is `voxel fps <f> work_ms <f> columns <n> chunks <n> faces <n> queue <n>
+/// mode <walk|fly>`.
+fn stats_shaped(line: &str) -> bool {
+    let words: Vec<&str> = line.split_whitespace().collect();
+    let keys = ["fps", "work_ms", "columns", "chunks", "faces", "queue"];
+    words.len() == 15
+        && words[0] == "voxel"
+        && keys.iter().enumerate().all(|(k, key)| words[1 + 2 * k] == *key && words[2 + 2 * k].parse::<f64>().is_ok())
+        && words[13] == "mode"
+        && (words[14] == "walk" || words[14] == "fly")
+}
+
 #[test]
 fn the_engine_directives_are_read() {
     let src = "// copy: kestrel/bench/voxels3d/voxels3d.kes\n// replace: voxels3d.kes fn density => pub fn density\n\

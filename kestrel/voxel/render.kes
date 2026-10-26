@@ -1,0 +1,205 @@
+// Rendering (E15, E44): the chunk meshes on the GPU, kept up to date and drawn. In Godot
+// terms each chunk is a `MeshInstance3D` whose `ArrayMesh` is rebuilt when the chunk changes;
+// here they are one list of meshes, one per chunk place (slot * LAYERS + layer), and a frame
+// draws the ones the camera can see.
+//
+// A frame's meshing (`mesh_step`), in order:
+//   1. Drop every mesh whose column slot was freed or reused since the mesh was built (the
+//      slot's generation moved on), so a reused slot never shows the old column.
+//   2. Take the chunks to mesh: the ones the frame's edits dirtied, then up to `batch` from
+//      the world's queue. A popped chunk is skipped when its column has gone (its handle is
+//      dead) or it was meshed already this frame from an edit; it goes back to CHUNK_NONE when
+//      its column is now beyond `view` of the player or one of its 8 neighbours unloaded (a
+//      mesh reads one block into each), so a later check queues it again (E44).
+//   3. Mesh them on all cores (`par for`) and upload each with `make_mesh`, all inside one
+//      `arena { }`, so the mesh data lives for this frame only. A chunk with no faces stores
+//      `none`.
+//
+// A mesh is in chunk-local coordinates and drawn at its chunk's corner, so `float` positions
+// stay exact far from 0.
+use window
+use draw3d
+use { Mesh, MeshData, Camera from draw3d }
+use { WHITE from draw }
+use { World, ChunkRef, CHUNK_NONE, CHUNK_QUEUED, CHUNK_MESHED from world }
+use { mesh_chunk, faces from mesher }
+use { neighbours_ready, column_at from stream }
+use { frustum_of from frustum }
+use { SIZE, LAYERS from blocks }
+
+pub struct Render {
+    // One per chunk place; `none` when there is no mesh or the chunk has no faces.
+    meshes: list[Mesh?]
+    // The column generation chunk i's mesh was built for, or -1 when it has none.
+    gens: list[int]
+    faces: list[int]
+    total_faces: int
+}
+
+// What a frame's meshing did: chunks meshed, and the microseconds spent meshing and uploading
+// (from `window.ticks_usec`, so 0 in a headless window).
+pub struct MeshStats {
+    meshed: int
+    mesh_us: i64
+    upload_us: i64
+}
+
+// One chunk to mesh this frame, and its mesh data once built.
+struct Job {
+    slot: int
+    layer: int
+    gen: int
+    data: MeshData
+}
+
+// A renderer for a world of `capacity` column slots, with no meshes.
+pub new_render(capacity: int) -> Render {
+    var r = Render(meshes: [], gens: [], faces: [], total_faces: 0)
+    for i from 0 to capacity * LAYERS {
+        r.meshes.add(none)
+        r.gens.add(-1)
+        r.faces.add(0)
+    }
+    r
+}
+
+// Whether chunk place `i` has a mesh to draw.
+pub pure has_mesh(r: Render, i: int) -> bool {
+    present(r.meshes[i])
+}
+
+pure present(m: Mesh?) -> bool {
+    let x = m else { return false }
+    true
+}
+
+// How many chunks have a mesh built for their column (empty ones included).
+pub pure meshed_chunks(r: Render) -> int {
+    var n = 0
+    for g in r.gens {
+        if g >= 0 {
+            n += 1
+        }
+    }
+    n
+}
+
+// Whether chunk place `i` is in `jobs` already.
+pure queued_job(jobs: list[Job], i: int) -> bool {
+    for j in jobs {
+        if j.slot * LAYERS + j.layer == i {
+            return true
+        }
+    }
+    false
+}
+
+// One frame's meshing; see the top of the file. `dirty` is the chunks this frame's edits
+// changed, `at` the player's position and `view` how far chunks are meshed, in columns (as
+// for streaming).
+pub mesh_step(var r: Render, var w: World, dirty: list[ChunkRef], batch: int, at: vec3, view: int) -> MeshStats {
+    var st = MeshStats(meshed: 0, mesh_us: 0, upload_us: 0)
+    // 1. Meshes of freed or reused slots.
+    for i from 0 to r.gens.len {
+        let slot = i / LAYERS
+        if r.gens[i] >= 0 and (not w.columns.used[slot] or w.columns.gens[slot] != r.gens[i]) {
+            r.meshes[i] = none
+            r.gens[i] = -1
+            r.total_faces -= r.faces[i]
+            r.faces[i] = 0
+        }
+    }
+    if dirty.len == 0 and w.queue.len() == 0 {
+        return st
+    }
+    let p = column_at(at)
+    arena {
+        // 2. The chunks to mesh.
+        var jobs: list[Job] = []
+        for d in dirty {
+            if w.columns.alive(d.column) {
+                let i = d.column.slot * LAYERS + d.layer
+                let cx = w.columns.items[d.column.slot].cx
+                let cz = w.columns.items[d.column.slot].cz
+                if not neighbours_ready(w, cx, cz) {
+                    w.chunk_state[i] = CHUNK_NONE
+                } else if not queued_job(jobs, i) {
+                    jobs.add(Job(slot: d.column.slot, layer: d.layer, gen: d.column.gen, data: MeshData()))
+                    w.chunk_state[i] = CHUNK_MESHED
+                }
+            }
+        }
+        var popped = 0
+        while popped < batch {
+            let c = w.queue.pop() else { break }
+            popped += 1
+            if w.columns.alive(c.column) {
+                let i = c.column.slot * LAYERS + c.layer
+                if w.chunk_state[i] == CHUNK_QUEUED {
+                    let cx = w.columns.items[c.column.slot].cx
+                    let cz = w.columns.items[c.column.slot].cz
+                    let dx = cx - p.x
+                    let dz = cz - p.y
+                    if dx * dx + dz * dz > view * view or not neighbours_ready(w, cx, cz) {
+                        w.chunk_state[i] = CHUNK_NONE
+                    } else {
+                        jobs.add(Job(slot: c.column.slot, layer: c.layer, gen: c.column.gen, data: MeshData()))
+                        w.chunk_state[i] = CHUNK_MESHED
+                    }
+                }
+            }
+        }
+        // 3. Mesh on all cores, then upload.
+        if jobs.len > 0 {
+            let t0 = window.ticks_usec()
+            par for j in jobs {
+                j.data = mesh_chunk(w, j.slot, j.layer)
+            }
+            let t1 = window.ticks_usec()
+            for j in jobs {
+                let i = j.slot * LAYERS + j.layer
+                let n = faces(j.data)
+                if n > 0 {
+                    r.meshes[i] = draw3d.make_mesh(j.data)
+                } else {
+                    r.meshes[i] = none
+                }
+                r.gens[i] = j.gen
+                r.total_faces += n - r.faces[i]
+                r.faces[i] = n
+            }
+            st.meshed = jobs.len
+            st.mesh_us = t1 - t0
+            st.upload_us = window.ticks_usec() - t1
+        }
+    }
+    st
+}
+
+// Draws mesh `m` (if there is one) with its corner at `at`. Gives whether it drew.
+draw_one(m: Mesh?, at: vec3) -> bool {
+    let x = m else { return false }
+    draw3d.mesh(x, at, WHITE)
+    true
+}
+
+// Sets the camera and draws every chunk mesh the camera may see (`frustum.sees` on the
+// chunk's box). Only meshes built for the column now in their slot are drawn. Gives how many
+// were drawn.
+pub draw_world(r: Render, w: World, cam: Camera, aspect: float) -> int {
+    draw3d.camera(cam)
+    let f = frustum_of(cam, aspect)
+    let size = float(SIZE)
+    var drawn = 0
+    for i from 0 to r.meshes.len {
+        let slot = i / LAYERS
+        if r.gens[i] >= 0 and r.faces[i] > 0 and w.columns.used[slot] and w.columns.gens[slot] == r.gens[i] {
+            let corner = vec3(float(w.columns.items[slot].cx) * size, float(i % LAYERS) * size,
+                float(w.columns.items[slot].cz) * size)
+            if f.sees(corner, corner + vec3(size, size, size)) and draw_one(r.meshes[i], corner) {
+                drawn += 1
+            }
+        }
+    }
+    drawn
+}
