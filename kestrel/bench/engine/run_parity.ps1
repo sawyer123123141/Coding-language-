@@ -52,7 +52,7 @@ $modes = @(@("checks on", "on_"), @("--release", "rel_"))
 function Run([string]$exe, $threads) {
     $env:KESTREL_THREADS = $threads
     try {
-        $t = (Measure-Command { $script:last = (& $exe) -join "" }).TotalMilliseconds
+        $t = (Measure-Command { & $exe | Out-Null }).TotalMilliseconds
     } finally { $env:KESTREL_THREADS = $null }
     $t
 }
@@ -66,25 +66,22 @@ foreach ($m in $modes) {
     }
 }
 
-# The runs: every exe (the empties too) once per round.
+# The runs: every exe (the empties too) once per round, the order rotated by one place each round
+# so no exe always runs right after the same neighbour or at the same point of a busy spell.
+# (Added after the table in results.md was made; its runs went in a fixed order.)
+$jobs = @()
+foreach ($m in $modes) {
+    foreach ($p in $programs) { $jobs += ,@("$($m[1])$($p[0])", "$out\$($m[1])$($p[0]).exe", "1") }
+    foreach ($p in @("frozen_par", "parity_par")) { $jobs += ,@("all_$($m[1])$p", "$out\$($m[1])$p.exe", $null) }
+}
 $exes = @{}
-foreach ($m in $modes) { foreach ($p in $programs) { $exes["$($m[1])$($p[0])"] = @() } }
+foreach ($j in $jobs) { $exes[$j[0]] = @() }
 $load = @()
-for ($r = 1; $r -le $Rounds; $r++) {
+for ($r = 0; $r -lt $Rounds; $r++) {
     $load += (Get-Counter '\Processor(_Total)\% Processor Time' -SampleInterval 1 -MaxSamples 1).CounterSamples[0].CookedValue
-    foreach ($m in $modes) {
-        foreach ($p in $programs) {
-            $key = "$($m[1])$($p[0])"
-            $exes[$key] += Run "$out\$key.exe" "1"
-        }
-    }
-    # The all-threads runs of the two par programs, which the loop above ran with one thread.
-    foreach ($m in $modes) {
-        foreach ($p in @("frozen_par", "parity_par")) {
-            $key = "all_$($m[1])$p"
-            if (-not $exes.ContainsKey($key)) { $exes[$key] = @() }
-            $exes[$key] += Run "$out\$($m[1])$p.exe" $null
-        }
+    for ($n = 0; $n -lt $jobs.Count; $n++) {
+        $j = $jobs[($n + $r) % $jobs.Count]
+        $exes[$j[0]] += Run $j[1] $j[2]
     }
 }
 
@@ -107,5 +104,18 @@ foreach ($m in $modes) {
         $lo = ($xs | Measure-Object -Minimum).Minimum
         $hi = ($xs | Measure-Object -Maximum).Maximum
         "| {0} | {1} | {2:N0} ms | {3:N0} ms | {4:N0} ms | {5:N0} to {6:N0} ms |" -f $label, $m[0], $med, $startup, ($med - $startup), ($lo - $startup), ($hi - $startup)
+    }
+}
+
+# The checks report of the frozen program against the parity one: total checks, removed, left.
+# (The parity entry also compiles the library's other functions, so compare the totals with that in
+# mind; results.md compares the working functions.)
+""
+"kestrel check --report, frozen main.kes against parity_main.kes (reports in out/report_*.txt):"
+foreach ($mode in @(@("checks on", @()), @("--release", @("--release")))) {
+    foreach ($prog in @(@("frozen", "$frozen\main.kes"), @("parity", "$voxel\parity_main.kes"))) {
+        $file = Join-Path $out ("report_" + $prog[0] + $(if ($mode[1].Count) { "--release" }) + ".txt")
+        & $kestrel check $prog[1] --report @($mode[1]) *> $file
+        "{0,-7} {1,-10} {2}" -f $prog[0], $mode[0], ((Get-Content $file | Select-String '^total:').Line)
     }
 }
