@@ -1,0 +1,30 @@
+// Contract probe (E39): `@prove(no_checks)` on `copy_blocks`'s loop (the item-by-item copy of
+// a generated column, 131,072 items), with `@assume`s on the grids' lengths and on the slot at
+// the call, passes `check` and `check --release` in a program that calls `stream_step` once,
+// but fails both in one that calls it twice from the same function, as this one does (the
+// stream tests do too). The second inlined copy keeps a bounds check on
+// `w2.columns.items[slot]` charged to the loop, as if its `@assume` on the slot weren't there.
+// So the engine doesn't carry the contract. This test adds it to the scratch copy of
+// `stream.kes` only and expects the build to refuse it. When a compiler change makes it pass,
+// this test fails: move the contract into the engine.
+use window
+use { new_world from world }
+use { new_stream, stream_step from stream }
+
+main() {
+    window.open(64, 64, "contract")
+    var w = new_world(1337, 30)
+    var s = new_stream(1, 8)
+    let a = stream_step(var s, var w, vec3(16.0, 80.0, 16.0))
+    var w2 = new_world(1337, 30)
+    var s2 = new_stream(1, 8)
+    let b = stream_step(var s2, var w2, vec3(16.0, 80.0, 16.0))
+    print(a.started, b.started)
+}
+// env: KESTREL_HEADLESS=1
+// env: KESTREL_HEADLESS_QUIET=1
+// replace: stream.kes for i from 0 to dst.items.len { => @assume(src.items.len == dst.items.len); @prove(no_checks) for i from 0 to dst.items.len {
+// replace: stream.kes copy_blocks(var w.columns.items[slot].blocks => @assume(slot >= 0 and slot < w.columns.items.len); copy_blocks(var w.columns.items[slot].blocks
+// expect-exit: 1
+// expect-stderr: can't be proven `no_checks`
+// release

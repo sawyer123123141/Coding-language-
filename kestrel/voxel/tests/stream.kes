@@ -1,0 +1,367 @@
+// Streaming without anything drawn (E12, E13, E43, E44): a walk along +x across x = 0, a jump
+// of 2,000 blocks, more walking, a circle and a back-and-forth. Each step calls `stream_step`
+// until it starts nothing (the world has settled), checks the loaded set, then drains the
+// queue with a stand-in mesher that pops up to MESH_BATCH refs at a time and applies E44's
+// rule (drop a dead ref, reset a chunk whose neighbours aren't all Ready, else mark it meshed
+// and remember the column generation it was meshed for, as the renderer will).
+//
+// `stream_step` times generation with `window.ticks_usec`, which needs an open window, so the
+// test opens a quiet headless one (nothing appears; its clock is fake, so `gen_us` is 0 here).
+use window
+use { World, ChunkRef, new_world, load_now, CHUNK_NONE, CHUNK_QUEUED, CHUNK_MESHED from world }
+use { Stream, new_stream, stream_step, VIEW, CAPACITY, GEN_BATCH, MESH_BATCH from stream }
+use { Handle from pool }
+use { column_key, column_of from column }
+use { solid_at from gen }
+use { AIR, SIZE, LAYERS, HEIGHT from blocks }
+
+// What the checks found, over the whole run.
+struct Checks {
+    filled: bool
+    full: int
+    // Columns generated minus columns started, over every step: 0 unless a job runs twice.
+    extra: int
+    max_in_use: int
+    indexed: bool
+    duplicates: int
+    outside: int
+    far: bool
+    dropped: int
+    reset: int
+    meshed: int
+    // Per chunk (slot * LAYERS + layer): the column generation it was meshed for, or -1.
+    meshed_gen: list[int]
+}
+
+pure player_column(at: vec3) -> ivec2 {
+    ivec2(column_of(int(floor(at.x))), column_of(int(floor(at.z))))
+}
+
+pure ready(w: World, slot: int) -> bool {
+    match w.columns.items[slot].state {
+        Ready { true }
+        else { false }
+    }
+}
+
+// Whether every column within `view` of the player's column is Ready and each of its chunks
+// is queued, or meshed for the column now in its slot (not one that had the slot before).
+pure filled(w: World, meshed_gen: list[int], at: vec3, view: int) -> bool {
+    let p = player_column(at)
+    for dz from -view to view + 1 {
+        for dx from -view to view + 1 {
+            if dx * dx + dz * dz <= view * view {
+                let slot = w.slot_at(p.x + dx, p.y + dz)
+                if slot < 0 {
+                    return false
+                }
+                for layer from 0 to LAYERS {
+                    let i = slot * LAYERS + layer
+                    let st = w.chunk_state[i]
+                    let meshed = st == CHUNK_MESHED and meshed_gen[i] == w.columns.gens[slot]
+                    if st != CHUNK_QUEUED and not meshed {
+                        return false
+                    }
+                }
+            }
+        }
+    }
+    true
+}
+
+// Whether the stored blocks of every column within `view` match the terrain, on one line of
+// cells per column (a different (x, z) in each), so a column that got another's blocks, or
+// none, shows.
+pure blocks_right(w: World, at: vec3, view: int) -> bool {
+    let p = player_column(at)
+    for dz from -view to view + 1 {
+        for dx from -view to view + 1 {
+            let cx = p.x + dx
+            let cz = p.y + dz
+            let slot = w.slot_at(cx, cz)
+            if slot >= 0 {
+                let x = cx * SIZE + ((dx * 7 + dz * 3) & 31)
+                let z = cz * SIZE + ((dz * 5 + dx) & 31)
+                for y from 0 to HEIGHT {
+                    if (w.block(x, y, z) != AIR) != solid_at(x, y, z, w.seed) {
+                        return false
+                    }
+                }
+            }
+        }
+    }
+    true
+}
+
+// Whether some Ready column's centre is farther than `view + 2` columns from `at`.
+pure any_far(w: World, at: vec3, view: int) -> bool {
+    let limit = float(view + 2)
+    for slot from 0 to w.columns.items.len {
+        if w.columns.used[slot] and ready(w, slot) {
+            let dx = float(w.columns.items[slot].cx) + 0.5 - at.x / float(SIZE)
+            let dz = float(w.columns.items[slot].cz) + 0.5 - at.z / float(SIZE)
+            if dx * dx + dz * dz > limit * limit {
+                return true
+            }
+        }
+    }
+    false
+}
+
+// Whether the 9 columns around and including (cx, cz) are Ready (written here, not taken
+// from `stream.kes`, so the stand-in mesher doesn't trust the code it tests).
+pure all_ready(w: World, cx: int, cz: int) -> bool {
+    for dz from -1 to 2 {
+        for dx from -1 to 2 {
+            if w.slot_at(cx + dx, cz + dz) < 0 {
+                return false
+            }
+        }
+    }
+    true
+}
+
+// The stand-in mesher's rule for one popped ref (E44). `p` is the player's column, `view`
+// how far chunks are queued: a live ref beyond it is counted.
+settle_ref(var w: World, r: ChunkRef, p: ivec2, view: int, var c: Checks) {
+    if not w.columns.alive(r.column) {
+        c.dropped += 1
+        return
+    }
+    let i = r.column.slot * LAYERS + r.layer
+    let cx = w.columns.items[r.column.slot].cx
+    let cz = w.columns.items[r.column.slot].cz
+    if (cx - p.x) * (cx - p.x) + (cz - p.y) * (cz - p.y) > view * view {
+        c.outside += 1
+    }
+    if all_ready(w, cx, cz) {
+        w.chunk_state[i] = CHUNK_MESHED
+        c.meshed_gen[i] = r.column.gen
+        c.meshed += 1
+    } else {
+        w.chunk_state[i] = CHUNK_NONE
+        c.reset += 1
+    }
+}
+
+pure ref_key(r: ChunkRef) -> i64 {
+    (i64(r.column.gen) << 32) | i64(r.column.slot * LAYERS + r.layer)
+}
+
+// Drains the queue MESH_BATCH refs at a time, then checks that no ref was in it twice.
+drain(var w: World, p: ivec2, view: int, var c: Checks) {
+    var all: list[ChunkRef] = []
+    while w.queue.len() > 0 {
+        var n = 0
+        while n < MESH_BATCH {
+            let r = w.queue.pop() else { break }
+            settle_ref(var w, r, p, view, var c)
+            all.add(r)
+            n += 1
+        }
+    }
+    all.sort_by((r) { ref_key(r) })
+    for i from 1 to all.len {
+        if ref_key(all[i - 1]) == ref_key(all[i]) {
+            c.duplicates += 1
+        }
+    }
+}
+
+// One settled step at `at`: stream until nothing starts, check, drain. Gives how many
+// columns were unloaded.
+step(var s: Stream, var w: World, at: vec3, var c: Checks) -> int {
+    var unloaded = 0
+    while true {
+        let st = stream_step(var s, var w, at)
+        unloaded += st.unloaded
+        c.full += st.out_of_slots + st.queue_full
+        c.extra += st.generated - st.started
+        if w.columns.in_use() > c.max_in_use {
+            c.max_in_use = w.columns.in_use()
+        }
+        if st.started == 0 {
+            break
+        }
+    }
+    if not filled(w, c.meshed_gen, at, s.view) {
+        c.filled = false
+    }
+    if any_far(w, at, s.view) {
+        c.far = true
+    }
+    if w.index.len != w.columns.in_use() {
+        c.indexed = false
+    }
+    drain(var w, player_column(at), s.view, var c)
+    unloaded
+}
+
+new_checks(capacity: int) -> Checks {
+    var c = Checks(filled: true, full: 0, extra: 0, max_in_use: 0, indexed: true, duplicates: 0, outside: 0, far: false,
+        dropped: 0, reset: 0, meshed: 0, meshed_gen: [])
+    for i from 0 to capacity * LAYERS {
+        c.meshed_gen.add(-1)
+    }
+    c
+}
+
+main() {
+    window.open(64, 64, "stream")
+    var w = new_world(1337, CAPACITY)
+    var s = new_stream(VIEW, GEN_BATCH)
+    var c = new_checks(CAPACITY)
+
+    // The first step starts the 8 nearest columns: the player's, its 4 sides, then 3 of the
+    // 4 corners in angle order ((-1, 1) is ninth). None has all 8 neighbours yet.
+    var at = vec3(-600.5, 80.0, -40.5)
+    let first = stream_step(var s, var w, at)
+    let p = player_column(at)
+    print("first", first.started, first.generated, first.queued, w.slot_at(p.x, p.y) >= 0,
+        w.slot_at(p.x + 1, p.y) >= 0 and w.slot_at(p.x - 1, p.y) >= 0 and w.slot_at(p.x, p.y + 1) >= 0 and w.slot_at(p.x, p.y - 1) >= 0,
+        w.slot_at(p.x - 1, p.y - 1) >= 0 and w.slot_at(p.x + 1, p.y - 1) >= 0 and w.slot_at(p.x + 1, p.y + 1) >= 0,
+        w.slot_at(p.x - 1, p.y + 1) < 0)
+
+    // The walk crosses x = 0, at negative z.
+    for i from 0 to 60 {
+        at.x += 20.0
+        step(var s, var w, at, var c)
+    }
+    print("blocks", blocks_right(w, at, VIEW))
+
+    // The jump: every loaded column is 62 columns away afterwards, so all unload and their
+    // slots go to the new place's columns. Keep the old handles to check they died.
+    let before = w.columns.in_use()
+    let p0 = player_column(at)
+    var old: list[Handle] = []
+    for slot from 0 to w.columns.items.len {
+        if w.columns.used[slot] {
+            old.add(w.columns.handle(slot))
+        }
+    }
+    at.z -= 2000.0
+    let gone = step(var s, var w, at, var c)
+    print("teleport", gone == before, w.slot_at(p0.x, p0.y) < 0, not w.index.has(column_key(p0.x, p0.y)),
+        filled(w, c.meshed_gen, at, VIEW), blocks_right(w, at, VIEW))
+
+    // A ref to a column whose slot was released and taken again is dead, and the stand-in
+    // mesher drops it rather than touching the new owner's chunk.
+    var alive = 0
+    var reused = 0
+    for h in old {
+        if w.columns.alive(h) {
+            alive += 1
+        }
+        if w.columns.used[h.slot] {
+            reused += 1
+        }
+    }
+    let dropped = c.dropped
+    let r = ChunkRef(column: old[0], layer: 2)
+    let state = w.chunk_state[old[0].slot * LAYERS + 2]
+    settle_ref(var w, r, player_column(at), VIEW, var c)
+    print("stale", alive == 0, reused > 0, c.dropped == dropped + 1, w.chunk_state[old[0].slot * LAYERS + 2] == state)
+
+    for i from 0 to 30 {
+        at.x += 20.0
+        step(var s, var w, at, var c)
+    }
+
+    // A circle of radius 200 blocks, starting where the walk ended.
+    let centre = vec3(at.x - 200.0, at.y, at.z)
+    for i from 1 to 121 {
+        let a = TAU * float(i) / 120.0
+        at = vec3(centre.x + 200.0 * cos(a), at.y, centre.z + 200.0 * sin(a))
+        step(var s, var w, at, var c)
+    }
+
+    // Back and forth across column borders: 24 blocks a step, turning every 5 steps.
+    var dir = 1.0
+    for i from 0 to 40 {
+        if i % 5 == 0 {
+            dir = -dir
+        }
+        at.x += 24.0 * dir
+        step(var s, var w, at, var c)
+    }
+
+    print("filled", c.filled, blocks_right(w, at, VIEW))
+    print("never full", c.full == 0)
+    print("generated", c.extra == 0)
+    print("in use", c.max_in_use <= CAPACITY, c.max_in_use > 0, c.indexed)
+    print("no duplicates", c.duplicates == 0, c.meshed > 0)
+    print("in view", c.outside == 0, c.reset == 0)
+    print("unloaded", not c.far)
+
+    // A full queue: the refused chunks stay CHUNK_NONE, are counted, and the next step at the
+    // same place queues them (the player hasn't changed column, so only the retry does it).
+    var w3 = new_world(1337, 30)
+    var s3 = new_stream(1, GEN_BATCH)
+    var c3 = new_checks(30)
+    let dead = ChunkRef(column: Handle(slot: -1, gen: -1), layer: 0)
+    while w3.queue.push(dead) {
+    }
+    let here = vec3(16.0, 80.0, 16.0)
+    var refused = 0
+    var started = 1
+    while started > 0 {
+        let st = stream_step(var s3, var w3, here)
+        refused += st.queue_full
+        started = st.started
+    }
+    drain(var w3, player_column(here), 1, var c3)
+    let none_yet = not filled(w3, c3.meshed_gen, here, 1)
+    let again = stream_step(var s3, var w3, here)
+    print("queue full", refused > 0, none_yet, again.queued == 20, again.queue_full, filled(w3, c3.meshed_gen, here, 1))
+
+    // A column beyond `view` isn't queued even when all 9 columns around it are Ready: with
+    // view 2, column (3, 0) is loaded (within view + 1) and its east neighbours are loaded by
+    // hand first; the player stands at the east edge of column 0 so they aren't unloaded.
+    var w4 = new_world(1337, 60)
+    var s4 = new_stream(2, GEN_BATCH)
+    var c4 = new_checks(60)
+    load_now(var w4, 4, -1)
+    load_now(var w4, 4, 0)
+    load_now(var w4, 4, 1)
+    step(var s4, var w4, vec3(31.9, 80.0, 16.0), var c4)
+    let beyond = w4.slot_at(3, 0)
+    var none_queued = true
+    for layer from 0 to LAYERS {
+        if w4.chunk_state[beyond * LAYERS + layer] != CHUNK_NONE {
+            none_queued = false
+        }
+    }
+    print("beyond view", all_ready(w4, 3, 0), none_queued, c4.filled, c4.outside == 0)
+
+    // E43: one column east, (3, 0) is within view with all 9 columns around it already Ready,
+    // so no column finishing next to it queues it; only the rescan on changing column does.
+    let gen_before = w4.columns.gens[beyond]
+    let moved = step(var s4, var w4, vec3(48.0, 80.0, 16.0), var c4)
+    print("rescan", moved, w4.slot_at(3, 0) == beyond, w4.columns.gens[beyond] == gen_before, c4.filled,
+        w4.chunk_state[beyond * LAYERS] == CHUNK_MESHED)
+
+    // A pool too small for the view: the step loads what fits, counts the failed take and
+    // says so, rather than stopping the program.
+    var small = new_world(1337, 4)
+    var s2 = new_stream(VIEW, GEN_BATCH)
+    let st = stream_step(var s2, var small, vec3(16.0, 80.0, 16.0))
+    print("pool full", st.started, st.out_of_slots, small.columns.in_use())
+}
+// env: KESTREL_HEADLESS=1
+// env: KESTREL_HEADLESS_QUIET=1
+// expect: first 8 8 0 true true true true
+// expect: blocks true
+// expect: teleport true true true true true
+// expect: stale true true true true
+// expect: filled true true
+// expect: never full true
+// expect: generated true
+// expect: in use true true true
+// expect: no duplicates true true
+// expect: in view true true
+// expect: unloaded true
+// expect: queue full true true true 0 true
+// expect: beyond view true true true true
+// expect: rescan 2 true true true true
+// expect: the column pool is full (4 slots); this is a bug in the stream's capacity
+// expect: pool full 4 1 4

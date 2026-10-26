@@ -1,0 +1,297 @@
+// Streaming: loading the columns around the player and unloading the ones left behind (E12),
+// once per frame. In GDScript terms it is the chunk loader a voxel game runs from
+// `_process`: a few columns per frame, nearest first, generated on worker threads.
+//
+// A step does five things, in this order:
+//   1. Unload every Ready column whose centre is farther than `view + 2` columns from the
+//      player: its chunk states go back to none, its key leaves the index, its slot is freed.
+//      (The renderer notices a freed or reused slot on its own and drops the old meshes.)
+//   2. Start up to `batch` jobs for the nearest missing columns: take a slot each, mark it
+//      Generating and index its key, so the next step doesn't start it again.
+//   3. Generate the jobs' columns on all cores, each into the job's own grid (E35), inside an
+//      `arena { }` (a `par for` outside one leaks its thread arenas, E31).
+//   4. Finish, outside the arena: copy each job's blocks into its slot's grid, mark it Ready.
+//   5. Queue the chunks that became meshable (E43): around each finished column, and every
+//      column within `view` whenever the player moved into another column (or the queue
+//      was full last step, so a refused chunk is retried).
+//
+// A chunk is meshable when its column is within `view` of the player's column and the 9
+// columns around and including it are Ready (its mesh reads one block into each neighbour).
+// So the columns loaded are those within `view + 1` and also every neighbour of a column
+// within `view`: `view + 1` alone misses 16 of them (such as (9, 1), beside (8, 0)), and the
+// chunks next to them would never be meshed. The farthest loaded column is then 9.93 columns
+// from the player (for `view` 8), inside the `view + 2` unload line, so nothing loaded is
+// unloaded on the next step; and every loaded column is within `view + 2` of the player, of
+// which there are at most `(2 (view + 2) + 1)^2` = CAPACITY (E13). That margin holds for a
+// `view` of 1 to 4, 6, 7, 8, 11 or 12, not for 5, 9 or 10: there the widest offsets reach past
+// the unload line from the far corner of the player's column, so a column could be loaded
+// and unloaded on alternate steps. Check it again before changing VIEW to one of those.
+//
+// Distances are in columns. "Within `view`" of the player's column compares the offset
+// (dx, dz) between the two columns: dx * dx + dz * dz <= view * view. Unloading measures
+// from the column's centre to the player's position, so walking back and forth across a
+// column border doesn't unload and reload the outer ring.
+//
+// Nothing here allocates once `new_stream` has returned, except map entries for new keys
+// (the index reuses removed entries' room, so it stops growing).
+use window
+use { World, ChunkRef, CHUNK_NONE, CHUNK_QUEUED from world }
+use { Grid, grid from grid }
+use { ColumnState, column_key, column_of from column }
+use { generate from gen }
+use { AIR, SIZE, LAYERS, HEIGHT from blocks }
+
+// How far the player sees, in columns: chunks within VIEW columns are meshed.
+pub let VIEW = 8
+// Column slots: every column within VIEW + 2 of any point (E13).
+pub let CAPACITY = (2 * (VIEW + 2) + 1) * (2 * (VIEW + 2) + 1)
+// Columns generated per step, and chunks meshed per frame (the renderer's batch).
+pub let GEN_BATCH = 8
+pub let MESH_BATCH = 16
+
+// A column place no column has: `column_of` of an `int` is at most 2^26.
+let NO_COLUMN = 2147483647
+
+// One column being generated: the slot it goes into, its place, and its own 32 x 128 x 32
+// grid, built once in `new_stream` and reused for every column the job generates.
+pub struct GenJob {
+    slot: int
+    cx: int
+    cz: int
+    active: bool
+    blocks: Grid[u8]
+}
+
+pub struct Stream {
+    view: int
+    // The column offsets to load around the player's column, nearest first.
+    offsets: list[ivec2]
+    jobs: list[GenJob]
+    // The player's column at the last step, for the rescan when it changes.
+    last_column: ivec2
+}
+
+// What a step did, for the HUD and the benchmark. `out_of_slots` and `queue_full` should
+// stay 0: the first means CAPACITY is too small (a bug), the second that the queue was full
+// (the chunk stays CHUNK_NONE and is queued again by a later check). `gen_us` is the time
+// generation took, from `window.ticks_usec` (0 when nothing was generated).
+pub struct StreamStats {
+    unloaded: int
+    started: int
+    generated: int
+    queued: int
+    out_of_slots: int
+    queue_full: int
+    gen_us: i64
+}
+
+// Whether a column at offset (dx, dz) from the player's column is loaded: within
+// `view + 1`, or beside a column within `view`.
+pure wanted(dx: int, dz: int, view: int) -> bool {
+    if dx * dx + dz * dz <= (view + 1) * (view + 1) {
+        return true
+    }
+    for nz from dz - 1 to dz + 2 {
+        for nx from dx - 1 to dx + 2 {
+            if nx * nx + nz * nz <= view * view {
+                return true
+            }
+        }
+    }
+    false
+}
+
+// A stream that sees `view` columns and generates up to `batch` columns a step. The offsets
+// are sorted by length, then by angle, so the order is the same on every run.
+pub new_stream(view: int, batch: int) -> Stream {
+    var s = Stream(view: view, offsets: [], jobs: [], last_column: ivec2(NO_COLUMN, NO_COLUMN))
+    let reach = view + 2
+    for dz from -reach to reach + 1 {
+        for dx from -reach to reach + 1 {
+            if wanted(dx, dz, view) {
+                s.offsets.add(ivec2(dx, dz))
+            }
+        }
+    }
+    // The angle is in 0 to TAU, under 8, so it only orders offsets of the same length.
+    s.offsets.sort_by((o) { float(o.x * o.x + o.y * o.y) * 8.0 + atan2(float(o.y), float(o.x)) + PI })
+    for i from 0 to batch {
+        s.jobs.add(GenJob(slot: -1, cx: 0, cz: 0, active: false, blocks: grid[u8](SIZE, HEIGHT, SIZE, AIR)))
+    }
+    s
+}
+
+// The column the position `at` is in.
+pub pure column_at(at: vec3) -> ivec2 {
+    ivec2(column_of(int(floor(at.x))), column_of(int(floor(at.z))))
+}
+
+// Whether the 9 columns around and including (cx, cz) are Ready, so its chunks can be
+// meshed. The renderer asks this of a popped ref too (E44).
+pub pure neighbours_ready(w: World, cx: int, cz: int) -> bool {
+    for dz from -1 to 2 {
+        for dx from -1 to 2 {
+            if w.slot_at(cx + dx, cz + dz) < 0 {
+                return false
+            }
+        }
+    }
+    true
+}
+
+// One step of streaming around the position `at` (see the top of the file). It needs an
+// open window (headless or hidden is fine), for the clock.
+pub stream_step(var s: Stream, var w: World, at: vec3) -> StreamStats {
+    var st = StreamStats(unloaded: 0, started: 0, generated: 0, queued: 0, out_of_slots: 0, queue_full: 0, gen_us: 0)
+    unload_far(var w, at, s.view, var st)
+    let p = column_at(at)
+    start_jobs(var s, var w, p, var st)
+    if st.started > 0 {
+        let seed = w.seed
+        let t0 = window.ticks_usec()
+        arena {
+            par for j in s.jobs {
+                if j.active {
+                    generate(var j.blocks, j.cx, j.cz, seed)
+                }
+            }
+        }
+        st.gen_us = window.ticks_usec() - t0
+        finish_jobs(var s, var w, p, var st)
+    }
+    if p != s.last_column {
+        for dz from -s.view to s.view + 1 {
+            for dx from -s.view to s.view + 1 {
+                queue_column(var w, p.x + dx, p.y + dz, p, s.view, var st)
+            }
+        }
+        s.last_column = p
+    }
+    // A chunk the full queue refused stays CHUNK_NONE; forgetting the player's column makes
+    // the next step rescan, so it is retried even if the player stands still.
+    if st.queue_full > 0 {
+        s.last_column = ivec2(NO_COLUMN, NO_COLUMN)
+    }
+    st
+}
+
+// Step 1: unloads the Ready columns whose centres are farther than `view + 2` from `at`.
+pure unload_far(var w: World, at: vec3, view: int, var st: StreamStats) {
+    let limit = float(view + 2)
+    let px = at.x / float(SIZE)
+    let pz = at.z / float(SIZE)
+    for slot from 0 to w.columns.items.len {
+        if w.columns.used[slot] and is_ready(w.columns.items[slot].state) {
+            let dx = float(w.columns.items[slot].cx) + 0.5 - px
+            let dz = float(w.columns.items[slot].cz) + 0.5 - pz
+            if dx * dx + dz * dz > limit * limit {
+                for layer from 0 to LAYERS {
+                    w.chunk_state[slot * LAYERS + layer] = CHUNK_NONE
+                }
+                w.index.remove(w.columns.items[slot].key)
+                w.columns.items[slot].state = ColumnState.Free
+                w.columns.release(w.columns.handle(slot))
+                st.unloaded += 1
+            }
+        }
+    }
+}
+
+pure is_ready(state: ColumnState) -> bool {
+    match state {
+        Ready { true }
+        else { false }
+    }
+}
+
+// Step 2: starts a job for each of the nearest missing columns, up to one per job.
+start_jobs(var s: Stream, var w: World, p: ivec2, var st: StreamStats) {
+    var n = 0
+    for i from 0 to s.offsets.len {
+        if n == s.jobs.len {
+            break
+        }
+        let cx = p.x + s.offsets[i].x
+        let cz = p.y + s.offsets[i].y
+        let key = column_key(cx, cz)
+        if w.index.has(key) {
+            continue
+        }
+        let h = w.columns.take() else {
+            st.out_of_slots += 1
+            print("the column pool is full ({w.columns.items.len} slots); this is a bug in the stream's capacity")
+            break
+        }
+        w.columns.items[h.slot].cx = cx
+        w.columns.items[h.slot].cz = cz
+        w.columns.items[h.slot].key = key
+        w.columns.items[h.slot].state = ColumnState.Generating
+        for layer from 0 to LAYERS {
+            w.chunk_state[h.slot * LAYERS + layer] = CHUNK_NONE
+        }
+        w.index[key] = h.slot
+        s.jobs[n].slot = h.slot
+        s.jobs[n].cx = cx
+        s.jobs[n].cz = cz
+        s.jobs[n].active = true
+        n += 1
+    }
+    st.started = n
+}
+
+// Steps 4 and 5 for the finished jobs: every finished column is made Ready first, then the
+// chunks around each are checked, so a batch of neighbours is checked once all are Ready.
+pure finish_jobs(var s: Stream, var w: World, p: ivec2, var st: StreamStats) {
+    for i from 0 to s.jobs.len {
+        if s.jobs[i].active {
+            let slot = s.jobs[i].slot
+            copy_blocks(var w.columns.items[slot].blocks, s.jobs[i].blocks)
+            w.columns.items[slot].state = ColumnState.Ready
+            st.generated += 1
+        }
+    }
+    for i from 0 to s.jobs.len {
+        if s.jobs[i].active {
+            for dz from -1 to 2 {
+                for dx from -1 to 2 {
+                    queue_column(var w, s.jobs[i].cx + dx, s.jobs[i].cz + dz, p, s.view, var st)
+                }
+            }
+            s.jobs[i].active = false
+        }
+    }
+}
+
+// Copies a job's blocks into a pooled column, item by item: assigning the whole grid would
+// allocate a new 128 KB list (E40).
+// It carries no contract: see `tests/contract_stream.kes`.
+pure copy_blocks(var dst: Grid[u8], src: Grid[u8]) {
+    for i from 0 to dst.items.len {
+        dst.items[i] = src.items[i]
+    }
+}
+
+// Step 5 for one column: queues each of its chunks that is meshable and not yet queued or
+// meshed. A full queue leaves the chunk CHUNK_NONE, counted, for a later check to retry.
+pure queue_column(var w: World, cx: int, cz: int, p: ivec2, view: int, var st: StreamStats) {
+    let dx = cx - p.x
+    let dz = cz - p.y
+    if dx * dx + dz * dz > view * view {
+        return
+    }
+    let slot = w.slot_at(cx, cz)
+    if slot < 0 or not neighbours_ready(w, cx, cz) {
+        return
+    }
+    for layer from 0 to LAYERS {
+        let i = slot * LAYERS + layer
+        if w.chunk_state[i] == CHUNK_NONE {
+            if w.queue.push(ChunkRef(column: w.columns.handle(slot), layer: layer)) {
+                w.chunk_state[i] = CHUNK_QUEUED
+                st.queued += 1
+            } else {
+                st.queue_full += 1
+            }
+        }
+    }
+}

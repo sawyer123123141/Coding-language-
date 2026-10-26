@@ -1,0 +1,114 @@
+// Flying faster than streaming keeps up with (E13, Review Focus 5): 400 blocks/s along +x
+// for 600 steps of 1/60 s (4,000 blocks), with one `stream_step` and one mesher batch
+// (MESH_BATCH refs, E44's rule) per step, as the frame loop will do. The loaded area lags
+// behind the player, but no `take` fails, the queue never overflows, nothing crashes, and
+// every loaded column stays within `view + 2`.
+//
+// `stream_step` times generation with `window.ticks_usec`, which needs an open window, so the
+// test opens a quiet headless one (nothing appears).
+use window
+use { World, new_world, CHUNK_NONE, CHUNK_MESHED from world }
+use { new_stream, stream_step, VIEW, CAPACITY, GEN_BATCH, MESH_BATCH from stream }
+use { column_of from column }
+use { SIZE, LAYERS from blocks }
+
+pure player_column(at: vec3) -> ivec2 {
+    ivec2(column_of(int(floor(at.x))), column_of(int(floor(at.z))))
+}
+
+pure ready(w: World, slot: int) -> bool {
+    match w.columns.items[slot].state {
+        Ready { true }
+        else { false }
+    }
+}
+
+// Whether every column within `view` of the player's column is Ready.
+pure caught_up(w: World, at: vec3, view: int) -> bool {
+    let p = player_column(at)
+    for dz from -view to view + 1 {
+        for dx from -view to view + 1 {
+            if dx * dx + dz * dz <= view * view and w.slot_at(p.x + dx, p.y + dz) < 0 {
+                return false
+            }
+        }
+    }
+    true
+}
+
+// Whether some Ready column's centre is farther than `view + 2` columns from `at`.
+pure any_far(w: World, at: vec3, view: int) -> bool {
+    let limit = float(view + 2)
+    for slot from 0 to w.columns.items.len {
+        if w.columns.used[slot] and ready(w, slot) {
+            let dx = float(w.columns.items[slot].cx) + 0.5 - at.x / float(SIZE)
+            let dz = float(w.columns.items[slot].cz) + 0.5 - at.z / float(SIZE)
+            if dx * dx + dz * dz > limit * limit {
+                return true
+            }
+        }
+    }
+    false
+}
+
+pure all_ready(w: World, cx: int, cz: int) -> bool {
+    for dz from -1 to 2 {
+        for dx from -1 to 2 {
+            if w.slot_at(cx + dx, cz + dz) < 0 {
+                return false
+            }
+        }
+    }
+    true
+}
+
+// One mesher batch: pops up to MESH_BATCH refs; a dead one is dropped, one whose neighbours
+// aren't all Ready goes back to CHUNK_NONE, the rest are meshed.
+mesh_batch(var w: World) {
+    for n from 0 to MESH_BATCH {
+        let r = w.queue.pop() else { return }
+        if w.columns.alive(r.column) {
+            let i = r.column.slot * LAYERS + r.layer
+            if all_ready(w, w.columns.items[r.column.slot].cx, w.columns.items[r.column.slot].cz) {
+                w.chunk_state[i] = CHUNK_MESHED
+            } else {
+                w.chunk_state[i] = CHUNK_NONE
+            }
+        }
+    }
+}
+
+main() {
+    window.open(64, 64, "stream_fast")
+    var w = new_world(1337, CAPACITY)
+    var s = new_stream(VIEW, GEN_BATCH)
+    var at = vec3(16.5, 80.0, 16.5)
+    var full = 0
+    var lagged = 0
+    var far = false
+    var over = false
+    for i from 0 to 600 {
+        at.x += 400.0 / 60.0
+        let st = stream_step(var s, var w, at)
+        full += st.out_of_slots + st.queue_full
+        if w.columns.in_use() > CAPACITY {
+            over = true
+        }
+        if any_far(w, at, VIEW) {
+            far = true
+        }
+        if not caught_up(w, at, VIEW) {
+            lagged += 1
+        }
+        mesh_batch(var w)
+    }
+    print("never full", full == 0)
+    print("no crash", true)
+    print("behind", lagged > 0, not over, not far)
+}
+// env: KESTREL_HEADLESS=1
+// env: KESTREL_HEADLESS_QUIET=1
+// expect: never full true
+// expect: no crash true
+// expect: behind true true true
+// release
