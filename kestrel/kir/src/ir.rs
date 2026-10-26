@@ -194,7 +194,9 @@ pub struct Module {
     pub files: Vec<String>,
     /// The method table of each (concrete type, interface) pair an interface value is made from.
     pub tables: Vec<MethodTable>,
-    /// Each call `inline_small` left in place and why, in the order it decided.
+    /// Each call `inline_small` left in place and why: function by function, each in the order
+    /// decided. A call left in a function that is inlined is listed again under each caller of the
+    /// copy, with the same reason.
     pub not_inlined: Vec<NotInlined>,
     /// Each `@assume` condition, by the id its `Stmt::Assume` gives it.
     pub assumptions: Vec<AssumeInfo>,
@@ -363,7 +365,10 @@ pub struct NotInlined {
     /// takes its first argument's line, or the line of the latest expression before it.
     pub line: u32,
     pub callee: FuncIdx,
-    /// Why, as a clause: "it calls itself", "it is 912 nodes; the limit is 256", "it has an early
-    /// `return`", "the inlining budget of `bench` ran out", "inlined calls nest more than 8 deep".
+    /// Why, as a clause: "it calls itself", "it is 912 nodes; the limit is 256", "it is 5,812 nodes
+    /// after its own inlining; the limit is 4,096", "it has an early `return`", "the inlining budget
+    /// of `bench` ran out", "it calls back into `walk`" (a call back into a cycle of calls, left in
+    /// the one-level copy of a function of the cycle; it names the function called). A native's call
+    /// isn't listed.
     pub reason: String,
 }

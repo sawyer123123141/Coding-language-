@@ -1,3 +1,5 @@
+mod range_common;
+
 use kestrel_kir::*;
 use kestrel_syntax::{parse, LineIndex};
 
@@ -118,4 +120,119 @@ main() {}
 ";
     let m = lower_inlined(src);
     assert_eq!(calls(&func(&m, "f").body), 2, "{:#?}", func(&m, "f").body);
+}
+
+/// The KIR nodes in `stmts`.
+fn nodes(stmts: &[Stmt]) -> usize {
+    let mut n = 0;
+    visit::walk(stmts, &mut |_| n += 1);
+    n
+}
+
+/// The calls in `stmts` to the function called `name`.
+fn calls_to(m: &Module, stmts: &[Stmt], name: &str) -> usize {
+    let target = FuncIdx(m.funcs.iter().position(|f| f.name == name).unwrap() as u32);
+    let mut n = 0;
+    visit::walk(stmts, &mut |node| match node {
+        visit::Node::Expr(Expr { kind: ExprKind::Call(c, _), .. }) | visit::Node::Stmt(Stmt::Call(c, _, _)) if *c == target => n += 1,
+        _ => {}
+    });
+    n
+}
+
+/// The reasons recorded for calls from `caller` to `callee`.
+fn reasons(m: &Module, caller: &str, callee: &str) -> Vec<String> {
+    let name = |i: FuncIdx| m.funcs[i.0 as usize].name.as_str();
+    m.not_inlined.iter().filter(|n| name(n.caller) == caller && name(n.callee) == callee).map(|n| n.reason.clone()).collect()
+}
+
+/// A number with a comma every three digits, as the inliner's reasons write sizes.
+fn commas(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// `mid`: a loop of 30 calls to `leaf` (a 40-term sum): small as written, over 4,096 nodes once
+/// its calls are inlined.
+fn leaf_and_mid() -> String {
+    let uses: Vec<String> = (0..30).map(|i| format!("leaf(i + {i})")).collect();
+    format!("{}pure mid(n: int) -> int {{\n var t = 0\n for i from 0 to n {{\n  t += {}\n }}\n t\n}}\n", sum_fn("leaf", 40), uses.join(" + "))
+}
+
+#[test]
+fn a_big_middle_function_stays_a_call_and_keeps_its_leaves_inlined() {
+    let src = format!("{}root(n: int) -> int {{ mid(n) + 1 }}\nmain() {{}}\n", leaf_and_mid());
+    let m = lower_inlined(&src);
+    let mid = func(&m, "mid");
+    assert_eq!(calls_to(&m, &mid.body, "leaf"), 0, "every leaf call is inlined into `mid`");
+    let post = nodes(&mid.body);
+    assert!(post > 4096, "`mid` is {post} nodes after its own inlining");
+    assert_eq!(calls_to(&m, &func(&m, "root").body, "mid"), 1);
+    let want = format!("it is {} nodes after its own inlining; the limit is 4,096", commas(post));
+    assert_eq!(reasons(&m, "root", "mid"), [want]);
+}
+
+#[test]
+fn mutual_recursion_inlines_one_level() {
+    let src = "a(n: int) -> int { if n <= 0 { 0 } else { b(n - 1) + 1 } }\nb(n: int) -> int { if n <= 0 { 1 } else { a(n - 1) * 2 } }\nmain() { print(a(5)) }\n";
+    let m = lower_inlined(src);
+    let a = func(&m, "a");
+    // `b`'s body is in `a` once (one copy of its parameter), and its call back into `a` stays.
+    assert_eq!(a.locals.iter().filter(|l| l.name == "b.n").count(), 1, "{:?}", a.locals);
+    assert_eq!((calls_to(&m, &a.body, "a"), calls_to(&m, &a.body, "b")), (1, 0), "{:#?}", a.body);
+    assert_eq!(reasons(&m, "a", "a"), ["it calls back into `a`"]);
+    // And the other way round in `b`.
+    assert_eq!(reasons(&m, "b", "b"), ["it calls back into `b`"]);
+    assert!(m.not_inlined.iter().all(|n| !n.reason.contains("nest more than")), "{:?}", m.not_inlined);
+}
+
+#[test]
+fn left_calls_are_reported_under_each_caller() {
+    // `mid` stays a call in `g` (too big after its own inlining); `g` is inlined into `f1` and
+    // `f2`, each of which then holds that call.
+    let src = format!("{}g(n: int) -> int {{ mid(n) * 2 }}\nf1(n: int) -> int {{ g(n) + 1 }}\nf2(n: int) -> int {{ g(n) - 1 }}\nmain() {{}}\n", leaf_and_mid());
+    let m = lower_inlined(&src);
+    let own = reasons(&m, "g", "mid");
+    let [why] = &own[..] else { panic!("{:?}", m.not_inlined) };
+    assert!(why.ends_with("nodes after its own inlining; the limit is 4,096"), "{why}");
+    assert_eq!(calls_to(&m, &func(&m, "f1").body, "g"), 0);
+    assert_eq!(reasons(&m, "f1", "mid"), own);
+    assert_eq!(reasons(&m, "f2", "mid"), own);
+}
+
+#[test]
+fn a_twice_inlined_local_keeps_its_name() {
+    use kestrel_kir::range::render::render;
+    let src = "inner(a: int) -> int {\n let n = a * 3\n n * 1000\n}\nouter(a: int) -> int {\n inner(a)\n}\npub top(a: int) -> int {\n outer(a)\n}";
+    let (m, r) = range_common::reported(src, kestrel_kir::range::Arith::Checked);
+    let top = func(&m, "top");
+    // One prefix: the function the local was written in.
+    assert!(top.locals.iter().any(|l| l.name == "inner.n"), "{:?}", top.locals);
+    let text = render(&r, &m, &|_| true);
+    assert!(text.contains("(in `inner`): overflow check: `n * 1000` may exceed `int`"), "{text}");
+    assert!(!text.contains("(...)"), "{text}");
+}
+
+#[test]
+fn a_fan_out_chain_stays_small() {
+    // Six functions, each summing 20 calls of the next.
+    let mut src = String::from("pure f5(x: int) -> int { x * 3 + 1 }\n");
+    for i in (0..5).rev() {
+        let uses: Vec<String> = (0..20).map(|k| format!("f{}(x + {k})", i + 1)).collect();
+        src.push_str(&format!("pure f{i}(x: int) -> int {{ {} }}\n", uses.join(" + ")));
+    }
+    src.push_str("main() {\n var s = 0\n for i from 0 to 10 {\n  s += f0(i)\n }\n print(s)\n}\n");
+    let start = std::time::Instant::now();
+    let m = lower_inlined(&src);
+    let took = start.elapsed();
+    let total: usize = m.funcs.iter().map(|f| nodes(&f.body)).sum();
+    assert!(total < 100_000, "{total} KIR nodes after inlining");
+    assert!(took < std::time::Duration::from_secs(10), "inlining took {took:?}");
 }

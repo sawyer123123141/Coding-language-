@@ -1,10 +1,17 @@
-pub f9(x: int) -> int { x ^ 9 }
-pub f8(x: int) -> int { f9(x ^ 8) }
-pub f7(x: int) -> int { f8(x ^ 7) }
-pub f6(x: int) -> int { f7(x ^ 6) }
-pub f5(x: int) -> int { f6(x ^ 5) }
-pub f4(x: int) -> int { f5(x ^ 4) }
-pub f3(x: int) -> int { f4(x ^ 3) }
+// `@prove(inline)` used to be able to fail only where a function is inlined: `f2` held in its own
+// body but not in its copy in `f0`, where the calls nested more than 8 deep. The inliner now works
+// callees first and copies each function as it is after its own inlining, so a copy leaves exactly
+// the calls the function's own body leaves, and the body is checked first: that failure can't
+// happen any more. This test checks the plain failure in the body itself (no second error for the
+// copies in `f1` and `f0`), with the reason a callee too big after its own inlining gives.
+pub pure leaf(x: int) -> int { x * 1 + x * 2 + x * 3 + x * 4 + x * 5 + x * 6 + x * 7 + x * 8 + x * 9 + x * 10 + x * 11 + x * 12 + x * 13 + x * 14 + x * 15 + x * 16 + x * 17 + x * 18 + x * 19 + x * 20 + x * 21 + x * 22 + x * 23 + x * 24 + x * 25 + x * 26 + x * 27 + x * 28 + x * 29 + x * 30 + x * 31 + x * 32 + x * 33 + x * 34 + x * 35 + x * 36 + x * 37 + x * 38 + x * 39 + x * 40 }
+pub pure f3(n: int) -> int {
+    var t = 0
+    for i from 0 to n {
+        t += leaf(i + 0) + leaf(i + 1) + leaf(i + 2) + leaf(i + 3) + leaf(i + 4) + leaf(i + 5) + leaf(i + 6) + leaf(i + 7) + leaf(i + 8) + leaf(i + 9) + leaf(i + 10) + leaf(i + 11) + leaf(i + 12) + leaf(i + 13) + leaf(i + 14) + leaf(i + 15) + leaf(i + 16) + leaf(i + 17) + leaf(i + 18) + leaf(i + 19) + leaf(i + 20) + leaf(i + 21) + leaf(i + 22) + leaf(i + 23) + leaf(i + 24) + leaf(i + 25) + leaf(i + 26) + leaf(i + 27) + leaf(i + 28) + leaf(i + 29)
+    }
+    t
+}
 @prove(inline)
 pub f2(x: int) -> int { f3(x ^ 2) }
 pub f1(x: int) -> int { f2(x ^ 1) }
@@ -12,4 +19,4 @@ pub f0(x: int) -> int { f1(x) }
 
 main() {}
 
-// error 8: `f2` can't be proven `inline` where it is inlined into `f0` (line 10): it calls `f9` (line 2), which isn't inlined: inlined calls nest more than 8 deep
+// error 15: `f2` can't be proven `inline`: it calls `f3` (line 16), which isn't inlined: it is 6,193 nodes after its own inlining; the limit is 4,096

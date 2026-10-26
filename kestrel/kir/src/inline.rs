@@ -4,8 +4,14 @@
 //! A callee with a contract (see `ContractSite`) has its copy marked: its body and its value's
 //! temporary go in a `Stmt::Prove` for each of its sites; the arguments, the caller's code, stay
 //! outside.
+//!
+//! It works bottom-up (see `order`): each function is inlined into once, callees first, and a
+//! caller copies its callees as they are after their own inlining, without looking into the copy
+//! again. So hot code split into helpers is inlined as if it were written in one piece, and each
+//! function's cost to its callers is its size after inlining, worked out once.
 
 mod descend;
+mod order;
 
 use std::collections::HashMap;
 
@@ -13,22 +19,31 @@ use crate::ir::*;
 use crate::rename::{rename_expr, rename_stmts, Subst};
 use crate::visit::{walk, Node};
 
-/// Callees larger than this many KIR nodes stay calls. Big enough for a
+/// Callees larger than this many KIR nodes as written stay calls. Big enough for a
 /// noise octave (8 lattice lookups), whose constant arguments then fold.
 const MAX_NODES: usize = 256;
-/// How many KIR nodes inlining may add to one function; calls past that
-/// stay calls, so nested inlining can't blow up code size.
-const GROWTH_BUDGET: usize = 4096;
-/// How deep inlined bodies are themselves inlined (the budget also bounds
-/// mutual recursion; this keeps a chain like solids -> density -> octave ->
-/// lattice -> hash whole even when it is itself inlined).
-const MAX_DEPTH: u32 = 8;
+/// Callees larger than this many KIR nodes after their own inlining stay calls: a function that
+/// inlining made big is called, with what it inlined still inlined inside it.
+const POST_LIMIT: usize = 4096;
+/// How many KIR nodes the copies inlined directly into one function may add, each charged its
+/// callee's size after inlining; calls past that stay calls. Twice `POST_LIMIT`, so two copies of
+/// the biggest callee fit. With it, a function after inlining is about its own size plus this at
+/// most, so code size grows only linearly in the number of functions.
+const BUDGET: usize = 8192;
+
+/// What the callers of a function already inlined into see of it.
+struct Done {
+    /// Its size in KIR nodes after its own inlining.
+    size: usize,
+    /// How many locals it had as written: the ones after came from the bodies inlined into it.
+    own_locals: usize,
+    /// The calls left in it, in the order decided. A copy of it leaves them in its caller too.
+    left: Vec<NotInlined>,
+}
 
 /// Inlines small functions everywhere in `m`.
 pub fn inline_small(m: &mut Module) {
-    let originals = m.funcs.clone();
-    let sizes: Vec<Result<usize, Why>> = originals.iter().enumerate().map(|(i, f)| inlinable(FuncIdx(i as u32), f)).collect();
-    let mut log = Vec::new();
+    let sizes: Vec<Result<usize, Why>> = m.funcs.iter().enumerate().map(|(i, f)| inlinable(FuncIdx(i as u32), f)).collect();
     // Each contracted function's sites, in the order listed.
     let mut sites: HashMap<u32, Vec<u32>> = HashMap::new();
     for (id, site) in m.contracts.iter().enumerate() {
@@ -36,14 +51,35 @@ pub fn inline_small(m: &mut Module) {
             sites.entry(f.0).or_default().push(id as u32);
         }
     }
-    for (i, f) in m.funcs.iter_mut().enumerate() {
-        let locals = std::mem::take(&mut f.locals);
-        let caller = FuncIdx(i as u32);
-        let mut cx = Inliner { originals: &originals, sizes: &sizes, sites: &sites, locals, budget: GROWTH_BUDGET, caller, line: f.lines.0, log: &mut log };
-        cx.stmts(&mut f.body, 0);
-        f.locals = cx.locals;
+    let comps = order::callee_first(&m.funcs);
+    let mut comp = vec![0; m.funcs.len()];
+    for (c, funcs) in comps.iter().enumerate() {
+        for f in funcs {
+            comp[f.0 as usize] = c;
+        }
     }
-    m.not_inlined = log;
+    let mut done: Vec<Option<Done>> = m.funcs.iter().map(|_| None).collect();
+    for funcs in &comps {
+        // Functions that call each other inline each other one level, from the bodies as written.
+        let mates: Vec<(FuncIdx, Func)> = if funcs.len() > 1 { funcs.iter().map(|&f| (f, m.funcs[f.0 as usize].clone())).collect() } else { Vec::new() };
+        for &caller in funcs {
+            let i = caller.0 as usize;
+            let mut body = std::mem::take(&mut m.funcs[i].body);
+            let locals = std::mem::take(&mut m.funcs[i].locals);
+            let own_locals = locals.len();
+            let line = m.funcs[i].lines.0;
+            let mut cx = Inliner { funcs: &m.funcs, done: &done, comp: &comp, mates: &mates, sizes: &sizes, sites: &sites, locals, budget: BUDGET, caller, line, log: Vec::new(), in_mate: false };
+            cx.stmts(&mut body);
+            let Inliner { locals, log, .. } = cx;
+            let mut size = 0;
+            walk(&body, &mut |_| size += 1);
+            m.funcs[i].body = body;
+            m.funcs[i].locals = locals;
+            done[i] = Some(Done { size, own_locals, left: log });
+        }
+    }
+    // Function by function, each in the order decided.
+    m.not_inlined = done.into_iter().flat_map(|d| d.expect("every function is inlined into").left).collect();
 }
 
 /// Why a function can't be inlined.
@@ -109,8 +145,16 @@ fn inlinable(idx: FuncIdx, f: &Func) -> Result<usize, Why> {
 }
 
 struct Inliner<'a> {
-    originals: &'a [Func],
-    /// Each function's size when it can be inlined, or why not.
+    /// The module's functions: every one outside the caller's component is already inlined into
+    /// (the caller's own body and locals are taken out while it is).
+    funcs: &'a [Func],
+    /// What callers see of each function already inlined into.
+    done: &'a [Option<Done>],
+    /// Each function's component (see `order::callee_first`).
+    comp: &'a [usize],
+    /// The caller's component as written, when it has more than one function (mutual recursion).
+    mates: &'a [(FuncIdx, Func)],
+    /// Each function's size as written when it can be inlined, or why not.
     sizes: &'a [Result<usize, Why>],
     /// The contract sites of each function that has one (see `ProveTarget::Func`).
     sites: &'a HashMap<u32, Vec<u32>>,
@@ -124,22 +168,34 @@ struct Inliner<'a> {
     /// argument that has one (see `NotInlined::line`).
     line: u32,
     /// The calls left in place, in the order they were decided (see `NotInlined`).
-    log: &'a mut Vec<NotInlined>,
+    log: Vec<NotInlined>,
+    /// Inside the copy of a function from the caller's own component: calls back into the
+    /// component stay calls.
+    in_mate: bool,
 }
 
 impl Inliner<'_> {
-    /// True when a call to `fi` at `depth` (written on `line`) should be inlined; takes its size
-    /// from the budget. Otherwise notes the call and why in the log.
-    fn take(&mut self, fi: FuncIdx, depth: u32, line: u32) -> bool {
-        let reason = match self.sizes[fi.0 as usize] {
-            Ok(_) if depth >= MAX_DEPTH => format!("inlined calls nest more than {MAX_DEPTH} deep"),
-            Ok(size) if size <= self.budget => {
-                self.budget -= size;
-                return true;
-            }
-            Ok(_) => format!("the inlining budget of `{}` ran out", self.originals[self.caller.0 as usize].name),
+    /// True when a call to `fi` (written on `line`) should be inlined; takes its size from the
+    /// budget. Otherwise notes the call and why in the log.
+    fn take(&mut self, fi: FuncIdx, line: u32) -> bool {
+        let i = fi.0 as usize;
+        let mate = self.comp[i] == self.comp[self.caller.0 as usize];
+        let reason = match self.sizes[i] {
             Err(Why::Native) => return false,
             Err(why) => why.text(),
+            Ok(_) if mate && self.in_mate => format!("it calls back into `{}`", self.funcs[i].name),
+            Ok(written) => {
+                // A function of the caller's own component is copied one level, as written.
+                let size = if mate { written } else { self.done[i].as_ref().expect("callees are inlined into first").size };
+                if !mate && size > POST_LIMIT {
+                    format!("it is {} nodes after its own inlining; the limit is {}", commas(size), commas(POST_LIMIT))
+                } else if size <= self.budget {
+                    self.budget -= size;
+                    return true;
+                } else {
+                    format!("the inlining budget of `{}` ran out", self.funcs[self.caller.0 as usize].name)
+                }
+            }
         };
         let line = if line == 0 { self.line } else { line };
         self.log.push(NotInlined { caller: self.caller, line, callee: fi, reason });
@@ -151,14 +207,14 @@ impl Inliner<'_> {
         LocalIdx(self.locals.len() as u32 - 1)
     }
 
-    fn stmts(&mut self, stmts: &mut Vec<Stmt>, depth: u32) {
+    fn stmts(&mut self, stmts: &mut Vec<Stmt>) {
         let mut out = Vec::with_capacity(stmts.len());
         for mut s in std::mem::take(stmts) {
             if let Stmt::Call(fi, args, call) = &mut s {
                 let line = if *call != 0 { *call } else { crate::visit::args_line(args) };
-                if self.take(*fi, depth, line) {
+                if self.take(*fi, line) {
                     let (fi, args) = (*fi, std::mem::take(args));
-                    let (mut body, value) = self.expand(fi, args, depth, line);
+                    let (mut body, value) = self.expand(fi, args, line);
                     if let Some(v) = value {
                         // A discarded result still has to be computed (for its effects).
                         let tmp = self.temp("discard".into(), v.ty, local_kind(v.ty));
@@ -168,20 +224,31 @@ impl Inliner<'_> {
                     continue;
                 }
             }
-            self.stmt(&mut s, depth);
+            self.stmt(&mut s);
             out.push(s);
         }
         *stmts = out;
     }
 
-    /// The callee's body, renamed into the caller, and its returned value.
+    /// The callee's body, renamed into the caller, and its returned value: as they are after its
+    /// own inlining, or for a function of the caller's own component, as written with their calls
+    /// inlined here.
     /// Arguments are evaluated first, in order, except a by-value one the callee never mentions
     /// whose evaluation has no effect (see `no_effect`): a closure body that reads no capture
     /// doesn't load its environment word. `line` is the call's packed line.
-    fn expand(&mut self, fi: FuncIdx, args: Vec<Arg>, depth: u32, line: u32) -> (Vec<Stmt>, Option<Expr>) {
+    fn expand(&mut self, fi: FuncIdx, args: Vec<Arg>, line: u32) -> (Vec<Stmt>, Option<Expr>) {
         // As `take` notes a call with no line of its own.
         let at = if line == 0 { self.line } else { line };
-        let callee = &self.originals[fi.0 as usize];
+        let (funcs, mates) = (self.funcs, self.mates);
+        let done = if self.comp[fi.0 as usize] == self.comp[self.caller.0 as usize] { None } else { self.done[fi.0 as usize].as_ref() };
+        let callee = match done {
+            Some(_) => &funcs[fi.0 as usize],
+            None => &mates.iter().find(|(g, _)| *g == fi).expect("a function of the caller's component").1,
+        };
+        // A local the callee got from its own inlining keeps its name, which already names the
+        // function it was written in; the callee's own locals get the callee's name in front.
+        let own = done.map_or(callee.locals.len(), |d| d.own_locals);
+        let name = |i: usize, local: &Local| if i < own { format!("{}.{}", callee.name, local.name) } else { local.name.clone() };
         let mut mentioned = vec![false; callee.locals.len()];
         walk(&callee.body, &mut |n| {
             if let Node::Place(place, _) = n {
@@ -193,11 +260,11 @@ impl Inliner<'_> {
         for (&p, mut arg) in callee.params.iter().zip(args) {
             // The arguments belong to the caller: inline their calls too.
             match &mut arg {
-                Arg::Value(v) => self.expr(v, depth),
-                Arg::Ref(place) => self.place(place, depth),
+                Arg::Value(v) => self.expr(v),
+                Arg::Ref(place) => self.place(place),
             }
             let local = &callee.locals[p.0 as usize];
-            let name = format!("{}.{}", callee.name, local.name);
+            let name = name(p.0 as usize, local);
             subst[p.0 as usize] = Some(match (local.kind, arg) {
                 (LocalKind::RefParam, Arg::Ref(place)) => Subst::Place(self.stable(place, &mut pre)),
                 (LocalKind::RefParam, Arg::Value(Expr { kind: ExprKind::Load(place), .. })) => {
@@ -220,28 +287,38 @@ impl Inliner<'_> {
         }
         for (i, local) in callee.locals.iter().enumerate() {
             if subst[i].is_none() {
-                let name = format!("{}.{}", callee.name, local.name);
-                subst[i] = Some(Subst::Local(self.temp(name, local.ty, local.kind)));
+                subst[i] = Some(Subst::Local(self.temp(name(i, local), local.ty, local.kind)));
             }
         }
         let subst: Vec<Subst> = subst.into_iter().map(|s| s.expect("every local mapped")).collect();
         let mut body = callee.body.clone();
-        let value = match body.last() {
+        let mut value = match body.last() {
             Some(Stmt::Return(Some(_))) => match body.pop() {
                 Some(Stmt::Return(Some(v))) => Some(v),
                 _ => unreachable!("just checked"),
             },
             _ => None,
         };
-        let mut value = value;
         rename_stmts(&mut body, &subst);
         if let Some(v) = &mut value {
             rename_expr(v, &subst);
         }
-        // Inline calls the callee itself makes.
-        self.stmts(&mut body, depth + 1);
-        if let Some(v) = &mut value {
-            self.expr(v, depth + 1);
+        match done {
+            // Already inlined into, and not looked into again: the calls left in it are now the
+            // caller's too.
+            Some(d) => {
+                let caller = self.caller;
+                self.log.extend(d.left.iter().map(|n| NotInlined { caller, ..n.clone() }));
+            }
+            // As written: inline the calls it makes, except back into the component.
+            None => {
+                let was = std::mem::replace(&mut self.in_mate, true);
+                self.stmts(&mut body);
+                if let Some(v) = &mut value {
+                    self.expr(v);
+                }
+                self.in_mate = was;
+            }
         }
         // (A program without contracts has no sites: nothing to look up.)
         let sites = if self.sites.is_empty() { None } else { self.sites.get(&fi.0) };
@@ -297,6 +374,19 @@ fn no_effect(e: &Expr) -> bool {
         ExprKind::FnEnv(p) | ExprKind::Load(p) => p.path.is_empty(),
         _ => false,
     }
+}
+
+/// `n` with a comma every three digits (4,096).
+fn commas(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
 }
 
 fn local_kind(ty: KTy) -> LocalKind {

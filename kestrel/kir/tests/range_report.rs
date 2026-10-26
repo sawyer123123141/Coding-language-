@@ -31,9 +31,9 @@ fn a_map_is_an_allocation_too() {
 
 #[test]
 fn a_filter_that_isnt_inlined_still_says_what_it_builds() {
-    // Past the inlining budget of `many`, the calls of the generated loops stay calls.
+    // Past the 8,192-node inlining budget of `many`, the calls of the generated loops stay calls.
     let mut src = String::from("pub many(xs: list[int]) -> int {\n var t = 0\n");
-    for i in 0..150 {
+    for i in 0..300 {
         src.push_str(&format!(" t += xs.filter((n) {{ n % {} == 0 }}).len\n", i + 2));
     }
     src.push_str(" t\n}");
@@ -41,7 +41,7 @@ fn a_filter_that_isnt_inlined_still_says_what_it_builds() {
     assert!(m.not_inlined.iter().any(|n| m.funcs[n.callee.0 as usize].name.starts_with("__kestrel_list_fn_filter_")), "some loop stays a call");
     let f = func_report(&r, "many");
     let allocs = items_of(f, Allocation);
-    assert_eq!(allocs.len(), 150, "every filter, inlined or not");
+    assert_eq!(allocs.len(), 300, "every filter, inlined or not");
     assert!(allocs.iter().all(|(_, t)| t == "`filter` builds a new list"), "{allocs:?}");
     // The generated loop isn't a call the program wrote: no call items.
     assert!(items_of(f, Call).is_empty(), "{:?}", items_of(f, Call));
@@ -177,21 +177,27 @@ fn a_big_callee_says_why_it_isnt_inlined() {
 }
 
 #[test]
-fn the_budget_and_the_nesting_are_recorded() {
-    // About 140 nodes a call: the 4,096-node budget of `bench` runs out.
-    let calls: Vec<String> = (0..40).map(|i| format!("mid(x + {i})")).collect();
+fn the_budget_and_the_size_after_inlining_are_recorded() {
+    // About 140 nodes a call: 80 copies pass the 8,192-node budget of `bench`.
+    let calls: Vec<String> = (0..80).map(|i| format!("mid(x + {i})")).collect();
     let src = format!("{}pub bench(x: int) -> int {{\n {}\n}}", sum_fn("mid", 35), calls.join(" + "));
     let m = optimized(&src);
     let ran_out: Vec<_> = m.not_inlined.iter().filter(|n| n.reason == "the inlining budget of `bench` ran out").collect();
-    assert!(!ran_out.is_empty() && ran_out.iter().all(|n| m.funcs[n.caller.0 as usize].name == "bench"));
-    // A chain of 11 small functions: the inliner stops 8 deep.
-    let mut src = String::new();
-    for i in 0..10 {
-        src.push_str(&format!("pure f{i}(x: int) -> int {{ f{}(x) + 1 }}\n", i + 1));
-    }
-    src.push_str("pure f10(x: int) -> int { x }\npub top(x: int) -> int {\n f0(x)\n}");
-    let m = optimized(&src);
-    assert!(m.not_inlined.iter().any(|n| n.reason == "inlined calls nest more than 8 deep"), "{:?}", m.not_inlined);
+    assert!(!ran_out.is_empty() && ran_out.iter().all(|n| m.funcs[n.caller.0 as usize].name == "bench"), "{:?}", m.not_inlined);
+    // `loop30` is small as written, but 30 inlined copies of a 40-term sum make it too big to copy.
+    let uses: Vec<String> = (0..30).map(|i| format!("leaf(i + {i})")).collect();
+    let src = format!(
+        "{}pure loop30(n: int) -> int {{\n var t = 0\n for i from 0 to n {{\n  t += {}\n }}\n t\n}}\npub top(n: int) -> int {{\n loop30(n)\n}}",
+        sum_fn("leaf", 40),
+        uses.join(" + ")
+    );
+    let (m, r) = reported(&src, Checked);
+    let recorded: Vec<_> = m.not_inlined.iter().filter(|n| m.funcs[n.callee.0 as usize].name == "loop30").collect();
+    let [n] = &recorded[..] else { panic!("{:?}", m.not_inlined) };
+    assert!(n.reason.starts_with("it is ") && n.reason.ends_with(" nodes after its own inlining; the limit is 4,096"), "{}", n.reason);
+    let calls = items_of(func_report(&r, "top"), Call);
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert!(calls[0].1.starts_with(&format!("`loop30` isn't inlined: {}", n.reason)), "{calls:?}");
 }
 
 #[test]
