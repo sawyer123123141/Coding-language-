@@ -118,7 +118,7 @@ impl Cx<'_> {
             | ExprKind::NoneLit
             | ExprKind::FnRef(_)
             | ExprKind::MakeFn { env: EnvKind::None, .. }
-            | ExprKind::RandFloat => any,
+            | ExprKind::RandFloat { .. } => any,
         }
     }
 

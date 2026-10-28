@@ -265,8 +265,10 @@ impl Walk<'_> {
             | ExprKind::MapNew
             | ExprKind::NoneLit
             | ExprKind::FnRef(_) => {}
-            // (`randf_range` is lowered to a `randf` too.)
-            ExprKind::RandFloat => self.effect(line, Effect::SharedRandom, "calls `randf`".to_string()),
+            ExprKind::RandFloat { ranged } => {
+                let name = if *ranged { "randf_range" } else { "randf" };
+                self.effect(line, Effect::SharedRandom, format!("calls `{name}`"));
+            }
             ExprKind::MakeFn { code, env: EnvKind::None } => self.closure(e, *code),
             ExprKind::StaticArena => self.alloc(line, Some("makes the arena the constants live in".to_string()), "makes the arena the constants live in".to_string(), ""),
             ExprKind::NewArena => self.alloc(line, Some("`Arena()` makes a new arena".to_string()), "makes a new arena".to_string(), ""),

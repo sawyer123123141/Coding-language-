@@ -182,7 +182,7 @@ impl Inliner<'_> {
             | ExprKind::NoneLit
             | ExprKind::FnRef(_)
             | ExprKind::MakeFn { env: EnvKind::None, .. }
-            | ExprKind::RandFloat => {}
+            | ExprKind::RandFloat { .. } => {}
         }
     }
 }

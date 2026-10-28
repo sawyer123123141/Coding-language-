@@ -90,7 +90,7 @@ impl<'a> FnLowerer<'a> {
             Builtin::Ceil => MathOp::Ceil,
             Builtin::Round => MathOp::Round,
             Builtin::Lerp => return self.lerp(args, ty, line),
-            Builtin::Randf => return ExprKind::RandFloat,
+            Builtin::Randf => return ExprKind::RandFloat { ranged: false },
             Builtin::RandfRange => return self.randf_range(args, ty, line),
             Builtin::RandiRange => {
                 let [lo, hi] = values(args.iter().map(|a| self.expr(&a.value)).collect());
@@ -207,7 +207,7 @@ impl<'a> FnLowerer<'a> {
         let vals = vals.into_iter().map(|v| self.once(v, &mut pre)).collect();
         let [lo, hi] = values(vals);
         let width = binary(BinOp::Sub, &hi, &lo, ty, line);
-        let drawn = node(ExprKind::RandFloat, ty, line);
+        let drawn = node(ExprKind::RandFloat { ranged: true }, ty, line);
         let offset = binary(BinOp::Mul, &width, &drawn, ty, line);
         Self::with_pre(pre, ExprKind::Binary(BinOp::Add, Box::new(lo), Box::new(offset)), ty, line)
     }

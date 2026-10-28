@@ -125,6 +125,85 @@ pub hit(var f: Fighter, on_hit: (Fighter) -> int) {\n    f.hp = f.hp ^ on_hit(f)
 }
 
 #[test]
+fn the_mouse_window_and_method_help_lines_say_what_to_do() {
+    let src = "native mouse() -> vec2
+native clear()
+interface Plain {\n    score(self) -> int\n}
+@prove(deterministic)
+pub aim() -> vec2 { mouse() }
+@prove(deterministic)
+pub wipe() { clear() }
+@prove(deterministic)
+pub c(s: Plain) -> int { s.score() }";
+    let found: Vec<(String, Option<String>)> = errors_renamed(src, &[("mouse", "input.mouse"), ("clear", "draw.clear")]).into_iter().map(|e| (e.message, e.help)).collect();
+    let want = [
+        ("`aim` can't be proven `deterministic`: it calls `input.mouse` (line 7), which reads the mouse", "read input outside and pass it in an `Inputs` struct"),
+        (
+            "`wipe` can't be proven `deterministic`: it calls `draw.clear` (line 9), which talks to the window, which a deterministic function can't depend on",
+            "talk to the window outside and pass what the function needs in as parameters",
+        ),
+        (
+            "`c` can't be proven `deterministic`: it calls a method of the interface value `s` (line 11), which isn't `pure` and doesn't promise `deterministic`",
+            "add `@prove(deterministic)` to the interface method `Plain.score`; then every implementation must keep it",
+        ),
+    ];
+    let want: Vec<(String, Option<String>)> = want.iter().map(|(m, h)| (m.to_string(), Some(h.to_string()))).collect();
+    assert_eq!(found, want);
+}
+
+#[test]
+fn randf_range_is_named_as_written() {
+    let src = "@prove(deterministic)\npub roll() -> float { randf_range(1.0, 2.0) }\n@prove(deterministic)\npub plain() -> float { randf() }";
+    let found: Vec<String> = errors(src).into_iter().map(|e| e.message).collect();
+    let want = [
+        "`roll` can't be proven `deterministic`: it calls `randf_range` (line 2), which uses the program's shared random generator",
+        "`plain` can't be proven `deterministic`: it calls `randf` (line 4), which uses the program's shared random generator",
+    ];
+    assert_eq!(found, want);
+}
+
+#[test]
+fn randf_two_calls_deep_is_followed() {
+    let src = "pub inner(n: int) -> float {\n    if n < 0 {\n        return 0.0\n    }\n    randf()\n}
+pub outer(n: int) -> float {\n    if n < 0 {\n        return 0.0\n    }\n    inner(n)\n}
+@prove(deterministic)
+pub step(n: int) -> float { outer(n) }";
+    let found: Vec<String> = errors(src).into_iter().map(|e| e.message).collect();
+    let want = "`step` can't be proven `deterministic`: it calls `outer` (line 14), which calls `inner` (line 11), which calls `randf` (line 5), which uses the program's shared random generator";
+    assert_eq!(found, [want]);
+}
+
+#[test]
+fn a_helper_that_only_prints_keeps_it() {
+    // `say` isn't `pure` (it prints) and stays a call (an early `return`).
+    let src = "pub say(n: int) {\n    if n < 0 {\n        return\n    }\n    print(\"n is {n}\")\n}
+@prove(deterministic)
+pub step(n: int) -> int {\n    say(n)\n    n ^ 1\n}";
+    let found: Vec<String> = errors(src).into_iter().map(|e| e.message).collect();
+    assert_eq!(found, Vec::<String>::new());
+}
+
+#[test]
+fn a_cut_walk_in_its_own_code_breaks_it() {
+    // Only the walk is cut: the analysis found nothing wrong, so `deterministic` alone fails.
+    let big = |f: Box<dyn FnOnce() + Send>| std::thread::Builder::new().stack_size(256 << 20).spawn(f).unwrap().join().unwrap();
+    big(Box::new(|| {
+        let mut m = optimized("@prove(deterministic)\npub f() {}");
+        let truth = Expr { kind: ExprKind::Bool(true), ty: KTy::Bool, line: 0 };
+        let mut body = Vec::new();
+        for _ in 0..5000 {
+            body = vec![Stmt::If { cond: truth.clone(), then_body: body, else_body: Vec::new() }];
+        }
+        let f = idx(&m, "f");
+        m.funcs[f].body = body;
+        let a = kestrel_kir::range::Analysis { funcs: vec![kestrel_kir::range::FuncChecks::default(); m.funcs.len()], assumptions: Vec::new() };
+        let found: Vec<String> = check(&m, &a).into_iter().map(|e| e.message).collect();
+        let want = "`f` can't be proven `deterministic`: range analysis stopped early in it (its code nests too deeply), so nothing can be proven about it; split it into smaller functions";
+        assert_eq!(found, [want]);
+    }));
+}
+
+#[test]
 fn a_cut_walk_breaks_it_through_a_call() {
     // A walk cut short may hide an effect; range analysis giving up alone doesn't matter.
     let big = |f: Box<dyn FnOnce() + Send>| std::thread::Builder::new().stack_size(256 << 20).spawn(f).unwrap().join().unwrap();

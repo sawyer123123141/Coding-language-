@@ -171,7 +171,7 @@ pub fn walk_expr<V: VisitMut + ?Sized>(v: &mut V, e: &mut Expr) {
         | ExprKind::NoneLit
         | ExprKind::FnRef(_)
         | ExprKind::MakeFn { env: EnvKind::None, .. }
-        | ExprKind::RandFloat => {}
+        | ExprKind::RandFloat { .. } => {}
     }
 }
 

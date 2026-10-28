@@ -139,7 +139,7 @@ pub fn walk_expr<'a>(e: &'a Expr, f: &mut impl FnMut(Node<'a>)) {
         | ExprKind::NoneLit
         | ExprKind::FnRef(_)
         | ExprKind::MakeFn { env: EnvKind::None, .. }
-        | ExprKind::RandFloat => {}
+        | ExprKind::RandFloat { .. } => {}
         ExprKind::Move(p) => place(p, true, f),
         ExprKind::Map(op, p, xs) => {
             for x in xs {

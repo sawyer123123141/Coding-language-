@@ -71,7 +71,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             ExprKind::And(l, r) => self.short_circuit(l, r, true)?,
             ExprKind::Or(l, r) => self.short_circuit(l, r, false)?,
             ExprKind::Math(op, args) => self.math(*op, args, e.ty)?,
-            ExprKind::RandFloat => self.rand_float(e.ty),
+            ExprKind::RandFloat { .. } => self.rand_float(e.ty),
             ExprKind::RandInt(lo, hi) => self.rand_int(lo, hi, e.ty)?,
             ExprKind::Call(fi, args) => self.call(*fi, args, None)?.expect("value-returning call"),
             ExprKind::CallIndirect { callee, args, sig } => self.call_indirect(callee, args, sig, None)?.expect("value-returning call"),

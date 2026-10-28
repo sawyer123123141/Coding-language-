@@ -206,6 +206,6 @@ pub(crate) fn rename_expr(e: &mut Expr, subst: &[Subst]) {
         | ExprKind::NoneLit
         | ExprKind::FnRef(_)
         | ExprKind::MakeFn { env: EnvKind::None, .. }
-        | ExprKind::RandFloat => {}
+        | ExprKind::RandFloat { .. } => {}
     }
 }

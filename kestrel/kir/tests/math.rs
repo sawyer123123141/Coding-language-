@@ -44,7 +44,7 @@ fn random_numbers_lower_to_their_own_nodes() {
         }
         other => panic!("{other:?}"),
     }
-    assert!(matches!(&body[2], Stmt::Let(_, Expr { kind: ExprKind::RandFloat, ty: KTy::F32, .. })), "{:?}", body[2]);
+    assert!(matches!(&body[2], Stmt::Let(_, Expr { kind: ExprKind::RandFloat { ranged: false }, ty: KTy::F32, .. })), "{:?}", body[2]);
     // `lo + (hi - lo) * draw`, at the result type, with `hi` read from a temporary.
     match &body[4] {
         Stmt::Let(_, Expr { kind: ExprKind::Seq(pre, value), ty: KTy::F64, .. }) => {
@@ -53,12 +53,12 @@ fn random_numbers_lower_to_their_own_nodes() {
             assert!(matches!(lo.kind, ExprKind::Float(f) if f == 2.0), "{lo:?}");
             let ExprKind::Binary(BinOp::Mul, width, draw) = &offset.kind else { panic!("{offset:?}") };
             assert!(matches!(width.kind, ExprKind::Binary(BinOp::Sub, ..)), "{width:?}");
-            assert!(matches!(draw.kind, ExprKind::RandFloat) && draw.ty == KTy::F64, "{draw:?}");
+            assert!(matches!(draw.kind, ExprKind::RandFloat { ranged: true }) && draw.ty == KTy::F64, "{draw:?}");
         }
         other => panic!("{other:?}"),
     }
     // A discarded draw is still taken.
-    assert!(matches!(&body[5], Stmt::Let(_, Expr { kind: ExprKind::RandFloat, .. })), "{:?}", body[5]);
+    assert!(matches!(&body[5], Stmt::Let(_, Expr { kind: ExprKind::RandFloat { ranged: false }, .. })), "{:?}", body[5]);
 }
 
 #[test]

@@ -64,8 +64,9 @@ pub enum ExprKind {
     Proven(Box<Expr>),
     /// A float operation (see `MathOp`); integer `abs`/`min`/`max` lower to `If`.
     Math(MathOp, Vec<Expr>),
-    /// A float from 0 up to (not including) 1, of this expression's type.
-    RandFloat,
+    /// A float from 0 up to (not including) 1, of this expression's type; `ranged` when it is
+    /// the draw of a `randf_range` (contracts name what the user wrote).
+    RandFloat { ranged: bool },
     /// An integer between the two operands, both included, of this expression's type.
     RandInt(Box<Expr>, Box<Expr>),
     Call(FuncIdx, Vec<Arg>),
