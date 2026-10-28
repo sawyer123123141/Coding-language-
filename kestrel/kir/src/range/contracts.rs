@@ -156,6 +156,11 @@ impl Cx<'_> {
             ProveTarget::Loop { .. } => None,
         };
         let mut out = Vec::new();
+        // The state the function changes must be copyable, before anything its code does (the
+        // function's own body only: an inlined copy has the same parameters).
+        if let (Some(fault), true) = (&site.snapshot, copy.block.is_none() && target == Some(copy.func)) {
+            out.push(Failure::new(DETERMINISTIC, words::snapshot(fault), Help::Snapshot));
+        }
         for &(g, _) in &contents.funcs {
             if let Some(stop) = summary::stop(self.a, self.events, g) {
                 out.push(Failure::new(ALL, words::stopped(m, stop, g, target == Some(g)), Help::Report));

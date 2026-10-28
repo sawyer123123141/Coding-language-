@@ -1,0 +1,68 @@
+struct World {
+    mem: Arena
+    n: int
+}
+
+struct Fighter {
+    on_hit: (int) -> int
+}
+
+struct Safe {
+    on_hit: pure (int) -> int
+    xs: list[int]
+}
+
+interface Scene {
+    draw(self)
+}
+
+struct Stage {
+    scene: Scene
+}
+
+struct Level {
+    mem: Arena
+}
+
+struct Game {
+    level: Level
+}
+
+struct Flat {
+    n: int
+    xs: list[int]
+}
+
+@prove(deterministic)
+pub step(var w: World) { w.n += 1 }
+
+@prove(deterministic)
+pub hit(var f: Fighter) { f.on_hit = f.on_hit }
+
+@prove(deterministic)
+pub ok(var s: Safe) { s.xs.add(1) }
+
+@prove(deterministic)
+pub play(var s: Stage) { s.scene = s.scene }
+
+@prove(deterministic)
+pub many(var ws: list[World]) { ws[0].n += 1 }
+
+@prove(deterministic)
+pub tick(var g: Game) {}
+
+// A read-only parameter is never changed, so it needs no snapshot.
+@prove(deterministic)
+pub look(w: World) -> int { w.n }
+
+@prove(deterministic)
+pub plain(var f: Flat) { f.n += 1 }
+
+main() {}
+
+// error 36: `step` can't be proven `deterministic`: its `var` parameter `w` holds an `Arena` (`w.mem`), which a snapshot can't copy and checksum
+// error 39: `hit` can't be proven `deterministic`: its `var` parameter `f` holds a function value (`f.on_hit`), which a snapshot can't copy and checksum
+// error 42: `ok` can't be proven `deterministic`: its `var` parameter `s` holds a function value (`s.on_hit`), which a snapshot can't copy and checksum
+// error 45: `play` can't be proven `deterministic`: its `var` parameter `s` holds an interface value (`s.scene`), which a snapshot can't copy and checksum
+// error 48: `many` can't be proven `deterministic`: its `var` parameter `ws` holds an `Arena` (`ws[i].mem`), which a snapshot can't copy and checksum
+// error 51: `tick` can't be proven `deterministic`: its `var` parameter `g` holds an `Arena` (`g.level.mem`), which a snapshot can't copy and checksum

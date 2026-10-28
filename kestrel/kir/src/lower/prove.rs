@@ -8,8 +8,8 @@
 
 use std::collections::HashMap;
 
-use kestrel_check::{FnId, Subst, Tables};
-use kestrel_syntax::ast::{self, Program};
+use kestrel_check::{snapshot_fault, FnId, SnapshotFault, Subst, Tables};
+use kestrel_syntax::ast::{self, Contract, Program};
 use kestrel_syntax::Span;
 
 use super::helpers::Helpers;
@@ -46,7 +46,8 @@ impl Proves {
             let contracts = &program.proves[k].contracts;
             if !info.is_abstract {
                 let target = ProveTarget::Func(FuncIdx(i as u32));
-                p.sites.push(ContractSite { target, contracts: contracts.clone(), required_by: None, copy: None });
+                let snapshot = snapshot_of(t, FnId(i as u32), contracts);
+                p.sites.push(ContractSite { target, contracts: contracts.clone(), required_by: None, copy: None, snapshot });
                 continue;
             }
             for imp in iface::implementations(t, FnId(i as u32), &decl.name) {
@@ -56,11 +57,21 @@ impl Proves {
                     contracts: contracts.iter().map(|&(c, _)| (c, at)).collect(),
                     required_by: Some(format!("`{}`", info.name)),
                     copy: None,
+                    snapshot: snapshot_of(t, imp, contracts),
                 });
             }
         }
         p
     }
+}
+
+/// For a function that promises `deterministic`: the first part of its `var` parameters (and `var
+/// self`) that a snapshot can't copy and `checksum` can't read (`kestrel_check::snapshot_fault`).
+fn snapshot_of(t: &Tables, f: FnId, contracts: &[(Contract, Span)]) -> Option<SnapshotFault> {
+    if !contracts.iter().any(|&(c, _)| c == Contract::Deterministic) {
+        return None;
+    }
+    t.func(f).params.iter().filter(|p| p.is_var).find_map(|p| snapshot_fault(t, p.ty, &p.name))
 }
 
 impl Proves {
@@ -129,7 +140,7 @@ impl FnLowerer<'_> {
                     Some(f) if self.t.func(f).copy.is_some() => Some(SiteCopy::Func(FuncIdx(f.0))),
                     _ => self.subst_instance().map(|name| SiteCopy::Instance(name.to_string())),
                 };
-                self.helpers.proves.sites.push(ContractSite { target, contracts, required_by: None, copy });
+                self.helpers.proves.sites.push(ContractSite { target, contracts, required_by: None, copy, snapshot: None });
                 self.helpers.proves.loops.insert(key, id);
                 id
             }

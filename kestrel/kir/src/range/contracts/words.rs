@@ -1,6 +1,7 @@
 //! The words of a contract's error: what it is on, which copy, the reason (the first item that
 //! breaks it, in the report's words), and the help line.
 
+use kestrel_check::SnapshotFault;
 use kestrel_syntax::ast::Contract;
 
 use super::region::{Copy, Lost};
@@ -149,6 +150,12 @@ pub(super) fn stopped(m: &Module, stop: Stop, g: usize, it: bool) -> String {
     }
 }
 
+/// A `var` parameter a snapshot can't copy: "its `var` parameter `w` holds an `Arena` (`w.mem`),
+/// which a snapshot can't copy and checksum".
+pub(super) fn snapshot(fault: &SnapshotFault) -> String {
+    format!("its `var` parameter `{}` holds {} (`{}`), which a snapshot can't copy and checksum", fault.param, fault.kind.holds(), fault.path)
+}
+
 /// The help line of an error.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Help {
@@ -162,6 +169,8 @@ pub(super) enum Help {
     ParFor,
     /// What breaks `deterministic`.
     Effect(Effect),
+    /// A `var` parameter a snapshot can't copy.
+    Snapshot,
 }
 
 /// The words of `help` for an error about contract `c`.
@@ -175,6 +184,7 @@ pub(super) fn help(m: &Module, help: Help, c: Contract) -> String {
             Effect::ImpureFnValue => "give it a `pure` function type, like `pure (Fighter) -> int`".to_string(),
             Effect::ImpureMethod(method) => self::help(m, Help::Iface(method), c),
         },
+        Help::Snapshot => "keep arenas, textures, meshes, interface values and function values outside the state a deterministic function changes".to_string(),
         Help::Report => "`kestrel check --report` lists everything left in it".to_string(),
         Help::FnValue => "contracts can't see into a function value yet; call a named function or an interface method instead".to_string(),
         Help::Iface(method) => {

@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 
+use kestrel_check::SnapshotFault;
 use kestrel_syntax::ast::Contract;
 use kestrel_syntax::Span;
 
@@ -74,6 +75,9 @@ pub struct ContractSite {
     /// For a loop in a copy of a generic, or in a field default lowered for an instance: what it
     /// was lowered for (the loop's `func` may be a closure's code, which has no `CopyNote`).
     pub copy: Option<SiteCopy>,
+    /// For a function site with `deterministic`: the first part of a `var` parameter (or `var
+    /// self`) that a snapshot can't copy and `checksum` can't read, if there is one.
+    pub snapshot: Option<SnapshotFault>,
 }
 
 /// What a loop site was lowered for (see `ContractSite::copy`).

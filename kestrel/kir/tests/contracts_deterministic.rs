@@ -232,3 +232,60 @@ fn the_other_contracts_ignore_effects() {
     let found: Vec<String> = errors(src).into_iter().map(|e| e.message).collect();
     assert_eq!(found, Vec::<String>::new());
 }
+
+const SNAPSHOT_HELP: &str = "keep arenas, textures, meshes, interface values and function values outside the state a deterministic function changes";
+
+#[test]
+fn the_snapshot_fault_has_help() {
+    let src = "struct World {\n    mem: Arena\n    n: int\n}
+@prove(deterministic)
+pub step(var w: World) {\n    w.n += 1\n}";
+    let found: Vec<(String, Option<String>)> = errors(src).into_iter().map(|e| (e.message, e.help)).collect();
+    let message = "`step` can't be proven `deterministic`: its `var` parameter `w` holds an `Arena` (`w.mem`), which a snapshot can't copy and checksum";
+    assert_eq!(found, vec![(message.to_string(), Some(SNAPSHOT_HELP.to_string()))]);
+}
+
+#[test]
+fn the_snapshot_fault_is_said_before_what_the_code_does() {
+    // Both break the contract; the error names the state, which the caller can fix without
+    // reading the body.
+    let src = "struct World {\n    mem: Arena\n    n: int\n}
+@prove(deterministic)
+pub step(var w: World) {\n    w.n += randi_range(1, 6)\n}";
+    let found: Vec<String> = errors(src).into_iter().map(|e| e.message).collect();
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(found[0].contains("its `var` parameter `w` holds an `Arena` (`w.mem`)"), "{found:?}");
+}
+
+#[test]
+fn a_var_self_and_an_implementation_are_checked_too() {
+    let src = "struct World {\n    mem: Arena\n    n: int\n
+    @prove(deterministic)
+    bump(var self) {\n        self.n += 1\n    }
+}
+interface Steps {
+    @prove(deterministic)
+    step(var self)
+}
+struct Sim: Steps {\n    keep: () -> int\n
+    step(var self) {\n    }
+}";
+    let found: Vec<String> = errors(src).into_iter().map(|e| e.message).collect();
+    let want = [
+        "`World.bump` can't be proven `deterministic`: its `var` parameter `self` holds an `Arena` (`self.mem`), which a snapshot can't copy and checksum",
+        "`Sim.step` can't be proven `deterministic`, which `Steps.step` requires: its `var` parameter `self` holds a function value (`self.keep`), which a snapshot can't copy and checksum",
+    ];
+    assert_eq!(found, want);
+}
+
+#[test]
+fn a_read_only_parameter_and_plain_data_have_no_snapshot_error() {
+    let src = "struct World {\n    mem: Arena\n    n: int\n}
+struct Flat {\n    n: int\n    xs: list[int]\n}
+@prove(deterministic)
+pub look(w: World) -> int {\n    w.n\n}
+@prove(deterministic)
+pub bump(var f: Flat) {\n    f.n += 1\n}";
+    let found: Vec<String> = errors(src).into_iter().map(|e| e.message).collect();
+    assert_eq!(found, Vec::<String>::new());
+}
