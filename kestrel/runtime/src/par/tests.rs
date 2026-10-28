@@ -65,12 +65,12 @@ fn allocations_survive_the_loop() {
 }
 
 extern "C" fn fail_on_pool(_env: *const u8, _start: i64, _end: i64) {
-    let pool_thread = CURRENT.with_borrow(|c| c.as_ref().is_some_and(|(_, p)| *p));
+    let pool_thread = CURRENT.with_borrow(|c| c.as_ref().is_some_and(|(_, p, _)| *p));
     if pool_thread {
         fail_in_job("iteration failed");
     }
     // The caller waits for a pool thread to fail.
-    while !CURRENT.with_borrow(|c| c.as_ref().is_some_and(|(j, _)| j.failed.load(Ordering::Acquire))) {
+    while !CURRENT.with_borrow(|c| c.as_ref().is_some_and(|(j, _, _)| j.failed.load(Ordering::Acquire))) {
         std::thread::yield_now();
     }
 }
@@ -119,7 +119,7 @@ mod float_mode {
 
     /// The caller records its mode; pool threads wait until it has, so it takes part for certain.
     extern "C" fn record_on_caller(_env: *const u8, _start: i64, _end: i64) {
-        if CURRENT.with_borrow(|c| c.as_ref().is_some_and(|(_, pool)| *pool)) {
+        if CURRENT.with_borrow(|c| c.as_ref().is_some_and(|(_, pool, _)| *pool)) {
             while CALLER_MODE.load(Ordering::Acquire) == 0 {
                 std::thread::yield_now();
             }
@@ -142,4 +142,57 @@ mod float_mode {
         .join()
         .unwrap();
     }
+}
+
+/// What the failing bodies below share: the message a failing caller thread got back, and which
+/// index fails after a sleep (the lower one) and which at once (the higher one).
+struct Race {
+    caller_got: Mutex<Option<String>>,
+    slow: i64,
+    fast: i64,
+}
+
+extern "C" fn race_body(env: *const u8, start: i64, end: i64) {
+    // SAFETY: the test's env is a `Race` that outlives the job.
+    let race = unsafe { &*(env as *const Race) };
+    for i in start..end {
+        if i == race.slow {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        } else if i != race.fast {
+            continue;
+        }
+        // A pool thread never comes back from this; the caller gets the winner.
+        if let Some(winner) = fail_in_job(&format!("iteration {i}")) {
+            *race.caller_got.lock().unwrap() = Some(winner);
+        }
+        return;
+    }
+}
+
+/// Runs the race over and over: the lowest failing index must always win, however the threads
+/// interleave. The outcome is fixed by the rule (the chunk with index `slow` is handed out before
+/// the one with index `fast`, and every chunk taken runs to its end), so there is nothing to time.
+fn lowest_wins(slow: i64, fast: i64, thread_counts: &[usize]) {
+    for &threads in thread_counts {
+        for round in 0..20 {
+            let race = Race { caller_got: Mutex::new(None), slow, fast };
+            let got = run(100, race_body, &race as *const Race as *const u8, threads);
+            let want = format!("iteration {slow}");
+            assert_eq!(got, Err(want.clone()), "threads {threads}, round {round}");
+            let told = race.caller_got.lock().unwrap().take();
+            if let Some(told) = told {
+                assert_eq!(told, want, "the caller was told another winner: threads {threads}, round {round}");
+            }
+        }
+    }
+}
+
+#[test]
+fn the_lowest_failing_chunk_wins() {
+    lowest_wins(5, 90, &[2, 4, 16]);
+}
+
+#[test]
+fn a_later_failure_does_not_stop_an_earlier_chunk() {
+    lowest_wins(0, 60, &[2, 4, 16]);
 }

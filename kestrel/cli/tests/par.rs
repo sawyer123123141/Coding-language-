@@ -21,3 +21,22 @@ fn one_thread_and_many_agree() {
     assert_eq!(run("par_for.kes", Some("1")), all);
     assert_eq!(run("par_for.kes", Some("3")), all);
 }
+
+/// Runs a program that fails and returns its exit code and standard error.
+fn run_failing(file: &str, threads: &str) -> (Option<i32>, String) {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/programs").join(file);
+    let out = Command::new(env!("CARGO_BIN_EXE_kestrel")).arg("run").arg(&path).env("KESTREL_THREADS", threads).output().unwrap();
+    (out.status.code(), String::from_utf8_lossy(&out.stderr).into_owned())
+}
+
+#[test]
+fn the_lowest_failing_iteration_reports_at_any_thread_count() {
+    let want = "kestrel: index 1020 out of bounds for length 1000 on line 31 of par_for_lowest_failure.kes\n";
+    for threads in ["1", "2", "8", "16"] {
+        for run in 0..5 {
+            let (code, err) = run_failing("par_for_lowest_failure.kes", threads);
+            assert_eq!(code, Some(101), "threads {threads}, run {run}: {err}");
+            assert_eq!(err, want, "threads {threads}, run {run}");
+        }
+    }
+}

@@ -27,8 +27,10 @@ pub fn set_failure_hook(hook: fn(&str) -> !) {
 /// Flushes output, then hands `msg` to the failure hook, or reports it and
 /// exits with code 101.
 pub fn fail(msg: &str) -> ! {
-    // On a `par for` pool thread this hands the message to the caller instead.
-    crate::par::fail_in_job(msg);
+    // Inside a `par for`: a pool thread hands the message to the caller and parks; the caller waits for
+    // the other threads and reports the failure with the lowest index, which may not be this one.
+    let msg = crate::par::fail_in_job(msg).unwrap_or_else(|| msg.to_string());
+    let msg = msg.as_str();
     crate::print::flush();
     if let Some(hook) = FAILURE_HOOK.get() {
         hook(msg);

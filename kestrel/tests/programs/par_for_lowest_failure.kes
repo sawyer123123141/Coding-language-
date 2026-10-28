@@ -1,0 +1,37 @@
+// env: KESTREL_THREADS=8
+// expect-exit: 101
+// expect-stderr: index 1020 out of bounds for length 1000 on line 31 of par_for_lowest_failure.kes
+// Two iterations fail. The one at index 900 fails at once and the one at index 20 fails after a
+// long spin, so on a timing race the late, lower failure would lose. (Index 0 keeps the calling
+// thread busy, so the first chunk's thread is not the one that fails.) The program always
+// reports the lowest failing index, whatever the thread count.
+main() {
+    var xs = list[int]()
+    var table = list[int]()
+    for i from 0 to 1000 {
+        xs.add(i)
+        table.add(i)
+    }
+    par for i, x in xs {
+        x = i
+        if i == 0 {
+            var s = 0
+            for k from 0 to 30_000_000 {
+                s +%= k
+            }
+            x = s
+        }
+        if i == 20 {
+            var s = 0
+            for k from 0 to 30_000_000 {
+                s +%= k
+            }
+            // `s` is never 999, but the compiler can't know that.
+            let off = if s == 999 { 1 } else { 0 }
+            x = table[i + 1000 + off]
+        }
+        if i == 900 {
+            x = table[i + 1000]
+        }
+    }
+}
