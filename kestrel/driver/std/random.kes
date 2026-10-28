@@ -32,7 +32,7 @@ pub struct Rng {
         if f >= 1.0 { 0.99999994 } else { f }
     }
 
-    // A float from `lo` to `hi`.
+    // A float from `lo` to `hi` (`hi` included when rounding reaches it).
     pure randf_range(var self, lo: float, hi: float) -> float {
         lo + (hi - lo) * self.randf()
     }

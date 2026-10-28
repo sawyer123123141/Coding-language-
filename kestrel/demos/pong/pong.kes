@@ -17,6 +17,7 @@
 //
 //   frames <N> confirmed <F> checksum <C>
 //   rollbacks <R> deepest <D> lost <L>
+//   checksums compared up to frame <K>
 //   replay matches (<F> frames)
 //
 // or stops early with "peers differ at frame <F>" when the peers' checksums disagree.
@@ -174,6 +175,8 @@ main() {
     let c = p1.confirmed()
     print("frames {tick} confirmed {c} checksum {checksum(p1.state_at(c))}")
     print("rollbacks {p1.rollbacks + p2.rollbacks} deepest {max(p1.deepest, p2.deepest)} lost {net.lost}")
+    // Both peers have compared every checksum up to this frame and found them equal.
+    print("checksums compared up to frame {min(p1.compared, p2.compared)}")
     let bad = replay.check()
     if bad < 0 {
         print("replay matches ({replay.inputs.len} frames)")

@@ -8,7 +8,10 @@
 //! bits on every x86-64 CPU, which replays and networked games depend on.
 //! `libm` is pinned to one version, without its `arch` feature, so nothing in
 //! an exe's math looks at the CPU; `math/bits.rs` pins the results for a
-//! table of inputs.
+//! table of inputs. The JIT's copy (linked into the compiler) does get `arch`,
+//! turned on by Cranelift's own dependency on `libm`. The results are still
+//! equal: `arch` only changes `sqrt` and `fma`, `fma` is never called here, and
+//! `sqrt` is correctly rounded either way (spec decision 2).
 
 use std::cell::Cell;
 use std::time::{SystemTime, UNIX_EPOCH};

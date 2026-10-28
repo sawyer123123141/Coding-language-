@@ -95,6 +95,11 @@ fn pong_runs_headless_and_the_three_builds_agree() {
     assert!(confirmed > 500 && confirmed <= 600, "confirmed {confirmed} frames of 600:\n{jit}");
     assert!(jit.lines().any(|l| l == format!("replay matches ({confirmed} frames)")), "no matching replay line in:\n{jit}");
     assert!(!jit.contains("differ"), "the peers differ:\n{jit}");
+    // The peers really compared their checksums (every 30 frames), not just never found a
+    // difference: both got at least to frame 480 of 600.
+    let words = line_after(&jit, "checksums compared up to frame ");
+    let compared = number(&words, 0);
+    assert!((480..=confirmed).contains(&compared), "checksums compared up to frame {compared}, {confirmed} confirmed:\n{jit}");
 }
 
 #[test]
@@ -139,10 +144,13 @@ fn arena_bytes(frames: u32) -> u64 {
 
 #[test]
 fn pong_memory_stays_flat() {
-    // The replay keeps every confirmed frame's inputs (4 bytes a frame), so the arena grows a
-    // little with the run's length; everything else is a ring or lives in a frame's `arena { }`.
+    // Everything is a ring or lives in a frame's `arena { }`, except the replay, which keeps
+    // every confirmed frame's inputs and a checksum every 60 frames: about 12,400 bytes at 3,000
+    // frames (twice that with the buffers its lists left behind when they doubled), which still
+    // fit in the arena's first block. So both runs report the same size (65,536 bytes today),
+    // and any other growth with the run's length shows.
     let (short, long) = (arena_bytes(600), arena_bytes(3000));
-    assert!(long.abs_diff(short) < 64 * 1024, "the program arena grew from {short} bytes (600 frames) to {long} bytes (3,000 frames)");
+    assert_eq!(long, short, "the program arena grew from {short} bytes (600 frames) to {long} bytes (3,000 frames)");
 }
 
 #[test]

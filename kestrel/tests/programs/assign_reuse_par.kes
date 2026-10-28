@@ -2,7 +2,10 @@
 // expect: 162 2406
 // expect: State(xs: [1, 2, 3], name: "template") State(xs: [1, 2, 3], name: "template") State(xs: [1, 2, 3], name: "template")
 // Assignments in a `par for` body: into a state local to the body, and into an item's field from a
-// template the body reads.
+// template the body reads. Both reuse the target's storage (`check --report` words their copies
+// as the assignment's, "when the list there has too little room"): the body is lowered before it
+// becomes the pool's function, so `template` is a plain local there, not a closure capture, and
+// it can't share memory with an item.
 struct State {
     xs: list[int]
     name: string

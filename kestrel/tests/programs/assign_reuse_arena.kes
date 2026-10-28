@@ -13,9 +13,16 @@
 // expect: State(xs: [0, 4, 8, 12], names: ["n0", "n1", "n2", "n3"], tag: "size 4")
 // expect: State(xs: [0, 2], names: ["n0", "n1"], tag: "size 2")
 // expect: State(xs: [0, 3, 6], names: ["n0", "n1", "n2"], tag: "size 3")
+// expect: Keyed(names: ["v0", "v1", "v2", "v3"], m: {"k0": 0, "k1": 1, "k2": 2, "k3": 3}, counts: {0: 0, 1: 10, 2: 20, 3: 30})
+// expect: Keyed(names: ["v0"], m: {"k0": 0}, counts: {0: 0})
+// expect: Keyed(names: ["v0", "v1", "v2"], m: {"k0": 0, "k1": 1, "k2": 2}, counts: {0: 0, 1: 10, 2: 20})
+// expect: Keyed(names: ["v0", "v1"], m: {"k0": 0, "k1": 1}, counts: {0: 0, 1: 10})
+// expect: Keyed(names: ["v0", "v1", "v2", "v3", "v4", "v5"], m: {"k0": 0, "k1": 1, "k2": 2, "k3": 3, "k4": 4, "k5": 5}, counts: {0: 0, 1: 10, 2: 20, 3: 30, 4: 40, 5: 50})
+// expect: Keyed(names: ["v0", "v1", "v2", "v3", "v4"], m: {"k0": 0, "k1": 1, "k2": 2, "k3": 3, "k4": 4}, counts: {0: 0, 1: 10, 2: 20, 3: 30, 4: 40})
+// expect: Keyed(names: ["v0", "v1", "v2", "v3", "v4"], m: {"k0": 0, "k1": 1, "k2": 2, "k3": 3, "k4": 4}, counts: {0: 0, 1: 10, 2: 20, 3: 30, 4: 40}) Keyed(names: [], m: {}, counts: {})
 // expect-stderr: arenas alive at exit: 0
-// A source built in an arena that is freed afterwards, and a target inside an `Arena` field, under
-// poisoned freeing: a reused target holds nothing of the freed memory.
+// A source built in an arena that is freed afterwards, and a target inside an `Arena` field (lists,
+// strings and maps), under poisoned freeing: a reused target holds nothing of the freed memory.
 struct State {
     xs: list[int]
     names: list[string]
@@ -25,6 +32,27 @@ struct State {
 struct Holder {
     mem: Arena = Arena()
     snap: State
+}
+
+struct Keyed {
+    names: list[string]
+    m: map[string, int]
+    counts: map[int, int]
+}
+
+struct Vault {
+    mem: Arena = Arena()
+    k: Keyed
+}
+
+keyed(n: int) -> Keyed {
+    var k = Keyed(names: [], m: {}, counts: {})
+    for i from 0 to n {
+        k.names.add("v{i}")
+        k.m["k{i}"] = i
+        k.counts[i] = i * 10
+    }
+    k
 }
 
 state(n: int) -> State {
@@ -69,4 +97,25 @@ main() {
         h.snap = state(3)
     }
     print(h.snap)
+
+    // Maps inside an `Arena` field: the first state of each size has no room and is copied into
+    // the field's arena; the smaller ones after it reuse those maps in place (string keys copied
+    // into the field's arena, the plain map's entries reused). A copy made outside then outlives
+    // the field's arena, which is freed (and poisoned) under it.
+    var v = Vault(k: keyed(0))
+    for n in [4, 1, 3, 2, 6, 5] {
+        var src = keyed(n)
+        in v.mem {
+            v.k = src
+        }
+        src = Keyed(names: ["junk"], m: {"j": 0}, counts: {9: 9})
+        print(v.k)
+    }
+    var keep = v.k
+    v = Vault(k: keyed(0))
+    arena {
+        var junk: list[string] = []
+        for i from 0 to 50 { junk.add("zzzzzzzzzzzzzzzz{i}") }
+    }
+    print(keep, v.k)
 }

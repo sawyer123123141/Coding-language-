@@ -1,0 +1,95 @@
+// env: KESTREL_POISON=1
+// expect: true true
+// expect: World(ms: [{1: [], 2: [1]}], e: E.Has(m: {"e1": [1, 0]}), opt: Inner(ms: [{1: 0}], tag: "t1"))
+// expect: World(ms: [{1: [], 2: [1]}], e: E.Has(m: {"e1": [1, 0]}), opt: Inner(ms: [{1: 0}], tag: "t1"))
+// expect: World(ms: [], e: E.Names(xs: ["b8", "c"], s: "s1"), opt: none)
+// expect: World(ms: [], e: E.Names(xs: ["b8", "c"], s: "s1"), opt: none)
+// expect: World(ms: [{7: [], 8: [1]}, {8: [], 9: [2], 10: [3, 4]}, {9: []}], e: E.Has(m: {"e7": [7, 4]}), opt: Inner(ms: [{7: 4}], tag: "t1"))
+// expect: World(ms: [{7: [], 8: [1]}, {8: [], 9: [2], 10: [3, 4]}, {9: []}], e: E.Has(m: {"e7": [7, 4]}), opt: Inner(ms: [{7: 4}], tag: "t1"))
+// A ring of snapshots whose lists hold maps (`list[map[..]]`) and whose enum and optional payloads
+// hold maps, assigned over and over (reusing the slots' storage), against the same ring filled
+// with fresh copies (`cp(x)` is a new value, so it is never assigned into). Lists and maps grow,
+// shrink, change variant and become empty, so every path of the reusing copy is taken.
+enum E {
+    Has { m: map[string, list[int]] }
+    Names { xs: list[string], s: string }
+    Empty
+}
+
+struct Inner {
+    ms: list[map[int, int]]
+    tag: string
+}
+
+struct World {
+    ms: list[map[int, list[int]]]
+    e: E
+    opt: Inner?
+}
+
+make(n: int, seed: int) -> World {
+    var ms: list[map[int, list[int]]] = []
+    for i from 0 to n % 4 {
+        var m: map[int, list[int]] = {}
+        for k from 0 to (n + i) % 3 + 1 {
+            var xs: list[int] = []
+            for q from 0 to (k + seed) % 4 { xs.add(k + i + q) }
+            m[k + i + n] = xs
+        }
+        ms.add(m)
+    }
+    var e = E.Empty
+    if n % 3 == 1 {
+        var em: map[string, list[int]] = {}
+        em["e{n}"] = [n, seed]
+        e = E.Has(m: em)
+    } else if n % 3 == 2 {
+        e = E.Names(xs: ["b{n}", "c"], s: "s{seed % 2}")
+    }
+    var opt: Inner? = none
+    if n % 4 != 0 {
+        var ims: list[map[int, int]] = []
+        for i from 0 to n % 3 { ims.add({i + n: seed}) }
+        opt = Inner(ms: ims, tag: "t{n % 2}")
+    }
+    World(ms: ms, e: e, opt: opt)
+}
+
+cp(w: World) -> World { w }
+
+main() {
+    var reused: list[World] = []
+    var fresh: list[World] = []
+    for i from 0 to 8 {
+        reused.add(make(i, i))
+        fresh.add(make(i, i))
+    }
+    var g = make(0, 0)
+    var h = make(0, 0)
+    var same = true
+    for f from 0 to 200 {
+        let w = make((f * 7) % 11, f % 13)
+        reused[f % 8] = w
+        fresh[f % 8] = cp(w)
+        g = reused[(f * 5) % 8]
+        h = cp(fresh[(f * 5) % 8])
+        if f % 4 == 0 {
+            g.ms.clear()
+            h.ms.clear()
+        }
+        reused[(f + 3) % 8] = g
+        fresh[(f + 3) % 8] = cp(h)
+        same = same and checksum(reused) == checksum(fresh)
+        arena {
+            var junk: list[string] = []
+            for i from 0 to 20 { junk.add("zzzzzzzzzzzzzzzzzzzzzzz{i}") }
+        }
+    }
+    print(same, checksum(g) == checksum(h))
+    print(reused[3])
+    print(fresh[3])
+    print(reused[4])
+    print(fresh[4])
+    print(reused[7])
+    print(fresh[7])
+}

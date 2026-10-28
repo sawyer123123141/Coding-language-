@@ -68,6 +68,9 @@ fn same_file(a: &Path, b: &Path) -> bool {
 }
 
 fn run() -> ExitCode {
+    // Cranelift's constant folding and the compiler's own `as f32` casts follow this thread's
+    // float mode, so it gets the same pinned mode a program runs in.
+    kestrel_runtime::fpu::pin();
     let Some(args) = parse_args(std::env::args().skip(1).collect()) else {
         eprintln!("{USAGE}");
         return ExitCode::from(2);

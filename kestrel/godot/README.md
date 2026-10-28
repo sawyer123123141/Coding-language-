@@ -61,6 +61,7 @@ Functions using other types (structs, enums, optionals) still work inside Kestre
 
 - **Each call runs on a Kestrel thread with its own memory**, which is freed when the call returns, so nothing builds up between calls.
 - **Kestrel's `print` shows up in Godot's Output panel.**
+- **Float results are not pinned across machines here.** A `par for` pins its pool threads' float mode (round to nearest, nothing flushed), but the thread running the call keeps the mode it has, as any host thread would, so Kestrel's same-bits-on-every-CPU promise is for `kestrel run` and built exes, not for code run inside the add-on.
 - **A runtime error** (a bad index, overflow) prints as a Godot error naming the line and the file (``... on line 24 of world.kes (in `crash`)``), and `run` returns `null`. The editor keeps running, and the next call works.
 - **Rebuilding the add-on needs Godot closed:** Windows locks the DLL while it's loaded. Editing `.kes` files never needs a rebuild.
 

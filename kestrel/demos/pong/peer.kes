@@ -160,8 +160,10 @@ pub struct Peer {
         self.wrong = NONE
     }
 
-    // Runs the present frame with our input `pad`, unless we are too far ahead of the other
-    // player's known inputs: then we wait a frame, and the input is dropped.
+    // Runs the present frame with our input `pad`, unless we are `MAX_AHEAD` (12) or more frames
+    // ahead of the other player's newest known input: then we wait a frame, and the input is
+    // dropped. (Inputs are never resent, so if the other's inputs for a frame are all lost, we
+    // wait here for good; see `SENT` in net.kes.)
     pure advance(var self, pad: Pad) {
         if self.now - self.known >= MAX_AHEAD {
             return

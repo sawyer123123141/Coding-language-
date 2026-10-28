@@ -74,7 +74,7 @@ pub fn start_with(entry: extern "C" fn(), poison: bool) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{arena_count_report, arena_report, kestrel_rt_start, poison_setting};
+    use super::{arena_count_report, arena_report, kestrel_rt_start, poison_setting, run_entry};
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
     #[test]
@@ -148,9 +148,20 @@ mod tests {
         MODE.store(crate::fpu::read(), Ordering::SeqCst);
     }
 
+    /// A fresh thread already starts in the pinned mode, so this runs `run_entry` on a thread
+    /// set to a wrong mode first (round toward zero, denormals are zero): only the pin fixes it.
     #[cfg(target_arch = "x86_64")]
     #[test]
     fn start_pins_the_float_mode_for_main() {
+        let seen = std::thread::spawn(|| {
+            crate::fpu::set(0x7FC0);
+            assert_eq!(crate::fpu::read(), 0x7FC0);
+            run_entry(mode_entry);
+            (MODE.load(Ordering::SeqCst), crate::fpu::read())
+        })
+        .join()
+        .unwrap();
+        assert_eq!(seen, (0x1F80, 0x1F80));
         assert_eq!(kestrel_rt_start(mode_entry), 0);
         assert_eq!(MODE.load(Ordering::SeqCst), 0x1F80);
     }

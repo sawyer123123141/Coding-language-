@@ -15,7 +15,10 @@ pub let JITTER = 2
 pub let LOSS = 0.05
 
 // Inputs each packet carries: the sender's last 8 frames, so a lost packet's inputs come with
-// the next one.
+// the next one. Nothing is acknowledged or sent again: if 8 packets in a row are lost, the inputs
+// of a frame never arrive, the peer missing them stops at `MAX_AHEAD` and waits for good, and
+// the other soon stops too (the game freezes; the peers don't desync). At 5% loss that is 0.05^8,
+// about 4 in 10^11 frames; a real game needs acknowledgements and resending.
 pub let SENT = 8
 
 // Packets that can be in flight at once (two peers send one a frame, each lives at most 8

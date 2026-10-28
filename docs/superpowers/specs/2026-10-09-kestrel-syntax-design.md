@@ -284,8 +284,10 @@ use {
   `2026-10-27-determinism-design.md`): every operation rounds as written,
   with no fused multiply-add, no reassociation and no fast-math, and there
   is no "strict" flag because strict is the only mode. No optimization may
-  change a float result. `float` math functions widen their operands to
-  `f64`, compute, and narrow the result once.
+  change a float result. The transcendental functions on `float` (`sin cos
+  tan asin acos atan atan2 exp log pow`) widen their operands to `f64`,
+  compute, and narrow the result once; the others (`sqrt floor ceil round
+  abs min max`) are exact `float` instructions.
 - **Vectors** (`vec2 vec3 vec4 ivec2 ivec3 ivec4`; the SIMD round of
   2026-10-22, spec `2026-10-21-simd-vectors-design.md`). One set of rules
   for all six, written in GDScript terms:
@@ -837,21 +839,36 @@ in chunk.mem {               // owned: lives as long as chunk.mem
   suggests a copy: `chunk.mesh = tris.copy_to(chunk.mem)`.
 - **Assigning over an existing value reuses its storage** when it has
   room: `ring[f % 16] = game` copies the game's lists into the slot's
-  own lists when they are long enough, and a string whose bytes are
-  already equal is kept. There is no syntax for it, and it is still a
-  deep copy: the two values share nothing afterwards, and the program
-  prints exactly what a fresh copy would. Storage never grows in place;
-  a list without room gets a fresh copy in the current arena, as before.
-  A map with room takes the new keys into its own entries and index (its
-  string keys and heap values are still copied fresh); a map being looped
-  over is copied fresh, so the loop sees the replacement as before.
+  own lists when they have the capacity. There is no syntax for it, and
+  it is still a deep copy: the two values share nothing afterwards, and
+  the program prints exactly what a fresh copy would. What is reused:
+  - lists and arrays of plain items (numbers, vectors, plain structs),
+    and structs, enums and optionals made of those (an enum or optional
+    reuses its payload when both sides hold the same variant);
+  - lists whose items hold lists, maps or strings, item by item, but
+    only up to the target's old length: a list that grows back into a
+    length it had before copies the items past its old length fresh;
+  - strings, only when their bytes are equal: a string is kept then, and
+    otherwise copied fresh (room has nothing to do with it; a string is
+    never written into);
+  - maps with plain keys and values: a map with room takes the new keys
+    into its own entries and index. String keys and heap values are
+    copied fresh each time, and a map being looped over is copied fresh,
+    so the loop sees the replacement as before.
+
+  Storage never grows in place: a list or map without room gets a fresh
+  copy in the current arena, as before. A reused buffer stays in the
+  arena it was made in, and later growth of it (an `add`) goes there
+  too; only a copy that doesn't fit goes to the current arena.
   `@prove(no_alloc)` holds for saving and restoring a snapshot with no
   list, map or string; one that holds them keeps the fresh copy for a
   target without room, so the contract names that assignment.
   A target that may share memory with the value (`a = a.child`,
   `ring[i] = ring[j]`), or whose index has a call in it, is copied
-  fresh. So a ring of snapshots stops allocating once each slot has
-  held the largest state.
+  fresh. So a ring of snapshots of plain lists, structs and maps stops
+  allocating once each slot has held the largest state; one whose lists
+  hold strings, lists or maps and change length, or whose maps hold
+  strings or heap values, keeps allocating for those.
 
 ## Optional values
 
