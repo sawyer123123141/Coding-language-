@@ -1,0 +1,137 @@
+// Snapshot copies, for the determinism round's measurements (`measure.py`, `results.md`): save a
+// state into a snapshot and restore it, as a rollback does. Built by the compiler of today, which
+// reuses the target's storage when one state is assigned over another, and by the compiler from
+// before the round, which copies into new memory every time.
+//
+// Two states:
+// - `Game` is Pong's (`demos/pong/game.kes`): numbers, vectors and a random generator. Its `Rng`
+//   is written out here as `Seed` (the same single `i64` field, `random.kes`), so that the
+//   compiler from before the round, which has no `random` module, compiles this file too.
+// - `Pool[Column]` is the voxel engine's store of columns (`voxel/pool.kes`, `voxel/column.kes`,
+//   `voxel/grid.kes`): 441 columns, each a 32 x 128 x 32 grid of `u8` blocks, about 58 MB.
+//
+// This is a library: `measure.py` writes one small main program per measurement next to a copy
+// of it (a `checksum` program only for today's compiler, since the old one has no `checksum`).
+
+pub struct Seed {
+    seed: i64
+}
+
+pub struct Game {
+    ball: vec2
+    vel: vec2
+    pad1: float
+    pad2: float
+    score1: int
+    score2: int
+    rng: Seed
+}
+
+pub pure new_game() -> Game {
+    Game(ball: vec2(400, 250), vel: vec2(360, 120), pad1: 250.0, pad2: 250.0, score1: 0, score2: 0,
+        rng: Seed(seed: 1337))
+}
+
+// A frame's worth of change, so every save copies a new state and nothing folds away.
+pub pure nudge(var g: Game, i: int) {
+    g.ball = g.ball + g.vel * 0.001
+    g.score1 += i & 1
+    g.rng.seed = g.rng.seed ^ i64(i)
+}
+
+// A few numbers from a game, so its state is used.
+pure sum(g: Game) -> int {
+    g.score1 + g.score2 + int(g.ball.x) + int(g.rng.seed & 1023)
+}
+
+// `n` pairs: save the game into a ring of 16 snapshots, change it, and restore the one saved
+// seven pairs earlier (a rollback of seven frames).
+pub pure pong_pairs(n: int) -> int {
+    var g = new_game()
+    var ring: list[Game] = []
+    for i from 0 to 16 {
+        ring.add(g)
+    }
+    for i from 0 to n {
+        ring[i & 15] = g
+        nudge(var g, i)
+        g = ring[(i + 9) & 15]
+    }
+    sum(g) + sum(ring[3])
+}
+
+// The same loop without the save and the restore, to take the loop and `nudge` out.
+pub pure pong_control(n: int) -> int {
+    var g = new_game()
+    var ring: list[Game] = []
+    for i from 0 to 16 {
+        ring.add(g)
+    }
+    for i from 0 to n {
+        nudge(var g, i)
+    }
+    sum(g) + sum(ring[3])
+}
+
+pub struct Grid[T] {
+    sx: int
+    sy: int
+    sz: int
+    items: list[T]
+}
+
+pub pure grid[T](sx: int, sy: int, sz: int, fill: T) -> Grid[T] {
+    var items: list[T] = []
+    for i from 0 to sx * sy * sz {
+        items.add(fill)
+    }
+    Grid[T](sx: sx, sy: sy, sz: sz, items: items)
+}
+
+pub enum ColumnState {
+    Free
+    Generating
+    Ready
+}
+
+pub struct Column {
+    cx: int
+    cz: int
+    key: i64
+    state: ColumnState
+    blocks: Grid[u8]
+}
+
+pub struct Pool[T] {
+    items: list[T]
+    gens: list[int]
+    used: list[bool]
+    free: list[int]
+}
+
+// The engine's pool of 441 columns (a radius of 10 columns), each a 32 x 128 x 32 grid of air.
+pub pure new_pool() -> Pool[Column] {
+    let fill = Column(cx: 0, cz: 0, key: 0, state: ColumnState.Free, blocks: grid[u8](32, 128, 32, 0))
+    var p = Pool[Column](items: [], gens: [], used: [], free: [])
+    for i from 0 to 441 {
+        p.items.add(fill)
+        p.gens.add(0)
+        p.used.add(false)
+        p.free.add(440 - i)
+    }
+    p
+}
+
+// The pool, its first snapshot, then `n` pairs: save the pool into the snapshot, change a block,
+// and restore the snapshot. `n` 0 is the start-up to take out.
+pub pure pool_pairs(n: int) -> int {
+    var p = new_pool()
+    var snap = p
+    for i from 0 to n {
+        snap = p
+        p.items[i % 441].blocks.items[i] = 1
+        p.gens[i % 441] += 1
+        p = snap
+    }
+    int(p.items[7].blocks.items[7]) + snap.items.len + p.gens[0]
+}

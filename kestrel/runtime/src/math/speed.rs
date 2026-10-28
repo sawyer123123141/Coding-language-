@@ -49,3 +49,34 @@ fn own_math_against_the_platform() {
         println!("{name:>5}: libm {own:.2} ns, platform {platform:.2} ns, ratio {:.2}", own / platform);
     }
 }
+
+const PINS: usize = 100_000_000;
+
+/// Nanoseconds per call of `f`, over `PINS` calls.
+fn per_pin(f: impl Fn()) -> f64 {
+    let start = Instant::now();
+    for _ in 0..PINS {
+        f();
+    }
+    start.elapsed().as_nanos() as f64 / PINS as f64
+}
+
+/// What pinning the float mode costs: `fpu::pin` (one `ldmxcsr`) inlined into a loop, and the
+/// call that compiled code makes after a native of the window library returns
+/// (`kestrel_rt_fpu_pin`, through a pointer the optimiser can't see through). Run it like
+/// `own_math_against_the_platform`: `cargo test -p kestrel-runtime --release pinning_the_float_mode
+/// -- --ignored --nocapture`.
+#[test]
+#[ignore = "a measurement: run it by hand on a quiet machine, in release"]
+fn pinning_the_float_mode() {
+    let empty = per_pin(|| black_box(()));
+    let inline = per_pin(|| {
+        crate::fpu::pin();
+        black_box(());
+    });
+    let entry: extern "C" fn() = black_box(crate::fpu::kestrel_rt_fpu_pin);
+    let call = per_pin(|| black_box(entry)());
+    // The low six bits are the sticky exception flags, which the timing's own arithmetic sets.
+    assert_eq!(crate::fpu::read() & !0x3F, crate::fpu::PINNED);
+    println!("empty loop {empty:.3} ns, pin inlined {inline:.3} ns, kestrel_rt_fpu_pin called {call:.3} ns per iteration ({PINS} each)");
+}
