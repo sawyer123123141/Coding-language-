@@ -1,0 +1,45 @@
+// `@prove(deterministic)` holds for a `pure` step and for a step that prints: math, a `pure`
+// function value, a `pure` interface method and a `par for` keep it.
+interface Shape {
+    pure area(self) -> float
+}
+
+struct Sq: Shape {
+    s: float
+
+    pure area(self) -> float { self.s * self.s }
+}
+
+struct Game {
+    x: float
+    hits: int
+}
+
+@prove(deterministic)
+pub pure step(var g: Game, dt: float, f: pure (float) -> float, sh: Shape) {
+    g.x = g.x + sin(dt) + f(dt) + sh.area()
+}
+
+@prove(deterministic)
+pub tell(var g: Game, var xs: list[int]) {
+    print("x {g.x} hits {g.hits}")
+    par for x in xs {
+        x = x * 2
+    }
+    g.hits += xs[0] + xs[1]
+}
+
+pub pure twice(x: float) -> float { x * 2.0 }
+
+main() {
+    var g = Game(x: 0.0, hits: 0)
+    var xs: list[int] = [1, 2, 3]
+    step(var g, 0.0, twice, Sq(s: 2.0))
+    step(var g, 0.5, (v) { v + 1.0 }, Sq(s: 1.0))
+    tell(var g, var xs)
+    tell(var g, var xs)
+    print(xs)
+}
+// expect: x 6.9794254 hits 0
+// expect: x 6.9794254 hits 6
+// expect: [4, 8, 12]

@@ -70,11 +70,13 @@ pub enum KTy {
 
 /// What an indirect call needs to know about the function it calls: each parameter's type and
 /// whether it is passed by pointer (`var`, or an aggregate: the same rule as `LocalKind::RefParam`
-/// for a parameter), and the result.
+/// for a parameter), and the result. `pure` is the source signature's: a `pure` function type, or
+/// a `pure` interface method (what `@prove(deterministic)` reads; codegen ignores it).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct KSig {
     pub params: Vec<(KTy, bool)>,
     pub ret: Option<KTy>,
+    pub pure: bool,
 }
 
 impl KTy {

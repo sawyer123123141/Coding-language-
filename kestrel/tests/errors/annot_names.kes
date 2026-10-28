@@ -10,5 +10,5 @@ f3() {}
 main() {}
 
 // error 1: unknown annotation `@fast`; Kestrel has `@prove` and `@assume`
-// error 4: unknown contract `fast`; `@prove` takes `no_alloc`, `no_checks`, `no_panic` and `inline`
+// error 4: unknown contract `fast`; `@prove` takes `no_alloc`, `no_checks`, `no_panic`, `inline` and `deterministic`
 // error 7: expected an annotation name after `@`, like `@prove` or `@assume`

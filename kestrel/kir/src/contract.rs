@@ -22,6 +22,7 @@ impl ContractSet {
     pub const NO_CHECKS: ContractSet = ContractSet(2);
     pub const NO_PANIC: ContractSet = ContractSet(4);
     pub const INLINE: ContractSet = ContractSet(8);
+    pub const DETERMINISTIC: ContractSet = ContractSet(16);
 
     /// The set holding just `c`'s bit (`no_panic` brings `no_checks`, as `insert` does).
     pub fn of(c: Contract) -> ContractSet {
@@ -31,6 +32,7 @@ impl ContractSet {
             Contract::NoChecks => ContractSet::NO_CHECKS,
             Contract::NoPanic => ContractSet::NO_PANIC,
             Contract::Inline => ContractSet::INLINE,
+            Contract::Deterministic => ContractSet::DETERMINISTIC,
         });
         set
     }

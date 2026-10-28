@@ -1,0 +1,32 @@
+interface Scorer {
+    pure score(self) -> int
+}
+
+interface Promised {
+    @prove(deterministic)
+    score(self) -> int
+}
+
+interface Plain {
+    score(self) -> int
+}
+
+@prove(deterministic)
+pub a(s: Scorer) -> int { s.score() }
+
+@prove(deterministic)
+pub b(s: Promised) -> int { s.score() }
+
+@prove(deterministic)
+pub c(s: Plain) -> int { s.score() }
+
+struct Dice: Promised {
+    sides: int = 6
+
+    score(self) -> int { randi_range(1, self.sides) }
+}
+
+main() {}
+
+// error 20: `c` can't be proven `deterministic`: it calls a method of the interface value `s` (line 21), which isn't `pure` and doesn't promise `deterministic`
+// error 26: `Dice.score` can't be proven `deterministic`, which `Promised.score` requires: it calls `randi_range` (line 26), which uses the program's shared random generator

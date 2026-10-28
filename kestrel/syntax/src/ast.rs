@@ -33,6 +33,8 @@ pub enum Contract {
     NoChecks,
     NoPanic,
     Inline,
+    /// The result, and every change to `var` parameters, depends only on the arguments.
+    Deterministic,
 }
 
 impl Contract {
@@ -42,11 +44,12 @@ impl Contract {
             Contract::NoChecks => "no_checks",
             Contract::NoPanic => "no_panic",
             Contract::Inline => "inline",
+            Contract::Deterministic => "deterministic",
         }
     }
 
     pub fn from_name(name: &str) -> Option<Contract> {
-        [Contract::NoAlloc, Contract::NoChecks, Contract::NoPanic, Contract::Inline].into_iter().find(|c| c.name() == name)
+        [Contract::NoAlloc, Contract::NoChecks, Contract::NoPanic, Contract::Inline, Contract::Deterministic].into_iter().find(|c| c.name() == name)
     }
 }
 

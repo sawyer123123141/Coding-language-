@@ -5,6 +5,7 @@ use kestrel_syntax::ast::Contract;
 
 use super::region::{Copy, Lost};
 use crate::ir::*;
+use crate::range::events::Effect;
 use crate::range::report::{callee_name, display_name};
 use crate::range::report_copies::plain_name;
 use crate::range::sites::CheckKind;
@@ -159,11 +160,21 @@ pub(super) enum Help {
     Iface(FuncIdx),
     /// A `par for`'s arenas.
     ParFor,
+    /// What breaks `deterministic`.
+    Effect(Effect),
 }
 
 /// The words of `help` for an error about contract `c`.
 pub(super) fn help(m: &Module, help: Help, c: Contract) -> String {
     match help {
+        Help::Effect(effect) => match effect {
+            Effect::Clock => "pass the time step in as a parameter, like `step(var g, i, DT)`".to_string(),
+            Effect::Keyboard | Effect::Mouse => "read input outside and pass it in an `Inputs` struct".to_string(),
+            Effect::Window => "talk to the window outside and pass what the function needs in as parameters".to_string(),
+            Effect::SharedRandom => "keep an `Rng` from the `random` module in the game state and call `g.rng.randi_range(1, 6)`".to_string(),
+            Effect::ImpureFnValue => "give it a `pure` function type, like `pure (Fighter) -> int`".to_string(),
+            Effect::ImpureMethod(method) => self::help(m, Help::Iface(method), c),
+        },
         Help::Report => "`kestrel check --report` lists everything left in it".to_string(),
         Help::FnValue => "contracts can't see into a function value yet; call a named function or an interface method instead".to_string(),
         Help::Iface(method) => {

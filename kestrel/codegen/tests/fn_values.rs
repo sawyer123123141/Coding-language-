@@ -40,7 +40,7 @@ fn func(name: &str, params: u32, locals: Vec<Local>, ret: Option<KTy>, body: Vec
 /// `add_env(env: i64, x: int) -> int { x + int(env) }`, `call_it(f: fn, x: int) -> int { f(x) }`
 /// and `env_of(f: fn) -> i64 { f.env }`: the pieces of a function value whose environment isn't 0.
 fn module() -> Module {
-    let int_sig = KSig { params: vec![(KTy::I32, false)], ret: Some(KTy::I32) };
+    let int_sig = KSig { params: vec![(KTy::I32, false)], ret: Some(KTy::I32), pure: false };
     let env_int = expr(ExprKind::Cast(Box::new(load(0, KTy::I64))), KTy::I32);
     let sum = expr(ExprKind::Binary(BinOp::Add, Box::new(load(1, KTy::I32)), Box::new(env_int)), KTy::I32);
     let add_env = func(

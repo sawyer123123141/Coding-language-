@@ -15,7 +15,7 @@ use kestrel_syntax::Span;
 use super::events::{self, Event, Unknown, What, PAR_ARENAS};
 use super::items::arrange;
 use super::report::{classes, Class, Item, ItemKind, Owners};
-use super::summary::{self, Chain, Part, Summary};
+use super::summary::{self, Chain, Part, Stop, Summary};
 use super::Analysis;
 use crate::ir::*;
 use region::Copy;
@@ -34,6 +34,8 @@ const NO_ALLOC: u8 = ContractSet::NO_ALLOC.0;
 const NO_CHECKS: u8 = ContractSet::NO_CHECKS.0;
 const NO_PANIC: u8 = ContractSet::NO_PANIC.0;
 const INLINE: u8 = ContractSet::INLINE.0;
+const DETERMINISTIC: u8 = ContractSet::DETERMINISTIC.0;
+/// The contracts range analysis decides: giving a function up breaks them all.
 const ALL: u8 = NO_ALLOC | NO_CHECKS | NO_PANIC | INLINE;
 
 /// The one bit of contract `c` (not `ContractSet::of`, which gives `no_panic` with `no_checks`).
@@ -43,6 +45,7 @@ fn bit(c: Contract) -> u8 {
         Contract::NoChecks => NO_CHECKS,
         Contract::NoPanic => NO_PANIC,
         Contract::Inline => INLINE,
+        Contract::Deterministic => DETERMINISTIC,
     }
 }
 
@@ -225,8 +228,12 @@ impl Cx<'_> {
                 }
                 out
             }
+            What::Effect(effect, r) => vec![Failure::new(DETERMINISTIC, words::unknown(m, r, home), Help::Effect(*effect))],
+            // (The other contracts fail through `summary::stop` for a cut walk; `deterministic`
+            // only for one in the copy, since range analysis giving up doesn't matter to it.)
+            What::Cut => vec![Failure::new(DETERMINISTIC, words::stopped(m, Stop::Deep, g, target == Some(g)), Help::Report)],
             What::Call(callee) => self.call_failures(copy, target, g, *callee, line, home),
-            What::Fail(_) | What::Body(_) | What::Closure(_) | What::Cut => Vec::new(),
+            What::Fail(_) | What::Body(_) | What::Closure(_) => Vec::new(),
         }
     }
 
@@ -241,7 +248,7 @@ impl Cx<'_> {
         }
         // (A function's own body calling itself: everything in it is in the copy already.)
         if !(copy.block.is_none() && c == copy.func) {
-            self.chains(&self.summaries[c], target == Some(c), &mut out, |chain, verb| words::call(m, callee, chain, line, verb));
+            self.chains(c, target == Some(c), &mut out, |chain, verb| words::call(m, callee, chain, line, verb));
         }
         match self.classes[c] {
             Class::User | Class::Closure => out.push(Failure::new(INLINE, words::not_inlined(m, "it", callee, line, &self.why(g, c, line), home), Help::Report)),
@@ -251,11 +258,13 @@ impl Cx<'_> {
         out
     }
 
-    /// The failures a call breaks `no_alloc`, `no_checks` and `no_panic` through: for each, the
-    /// chain of `s` with the fewest calls (on a tie, one the summary can't see into, then a check,
-    /// a way to fail, recursion), in the words `text` makes of a chain and the verb of an item it
-    /// ends in. With `recursion_said`, the call's recursion is already a failure.
-    fn chains(&self, s: &Summary, recursion_said: bool, out: &mut Vec<Failure>, text: impl Fn(&Chain, &str) -> String) {
+    /// The failures a call to function `f` breaks `no_alloc`, `no_checks`, `no_panic` and
+    /// `deterministic` through: for each, the chain of its summary with the fewest calls (on a tie,
+    /// one the summary can't see into, then a check, a way to fail, recursion), in the words `text`
+    /// makes of a chain and the verb of an item it ends in. With `recursion_said`, the call's
+    /// recursion is already a failure.
+    fn chains(&self, f: usize, recursion_said: bool, out: &mut Vec<Failure>, text: impl Fn(&Chain, &str) -> String) {
+        let s = &self.summaries[f];
         let checks = s.checks.as_ref().map(|c| (c, c.reason.via.as_str()));
         let recursion = if recursion_said { None } else { s.recursion.as_ref() };
         let picks: [(u8, [Option<Pick>; 4]); 3] = [
@@ -268,12 +277,27 @@ impl Cx<'_> {
                 out.push(Failure::new(breaks, text(chain, verb), Help::Report));
             }
         }
+        if let Some(chain) = &s.effects {
+            out.push(Failure::new(DETERMINISTIC, text(chain, ""), self.effect_help(f, chain)));
+        }
+    }
+
+    /// The help for `deterministic` broken through `chain`, the effects chain of function `f`: by
+    /// what the function the chain ends in does first (its own reason).
+    fn effect_help(&self, f: usize, chain: &Chain) -> Help {
+        let end = chain.steps.last().map_or(f, |s| s.callee.0 as usize);
+        let first = self.events[end].iter().find_map(|e| match &e.what {
+            What::Effect(effect, _) => Some(Help::Effect(*effect)),
+            What::Cut => Some(Help::Report),
+            _ => None,
+        });
+        first.unwrap_or(Help::Report)
     }
 
     /// `main`'s constants, built by `init` before it starts: what they break, at `line`.
     fn constants(&self, init: FuncIdx, line: u32, home: u32, out: &mut Vec<Failure>) {
         let m = self.m;
-        self.chains(&self.summaries[init.0 as usize], false, out, |chain, _| words::constants(m, chain, line));
+        self.chains(init.0 as usize, false, out, |chain, _| words::constants(m, chain, line));
         self.generated_calls(init.0 as usize, &format!("{}, which", words::CONSTANTS), line, home, out);
     }
 

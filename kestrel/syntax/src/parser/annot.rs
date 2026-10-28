@@ -80,7 +80,7 @@ impl Parser {
         loop {
             let (name, span) = self.expect_ident("a contract name")?;
             let Some(contract) = Contract::from_name(&name) else {
-                let msg = format!("unknown contract `{name}`; `@prove` takes `no_alloc`, `no_checks`, `no_panic` and `inline`");
+                let msg = format!("unknown contract `{name}`; `@prove` takes `no_alloc`, `no_checks`, `no_panic`, `inline` and `deterministic`");
                 self.error(span, msg);
                 return Err(());
             };

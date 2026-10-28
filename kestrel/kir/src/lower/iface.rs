@@ -156,7 +156,7 @@ impl FnLowerer<'_> {
                 (ty, p.is_var || ty.is_aggregate())
             })
             .collect();
-        let sig = KSig { params, ret: (info.ret != Ty::Unit).then(|| kty(info.ret)) };
+        let sig = KSig { params, ret: (info.ret != Ty::Unit).then(|| kty(info.ret)), pure: info.is_pure };
         let keeps = self.helpers.proves.keeps(self.program, info.decl(self.program).span);
         (pre, recv, lowered, sig, keeps, FuncIdx(f.0))
     }

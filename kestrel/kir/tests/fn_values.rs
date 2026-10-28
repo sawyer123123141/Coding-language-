@@ -88,7 +88,7 @@ fn a_named_function_value_is_its_thunk_and_a_call_goes_through_it() {
     for (callee, n, sig) in calls {
         assert!(callee.path.is_empty() && main.locals[callee.root.0 as usize].ty == KTy::Fn);
         assert_eq!(n, 1);
-        assert_eq!(sig, KSig { params: vec![(KTy::I32, false)], ret: Some(KTy::I32) });
+        assert_eq!(sig, KSig { params: vec![(KTy::I32, false)], ret: Some(KTy::I32), pure: true });
     }
 }
 
@@ -121,8 +121,8 @@ main() {
     assert!(matches!(mk.ret, Some(KTy::Struct(_))));
     let sigs: Vec<KSig> = indirect(&func(&m, "main").body).into_iter().map(|c| c.2).collect();
     let struct_ty = mk.ret.unwrap();
-    assert_eq!(sigs[0], KSig { params: vec![(KTy::I32, true), (KTy::I32, false)], ret: None });
-    assert_eq!(sigs[1], KSig { params: vec![(KTy::Str, true), (struct_ty, true)], ret: Some(struct_ty) });
+    assert_eq!(sigs[0], KSig { params: vec![(KTy::I32, true), (KTy::I32, false)], ret: None, pure: false });
+    assert_eq!(sigs[1], KSig { params: vec![(KTy::Str, true), (struct_ty, true)], ret: Some(struct_ty), pure: false });
 }
 
 #[test]

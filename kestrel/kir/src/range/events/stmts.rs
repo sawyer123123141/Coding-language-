@@ -1,6 +1,6 @@
 //! The statements of the events walk: each one's operands, then what it does.
 
-use super::{Unknown, Walk, What, MAX_DEPTH};
+use super::{Effect, Walk, What, MAX_DEPTH};
 use crate::ir::*;
 use crate::range::show::place_text;
 
@@ -22,7 +22,11 @@ impl Walk<'_> {
 
     fn stmt_inner(&mut self, s: &Stmt) {
         match s {
-            Stmt::Let(_, e) | Stmt::Return(Some(e)) | Stmt::RandSeed(e) => self.expr(e),
+            Stmt::Let(_, e) | Stmt::Return(Some(e)) => self.expr(e),
+            Stmt::RandSeed(e) => {
+                self.expr(e);
+                self.effect(e.line, Effect::SharedRandom, "calls `rand_seed`".to_string());
+            }
             Stmt::Assign(p, e) => {
                 self.expr(e);
                 self.place_walk(p);
@@ -84,15 +88,15 @@ impl Walk<'_> {
                 }
                 self.call(*g, line);
             }
-            Stmt::CallIndirect { callee, args, .. } => {
+            Stmt::CallIndirect { callee, args, sig } => {
                 self.place_walk(callee);
                 self.args(args);
-                self.indirect(callee, crate::visit::args_line(args));
+                self.indirect(callee, crate::visit::args_line(args), sig.pure);
             }
-            Stmt::CallVirtual { recv, args, keeps, method, .. } => {
+            Stmt::CallVirtual { recv, args, keeps, method, sig, .. } => {
                 self.place_walk(recv);
                 self.args(args);
-                self.virtual_call(recv, crate::visit::args_line(args), Unknown::Virtual(*keeps, *method));
+                self.virtual_call(recv, crate::visit::args_line(args), *keeps, *method, sig.pure);
             }
             Stmt::Print(parts) | Stmt::Write(parts) => self.print(parts),
             Stmt::ListAdd(p, value) => {

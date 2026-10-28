@@ -2,7 +2,7 @@
 //! allocation and way to fail, checked against its arm in codegen and the runtime function it
 //! calls.
 
-use super::{Unknown, Walk, What};
+use super::{Effect, Unknown, Walk, What};
 use crate::range::summary::Part;
 use crate::range::show::{expr_text, place_text, type_name};
 use crate::range::MAX_ITEMS;
@@ -83,21 +83,31 @@ impl Walk<'_> {
         let callee = &self.m.funcs[g.0 as usize];
         if callee.native.is_some() {
             self.unknown(line, Unknown::Native, format!("calls the native function `{}`", callee.name));
+            self.effect(line, Effect::of_native(&callee.name), format!("calls `{}`", callee.name));
         } else if self.m.init != Some(g) {
             // (The constants are built once, before `main`: not a cost of the call.)
             self.push(line, What::Call(g));
         }
     }
 
-    pub(super) fn indirect(&mut self, callee: &Place, line: u32) {
+    /// A call through the function value at `callee`, whose type is `pure` or not.
+    pub(super) fn indirect(&mut self, callee: &Place, line: u32, pure: bool) {
         let name = place_text(self.m, self.f, callee, callee.path.len());
         let via = if name.starts_with("(...)") { "calls a function value".to_string() } else { format!("calls the function value `{name}`") };
-        self.unknown(line, Unknown::Indirect, via);
+        self.unknown(line, Unknown::Indirect, via.clone());
+        if !pure {
+            self.effect(line, Effect::ImpureFnValue, via);
+        }
     }
 
-    pub(super) fn virtual_call(&mut self, recv: &Place, line: u32, kind: Unknown) {
+    /// A call through the interface value at `recv` to `method` (the interface's own), which
+    /// promises `keeps` and is `pure` or not.
+    pub(super) fn virtual_call(&mut self, recv: &Place, line: u32, keeps: ContractSet, method: FuncIdx, pure: bool) {
         let via = format!("calls a method of the interface value `{}`", place_text(self.m, self.f, recv, recv.path.len()));
-        self.unknown(line, kind, via);
+        self.unknown(line, Unknown::Virtual(keeps, method), via.clone());
+        if !pure && !keeps.contains(ContractSet::DETERMINISTIC) {
+            self.effect(line, Effect::ImpureMethod(method), via);
+        }
     }
 
     pub(super) fn list_add(&mut self, p: &Place, line: u32) {

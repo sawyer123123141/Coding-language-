@@ -3,9 +3,11 @@
 //! the calls. Each candidate was checked against its arm in codegen and the runtime function it
 //! calls (`runtime/src/list.rs`, `arena.rs`, `map.rs`, `string*.rs`, `par.rs`).
 
+mod effects;
 mod reasons;
 mod stmts;
 
+pub use effects::Effect;
 use reasons::{elem_text, limit, place_ty};
 use super::show::{expr_text, place_text};
 use super::summary::{Part, Reason};
@@ -33,6 +35,10 @@ pub enum What {
     /// native. The reason is the report's words ("calls the function value `f`", line, "; its
     /// body isn't known here").
     Unknown(Unknown, Reason),
+    /// Something that breaks `deterministic` (and nothing else): the reason is a chain's words
+    /// ("calls `randf`", line, ", which uses the program's shared random generator"). A native or
+    /// a call through a value has its `Unknown` event as well, for the other contracts.
+    Effect(Effect, Reason),
     /// A call to a function of the program.
     Call(FuncIdx),
     /// A `par for` that runs this body.
@@ -258,8 +264,9 @@ impl Walk<'_> {
             | ExprKind::ListNew
             | ExprKind::MapNew
             | ExprKind::NoneLit
-            | ExprKind::FnRef(_)
-            | ExprKind::RandFloat => {}
+            | ExprKind::FnRef(_) => {}
+            // (`randf_range` is lowered to a `randf` too.)
+            ExprKind::RandFloat => self.effect(line, Effect::SharedRandom, "calls `randf`".to_string()),
             ExprKind::MakeFn { code, env: EnvKind::None } => self.closure(e, *code),
             ExprKind::StaticArena => self.alloc(line, Some("makes the arena the constants live in".to_string()), "makes the arena the constants live in".to_string(), ""),
             ExprKind::NewArena => self.alloc(line, Some("`Arena()` makes a new arena".to_string()), "makes a new arena".to_string(), ""),
@@ -313,9 +320,14 @@ impl Walk<'_> {
                 self.expr(src);
                 self.alloc(line, Some("copies an interface value's data".to_string()), "copies an interface value's data".to_string(), "");
             }
-            ExprKind::Binary(_, a, b) | ExprKind::And(a, b) | ExprKind::Or(a, b) | ExprKind::RandInt(a, b) => {
+            ExprKind::Binary(_, a, b) | ExprKind::And(a, b) | ExprKind::Or(a, b) => {
                 self.expr(a);
                 self.expr(b);
+            }
+            ExprKind::RandInt(a, b) => {
+                self.expr(a);
+                self.expr(b);
+                self.effect(line, Effect::SharedRandom, "calls `randi_range`".to_string());
             }
             ExprKind::Math(_, xs) | ExprKind::StructLit(_, xs) | ExprKind::VariantLit(_, _, xs) | ExprKind::VecLit(xs) => {
                 for x in xs {
@@ -339,15 +351,15 @@ impl Walk<'_> {
                 self.args(args);
                 self.call(*g, line);
             }
-            ExprKind::CallIndirect { callee, args, .. } => {
+            ExprKind::CallIndirect { callee, args, sig } => {
                 self.place_walk(callee);
                 self.args(args);
-                self.indirect(callee, line);
+                self.indirect(callee, line, sig.pure);
             }
-            ExprKind::CallVirtual { recv, args, keeps, method, .. } => {
+            ExprKind::CallVirtual { recv, args, keeps, method, sig, .. } => {
                 self.place_walk(recv);
                 self.args(args);
-                self.virtual_call(recv, line, Unknown::Virtual(*keeps, *method));
+                self.virtual_call(recv, line, *keeps, *method, sig.pure);
             }
             ExprKind::MakeIface { data: IfaceData::Borrowed(p), .. } => self.place_walk(p),
             ExprKind::MakeIface { data: IfaceData::Boxed(x), .. } => {

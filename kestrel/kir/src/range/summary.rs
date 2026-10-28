@@ -80,6 +80,10 @@ pub struct Summary {
     pub unknown_panic: Option<Chain>,
     /// It can call itself, directly or through other functions, so the stack may run out.
     pub recursion: Option<Chain>,
+    /// Its result may depend on more than its arguments: a native, the shared random generator,
+    /// or a call through a value that isn't `pure` (`deterministic`'s); or the events walk was cut
+    /// short in it.
+    pub effects: Option<Chain>,
     /// The checks left in it and in everything it calls, each counted once (the report's; 0 when
     /// not asked for).
     pub checks_left: u32,
@@ -114,6 +118,12 @@ pub fn summarize(m: &Module, a: &Analysis, events: &[Vec<Event>], own_checks: Op
     };
     let checks: Vec<Option<Reason>> = (0..events.len()).map(|f| a.funcs.get(f).and_then(|c| c.left.first()).map(check_reason)).collect();
     let recursion = cycles::own_reasons(m, events);
+    // (Range analysis giving up doesn't matter here; a cut walk may hide an effect.)
+    let effects = first(&|e| match &e.what {
+        What::Effect(_, r) => Some(r.clone()),
+        What::Cut => Some(Reason { direct: None, via: String::new(), tail: cut_tail(), line: 0, part: Part::Whole }),
+        _ => None,
+    });
     let out = Chains::new(events);
     let reach = match own_checks {
         Some(own) => reachable_checks(m, events, own),
@@ -128,6 +138,7 @@ pub fn summarize(m: &Module, a: &Analysis, events: &[Vec<Event>], own_checks: Op
         out.chains(unknown(|k| k.allocates())),
         out.chains(unknown(|k| k.fails())),
         out.chains(recursion),
+        out.chains(effects),
     ]
     .map(|v| v.into_iter());
     reach
@@ -143,6 +154,7 @@ pub fn summarize(m: &Module, a: &Analysis, events: &[Vec<Event>], own_checks: Op
                 unknown_alloc: next(5),
                 unknown_panic: next(6),
                 recursion: next(7),
+                effects: next(8),
                 checks_left,
             }
         })
@@ -210,6 +222,12 @@ fn stopped(a: &Analysis, events: &[Vec<Event>], f: usize) -> Option<Reason> {
     let (did, why) = stop(a, events, f)?.words();
     let tail = format!(", where range analysis {did}{why}");
     Some(Reason { direct: None, via: String::new(), tail, line: 0, part: Part::Whole })
+}
+
+/// How a chain ends in a function whose events walk was cut (`Stop::Deep`'s words).
+fn cut_tail() -> String {
+    let (did, why) = Stop::Deep.words();
+    format!(", where range analysis {did}{why}")
 }
 
 /// The calls a function makes, in the order it makes them (a `par for` body and a closure made

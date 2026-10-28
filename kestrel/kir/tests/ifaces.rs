@@ -206,8 +206,8 @@ fn a_call_through_an_interface_names_its_slot_and_leaves_self_out_of_the_signatu
         }
         _ => {}
     });
-    let hit = KSig { params: vec![(KTy::I32, false)], ret: None };
-    let at = KSig { params: Vec::new(), ret: Some(KTy::Struct(StructIdx(0))) };
+    let hit = KSig { params: vec![(KTy::I32, false)], ret: None, pure: false };
+    let at = KSig { params: Vec::new(), ret: Some(KTy::Struct(StructIdx(0))), pure: true };
     assert_eq!(calls, vec![(0, hit), (2, at)]);
     let hp: Vec<u32> = {
         let mut out = Vec::new();

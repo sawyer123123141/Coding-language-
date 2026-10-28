@@ -117,7 +117,8 @@ impl<'a> Cx<'a> {
                         item(ItemKind::CanFail, reason_text(self.m, r, home));
                     }
                 }
-                What::Body(_) | What::Closure(_) | What::Cut => {}
+                // (The report doesn't list what breaks `deterministic`.)
+                What::Body(_) | What::Closure(_) | What::Cut | What::Effect(..) => {}
                 What::Call(callee) => {
                     let c = callee.0 as usize;
                     let summary = &self.summaries[c];

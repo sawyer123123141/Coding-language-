@@ -1,0 +1,26 @@
+struct Game {
+    n: int
+}
+
+pub spawn_enemy(var g: Game) {
+    if g.n < 0 {
+        return
+    }
+    g.n = g.n ^ randi_range(1, 6)
+}
+
+@prove(deterministic)
+pub step(var g: Game) {
+    spawn_enemy(var g)
+}
+
+@prove(deterministic)
+pub reseed(var g: Game) {
+    rand_seed(1)
+    g.n = 0
+}
+
+main() {}
+
+// error 12: `step` can't be proven `deterministic`: it calls `spawn_enemy` (line 14), which calls `randi_range` (line 9), which uses the program's shared random generator
+// error 17: `reseed` can't be proven `deterministic`: it calls `rand_seed` (line 19), which uses the program's shared random generator

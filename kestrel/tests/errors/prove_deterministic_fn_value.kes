@@ -1,0 +1,13 @@
+@prove(deterministic)
+pub hit(var f: Fighter, on_hit: (Fighter) -> int) { f.hp = f.hp ^ on_hit(f) }
+
+@prove(deterministic)
+pub hit_pure(var f: Fighter, on_hit: pure (Fighter) -> int) { f.hp = f.hp ^ on_hit(f) }
+
+struct Fighter {
+    hp: int
+}
+
+main() {}
+
+// error 1: `hit` can't be proven `deterministic`: it calls the function value `on_hit` (line 2), which isn't `pure`

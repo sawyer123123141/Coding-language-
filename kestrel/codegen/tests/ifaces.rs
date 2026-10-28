@@ -54,7 +54,7 @@ fn module() -> Module {
         recv: Place::local(LocalIdx(0)),
         slot: 0,
         args: vec![Arg::Value(expr(ExprKind::Load(Place::local(LocalIdx(1))), KTy::I64))],
-        sig: KSig { params: vec![(KTy::I64, false)], ret: Some(KTy::I64) },
+        sig: KSig { params: vec![(KTy::I64, false)], ret: Some(KTy::I64), pure: false },
         keeps: ContractSet::default(),
         // (No interface method of its own: it names a function only for messages.)
         method: FuncIdx(0),

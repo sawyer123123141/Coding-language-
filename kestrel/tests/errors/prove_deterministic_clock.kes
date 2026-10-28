@@ -1,0 +1,29 @@
+use window
+use draw
+
+@prove(deterministic)
+pub step(var g: Game) {
+    g.x += window.delta()
+}
+
+struct Game {
+    x: float
+    t: i64
+}
+
+@prove(deterministic)
+pub tick(var g: Game) {
+    g.t = window.ticks_usec()
+}
+
+// Any other native talks to the window.
+@prove(deterministic)
+pub wipe() {
+    draw.clear(draw.Color(0, 0, 0))
+}
+
+main() {}
+
+// error 4: `step` can't be proven `deterministic`: it calls `window.delta` (line 6), which reads the clock
+// error 14: `tick` can't be proven `deterministic`: it calls `window.ticks_usec` (line 16), which reads the clock
+// error 20: `wipe` can't be proven `deterministic`: it calls `draw.clear` (line 22), which talks to the window, which a deterministic function can't depend on

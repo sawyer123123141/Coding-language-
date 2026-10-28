@@ -1,0 +1,26 @@
+use input
+use { Key from input }
+
+// `input.axis` is inlined into `steer`: its call to `input.held` is said at its own line, as for
+// every contract.
+
+@prove(deterministic)
+pub update() -> bool {
+    input.held(Key.W)
+}
+
+@prove(deterministic)
+pub steer() -> float {
+    input.axis(Key.A, Key.D)
+}
+
+@prove(deterministic)
+pub aim() -> vec2 {
+    input.mouse()
+}
+
+main() {}
+
+// error 7: `update` can't be proven `deterministic`: it calls `input.held` (line 9), which reads the keyboard
+// error 12: `steer` can't be proven `deterministic`: it calls `input.held` (input.kes:86), which reads the keyboard
+// error 17: `aim` can't be proven `deterministic`: it calls `input.mouse` (line 19), which reads the mouse

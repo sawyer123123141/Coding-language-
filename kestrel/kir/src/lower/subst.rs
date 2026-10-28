@@ -32,7 +32,7 @@ pub(super) fn known_ksig(t: &Tables, sig: SigId) -> KSig {
             (ty, p.is_var || ty.is_aggregate())
         })
         .collect();
-    KSig { params, ret: (sig.ret != Ty::Unit).then(|| kty(sig.ret)) }
+    KSig { params, ret: (sig.ret != Ty::Unit).then(|| kty(sig.ret)), pure: sig.is_pure }
 }
 
 /// What a constant expression names, for code outside any function (the constants' build
