@@ -1,0 +1,65 @@
+// Determinism: a ring of 16 snapshots over 300 frames. Every 7th frame the game rolls back 5
+// frames and re-runs them with the same inputs; its final `checksum` equals the one of a straight
+// run without rollbacks. Both are printed and must be identical in every build.
+use { Rng from random }
+
+struct Game {
+    frame: int
+    pos: vec2
+    vel: vec2
+    score: int
+    history: list[int]
+    rng: Rng
+}
+
+// The input of a frame depends only on the frame number.
+input(frame: int) -> int {
+    (frame * 7 + frame / 3) % 5 - 2
+}
+
+advance(var g: Game, move: int) {
+    let kick = g.rng.randf_range(-0.5, 0.5)
+    g.vel = (g.vel + vec2(float(move), kick) * 0.1) * 0.98
+    g.pos = g.pos + g.vel
+    g.score += move * 3 + g.frame % 4
+    g.history.add(g.score)
+    g.frame += 1
+}
+
+fresh() -> Game {
+    Game(frame: 0, pos: vec2(0, 0), vel: vec2(1, 0), score: 0, history: [], rng: Rng(seed: 77))
+}
+
+play(rollbacks: bool) -> Game {
+    var g = fresh()
+    var ring: list[Game] = []
+    for i from 0 to 16 { ring.add(g) }
+    var back = 0
+    while g.frame < 300 {
+        ring[g.frame % 16] = g
+        advance(var g, input(g.frame))
+        if rollbacks and g.frame % 7 == 0 and g.frame >= 5 {
+            // Back to the state five frames ago, then the same five frames again.
+            let target = g.frame - 5
+            g = ring[target % 16]
+            while g.frame < target + 5 {
+                ring[g.frame % 16] = g
+                advance(var g, input(g.frame))
+            }
+            back += 1
+        }
+    }
+    print("rollbacks", back)
+    g
+}
+
+main() {
+    let rolled = play(true)
+    let straight = play(false)
+    print(checksum(rolled), checksum(straight), checksum(rolled) == checksum(straight))
+    print(rolled.frame, rolled.score, rolled.pos, rolled.history.len)
+}
+// expect: rollbacks 42
+// expect: rollbacks 0
+// expect: 6799930083668525852 6799930083668525852 true
+// expect: 300 450 vec2(x: 54.048874, y: -34.916855) 300

@@ -1,0 +1,58 @@
+// Determinism: 200 bodies with `vec2` positions, 1,000 steps of a fixed `DT` using `sin`, `cos`,
+// `atan2`, `exp`, `log`, `pow` and `sqrt`, with the bodies stepped in a `par for`. It prints the
+// `checksum` of the whole state every 250 steps, and a few raw values so a difference is easy to
+// find. The lines must be identical in every build and at any thread count.
+let DT = 0.01
+let BODIES = 200
+
+struct Body {
+    pos: vec2
+    vel: vec2
+    spin: float
+    mass: f64
+    age: int
+}
+
+struct World {
+    bodies: list[Body]
+    tick: int
+}
+
+pure step(var b: Body, t: int) {
+    let angle = atan2(b.vel.y, b.vel.x) + b.spin * 0.01
+    let speed = sqrt(b.vel.x * b.vel.x + b.vel.y * b.vel.y) + 0.001
+    let push = vec2(cos(angle), sin(angle)) * (speed * 0.999)
+    let drag = exp(-DT * 0.05)
+    b.vel = (push + vec2(sin(b.pos.y * 0.1), cos(b.pos.x * 0.1)) * 0.01) * drag
+    b.pos = b.pos + b.vel * DT
+    b.spin = b.spin + sin(b.pos.x + float(t) * 0.001) * 0.1
+    b.mass = pow(b.mass, 0.9999) + log(1.0 + f64(speed)) * 0.0001
+    b.age += 1
+}
+
+main() {
+    var w = World(bodies: [], tick: 0)
+    for i from 0 to BODIES {
+        let a = float(i) * 0.7
+        w.bodies.add(Body(pos: vec2(cos(a) * 3.0, sin(a) * 3.0), vel: vec2(sin(a * 1.3), cos(a * 0.9)), spin: float(i % 7) - 3.0, mass: 1.0 + f64(i) * 0.01, age: 0))
+    }
+    for t from 0 to 1000 {
+        par for b in w.bodies {
+            step(var b, t)
+        }
+        w.tick += 1
+        if w.tick % 250 == 0 {
+            print(w.tick, checksum(w))
+        }
+    }
+    let first = w.bodies[0]
+    let last = w.bodies[BODIES - 1]
+    print(first.pos, first.spin, first.mass)
+    print(last.pos, last.spin, last.mass)
+}
+// expect: 250 8833392080462543213
+// expect: 500 -7362058023118986372
+// expect: 750 2187843396518032676
+// expect: 1000 -3165968733279055487
+// expect: vec2(x: 3.995524, y: 0.21960953) -88.35436 1.0630079815859421
+// expect: vec2(x: 0.4849148, y: 2.9018135) 87.781395 2.7547913433017834

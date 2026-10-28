@@ -1,0 +1,80 @@
+// Determinism: 20 draws of each `Rng` method from three seeds, and the `checksum` of a struct
+// holding every kind of value. Run in the JIT and in both exes, the lines must be identical
+// (`cli/tests/determinism.rs`).
+use { Rng from random }
+
+enum Mood {
+    Calm
+    Angry { level: int }
+}
+
+struct Pet {
+    name: string
+    age: int
+}
+
+struct Everything {
+    i: int
+    f: float
+    d: f64
+    nan: f64
+    v2: vec2
+    v4: vec4
+    s: string
+    pets: list[Pet]
+    scores: map[string, int]
+    maybe: int?
+    mood: Mood
+    flag: bool
+}
+
+main() {
+    for seed in [1, 12345, 987654321] {
+        var r = Rng(seed: seed)
+        var next_sum: i64 = 0
+        var f_sum = 0.0
+        var range_sum = 0.0
+        var int_sum = 0
+        for i from 0 to 20 {
+            next_sum = next_sum ^ r.next()
+            f_sum += r.randf()
+            range_sum += r.randf_range(-3.5, 8.25)
+            int_sum += r.randi_range(-100, 100)
+        }
+        print(seed, next_sum, f_sum, range_sum, int_sum)
+        print(r.next(), r.randf(), r.randf_range(0.0, 1.0), r.randi_range(1, 6))
+    }
+
+    let zero = 0.0
+    let e = Everything(
+        i: -7,
+        f: 2.5,
+        d: 1.0 / 3.0,
+        nan: zero / zero,
+        v2: vec2(1.5, -2.25),
+        v4: vec4(0.1, 0.2, 0.3, 0.4),
+        s: "hello, world",
+        pets: [Pet(name: "Ada", age: 3), Pet(name: "Bo", age: 9)],
+        scores: {"a": 1, "b": 22, "c": 333},
+        maybe: 42,
+        mood: Mood.Angry(level: 4),
+        flag: true,
+    )
+    print(checksum(e))
+    var shifted = e
+    shifted.pets[1].age = 10
+    print(checksum(shifted), checksum(shifted) != checksum(e))
+    var calm = e
+    calm.mood = Mood.Calm
+    calm.maybe = none
+    print(checksum(calm))
+}
+// expect: 1 2547383739970260943 11.537804 54.411854 -180
+// expect: -6464018130115657927 0.22077304 0.42273447 6
+// expect: 12345 3136528239019049996 7.588422 39.813374 -504
+// expect: -244860004067747208 0.56303346 0.33638293 4
+// expect: 987654321 -2856502236712164879 11.021628 73.18265 -253
+// expect: -736485839538868741 0.93472356 0.5554063 2
+// expect: 4652816377419666984
+// expect: 3026030263426256649 true
+// expect: -4239285941350119362
