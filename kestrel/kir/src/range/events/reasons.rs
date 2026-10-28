@@ -50,6 +50,28 @@ impl Walk<'_> {
                 let tail = " and fails if it is being allocated into";
                 self.fail(0, Some(format!("freeing the arena at {at} fails if it is being allocated into")), format!("frees the arena at {at}"), tail);
             }
+            Stmt::Dup(p) if p.path.is_empty() && is_room_copy(&self.f.locals[p.root.0 as usize].name) => {
+                // An assignment's copy when the target's own buffer has too little room for the value
+                // (see `lower::assign_into`), named by what it copies.
+                self.place_walk(p);
+                let at = self.place(p);
+                let noun = match place_ty(self.m, self.f, p) {
+                    KTy::Map(..) => "map",
+                    KTy::Array(_) => "array",
+                    _ => "list",
+                };
+                let when = if noun == "map" {
+                    format!(" when the {noun} there has too little room or is being looped over")
+                } else {
+                    format!(" when the {noun} there has too little room")
+                };
+                let (direct, via) = if at.starts_with('`') {
+                    (format!("the assignment copies {at} to a new {noun}{when}"), format!("copies {at} to a new {noun}"))
+                } else {
+                    (format!("the assignment makes a new {noun}{when}"), format!("makes a new {noun}"))
+                };
+                self.alloc(0, Some(direct), via, &when);
+            }
             Stmt::Dup(p) => {
                 self.place_walk(p);
                 let at = self.place(p);
@@ -191,6 +213,12 @@ impl Walk<'_> {
         }
     }
 
+}
+
+/// Whether a local named `name` is an assign helper's temporary for a target with too little
+/// room: its own name, or its name inlined (`__kestrel_assign_4.__room7`).
+fn is_room_copy(name: &str) -> bool {
+    name.rsplit_once('.').map_or(name, |(_, own)| own).starts_with(ROOM_COPY)
 }
 
 /// The type of the place `p` in `f`.

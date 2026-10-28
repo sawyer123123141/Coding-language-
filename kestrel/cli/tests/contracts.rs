@@ -337,3 +337,64 @@ fn a_copy_of_a_library_contract_names_where_the_program_made_it() {
     let want = "`Stack[string].put` (made by `Stack[string]` on main.kes:5) can't be proven `no_alloc`: it allocates on line 5: makes a copy of `v`";
     assert!(stderr(&out).contains(want), "{want}\n{}", stderr(&out));
 }
+
+const PLAIN_STATE: &str = "use { Rng from random }
+
+struct Game {
+    ball: vec2
+    vel: vec2
+    p1: float
+    p2: float
+    score1: int
+    score2: int
+    rng: Rng
+}
+
+struct Pair {
+    game: Game
+    ring: list[Game]
+}
+
+@prove(no_alloc)
+save(var ring: list[Game], k: int, g: Game) {
+    ring[k % 16] = g
+}
+
+@prove(no_alloc)
+restore(var g: Game, ring: list[Game], k: int) {
+    g = ring[k % 16]
+}
+
+fresh(seed: int) -> Game {
+    Game(ball: vec2(0, 0), vel: vec2(1, 0.5), p1: 0, p2: 0, score1: seed, score2: 0, rng: Rng(seed: 5))
+}
+
+main() {
+    var ring: list[Game] = []
+    for i from 0 to 16 {
+        ring.add(fresh(i))
+    }
+    var g = fresh(99)
+    var p = Pair(game: fresh(7), ring: ring)
+    @prove(no_alloc)
+    for k from 0 to 100 {
+        save(var ring, k, g)
+        restore(var g, ring, k + 3)
+        p.ring[k % 16] = p.game
+        p.game = p.ring[(k + 11) % 16]
+    }
+    print(g.score1, p.game.score1, ring.len)
+}
+";
+
+#[test]
+fn save_and_restore_of_plain_state_prove_no_alloc() {
+    // A snapshot with no list, map or string is copied without allocating, by separate variables
+    // and by assignments between field-disjoint places of one root.
+    let dir = project("plain_state", &[("pong.kes", PLAIN_STATE)]);
+    for args in [&["check"][..], &["check", "--release"]] {
+        let out = kestrel(args, &dir.join("pong.kes"));
+        assert!(out.status.success(), "{args:?}: {}", stderr(&out));
+        assert_eq!((stdout(&out).as_str(), stderr(&out).as_str()), ("", ""), "{args:?}");
+    }
+}

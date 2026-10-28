@@ -842,6 +842,12 @@ in chunk.mem {               // owned: lives as long as chunk.mem
   deep copy: the two values share nothing afterwards, and the program
   prints exactly what a fresh copy would. Storage never grows in place;
   a list without room gets a fresh copy in the current arena, as before.
+  A map with room takes the new keys into its own entries and index (its
+  string keys and heap values are still copied fresh); a map being looped
+  over is copied fresh, so the loop sees the replacement as before.
+  `@prove(no_alloc)` holds for saving and restoring a snapshot with no
+  list, map or string; one that holds them keeps the fresh copy for a
+  target without room, so the contract names that assignment.
   A target that may share memory with the value (`a = a.child`,
   `ring[i] = ring[j]`), or whose index has a call in it, is copied
   fresh. So a ring of snapshots stops allocating once each slot has

@@ -107,7 +107,7 @@ fn expr_builds(e: &Expr, calls: &mut Vec<FuncIdx>) -> bool {
             StrOp::Chars | StrOp::CharLen | StrOp::Find | StrOp::Starts | StrOp::Cmp | StrOp::Ends | StrOp::ToInt | StrOp::ToFloat => false,
         },
         ExprKind::Map(op, ..) => match op {
-            MapOp::Get | MapOp::Has | MapOp::Remove | MapOp::Used | MapOp::Live | MapOp::Lock => false,
+            MapOp::Get | MapOp::Has | MapOp::Remove | MapOp::Used | MapOp::Live | MapOp::Lock | MapOp::CopyInto => false,
         },
         ExprKind::Call(g, _) => {
             calls.push(*g);

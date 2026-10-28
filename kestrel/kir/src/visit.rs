@@ -150,7 +150,7 @@ pub fn walk_expr<'a>(e: &'a Expr, f: &mut impl FnMut(Node<'a>)) {
             for x in xs {
                 walk_expr(x, f);
             }
-            place(p, matches!(op, MapOp::Remove | MapOp::Lock), f);
+            place(p, matches!(op, MapOp::Remove | MapOp::Lock | MapOp::CopyInto), f);
         }
         ExprKind::Format(parts) => print_args(parts, f),
         ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::Cap(p) | ExprKind::FnEnv(p) => place(p, false, f),

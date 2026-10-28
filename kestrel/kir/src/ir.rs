@@ -332,6 +332,11 @@ pub struct Func {
     pub native: Option<String>,
 }
 
+/// The start of the name of an assign helper's temporary that holds today's copy because the
+/// target's own list, array or map has too little room (see `lower::assign_into`): the report
+/// words that copy as the assignment's. (A name starting with `__` is one the compiler made.)
+pub(crate) const ROOM_COPY: &str = "__room";
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Local {
     pub name: String,

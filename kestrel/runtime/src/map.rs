@@ -33,7 +33,7 @@ const EMPTY: i32 = -1;
 const REMOVED: i32 = -2;
 /// Entry fields: the key's hash (u32), whether it's live (u8), the key.
 const HASH: usize = 0;
-const LIVE: usize = 4;
+pub(crate) const LIVE: usize = 4;
 const KEY: usize = 8;
 /// Key kinds: 0, 1, 2 are integers (or bools) of 1, 4 and 8 bytes.
 const STRING: i32 = 3;
@@ -103,7 +103,7 @@ impl Key<'_> {
 impl Map {
     /// # Safety
     /// `i` must be below `cap`, with `size` the entry size.
-    unsafe fn entry(&self, i: i64, size: i64) -> *mut u8 {
+    pub(crate) unsafe fn entry(&self, i: i64, size: i64) -> *mut u8 {
         self.entries.add((i * size) as usize)
     }
 
@@ -200,7 +200,7 @@ impl Map {
     ///
     /// # Safety
     /// The table and entries must be allocated, entries of `size` bytes.
-    unsafe fn rebuild(&mut self, size: i64) {
+    pub(crate) unsafe fn rebuild(&mut self, size: i64) {
         let n = self.slot_count as usize;
         std::slice::from_raw_parts_mut(self.slots, n).fill(EMPTY);
         for i in 0..self.used {

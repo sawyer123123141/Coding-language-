@@ -36,6 +36,7 @@ pub(crate) struct RtFuncs {
     pub map_insert: FuncId,
     pub map_remove: FuncId,
     pub map_dup: FuncId,
+    pub map_copy_into: FuncId,
     pub str_eq: FuncId,
     pub str_chars: FuncId,
     pub str_at: FuncId,
@@ -127,6 +128,7 @@ impl RtFuncs {
             map_insert: decl("kestrel_rt_map_insert", &[ptr, ptr, I32, I64, I64, I32, ptr], Some(ptr))?,
             map_remove: decl("kestrel_rt_map_remove", &[ptr, ptr, I32, I64], Some(I8))?,
             map_dup: decl("kestrel_rt_map_dup", &[ptr, I64, I64], None)?,
+            map_copy_into: decl("kestrel_rt_map_copy_into", &[ptr, ptr, I64, I64], Some(I8))?,
             str_eq: decl("kestrel_rt_str_eq", &[ptr, I64, ptr, I64], Some(I8))?,
             str_chars: decl("kestrel_rt_str_chars", &[ptr, I64], Some(I64))?,
             str_at: decl("kestrel_rt_str_at", &[ptr, I64, I64, I32, ptr, ptr], None)?,
@@ -178,7 +180,7 @@ pub(crate) const MATH: [(MathOp, &str, usize); 10] = [
 
 /// Addresses of every runtime export, for registering with the JIT.
 pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
-    use kestrel_runtime::{arena, checksum, fpu, gpu, list, map, math, panic, par, print, sort, start, string, string_find, string_make, string_parse};
+    use kestrel_runtime::{arena, checksum, fpu, gpu, list, map, map_copy, math, panic, par, print, sort, start, string, string_find, string_make, string_parse};
     vec![
         ("kestrel_rt_print_i64", print::kestrel_rt_print_i64 as *const u8),
         ("kestrel_rt_print_f32", print::kestrel_rt_print_f32 as *const u8),
@@ -213,6 +215,7 @@ pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
         ("kestrel_rt_map_insert", map::kestrel_rt_map_insert as *const u8),
         ("kestrel_rt_map_remove", map::kestrel_rt_map_remove as *const u8),
         ("kestrel_rt_map_dup", map::kestrel_rt_map_dup as *const u8),
+        ("kestrel_rt_map_copy_into", map_copy::kestrel_rt_map_copy_into as *const u8),
         ("kestrel_rt_str_eq", map::kestrel_rt_str_eq as *const u8),
         ("kestrel_rt_str_chars", string::kestrel_rt_str_chars as *const u8),
         ("kestrel_rt_str_at", string::kestrel_rt_str_at as *const u8),

@@ -1,0 +1,232 @@
+// env: KESTREL_POISON=1
+// env: KESTREL_ARENA_COUNT=1
+// expect: {"a1": 31, "a3": 33, "a4": 34} 3 3
+// expect: 31 9 false 3 103
+// expect: {"a2": 12} 1 1
+// expect: -1 9 false 1 101
+// expect: {"a1": 61, "a2": 62, "a3": 63, "a5": 65, "a6": 66, "a7": 67} 6 6
+// expect: 61 9 false 6 106
+// expect: {} 0 0
+// expect: -1 9 false 0 100
+// expect: 20 18 19
+// expect: {0: [-1, 0, 100], 2: [-3, 20, 102]} {0: [0, 0], 2: [2, 20]}
+// expect: {5: {5: 5, 6: 6, 7: 7}} {5: {5: 5, 6: 6}}
+// expect: Box(m: {"a1": 51, "a3": 53, "a4": 54}, n: 2)
+// expect: Box(m: {"a1": 51, "a3": 53, "a4": 54, "q": 7}, n: 2) Box(m: {"a1": 51, "a3": 53, "a4": 54}, n: 2)
+// expect: Pair(a: {3: 3, 4: 4}, b: {3: 3})
+// expect: Pair(a: {3: 3, 4: 4}, b: {3: 3}) {5: 5, 6: 6}
+// expect: {} 0
+// expect: {3: 3, 4: 4}
+// expect: {9: 9} {}
+// expect: 29 39 false {7: 7}
+// expect: {"a1": 5, "a2": 6, "a4": 8, "a5": 9} 4
+// expect: {"a1": 3, "a3": 5} 2
+// expect: {"a1": 7, "a2": 8, "a3": 9, "a5": 11, "a6": 12, "a7": 13} 6
+// expect: 42448 {5: 50, 6: 60, 7: 70} {0: 1} {5: 50, 6: 60, 7: 70} {5: 50, 6: 60, 7: 70}
+// expect: 1 70
+// expect: 8 80
+// expect: {7: 70, 8: 80}
+// expect: 1 40
+// expect: 5 50
+// expect: {4: 40, 5: 50} {7: 70, 8: 80} {4: 40, 5: 50}
+// expect: a1 53
+// expect: a4 54
+// expect: Box(m: {"a1": 51, "a3": 53, "a4": 54}, n: 2)
+// expect: {4: 40, 5: 50, 105: 50} {4: 40, 5: 50}
+// expect-stderr: arenas alive at exit: 0
+// Assigning a map over another reuses the target's entries and index when it has room and isn't
+// being looped over; heap keys and values get fresh copies. Every line prints what a fresh copy
+// would. The source of the arena case is freed (and poisoned) after the assignment.
+struct Box {
+    m: map[string, int]
+    n: int
+}
+
+struct Pair {
+    a: map[int, int]
+    b: map[int, int]
+}
+
+struct Holder {
+    mem: Arena = Arena()
+    m: map[string, int]
+}
+
+struct Item {
+    id: int
+    m: map[int, int]
+}
+
+struct Cell {
+    m: map[int, int] = map[int, int]()
+}
+
+// `n` live string keys, with removed ones among them: keys a0 .. a{n+1}, then a0 and a{n/2+1}
+// removed.
+keyed(n: int, base: int) -> map[string, int] {
+    var m: map[string, int] = {}
+    for i from 0 to n + 2 {
+        m["a{i}"] = base + i
+    }
+    m.remove("a0")
+    m.remove("a{n / 2 + 1}")
+    m
+}
+
+// How many of the keys a0 .. a19 and x the map finds.
+found(m: map[string, int]) -> int {
+    var n = 0
+    for i from 0 to 20 {
+        if m.has("a{i}") { n += 1 }
+    }
+    if m.has("x") { n += 100 }
+    n
+}
+
+main() {
+    // Sources of 3, 1, 6 and 0 keys over a target with room for 8.
+    var dst = keyed(4, 100)
+    for n in [3, 1, 6, 0] {
+        let src = keyed(n, n * 10)
+        dst = src
+        print(dst, dst.len, found(dst))
+        dst["x"] = 9
+        print(dst.get("a1", -1), dst.get("x", -1), src.has("x"), src.len, found(dst))
+    }
+    // A target without room: today's copy.
+    var small: map[string, int] = {"z": 0}
+    let big20 = keyed(20, 0)
+    small = big20
+    print(small.len, found(small), small.get("a19", -1))
+
+    // A map of lists: the values are the target's own.
+    var ml: map[int, list[int]] = {1: [1], 2: [2, 2], 3: [3], 4: [4]}
+    var other: map[int, list[int]] = {}
+    for i from 0 to 3 {
+        other[i] = [i, i * 10]
+    }
+    other.remove(1)
+    ml = other
+    for k, v in ml {
+        v[0] = -k - 1
+        v.add(k + 100)
+    }
+    print(ml, other)
+
+    // A map of maps.
+    var mm: map[int, map[int, int]] = {1: {1: 1}, 2: {2: 2}}
+    let mm2: map[int, map[int, int]] = {5: {5: 5, 6: 6}}
+    mm = mm2
+    for k, v in mm {
+        v[7] = 7
+    }
+    print(mm, mm2)
+
+    // A struct holding a map.
+    var b = Box(m: keyed(2, 0), n: 1)
+    let b2 = Box(m: keyed(3, 50), n: 2)
+    b = b2
+    print(b)
+    b.m["q"] = 7
+    print(b, b2)
+
+    // Field-disjoint places of one root reuse; a map assigned to itself doesn't.
+    var p = Pair(a: {1: 1, 2: 2}, b: {3: 3})
+    p.a = p.b
+    p.a[4] = 4
+    print(p)
+    p.a = p.a
+    var m = {5: 5, 6: 6}
+    m = m
+    print(p, m)
+
+    // An empty target with no entries yet, and a target emptied by an empty source.
+    var c = Cell()
+    let empty: map[int, int] = {}
+    c.m = empty
+    print(c.m, c.m.len)
+    c.m = p.a
+    print(c.m)
+    c.m = empty
+    c.m[9] = 9
+    print(c.m, empty)
+
+    // Growing a reused target past its room, and removing from it.
+    var g = {1: 1, 2: 2, 3: 3}
+    let g2 = {7: 7}
+    g = g2
+    for i from 10 to 40 {
+        g[i] = i
+    }
+    g.remove(7)
+    g.remove(10)
+    print(g.len, g.get(39, -1), g.has(7), g2)
+
+    // Arena-held string keys: the source's arena is freed and poisoned after the assignment.
+    var target = keyed(5, 0)
+    for n in [4, 2, 6] {
+        var hs = Holder(m: keyed(0, 0))
+        in hs.mem {
+            hs.m = keyed(n, n)
+        }
+        target = hs.m
+        hs = Holder(m: keyed(1, 1))
+        arena {
+            var junk: list[string] = []
+            for i from 0 to 50 { junk.add("zzzzzzzzzzzzzzzz{i}") }
+        }
+        print(target, found(target))
+    }
+
+    // A `par for` assigning a captured map to each item's field.
+    var items: list[Item] = []
+    for i from 0 to 64 {
+        var im = map[int, int]()
+        for k from 0 to i % 7 {
+            im[k] = i
+        }
+        items.add(Item(id: i, m: im))
+    }
+    let template = {5: 50, 6: 60, 7: 70}
+    par for it in items {
+        if it.id % 2 == 0 {
+            it.m = template
+        }
+        it.id = it.id + it.m.len
+    }
+    var sum = 0
+    for it in items {
+        sum += it.id
+        for k, v in it.m { sum += k * v }
+    }
+    print(sum, items[0].m, items[1].m, items[62].m, template)
+
+    // A map assigned while a loop runs over it is copied, so the loop sees the replacement.
+    var lm = {1: 10, 2: 20, 3: 30}
+    let lm2 = {7: 70, 8: 80}
+    let lm3 = {4: 40, 5: 50}
+    for k, v in lm {
+        lm = lm2
+        print(k, v)
+    }
+    print(lm)
+    lm = {1: 10, 2: 20, 3: 30}
+    for k, v in lm {
+        lm = lm2
+        lm = lm3
+        print(k, v)
+    }
+    print(lm, lm2, lm3)
+    var bb = Box(m: keyed(3, 0), n: 0)
+    for k, v in bb.m {
+        bb = b2
+        print(k, v)
+    }
+    print(bb)
+    var copy: map[int, int] = {1: 1}
+    for k, v in lm {
+        copy = lm
+        copy[k + 100] = v
+    }
+    print(copy, lm)
+}

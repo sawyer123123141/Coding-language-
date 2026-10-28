@@ -37,6 +37,12 @@ pub enum MapOp {
     Live,
     /// `[]`: starts a loop over the map; the old lock count (i64), for `MapUnlock`.
     Lock,
+    /// `[src]`, a `Load` of another map of the same type: copies `src`'s live entries, in order,
+    /// into the place's own entries and rebuilds its index table, reusing them
+    /// (`kestrel_rt_map_copy_into`). A bool: true when it did; false, with nothing changed, when
+    /// the map is being looped over or has too little room. Keys and values are copied as bytes
+    /// (heap ones still point at `src`'s memory). Never allocates or fails; `src` is only read.
+    CopyInto,
 }
 
 /// What `Stmt::List` does with the list at its place.

@@ -1,0 +1,16 @@
+// expect: 1 70 3
+// expect: 8 80 3
+// expect-exit: 101
+// expect-stderr: a map was replaced while looping over it on line 10 of assign_reuse_maps_loop.kes
+// A map assigned while a loop runs over it is copied fresh: the new map isn't being looped over,
+// so keys can be added to it, and the loop reports the replacement once its entries run out.
+main() {
+    let other = {7: 70, 8: 80}
+    var big = {1: 10, 2: 20, 3: 30, 4: 40, 5: 50, 6: 60}
+    for k, v in big {
+        big = other
+        big[k + 100] = v
+        print(k, v, big.len)
+    }
+    print(big)
+}

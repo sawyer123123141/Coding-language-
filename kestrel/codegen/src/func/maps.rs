@@ -95,6 +95,16 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 self.b.ins().store(MemFlagsData::trusted(), new, header, LOCKS);
                 old
             }
+            MapOp::CopyInto => {
+                let kir::ExprKind::Load(src) = &args[0].kind else { unreachable!("`CopyInto` copies from a map's place") };
+                let l = self.map_layout_of(self.place_ty(map));
+                // The source is found first, then the target, as a call finds its arguments.
+                let from = self.place_addr(src)?;
+                let header = self.place_addr(map)?;
+                let size = self.b.ins().iconst(types::I64, l.entry_size as i64);
+                let align = self.b.ins().iconst(types::I64, l.entry_align as i64);
+                self.call_id(self.shared.rt.map_copy_into, &[header, from, size, align]).expect("returns a bool")
+            }
             MapOp::Get => unreachable!("`Get` builds an optional in memory"),
         })
     }

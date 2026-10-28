@@ -7,7 +7,7 @@ use super::kty;
 use crate::ir::*;
 
 /// The key and value types of a map type.
-fn key_value(ty: KTy, t: &Tables) -> (KTy, KTy) {
+pub(super) fn key_value(ty: KTy, t: &Tables) -> (KTy, KTy) {
     let KTy::Map(k, v) = ty else { unreachable!("{ty:?} isn't a map") };
     (kty(t.elems[k.0 as usize]), kty(t.elems[v.0 as usize]))
 }
@@ -15,7 +15,11 @@ fn key_value(ty: KTy, t: &Tables) -> (KTy, KTy) {
 /// `for i from 0 to m.used { if live(i) { body(key, value) } }`, over the
 /// map in local 0 with local 1 as `i`.
 fn each_entry(body: impl FnOnce(Place, Place) -> Vec<Stmt>) -> Stmt {
-    let (m, i) = (Place::local(LocalIdx(0)), LocalIdx(1));
+    each_entry_of(Place::local(LocalIdx(0)), LocalIdx(1), body)
+}
+
+/// `each_entry` over the map at `m`, with the local `i` as the entry's number.
+pub(super) fn each_entry_of(m: Place, i: LocalIdx, body: impl FnOnce(Place, Place) -> Vec<Stmt>) -> Stmt {
     let at = expr(ExprKind::Load(Place::local(i)), KTy::I64);
     let key = with(&m, Proj::MapKey { at: at.clone() });
     // The body never adds or removes keys, so the entry stays put.

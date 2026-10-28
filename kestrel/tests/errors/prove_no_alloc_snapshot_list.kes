@@ -1,0 +1,22 @@
+struct State {
+    xs: list[int]
+    hp: int
+}
+
+@prove(no_alloc)
+save(var ring: list[State], k: int, g: State) {
+    ring[k % 16] = g
+}
+
+main() {
+    var ring: list[State] = []
+    for i from 0 to 16 {
+        ring.add(State(xs: [], hp: 0))
+    }
+    save(var ring, 3, State(xs: [1, 2], hp: 5))
+    print(ring[3])
+}
+
+// A state holding a list keeps today's copy for a target without room, so `no_alloc` can't be
+// proven (the ring still stops allocating at run time).
+// error 6: `save` can't be proven `no_alloc`: it allocates on line 8: the assignment copies `g.xs` to a new list when the list there has too little room

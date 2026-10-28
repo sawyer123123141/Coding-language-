@@ -8,6 +8,7 @@ pub mod fpu;
 pub mod gpu;
 pub mod list;
 pub mod map;
+pub mod map_copy;
 pub mod math;
 pub mod panic;
 pub mod par;

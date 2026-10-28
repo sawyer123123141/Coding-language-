@@ -1,10 +1,11 @@
 //! A ring of snapshots stops allocating once each slot has held the longest state: assigning a
-//! snapshot over an older one reuses the older one's buffers when they have room.
+//! snapshot over an older one reuses the older one's buffers (a list's items, a map's entries and
+//! index) when they have room.
 //!
 //! Memory is measured with the runtime's own report (`KESTREL_ARENA_REPORT=1`: the size of the
 //! program arena's blocks when `main` returns), which is exact. Each program runs for 2 periods
 //! and for 200; a period (816 frames: 16 slots times 51 lengths) is enough for every slot to have
-//! held the longest list. The control leaves out the save and restore lines, to show the program's
+//! held the longest list (the map program's is 336). The control leaves out the save and restore lines, to show the program's
 //! own work allocates nothing after its first period.
 
 use std::fs;
@@ -50,6 +51,44 @@ main() {{
     )
 }
 
+/// The same with a `map[int, int]` in the state whose key count cycles from 0 to 20. A period is
+/// 336 frames (16 slots times 21 counts). Each frame removes every key and adds the frame's: the
+/// map's removed entries are compacted in place, so its own updates stop allocating.
+fn map_program(periods: u32, ring: bool) -> String {
+    let (save, restore) = if ring {
+        ("        ring[f % 16] = g\n", "        if f % 7 == 0 {\n            g = ring[(f + 11) % 16]\n        }\n")
+    } else {
+        ("", "")
+    };
+    format!(
+        "let PERIODS = {periods}
+
+struct State {{
+    m: map[int, int]
+    hp: int
+}}
+
+main() {{
+    var g = State(m: {{}}, hp: 0)
+    var ring: list[State] = []
+    for i from 0 to 16 {{
+        ring.add(State(m: {{}}, hp: 0))
+    }}
+    for f from 0 to PERIODS * 336 {{
+        for k from 0 to 21 {{
+            g.m.remove(k)
+        }}
+        for k from 0 to f % 21 {{
+            g.m[k] = f
+        }}
+        g.hp = f
+{save}{restore}    }}
+    print(g.hp, g.m.len, ring.len)
+}}
+"
+    )
+}
+
 /// Writes `src` as `name.kes` and gives its path.
 fn write(name: &str, src: &str) -> PathBuf {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("snapshot_memory");
@@ -77,5 +116,14 @@ fn a_snapshot_ring_stops_allocating_after_its_first_lap() {
     let (control_few, control_many) = (bytes("control_2", 2, false), bytes("control_200", 200, false));
     assert_eq!(control_few, control_many, "the control's own work allocates after its first period");
     let (ring_few, ring_many) = (bytes("ring_2", 2, true), bytes("ring_200", 200, true));
+    assert_eq!(ring_few, ring_many, "the snapshot ring grew from {ring_few} bytes (2 periods) to {ring_many} bytes (200 periods)");
+}
+
+#[test]
+fn a_map_in_a_snapshot_ring_stops_allocating() {
+    let bytes = |name: &str, periods: u32, ring: bool| arena_bytes(&write(name, &map_program(periods, ring)));
+    let (control_few, control_many) = (bytes("map_control_2", 2, false), bytes("map_control_200", 200, false));
+    assert_eq!(control_few, control_many, "the control's own work allocates after its first period");
+    let (ring_few, ring_many) = (bytes("map_ring_2", 2, true), bytes("map_ring_200", 200, true));
     assert_eq!(ring_few, ring_many, "the snapshot ring grew from {ring_few} bytes (2 periods) to {ring_many} bytes (200 periods)");
 }

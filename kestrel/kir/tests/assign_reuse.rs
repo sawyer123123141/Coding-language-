@@ -187,3 +187,41 @@ fn a_loop_over_the_target_reindexes() {
     });
     assert_eq!(binds, 0, "the element pointer isn't used: {:#?}", func(&m, "main").body);
 }
+
+/// The `__kestrel_assign_` helper of the map type `ty`'s first statement: `if Map(CopyInto, dst,
+/// [Load(src)]) { then } else { otherwise }`.
+fn map_helper(m: &Module, key: KTy) -> (&[Stmt], &[Stmt]) {
+    let h = m
+        .funcs
+        .iter()
+        .find(|f| f.name.starts_with("__kestrel_assign_") && matches!(f.locals[0].ty, KTy::Map(k, _) if m.elem(k) == key))
+        .unwrap_or_else(|| panic!("no assign helper for a map keyed by {key:?}"));
+    let [Stmt::If { cond, then_body, else_body }] = &h.body[..] else { panic!("{:#?}", h.body) };
+    let ExprKind::Map(MapOp::CopyInto, dst, args) = &cond.kind else { panic!("{cond:?}") };
+    assert_eq!((dst.root, cond.ty), (LocalIdx(0), KTy::Bool));
+    assert!(matches!(&args[..], [Expr { kind: ExprKind::Load(src), .. }] if src.root == LocalIdx(1) && src.path.is_empty()), "{args:?}");
+    (then_body, else_body)
+}
+
+#[test]
+fn a_map_assignment_copies_into_the_target_first() {
+    let src = "struct S {\n m: map[string, list[int]]\n n: map[int, int]\n}\n\
+main() {\n var a = S(m: {}, n: {})\n let b = S(m: {\"x\": [1]}, n: {1: 2})\n a = b\n print(a)\n}\n";
+    let m = lower_src(src);
+    assert_eq!(assign_calls(&m, "main").len(), 1, "{:#?}", func(&m, "main").body);
+    // Plain keys and values: the entries' bytes are all there is.
+    let (then_body, else_body) = map_helper(&m, KTy::I32);
+    assert!(then_body.is_empty(), "{then_body:#?}");
+    assert!(else_body.iter().any(|s| matches!(s, Stmt::Assign(..))), "today's copy: {else_body:#?}");
+    // String keys and list values get their own copies over the copied entries.
+    let (then_body, else_body) = map_helper(&m, KTy::Str);
+    assert!(matches!(then_body, [Stmt::ForRange { .. }]), "{then_body:#?}");
+    let mut copies = 0;
+    visit::walk(then_body, &mut |n| match n {
+        visit::Node::Stmt(Stmt::Dup(p)) if matches!(p.path.last(), Some(Proj::MapKey { .. } | Proj::MapValue { .. })) => copies += 1,
+        visit::Node::Stmt(Stmt::Call(..)) => copies += 1,
+        _ => {}
+    });
+    assert!(copies >= 2, "{then_body:#?}");
+    assert!(!else_body.is_empty());
+}

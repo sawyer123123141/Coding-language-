@@ -1,8 +1,8 @@
 //! Where a plain `target = value` reuses the target's storage: the value reads an existing place
-//! of the same type, the type holds a list, array or string and no owning value, the two places
-//! can't share memory, and the target's index expressions can't write. Then lowering calls the
-//! type's assign helper (see `assign_into`) instead of copying the value and storing the copy.
-//! Anything else keeps today's lowering, untouched.
+//! of the same type, the type holds a list, array, map or string and no owning value, the two
+//! places can't share memory, and the target's index expressions can't write. Then lowering
+//! calls the type's assign helper (see `assign_into`) instead of copying the value and storing
+//! the copy. Anything else keeps today's lowering, untouched.
 //!
 //! Evaluation order is today's: the value's place is found first (its index expressions run, and
 //! its bounds are checked), then the target's. Today the value is copied before the target's
