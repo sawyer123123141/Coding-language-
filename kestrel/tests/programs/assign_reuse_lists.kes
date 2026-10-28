@@ -1,0 +1,149 @@
+// expect: [500, 501, 502, 503, 504] 5
+// expect: [500, 501, 502, 503, 504] [500, 501, 502, 503, 504, -1]
+// expect: [200, 201] 2
+// expect: [200, 201] [200, 201, -1]
+// expect: [800, 801, 802, 803, 804, 805, 806, 807] 8
+// expect: [800, 801, 802, 803, 804, 805, 806, 807] [800, 801, 802, 803, 804, 805, 806, 807, -1]
+// expect: [] 0
+// expect: [] [-1]
+// expect: [500, 501, 502, 503, 504] 5
+// expect: [500, 501, 502, 503, 504] [500, 501, 502, 503, 504, -1]
+// expect: [[30, 31, 32], [], [60, 61, 62, 63, 64, 65]]
+// expect: [30, 31, 32] [30, 31, 32, -7]
+// expect: [[10]]
+// expect: [10] [10, -7]
+// expect: [[20, 21], [60, 61, 62, 63, 64, 65], []]
+// expect: [20, 21] [20, 21, -7]
+// expect: [[20, 21], [60, 61, 62, 63, 64, 65], [], [40, 41, 42, 43]]
+// expect: [20, 21] [20, 21, -7]
+// expect: [0, 0.5, 1, 1.5] 4
+// expect: 0 99
+// expect: [0, 0.5] 2
+// expect: 0 99
+// expect: [0, 0.5, 1, 1.5, 2, 2.5] 6
+// expect: 0 99
+// expect: abc
+// expect: xyz3 xyz3
+// expect: lit xyz3
+// expect: ["a", "z3", "ccc"]
+// expect: ["a", "z3", "ccc"] ["q", "z3", "ccc"]
+// expect: State(xs: [1, 2, 3], name: "first", hp: 10, pos: vec2(x: 1, y: 2), opt: none, shape: Shape.Circle(r: 2, tags: ["a", "bb"]))
+// expect: State(xs: [1, 2, 3], name: "first", hp: 10, pos: vec2(x: 1, y: 2), opt: none, shape: Shape.Circle(r: 2, tags: ["a", "bb"]))
+// expect: State(xs: [4], name: "second", hp: 20, pos: vec2(x: 3, y: 4), opt: 7, shape: Shape.Circle(r: 5, tags: ["ccc"]))
+// expect: State(xs: [4], name: "second", hp: 20, pos: vec2(x: 3, y: 4), opt: 7, shape: Shape.Circle(r: 5, tags: ["ccc"]))
+// expect: State(xs: [5, 6, 7, 8, 9], name: "second", hp: 30, pos: vec2(x: 5, y: 6), opt: 8, shape: Shape.Box(w: 1, h: 2))
+// expect: State(xs: [5, 6, 7, 8, 9], name: "second", hp: 30, pos: vec2(x: 5, y: 6), opt: 8, shape: Shape.Box(w: 1, h: 2))
+// expect: State(xs: [], name: "fourth", hp: 40, pos: vec2(x: 7, y: 8), opt: none, shape: Shape.Dot)
+// expect: State(xs: [], name: "fourth", hp: 40, pos: vec2(x: 7, y: 8), opt: none, shape: Shape.Dot)
+// expect: State(xs: [1, 2, 3], name: "first", hp: 10, pos: vec2(x: 1, y: 2), opt: none, shape: Shape.Circle(r: 2, tags: ["a", "bb"]))
+// expect: State(xs: [1, 2, 3], name: "first", hp: 10, pos: vec2(x: 1, y: 2), opt: none, shape: Shape.Circle(r: 2, tags: ["a", "bb"]))
+// expect: State(xs: [5, 6, 7, 8, 9], name: "second", hp: 30, pos: vec2(x: 5, y: 6), opt: 8, shape: Shape.Box(w: 1, h: 2))
+// expect: State(xs: [5, 6, 7, 8, 9], name: "second", hp: 30, pos: vec2(x: 5, y: 6), opt: 8, shape: Shape.Box(w: 1, h: 2))
+// expect: State(xs: [4], name: "second", hp: 20, pos: vec2(x: 3, y: 4), opt: 7, shape: Shape.Circle(r: 5, tags: ["ccc"]))
+// expect: State(xs: [4], name: "second", hp: 20, pos: vec2(x: 3, y: 4), opt: 7, shape: Shape.Circle(r: 5, tags: ["ccc"]))
+// Assigning over an existing value reuses its storage when it has room; the output is the same as
+// a fresh copy's. Lists of numbers and of lists, arrays, strings, and a struct holding all of them
+// with an enum and an optional, each assigned from values that grow, shrink and change variant.
+enum Shape {
+    Circle { r: int, tags: list[string] }
+    Box { w: int, h: int }
+    Dot
+}
+
+struct State {
+    xs: list[int]
+    name: string
+    hp: int
+    pos: vec2
+    opt: int?
+    shape: Shape
+}
+
+nums(n: int, base: int) -> list[int] {
+    var xs: list[int] = []
+    for i from 0 to n { xs.add(base + i) }
+    xs
+}
+
+nested(counts: [int]) -> list[list[int]] {
+    var out: list[list[int]] = []
+    for c in counts { out.add(nums(c, c * 10)) }
+    out
+}
+
+floats(n: int) -> [f64] {
+    var a = array[f64](n)
+    for i from 0 to n { a[i] = 0.5 * i }
+    a
+}
+
+main() {
+    // A list of numbers: 5, 2, 8, 0 and 5 items.
+    var t: list[int] = []
+    for n in [5, 2, 8, 0, 5] {
+        let src = nums(n, n * 100)
+        t = src
+        print(t, t.len)
+        t.add(-1)
+        print(src, t)
+    }
+
+    // A list of lists whose inner lists shrink and grow.
+    var ll: list[list[int]] = []
+    // (The third fits in the room the first left: its last two lists are copied fresh.)
+    for counts in [[3, 0, 6], [1], [2, 6, 0], [2, 6, 0, 4]] {
+        let src = nested(counts)
+        ll = src
+        print(ll)
+        ll[0].add(-7)
+        print(src[0], ll[0])
+    }
+
+    // An array of equal, shorter and longer length.
+    var fs = floats(4)
+    for n in [4, 2, 6] {
+        let src = floats(n)
+        fs = src
+        print(fs, fs.len)
+        fs[0] = 99.0
+        print(src[0], fs[0])
+    }
+
+    // Strings: an equal one, a different one, then a literal.
+    var s = "abc"
+    let same = "ab" + "c"
+    s = same
+    print(s)
+    let other = "xyz{s.len}"
+    s = other
+    print(s, other)
+    s = "lit"
+    print(s, other)
+
+    // A list of string literals: an equal item is kept, a different one copied fresh.
+    var names: list[string] = ["a", "bb", "ccc"]
+    let names2: list[string] = ["a", "z{names.len}", "ccc"]
+    names = names2
+    print(names)
+    names[0] = "q"
+    print(names2, names)
+
+    // A struct, from states that differ in each field.
+    let a = State(xs: [1, 2, 3], name: "first", hp: 10, pos: vec2(1.0, 2.0), opt: none, shape: Shape.Circle(r: 2, tags: ["a", "bb"]))
+    let b = State(xs: [4], name: "second", hp: 20, pos: vec2(3.0, 4.0), opt: 7, shape: Shape.Circle(r: 5, tags: ["ccc"]))
+    let c = State(xs: [5, 6, 7, 8, 9], name: "second", hp: 30, pos: vec2(5.0, 6.0), opt: 8, shape: Shape.Box(w: 1, h: 2))
+    let d = State(xs: [], name: "fourth", hp: 40, pos: vec2(7.0, 8.0), opt: none, shape: Shape.Dot)
+    var g = State(xs: [], name: "", hp: 0, pos: vec2(0.0, 0.0), opt: none, shape: Shape.Dot)
+    for src in [a, b, c, d, a, c, b] {
+        g = src
+        print(g)
+        g.xs.add(100)
+        g.name = "changed"
+        g.hp += 1
+        match g.shape {
+            Circle k { k.tags.add("new") }
+            else { }
+        }
+        print(src)
+    }
+}

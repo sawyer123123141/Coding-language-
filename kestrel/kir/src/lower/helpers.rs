@@ -16,7 +16,7 @@ pub(crate) use super::heap::{has_heap, owning};
 use crate::ir::*;
 
 /// `place`'s optional holds a value: its tag isn't 0.
-fn has_value(place: &Place) -> Expr {
+pub(super) fn has_value(place: &Place) -> Expr {
     let tag = expr(ExprKind::Tag(place.clone()), KTy::U8);
     let zero = expr(ExprKind::Int(0), KTy::U8);
     expr(ExprKind::Binary(BinOp::Ne, Box::new(tag), Box::new(zero)), KTy::Bool)
@@ -34,7 +34,7 @@ pub(super) fn expr(kind: ExprKind, ty: KTy) -> Expr {
 }
 
 /// `tag(place) == variant`
-fn tag_is(place: &Place, variant: u32) -> Expr {
+pub(super) fn tag_is(place: &Place, variant: u32) -> Expr {
     let tag = expr(ExprKind::Tag(place.clone()), KTy::U8);
     let v = expr(ExprKind::Int(variant as i64), KTy::U8);
     expr(ExprKind::Binary(BinOp::Eq, Box::new(tag), Box::new(v)), KTy::Bool)
@@ -55,6 +55,11 @@ pub(crate) struct Helpers {
     pub(super) base: u32,
     pub(crate) funcs: Vec<Func>,
     pub(super) copy: HashMap<KTy, FuncIdx>,
+    /// The storage-reusing assignment of each type assigned that way (see `assign_into`).
+    pub(super) assign: HashMap<KTy, FuncIdx>,
+    /// The locals of the assign helper being built (see `assign_into`), which its copies add
+    /// temporaries to.
+    pub(super) assign_locals: Vec<Local>,
     drop: HashMap<KTy, FuncIdx>,
     pub(crate) print: HashMap<KTy, FuncIdx>,
     /// The search behind `has` and `find`, per list or array type.
@@ -98,6 +103,8 @@ impl Helpers {
             base,
             funcs,
             copy,
+            assign: HashMap::new(),
+            assign_locals: Vec::new(),
             drop,
             print,
             find,

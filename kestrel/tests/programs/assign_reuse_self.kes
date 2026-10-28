@@ -1,0 +1,141 @@
+// expect: State(xs: [0, 1, 2], name: "a", subs: [State(xs: [3, 3], name: "sub a", subs: [])])
+// expect: Node(v: 2, kids: [Node(v: 3, kids: []), Node(v: 4, kids: [])])
+// expect: Node(v: 6, kids: [Node(v: 6, kids: [Node(v: 7, kids: [])])])
+// expect: [State(xs: [0], name: "r0", subs: [State(xs: [1, 1], name: "sub r0", subs: [])]), State(xs: [0, 1], name: "r1", subs: [State(xs: [2, 2], name: "sub r1", subs: [])]), State(xs: [0, 1, 2], name: "r2", subs: [State(xs: [3, 3], name: "sub r2", subs: [])])]
+// expect: [State(xs: [0, 1, 2, 9], name: "r2", subs: [State(xs: [3, 3], name: "sub r2", subs: [])]), State(xs: [0, 1], name: "r1", subs: [State(xs: [2, 2], name: "sub r1", subs: [])]), State(xs: [0, 1, 2], name: "r2", subs: [State(xs: [3, 3], name: "sub r2", subs: [])])]
+// expect: Game(xs: [2, 3], history: [Game(xs: [7], history: []), Game(xs: [8, 9], history: [])])
+// expect: Game(xs: [8, 9], history: [])
+// expect: Game(xs: [8, 9], history: [])
+// expect: State(xs: [2, 2], name: "sub game", subs: [])
+// expect: [State(xs: [0, 1, 2, 3], name: "p1", subs: [State(xs: [4, 4], name: "sub p1", subs: [])]), State(xs: [0, 1, 2, 3], name: "p1", subs: [State(xs: [4, 4], name: "sub p1", subs: [])])]
+// expect: [State(xs: [2, 2], name: "sub game", subs: []), State(xs: [0, 1, 2, 3], name: "p1", subs: [State(xs: [4, 4], name: "sub p1", subs: [])])]
+// expect: State(xs: [0, 1, 2, 3], name: "p1", subs: [State(xs: [4, 4], name: "sub p1", subs: [])])
+// expect: [2, 2, 77] [0, 1, 2, 3]
+// expect: [State(xs: [0, 1, 2, 9], name: "r2", subs: [State(xs: [3, 3], name: "sub r2", subs: [])]), State(xs: [0, 1, 2, 3, 4], name: "h", subs: [State(xs: [5, 5], name: "sub h", subs: [])]), State(xs: [0, 1, 2], name: "r2", subs: [State(xs: [3, 3], name: "sub r2", subs: [])])] 1
+// expect: [State(xs: [0, 1, 2, 9], name: "r2", subs: [State(xs: [3, 3], name: "sub r2", subs: [])]), State(xs: [0, 1, 2, 3, 4], name: "h", subs: [State(xs: [5, 5], name: "sub h", subs: [])]), State(xs: [0, 1, 2, 3, 4], name: "h", subs: [State(xs: [5, 5], name: "sub h", subs: [])])] 2
+// expect: [State(xs: [0, 1, 2, 9], name: "r2", subs: [State(xs: [3, 3], name: "sub r2", subs: [])]), State(xs: [0, 1, 2, 3, 4], name: "h", subs: [State(xs: [5, 5], name: "sub h", subs: [])]), State(xs: [0, 1, 2, 3, 4], name: "h", subs: [State(xs: [5, 5], name: "sub h", subs: [])])]
+// expect: State(xs: [0], name: "h2", subs: [State(xs: [1, 1], name: "sub h2", subs: [])]) State(xs: [0, 99], name: "h2", subs: [State(xs: [1, 1], name: "sub h2", subs: [])])
+// expect: 7
+// expect: 8
+// expect: 9
+// Assignments whose two sides may share memory keep today's copy; ones whose places are
+// field-disjoint reuse. A call in the target's index runs where it always has. Every one prints
+// the same as a fresh copy would.
+struct Node {
+    v: int
+    kids: list[Node]
+}
+
+struct State {
+    xs: list[int]
+    name: string
+    subs: list[State]
+}
+
+struct Pair {
+    game: State
+    ring: list[State]
+}
+
+struct Game {
+    xs: list[int]
+    history: list[Game]
+}
+
+leaf(v: int) -> Node {
+    Node(v: v, kids: [])
+}
+
+state(n: int, name: string) -> State {
+    var xs: list[int] = []
+    for i from 0 to n { xs.add(i) }
+    State(xs: xs, name: name, subs: [State(xs: [n, n], name: "sub {name}", subs: [])])
+}
+
+next(var k: int) -> int {
+    k += 1
+    k % 3
+}
+
+pick(ring: list[State]) -> int {
+    ring.len - 1
+}
+
+grow(var s: State) -> int {
+    s.xs.add(99)
+    0
+}
+
+main() {
+    // `a = a`.
+    var a = state(3, "a")
+    a = a
+    print(a)
+
+    // `a = a.kids[0]` and `n.kids[0] = n`.
+    var t = Node(v: 1, kids: [Node(v: 2, kids: [leaf(3), leaf(4)]), leaf(5)])
+    t = t.kids[0]
+    print(t)
+    var n = Node(v: 6, kids: [leaf(7)])
+    n.kids[0] = n
+    print(n)
+
+    // `ring[i] = ring[j]`, with `i == j` and with `i != j`.
+    var ring: list[State] = [state(1, "r0"), state(2, "r1"), state(3, "r2")]
+    let i = 1
+    let j = 1
+    ring[i] = ring[j]
+    print(ring)
+    let j2 = 2
+    ring[0] = ring[j2]
+    ring[0].xs.add(9)
+    print(ring)
+
+    // A loop over the target's own history.
+    var g = Game(xs: [1], history: [Game(xs: [2, 3], history: [Game(xs: [7], history: []), Game(xs: [8, 9], history: [])]), Game(xs: [4, 5, 6], history: [])])
+    for s in g.history {
+        g = s
+        print(g)
+    }
+    print(g)
+
+    // Same-root places that overlap.
+    var p = Pair(game: state(2, "game"), ring: [state(1, "p0"), state(4, "p1")])
+    p.game = p.game.subs[0]
+    print(p.game)
+    let k = 0
+    let jj = 1
+    p.ring[k] = p.ring[jj]
+    print(p.ring)
+
+    // Same-root places whose fields are disjoint: these reuse.
+    p.ring[k] = p.game
+    print(p.ring)
+    p.game = p.ring[jj]
+    print(p.game)
+    p.ring[k].xs.add(77)
+    print(p.ring[k].xs, p.game.xs)
+
+    // A call in the target's index.
+    var kk = 0
+    let h = state(5, "h")
+    ring[next(var kk)] = h
+    print(ring, kk)
+    ring[next(var kk)] = h
+    print(ring, kk)
+    ring[pick(ring)] = h
+    print(ring)
+
+    // A call in the target's index that changes the value: the value was copied before it ran.
+    var h2 = state(1, "h2")
+    ring[grow(var h2)] = h2
+    print(ring[0], h2)
+
+    // A loop over the target's list: the item is read again after each assignment.
+    var gg = Game(xs: [1, 2, 3], history: [])
+    let hh = Game(xs: [7, 8, 9], history: [])
+    for x in gg.xs {
+        gg = hh
+        print(x)
+    }
+}

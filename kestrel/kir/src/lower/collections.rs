@@ -151,7 +151,7 @@ impl<'a> FnLowerer<'a> {
     }
 
     /// `p` with any element pointer at its root replaced by the place it points at.
-    fn origin(&self, p: &Place) -> Place {
+    pub(super) fn origin(&self, p: &Place) -> Place {
         match self.origins.get(&p.root) {
             Some(o) => {
                 let mut o = self.origin(o);

@@ -39,6 +39,8 @@ impl<'a> FnLowerer<'a> {
                 let ty = kty(self.ty(target.id));
                 let rhs = self.expr(value);
                 let value = match op.binary() {
+                    // Over an existing value: its storage is reused where it has room.
+                    None if self.reuses(&place, &rhs, ty) => return self.assign_reusing(place, rhs, out),
                     None => self.owned(rhs, false),
                     Some(bop) => {
                         // The value first, then the place (read and written), once.

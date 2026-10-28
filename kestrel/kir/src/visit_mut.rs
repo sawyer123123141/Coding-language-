@@ -73,6 +73,10 @@ pub fn walk_stmt<V: VisitMut + ?Sized>(v: &mut V, s: &mut Stmt) {
             v.visit_place(recv);
             walk_args(v, args);
         }
+        Stmt::CopyItems(dst, src) => {
+            v.visit_place(src);
+            v.visit_place(dst);
+        }
         Stmt::BindEnv { env, .. } => v.visit_expr(env),
         Stmt::MapSet(p, k, val, _) => {
             v.visit_expr(k);
@@ -95,7 +99,7 @@ pub fn walk_stmt<V: VisitMut + ?Sized>(v: &mut V, s: &mut Stmt) {
 pub fn walk_expr<V: VisitMut + ?Sized>(v: &mut V, e: &mut Expr) {
     match &mut e.kind {
         ExprKind::Format(parts) => walk_print(v, parts),
-        ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::Move(p) | ExprKind::FnEnv(p) => v.visit_place(p),
+        ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::Cap(p) | ExprKind::Move(p) | ExprKind::FnEnv(p) => v.visit_place(p),
         ExprKind::Map(_, p, xs) => {
             for x in xs {
                 v.visit_expr(x);

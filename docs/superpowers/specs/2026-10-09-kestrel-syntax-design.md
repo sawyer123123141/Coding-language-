@@ -808,6 +808,17 @@ in chunk.mem {               // owned: lives as long as chunk.mem
 - **Escape check:** a value allocated in an arena may not be stored
   anywhere that outlives that arena. Error names both lifetimes and
   suggests a copy: `chunk.mesh = tris.copy_to(chunk.mem)`.
+- **Assigning over an existing value reuses its storage** when it has
+  room: `ring[f % 16] = game` copies the game's lists into the slot's
+  own lists when they are long enough, and a string whose bytes are
+  already equal is kept. There is no syntax for it, and it is still a
+  deep copy: the two values share nothing afterwards, and the program
+  prints exactly what a fresh copy would. Storage never grows in place;
+  a list without room gets a fresh copy in the current arena, as before.
+  A target that may share memory with the value (`a = a.child`,
+  `ring[i] = ring[j]`), or whose index has a call in it, is copied
+  fresh. So a ring of snapshots stops allocating once each slot has
+  held the largest state.
 
 ## Optional values
 

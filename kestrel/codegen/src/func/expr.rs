@@ -20,6 +20,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             ExprKind::Bool(v) => self.b.ins().iconst(types::I8, *v as i64),
             ExprKind::Load(p) => self.load_place(p)?,
             ExprKind::Len(p) => self.len(p)?,
+            ExprKind::Cap(p) => self.cap(p)?,
             ExprKind::Map(op, p, args) => self.map_op(*op, p, args)?,
             ExprKind::Str(op, args) => self.str_scalar(*op, args)?,
             ExprKind::FieldOf(base, i) => {

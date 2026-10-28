@@ -170,11 +170,15 @@ pub fn display_name(m: &Module, g: FuncIdx) -> String {
     super::report_copies::plain_name(m, &f.name, f.lines.0)
 }
 
-/// A function as a chain names it: "`spawn`", "the closure at line 8", "`filter`".
+/// A function as a chain names it: "`spawn`", "the closure at line 8", "`filter`", "assigning a
+/// `Game`" (a storage-reusing assignment's helper, named by the type it assigns).
 pub fn callee_name(m: &Module, g: FuncIdx) -> String {
     let f = &m.funcs[g.0 as usize];
     if f.name.starts_with("__kestrel_closure_") {
         return format!("the closure at line {}", unpack_line(f.lines.0).0);
+    }
+    if f.name.starts_with("__kestrel_assign_") {
+        return format!("assigning a `{}`", super::events::elem_text(m, f.locals[0].ty));
     }
     if m.par_bodies.contains(&g) {
         return "the `par for` body".to_string();

@@ -1,0 +1,19 @@
+// expect: before
+// expect-exit: 101
+// expect-stderr: index 7 out of bounds for length 1 on line 17
+// When both indexes are out of bounds, the value's is reported, as when the value was copied
+// before the target was found.
+struct State {
+    name: string
+    xs: list[int]
+}
+
+main() {
+    var ring: list[State] = [State(name: "a", xs: [1])]
+    let hist: list[State] = [State(name: "b", xs: [2])]
+    let k = 5
+    let j = 7
+    print("before")
+    ring[k] = hist[j]
+    print("after")
+}

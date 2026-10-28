@@ -59,6 +59,11 @@ fn stmt<'a>(s: &'a Stmt, f: &mut impl FnMut(Node<'a>)) {
             args(a, f);
         }
         Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::DropGpu(p) => place(p, true, f),
+        // The source is read, then the target written (its items and its length).
+        Stmt::CopyItems(dst, src) => {
+            place(src, false, f);
+            place(dst, true, f);
+        }
         Stmt::PushArena(Some(p), _) => place(p, true, f),
         Stmt::PushArena(None, _) | Stmt::PopArena { .. } => {}
         Stmt::If { cond, then_body, else_body } => {
@@ -148,7 +153,7 @@ pub fn walk_expr<'a>(e: &'a Expr, f: &mut impl FnMut(Node<'a>)) {
             place(p, matches!(op, MapOp::Remove | MapOp::Lock), f);
         }
         ExprKind::Format(parts) => print_args(parts, f),
-        ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::FnEnv(p) => place(p, false, f),
+        ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::Cap(p) | ExprKind::FnEnv(p) => place(p, false, f),
         ExprKind::Unary(_, x)
         | ExprKind::Cast(x)
         | ExprKind::Proven(x)

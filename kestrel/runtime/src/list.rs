@@ -84,6 +84,29 @@ pub unsafe extern "C" fn kestrel_rt_list_clear(list: *mut List, elem_size: i64) 
     }
 }
 
+/// Copies `src_len` items of `elem_size` bytes from `src` into the buffer of the list or array at
+/// `dst`, and sets its length to `src_len`: storage-reusing assignment of items that hold no heap
+/// memory. Only the first two words of `dst` (the buffer and the length) are touched, so an
+/// array's header, which has only those, can be passed too; a list keeps its capacity and arena.
+/// `ptr::copy` is used, so even overlapping memory would be copied correctly.
+///
+/// # Safety
+/// `dst` must point to a valid list or array header whose buffer has room for `src_len` items
+/// (compiled code checks the capacity first), and `src` must hold `src_len` items.
+#[no_mangle]
+pub unsafe extern "C" fn kestrel_rt_copy_items(dst: *mut List, src: *const u8, src_len: i64, elem_size: i64) {
+    let bytes = src_len.max(0) as usize * elem_size.max(0) as usize;
+    // SAFETY: the caller guarantees `dst` and `src`, and room for the items; no reference to the
+    // whole header is made, so an array's two-word header is never read past. With no bytes to
+    // copy the buffer may be null, so nothing is copied.
+    unsafe {
+        if bytes > 0 {
+            std::ptr::copy(src, (*dst).ptr, bytes);
+        }
+        (*dst).len = src_len;
+    }
+}
+
 /// Finishes a loop that removed items as it went: `kept` items are packed at the front, and the
 /// items from `next` on, which the loop didn't reach, move down after them. The slots they leave
 /// are zeroed and the length becomes `kept` plus their count. When `next` is past the length (the
@@ -210,6 +233,41 @@ mod tests {
             kestrel_rt_list_remove(&mut l, 0, 12, 0, std::ptr::null());
             assert_eq!(std::slice::from_raw_parts(l.ptr as *const i32, 6), &[10, 11, 12, 20, 21, 22]);
         }
+    }
+
+    #[test]
+    fn copy_items_fills_the_buffer_and_keeps_the_capacity_and_arena() {
+        let mut dst = list_of(&[1, 2, 3, 4, 5]);
+        let (ptr, cap) = (dst.ptr, dst.cap);
+        let src = [7i32, 8];
+        // SAFETY: `dst` has room for 2 items; `src` holds 2 i32s.
+        unsafe { kestrel_rt_copy_items(&mut dst, src.as_ptr() as *const u8, 2, 4) };
+        assert_eq!(items(&dst), [7, 8]);
+        assert_eq!((dst.ptr, dst.cap), (ptr, cap), "the buffer is reused");
+        let longer = [9i32, 10, 11, 12, 13];
+        // SAFETY: as above, 5 items fit in the capacity of 8.
+        unsafe { kestrel_rt_copy_items(&mut dst, longer.as_ptr() as *const u8, 5, 4) };
+        assert_eq!(items(&dst), [9, 10, 11, 12, 13]);
+    }
+
+    #[test]
+    fn copy_items_of_nothing_leaves_a_null_buffer_alone() {
+        let mut dst = List { ptr: std::ptr::null_mut(), len: 0, cap: 0, arena: std::ptr::null_mut() };
+        // SAFETY: nothing is copied, so a null buffer and source are fine.
+        unsafe { kestrel_rt_copy_items(&mut dst, std::ptr::null(), 0, 4) };
+        assert_eq!((dst.len, dst.ptr), (0, std::ptr::null_mut()));
+    }
+
+    #[test]
+    fn copy_items_into_an_array_touches_only_its_two_words() {
+        // An array's header is `{ptr, len}`; the words after it belong to something else.
+        let mut buf = [0i32; 3];
+        let mut words: [i64; 4] = [buf.as_mut_ptr() as i64, 3, -1, -2];
+        let src = [4i32, 5];
+        // SAFETY: `words` starts like a list header; only its first two words are used.
+        unsafe { kestrel_rt_copy_items(words.as_mut_ptr() as *mut List, src.as_ptr() as *const u8, 2, 4) };
+        assert_eq!(&words[1..], [2, -1, -2]);
+        assert_eq!(buf, [4, 5, 0]);
     }
 
     #[test]

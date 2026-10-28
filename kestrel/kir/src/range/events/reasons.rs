@@ -212,7 +212,7 @@ pub(super) fn place_ty(m: &Module, f: &Func, p: &Place) -> KTy {
 }
 
 /// An element type as the report writes it.
-pub(super) fn elem_text(m: &Module, ty: KTy) -> String {
+pub(crate) fn elem_text(m: &Module, ty: KTy) -> String {
     match ty {
         KTy::Struct(s) => m.layout(s).name.clone(),
         KTy::Enum(e) => m.enum_layout(e).name.clone(),

@@ -209,6 +209,11 @@ pub(super) fn write_expr(m: &Module, f: &Func, e: &Expr, s: &mut String) {
             write_place(m, f, p, p.path.len(), s);
             s.push_str(".len");
         }
+        // (Only an assign helper reads a capacity; the language has no name for it.)
+        ExprKind::Cap(p) => {
+            write_place(m, f, p, p.path.len(), s);
+            s.push_str(".capacity");
+        }
         ExprKind::Proven(x) => write_expr(m, f, x, s),
         ExprKind::Unary(op, x) => {
             s.push_str(match op {

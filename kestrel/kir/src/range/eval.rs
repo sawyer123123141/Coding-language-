@@ -49,6 +49,11 @@ impl Cx<'_> {
             ExprKind::Bool(b) => Val::range(Interval::exact(i128::from(*b))),
             ExprKind::Load(p) => self.load(st, p, e.ty, sure),
             ExprKind::Len(p) => self.len(st, p, sure),
+            // A list's capacity, or an array's length: nothing is known of it but its sign.
+            ExprKind::Cap(p) => {
+                self.place(st, p, sure);
+                Val::range(Interval::new(0, i64::MAX.into()))
+            }
             ExprKind::Move(p) | ExprKind::Tag(p) | ExprKind::FnEnv(p) | ExprKind::MakeIface { data: IfaceData::Borrowed(p), .. } => {
                 self.place(st, p, sure);
                 any

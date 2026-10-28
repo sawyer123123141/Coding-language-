@@ -32,8 +32,15 @@ pub enum Stmt {
     /// Removes or inserts an item of the list at a place; see `ListOp` for the arguments.
     List(ListOp, Place, Vec<Expr>),
     /// Sets the length (i64) of the list at a place to a value no greater than the old length;
-    /// the items past it are not dropped, whoever shortens a list has moved or dropped them.
+    /// the items past it are not dropped, whoever shortens a list has moved or dropped them. An
+    /// assign helper (see `Helpers::assign_fn`) also sets it on an array, and raises it within the
+    /// room `Cap` reports, then writes every item past the old length before anything reads it.
     SetLen(Place, Expr),
+    /// `CopyItems(dst, src)`: copies the items of the array or list at `src` into the buffer of the
+    /// one at `dst` and sets `dst`'s length to `src`'s. The items hold no heap memory, and `dst` has
+    /// room (an assign helper checks `Cap` first); the two are different places. A list keeps its
+    /// capacity and its arena.
+    CopyItems(Place, Place),
     /// Points a reference local at a place (a `for ... in` element, found
     /// once per iteration).
     Bind(LocalIdx, Place),

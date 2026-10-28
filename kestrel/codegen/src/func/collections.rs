@@ -86,6 +86,34 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         Ok(self.b.ins().load(types::I64, MemFlagsData::trusted(), addr, LEN))
     }
 
+    /// The room of the list (its capacity) or array (its length) at `p`.
+    pub(crate) fn cap(&mut self, p: &Place) -> Result<Value, String> {
+        let at = match self.place_ty(p) {
+            KTy::List(_) => CAP,
+            KTy::Array(_) => LEN,
+            other => return Err(format!("`Cap` of a {other:?}, which has no buffer of items")),
+        };
+        let addr = self.place_addr(p)?;
+        Ok(self.b.ins().load(types::I64, MemFlagsData::trusted(), addr, at))
+    }
+
+    /// `CopyItems(dst, src)`: the source's items into the target's buffer, which has room (see
+    /// `kestrel_rt_copy_items`). The source is found first, then the target.
+    pub(crate) fn copy_items(&mut self, dst: &Place, src: &Place) -> Result<(), String> {
+        let ty = self.place_ty(dst);
+        if !matches!(ty, KTy::List(_) | KTy::Array(_)) || self.place_ty(src) != ty {
+            return Err(format!("`CopyItems` from a {:?} into a {ty:?}", self.place_ty(src)));
+        }
+        let (size, _) = self.elem_size_align(ty);
+        let from = self.place_addr(src)?;
+        let ptr = self.b.ins().load(self.ptr, MemFlagsData::trusted(), from, PTR);
+        let len = self.b.ins().load(types::I64, MemFlagsData::trusted(), from, LEN);
+        let to = self.place_addr(dst)?;
+        let size = self.b.ins().iconst(types::I64, size);
+        self.call_id(self.shared.rt.copy_items, &[to, ptr, len, size]);
+        Ok(())
+    }
+
     /// `xs.add(v)`. `v` is evaluated first (it may read `xs`), then the
     /// list grows if it's full. Range analysis relies on `v` running before
     /// the place is found (`kir::range` `change_len`): keep that order.

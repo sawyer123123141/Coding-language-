@@ -1,0 +1,9 @@
+main() {
+    var outer: list[int] = []
+    arena {
+        let tmp: list[int] = [1, 2, 3]
+        outer = tmp
+    }
+    print(outer)
+}
+// error 5: this memory is freed at the end of the `arena { }` block, but `outer` lives longer

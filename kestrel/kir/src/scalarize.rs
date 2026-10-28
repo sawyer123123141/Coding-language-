@@ -90,7 +90,11 @@ fn pinned(body: &[Stmt]) -> HashSet<LocalIdx> {
         ) => {
             out.insert(p.root);
         }
-        Node::Expr(Expr { kind: ExprKind::Move(p) | ExprKind::Len(p) | ExprKind::Tag(p) | ExprKind::FnEnv(p) | ExprKind::Map(_, p, _), .. }) => {
+        Node::Stmt(Stmt::CopyItems(dst, src)) => {
+            out.insert(dst.root);
+            out.insert(src.root);
+        }
+        Node::Expr(Expr { kind: ExprKind::Move(p) | ExprKind::Len(p) | ExprKind::Cap(p) | ExprKind::Tag(p) | ExprKind::FnEnv(p) | ExprKind::Map(_, p, _), .. }) => {
             out.insert(p.root);
         }
         _ => {}

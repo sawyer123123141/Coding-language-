@@ -137,6 +137,10 @@ pub fn operands(s: &Stmt) -> Vec<&Expr> {
         }
         Stmt::Print(parts) | Stmt::Write(parts) => print_values(parts, &mut out),
         Stmt::BindEnv { env, .. } => out.push(env),
+        Stmt::CopyItems(dst, src) => {
+            index_exprs(src, &mut out);
+            index_exprs(dst, &mut out);
+        }
         Stmt::Bind(_, p)
         | Stmt::CopyFnEnv(p)
         | Stmt::CopyIface(p)
@@ -236,6 +240,8 @@ fn list_change(s: &Stmt) -> Option<(&Place, WriteKind)> {
         Stmt::List(ListOp::RemoveAt, p, _) => (p, WriteKind::Length(LenChange::Add(-1))),
         Stmt::List(ListOp::Clear, p, _) => (p, WriteKind::Length(LenChange::Set(Expr { kind: ExprKind::Int(0), ty: KTy::I64, line: 0 }))),
         Stmt::SetLen(p, n) => (p, WriteKind::Length(LenChange::Set(n.clone()))),
+        // The target takes the source's length (and its items).
+        Stmt::CopyItems(dst, _) => (dst, WriteKind::Length(LenChange::Unknown)),
         Stmt::List(ListOp::Compact, p, _) => (p, WriteKind::Length(LenChange::Unknown)),
         Stmt::List(ListOp::Sort | ListOp::SortBy(_), p, _) | Stmt::Dup(p) => (p, WriteKind::Items),
         _ => return None,

@@ -115,6 +115,11 @@ impl Walk<'_> {
                 self.expr(n);
                 self.place_walk(p);
             }
+            // It copies into a buffer that is already there: no event.
+            Stmt::CopyItems(dst, src) => {
+                self.place_walk(src);
+                self.place_walk(dst);
+            }
             Stmt::Bind(_, p) => self.place_walk(p),
             Stmt::BindEnv { env, .. } => self.expr(env),
             Stmt::CopyFnEnv(_) | Stmt::CopyIface(_) | Stmt::PushArena(..) | Stmt::FreeArena(_) | Stmt::Dup(_) | Stmt::MapSet(..) | Stmt::Trap | Stmt::Fail(_) => self.memory_stmt(s),

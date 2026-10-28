@@ -34,6 +34,9 @@ pub enum ExprKind {
     Map(MapOp, Place, Vec<Expr>),
     /// The length (i64) of the array or list at a place; of a string, its bytes.
     Len(Place),
+    /// The room (i64) of the array or list at a place: a list's capacity, an array's length. Only an
+    /// assign helper reads it (see `Helpers::assign_fn`), to decide whether the source fits.
+    Cap(Place),
     /// An operation on a string value; see `StrOp` for the arguments.
     Str(StrOp, Vec<Expr>),
     /// `Arena()`: a new, empty arena.

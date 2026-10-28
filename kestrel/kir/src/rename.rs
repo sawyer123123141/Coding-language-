@@ -92,6 +92,10 @@ pub(crate) fn rename_stmts(stmts: &mut [Stmt], subst: &[Subst]) {
                 rename_args(args, subst);
             }
             Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::DropGpu(p) | Stmt::PushArena(Some(p), _) => rename_place(p, subst),
+            Stmt::CopyItems(dst, src) => {
+                rename_place(dst, subst);
+                rename_place(src, subst);
+            }
             Stmt::MapSet(p, k, v, _) => {
                 rename_place(p, subst);
                 rename_expr(k, subst);
@@ -132,7 +136,7 @@ fn rename_print(parts: &mut [PrintArg], subst: &[Subst]) {
 pub(crate) fn rename_expr(e: &mut Expr, subst: &[Subst]) {
     match &mut e.kind {
         ExprKind::Format(parts) => rename_print(parts, subst),
-        ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::Move(p) | ExprKind::FnEnv(p) => rename_place(p, subst),
+        ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::Cap(p) | ExprKind::Move(p) | ExprKind::FnEnv(p) => rename_place(p, subst),
         ExprKind::Map(_, p, xs) => {
             rename_place(p, subst);
             for x in xs {

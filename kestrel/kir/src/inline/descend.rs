@@ -52,6 +52,10 @@ impl Inliner<'_> {
             Stmt::Bind(_, p) | Stmt::Dup(p) | Stmt::FreeArena(p) | Stmt::DropGpu(p) | Stmt::PushArena(Some(p), _) | Stmt::CopyFnEnv(p) | Stmt::CopyIface(p) => {
                 self.place(p)
             }
+            Stmt::CopyItems(dst, src) => {
+                self.place(src);
+                self.place(dst);
+            }
             Stmt::CallVirtual { recv, args, .. } => {
                 self.place(recv);
                 self.args(args);
@@ -111,7 +115,7 @@ impl Inliner<'_> {
                 e.kind = if body.is_empty() { value.kind } else { ExprKind::Seq(body, Box::new(value)) };
             }
             ExprKind::Format(parts) => self.print(parts),
-            ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::Move(p) | ExprKind::FnEnv(p) => self.place(p),
+            ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::Cap(p) | ExprKind::Move(p) | ExprKind::FnEnv(p) => self.place(p),
             ExprKind::Map(_, p, xs) => {
                 self.place(p);
                 for x in xs {

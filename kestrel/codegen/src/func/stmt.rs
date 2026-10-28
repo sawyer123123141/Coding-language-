@@ -79,6 +79,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             kir::Stmt::List(op, list, args) => self.list_op(*op, list, args)?,
             kir::Stmt::SetLen(list, len) => self.set_len(list, len)?,
             kir::Stmt::Dup(p) => self.dup(p)?,
+            kir::Stmt::CopyItems(dst, src) => self.copy_items(dst, src)?,
             kir::Stmt::MapSet(map, key, value, copy_key) => self.map_set(map, key, value, *copy_key, key.line)?,
             kir::Stmt::MapUnlock(map, saved) => self.map_unlock(map, saved)?,
             kir::Stmt::ParFor { func, args, count } => self.par_for(*func, args, count)?,

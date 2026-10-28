@@ -1,0 +1,72 @@
+// env: KESTREL_POISON=1
+// env: KESTREL_ARENA_COUNT=1
+// expect: State(xs: [0, 4, 8, 12], names: ["n0", "n1", "n2", "n3"], tag: "size 4")
+// expect: State(xs: [0, 9, 18, 27, 36, 45, 54, 63, 72], names: ["n0", "n1", "n2", "n3", "n4", "n5", "n6", "n7", "n8"], tag: "size 9")
+// expect: State(xs: [0, 2], names: ["n0", "n1"], tag: "size 2")
+// expect: State(xs: [0, 3, 6], names: ["n0", "n1", "n2"], tag: "size 3")
+// expect: State(xs: [0], names: ["n0"], tag: "size 1")
+// expect: State(xs: [0, 5, 10, 15, 20], names: ["n0", "n1", "n2", "n3", "n4"], tag: "size 5")
+// expect: State(xs: [0, 5, 10, 15, 20], names: ["n0", "n1", "n2", "n3", "n4"], tag: "size 5")
+// expect: State(xs: [0, 2], names: ["n0", "n1"], tag: "size 2")
+// expect: State(xs: [0, 7, 14, 21, 28, 35, 42], names: ["n0", "n1", "n2", "n3", "n4", "n5", "n6"], tag: "size 7")
+// expect: State(xs: [], names: [], tag: "size 0")
+// expect: State(xs: [0, 4, 8, 12], names: ["n0", "n1", "n2", "n3"], tag: "size 4")
+// expect: State(xs: [0, 2], names: ["n0", "n1"], tag: "size 2")
+// expect: State(xs: [0, 3, 6], names: ["n0", "n1", "n2"], tag: "size 3")
+// expect-stderr: arenas alive at exit: 0
+// A source built in an arena that is freed afterwards, and a target inside an `Arena` field, under
+// poisoned freeing: a reused target holds nothing of the freed memory.
+struct State {
+    xs: list[int]
+    names: list[string]
+    tag: string
+}
+
+struct Holder {
+    mem: Arena = Arena()
+    snap: State
+}
+
+state(n: int) -> State {
+    var xs: list[int] = []
+    var names: list[string] = []
+    for i from 0 to n {
+        xs.add(i * n)
+        names.add("n{i}")
+    }
+    State(xs: xs, names: names, tag: "size {n}")
+}
+
+main() {
+    // A source built in an arena, copied into an outer target; then the arena is freed.
+    var target = state(6)
+    for n in [4, 9, 2] {
+        var src = Holder(snap: state(0))
+        in src.mem {
+            src.snap = state(n)
+        }
+        target = src.snap
+        src = Holder(snap: state(1))
+        arena {
+            var junk: list[string] = []
+            for i from 0 to 50 { junk.add("zzzzzzzzzzzzzzzz{i}") }
+        }
+        print(target)
+    }
+
+    // A target inside an `Arena` field, over states of growing and shrinking sizes.
+    var h = Holder(snap: state(0))
+    for n in [3, 1, 5, 5, 2, 7, 0, 4] {
+        let s = state(n)
+        in h.mem {
+            h.snap = s
+        }
+        print(h.snap)
+    }
+    h = Holder(snap: state(2))
+    print(h.snap)
+    in h.mem {
+        h.snap = state(3)
+    }
+    print(h.snap)
+}

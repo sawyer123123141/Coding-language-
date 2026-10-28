@@ -8,7 +8,8 @@ mod reasons;
 mod stmts;
 
 pub use effects::Effect;
-use reasons::{elem_text, limit, place_ty};
+pub(super) use reasons::elem_text;
+use reasons::{limit, place_ty};
 use super::show::{expr_text, place_text};
 use super::summary::{Part, Reason};
 use crate::ir::*;
@@ -299,7 +300,7 @@ impl Walk<'_> {
                 }
                 self.place_walk(p);
             }
-            ExprKind::Len(p) | ExprKind::Tag(p) | ExprKind::FnEnv(p) | ExprKind::Load(p) | ExprKind::Move(p) => self.place_walk(p),
+            ExprKind::Len(p) | ExprKind::Cap(p) | ExprKind::Tag(p) | ExprKind::FnEnv(p) | ExprKind::Load(p) | ExprKind::Move(p) => self.place_walk(p),
             ExprKind::Str(op, xs) => {
                 for x in xs {
                     self.expr(x);

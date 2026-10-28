@@ -159,6 +159,10 @@ impl Cx<'_> {
             | Stmt::FreeArena(p)
             | Stmt::DropGpu(p)
             | Stmt::PushArena(Some(p), _) => self.place(st, p, true),
+            Stmt::CopyItems(dst, src) => {
+                self.place(st, src, true);
+                self.place(st, dst, true);
+            }
             Stmt::If { .. }
             | Stmt::Assume { .. }
             | Stmt::Prove { .. }

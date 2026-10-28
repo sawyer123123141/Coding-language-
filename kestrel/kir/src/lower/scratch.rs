@@ -69,6 +69,8 @@ fn stmt_builds(s: &Stmt, calls: &mut Vec<FuncIdx>) -> bool {
         | Stmt::Write(_)
         | Stmt::RandSeed(_)
         | Stmt::SetLen(..)
+        // (It copies into a buffer that is already there.)
+        | Stmt::CopyItems(..)
         | Stmt::Bind(..)
         | Stmt::BindGlobal(..)
         | Stmt::BindEnv { .. }
@@ -118,6 +120,7 @@ fn expr_builds(e: &Expr, calls: &mut Vec<FuncIdx>) -> bool {
         | ExprKind::ListNew
         | ExprKind::MapNew
         | ExprKind::Len(_)
+        | ExprKind::Cap(_)
         | ExprKind::Some(_)
         | ExprKind::NoneLit
         | ExprKind::Move(_)

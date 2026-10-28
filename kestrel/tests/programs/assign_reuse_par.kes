@@ -1,0 +1,42 @@
+// env: KESTREL_THREADS=8
+// expect: 162 2406
+// expect: State(xs: [1, 2, 3], name: "template") State(xs: [1, 2, 3], name: "template") State(xs: [1, 2, 3], name: "template")
+// Assignments in a `par for` body: into a state local to the body, and into an item's field from a
+// template the body reads.
+struct State {
+    xs: list[int]
+    name: string
+}
+
+struct Item {
+    n: int
+    st: State
+}
+
+main() {
+    var items: list[Item] = []
+    for i from 0 to 64 {
+        var xs: list[int] = []
+        for k from 0 to i % 5 { xs.add(k) }
+        items.add(Item(n: i, st: State(xs: xs, name: "item")))
+    }
+    let template = State(xs: [1, 2, 3], name: "template")
+    par for it in items {
+        var mine = State(xs: [9, 9, 9, 9, 9, 9], name: "mine")
+        let cur = it.st
+        mine = cur
+        it.n = it.n + mine.xs.len
+        if it.n % 2 == 0 {
+            it.st = template
+        }
+    }
+    var lens = 0
+    var sum = 0
+    for it in items {
+        lens += it.st.xs.len
+        sum += it.n
+        for x in it.st.xs { sum += x }
+    }
+    print(lens, sum)
+    print(items[0].st, items[1].st, items[63].st)
+}
