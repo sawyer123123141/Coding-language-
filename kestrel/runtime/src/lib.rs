@@ -3,6 +3,7 @@
 
 pub mod arena;
 mod blocks;
+pub mod fpu;
 pub mod gpu;
 pub mod list;
 pub mod map;

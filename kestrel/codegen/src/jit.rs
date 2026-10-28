@@ -31,7 +31,7 @@ impl JitProgram {
                 return Err(format!("no implementation was linked in for the native function `{import}`"));
             }
         }
-        let mut builder = JITBuilder::with_isa(isa::host_isa()?, cranelift_module::default_libcall_names());
+        let mut builder = JITBuilder::with_isa(isa::target_isa()?, cranelift_module::default_libcall_names());
         for (name, addr) in rt::jit_symbols() {
             builder.symbol(name, addr);
         }

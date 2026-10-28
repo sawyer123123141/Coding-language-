@@ -20,6 +20,8 @@ use kestrel_kir as kir;
 #[doc(hidden)]
 pub use dump::{dump, dump_lowered};
 pub use export::{ExportInfo, ExportTy};
+pub use isa::TARGET_CPUS;
+pub use kestrel_runtime::fpu::{has_sse41, NO_SSE41};
 pub use jit::JitProgram;
 pub use object::emit_object;
 #[doc(hidden)]

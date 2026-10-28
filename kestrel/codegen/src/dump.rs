@@ -48,7 +48,7 @@ pub fn dump_lowered(m: &kir::Module, opts: Options, name: &str) -> Result<String
 }
 
 fn dump_with(m: &kir::Module, opts: Options, name: &str, lowered: bool) -> Result<String, String> {
-    let builder = ObjectBuilder::new(isa::host_isa()?, "kestrel", cranelift_module::default_libcall_names()).map_err(|e| e.to_string())?;
+    let builder = ObjectBuilder::new(isa::target_isa()?, "kestrel", cranelift_module::default_libcall_names()).map_err(|e| e.to_string())?;
     let mut module = ObjectModule::new(builder);
     let mut d = Dump { name, text: String::new(), lowered };
     define_module(&mut module, m, opts, Some(&mut d))?;

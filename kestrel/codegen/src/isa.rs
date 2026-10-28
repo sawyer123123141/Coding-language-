@@ -2,8 +2,14 @@ use cranelift_codegen::isa::{OwnedTargetIsa, TargetIsa};
 use cranelift_codegen::settings::{self, Configurable};
 use kestrel_kir::{self as kir, KTy};
 
-/// The host machine, with the flags every Kestrel build uses.
-pub(crate) fn host_isa() -> Result<OwnedTargetIsa, String> {
+/// The CPUs a Kestrel build runs on, as `kestrel build` says it.
+pub const TARGET_CPUS: &str = "x86-64 CPUs with SSE4.1 (every one since about 2011)";
+
+/// The one ISA every Kestrel build compiles for, the JIT and exes alike: x86-64 with SSE3, SSSE3
+/// and SSE4.1 and nothing newer (no SSE4.2, POPCNT, AVX, FMA, BMI), so the same KIR gives the same
+/// instructions on every machine. On another kind of host it is that host, as before. The flags
+/// are the ones every Kestrel build uses.
+pub(crate) fn target_isa() -> Result<OwnedTargetIsa, String> {
     let mut flags = settings::builder();
     // Probestack: Windows grows the stack one guard page at a time, so large
     // frames must touch each page in order.
@@ -15,10 +21,15 @@ pub(crate) fn host_isa() -> Result<OwnedTargetIsa, String> {
     ] {
         flags.set(key, value).map_err(|e| e.to_string())?;
     }
-    cranelift_native::builder()
-        .map_err(|e| e.to_string())?
-        .finish(settings::Flags::new(flags))
-        .map_err(|e| e.to_string())
+    let builder = if cfg!(target_arch = "x86_64") {
+        // No feature detection: the baseline is the same on every host.
+        let mut builder = cranelift_native::builder_with_options(false).map_err(|e| e.to_string())?;
+        builder.enable("sse41").map_err(|e| e.to_string())?;
+        builder
+    } else {
+        cranelift_native::builder().map_err(|e| e.to_string())?
+    };
+    builder.finish(settings::Flags::new(flags)).map_err(|e| e.to_string())
 }
 
 /// C1: SIMD vectors need SSE4.1 (`pmulld`, `pminsd`, `roundps`, `ptest`; without it Cranelift
@@ -50,4 +61,22 @@ fn uses_vectors(m: &kir::Module) -> bool {
         });
         found
     })
+}
+
+#[cfg(all(test, target_arch = "x86_64"))]
+mod tests {
+    use super::target_isa;
+
+    #[test]
+    fn the_target_isa_is_the_sse41_baseline() {
+        let isa = target_isa().unwrap();
+        let flags = isa.isa_flags();
+        let has = |name: &str| flags.iter().any(|f| f.name == name && f.as_bool() == Some(true));
+        for on in ["has_sse3", "has_ssse3", "has_sse41"] {
+            assert!(has(on), "{on} should be on");
+        }
+        for off in ["has_sse42", "has_popcnt", "has_avx", "has_avx2", "has_fma", "has_bmi1", "has_bmi2", "has_lzcnt"] {
+            assert!(!has(off), "{off} should be off");
+        }
+    }
 }

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use kestrel_driver::{without_bom, DiagStyle};
-use kestrel_codegen::{emit_object, JitProgram, Options};
+use kestrel_codegen::{emit_object, has_sse41, JitProgram, Options, NO_SSE41, TARGET_CPUS};
 use link::Lib;
 
 const USAGE: &str = "usage: kestrel <run|check|build> <file.kes> [-o <exe>] [--release] [--report] [--diagnostics=short]";
@@ -113,6 +113,7 @@ fn run() -> ExitCode {
         ..Options::default()
     };
     let result = match args.cmd.as_str() {
+        "run" if !has_sse41() => Err(NO_SSE41.to_string()),
         "run" => {
             // The program's relative paths (`window.screenshot`, textures) are read from its own folder.
             kestrel_window::set_program_dir(Path::new(&args.path).parent().unwrap_or(Path::new("")));
@@ -183,7 +184,9 @@ fn build(module: &kestrel_kir::Module, opts: Options, args: &Args, lib: Lib) -> 
     std::fs::write(&obj, bytes).map_err(|e| format!("can't write {}: {e}", obj.display()))?;
     let linked = link::link(&obj, &exe, lib);
     let _ = std::fs::remove_file(&obj);
-    linked
+    linked?;
+    println!("built {} for {TARGET_CPUS}", exe.display());
+    Ok(())
 }
 
 #[cfg(test)]

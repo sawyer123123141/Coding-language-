@@ -49,3 +49,15 @@ fn build_to_a_different_path_still_works() {
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert!(exe.is_file());
 }
+
+#[test]
+fn build_says_which_cpus_the_exe_runs_on() {
+    let dir = scratch("build_cpus");
+    let src = dir.join("prog.kes");
+    fs::write(&src, SRC).unwrap();
+    let exe = dir.join(format!("prog{}", std::env::consts::EXE_SUFFIX));
+    let out = build(&src, &exe);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let line = format!("built {} for x86-64 CPUs with SSE4.1 (every one since about 2011)\n", exe.display());
+    assert_eq!(String::from_utf8_lossy(&out.stdout), line);
+}

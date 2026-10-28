@@ -3,6 +3,10 @@ const STACK_SIZE: usize = 256 * 1024 * 1024;
 
 /// Runs `entry` and flushes on the calling thread, since output is buffered per thread.
 fn run_entry(entry: extern "C" fn()) {
+    // Round to nearest and nothing flushed, whatever mode the thread started with; `par for`
+    // then pins its caller (this thread) too.
+    crate::fpu::pin();
+    crate::fpu::mark_started();
     entry();
     crate::print::flush();
     // The program arena belongs to this thread, so it is measured here (and only when asked).
@@ -39,6 +43,10 @@ fn poison_setting(setting: Option<&str>) -> bool {
 /// Returns the exit code. `KESTREL_POISON` is read here, once, before `entry` runs.
 #[no_mangle]
 pub extern "C" fn kestrel_rt_start(entry: extern "C" fn()) -> i32 {
+    if !crate::fpu::has_sse41() {
+        eprintln!("kestrel: {}", crate::fpu::NO_SSE41);
+        return 101;
+    }
     start_with(entry, poison_setting(std::env::var("KESTREL_POISON").ok().as_deref()))
 }
 
@@ -67,7 +75,7 @@ pub fn start_with(entry: extern "C" fn(), poison: bool) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{arena_count_report, arena_report, kestrel_rt_start, poison_setting};
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
     #[test]
     fn the_arena_report_is_on_only_for_one() {
@@ -132,5 +140,18 @@ mod tests {
     fn entry_runs_on_a_large_stack() {
         assert_eq!(kestrel_rt_start(deep_entry), 0);
         assert!(DEEP.load(Ordering::SeqCst));
+    }
+
+    static MODE: AtomicU32 = AtomicU32::new(0);
+
+    extern "C" fn mode_entry() {
+        MODE.store(crate::fpu::read(), Ordering::SeqCst);
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn start_pins_the_float_mode_for_main() {
+        assert_eq!(kestrel_rt_start(mode_entry), 0);
+        assert_eq!(MODE.load(Ordering::SeqCst), 0x1F80);
     }
 }

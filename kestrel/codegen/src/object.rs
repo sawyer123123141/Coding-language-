@@ -8,7 +8,7 @@ use crate::{define_module, isa, Options};
 
 /// Compiles `m` to a native object file whose C `main` runs the Kestrel `main`.
 pub fn emit_object(m: &kir::Module, opts: Options) -> Result<Vec<u8>, String> {
-    let builder = ObjectBuilder::new(isa::host_isa()?, "kestrel", cranelift_module::default_libcall_names())
+    let builder = ObjectBuilder::new(isa::target_isa()?, "kestrel", cranelift_module::default_libcall_names())
         .map_err(|e| e.to_string())?;
     let mut module = ObjectModule::new(builder);
     let ids = define_module(&mut module, m, opts, None)?;

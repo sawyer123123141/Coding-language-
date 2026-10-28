@@ -20,7 +20,13 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         }
         vals.extend(self.call_args(args)?);
         let id = self.shared.funcs[fi.0 as usize];
-        Ok(self.call_id(id, &vals))
+        let result = self.call_id(id, &vals);
+        // Only built-in modules declare natives, and today all of them are the window library,
+        // whose graphics driver may change the float mode on this thread: put it back.
+        if self.shared.kir.funcs[fi.0 as usize].native.is_some() {
+            self.call_id(self.shared.rt.fpu_pin, &[]);
+        }
+        Ok(result)
     }
 
     /// The values a call passes for `args`, in order: a pointer for a struct or a `var` argument.

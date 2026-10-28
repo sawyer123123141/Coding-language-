@@ -50,3 +50,66 @@ fn a_wrapping_multiply_never_traps() {
     let code = dump(&m, checked, "f").unwrap();
     assert_eq!(code.matches("trap user2").count(), 1, "{code}");
 }
+
+#[test]
+fn a_float_multiply_add_is_never_fused() {
+    for ty in ["f64", "float"] {
+        let m = common::optimized(&format!("pure f(a: {ty}, b: {ty}, c: {ty}) -> {ty} {{ a * b + c }}\nmain() {{}}\n"));
+        let code = dump(&m, release(), "f").unwrap();
+        assert!(code.contains("fmul") && code.contains("fadd"), "{ty}: {code}");
+        assert!(!code.contains("fma") && !code.contains("vfmadd"), "{ty}: {code}");
+    }
+}
+
+/// The `u0:N` index of each function the IR of a dump calls, in order. (External names print as
+/// numbers, in declaration order: the runtime's functions first, then the program's.)
+fn callees(code: &str) -> Vec<u32> {
+    let ir = code.split("
+}
+").next().unwrap();
+    let targets: std::collections::HashMap<&str, u32> = ir
+        .lines()
+        .filter_map(|l| {
+            let (name, rest) = l.trim().split_once(" = ")?;
+            let id = rest.strip_prefix("colocated ").unwrap_or(rest).strip_prefix("u0:")?;
+            Some((name, id.split_whitespace().next()?.parse().ok()?))
+        })
+        .collect();
+    ir.lines()
+        .filter_map(|l| {
+            let after = l.split("call fn").nth(1)?;
+            let n = after.split('(').next()?;
+            targets.get(format!("fn{n}").as_str()).copied()
+        })
+        .collect()
+}
+
+#[test]
+fn every_native_call_is_followed_by_a_pin() {
+    // `again` calls itself, so it is never inlined into `f`.
+    let src = "native clear(r: float)
+native frame() -> int
+again(n: int) -> int {
+ if n > 0 {
+  return 1 + again(n - 1)
+ }
+ 0
+}
+f(n: int) -> int {
+ clear(0.5)
+ let a = frame()
+ again(n) + a
+}
+main() {}
+";
+    let m = common::optimized(src);
+    let code = dump(&m, release(), "f").unwrap();
+    // clear, pin, frame, pin, again, and nothing after `again`; the pin is a runtime function,
+    // so it is declared before the program's own.
+    let ids = callees(&code);
+    assert_eq!(ids.len(), 5, "{ids:?}
+{code}");
+    assert_eq!(ids[1], ids[3], "{ids:?}");
+    assert!(ids[1] < ids[0] && ids[1] < ids[2] && ids[1] < ids[4], "{ids:?}");
+    assert!(ids[0] != ids[2] && ids[4] != ids[0] && ids[4] != ids[2], "{ids:?}");
+}
