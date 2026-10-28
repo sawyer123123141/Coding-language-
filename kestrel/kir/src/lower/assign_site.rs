@@ -57,8 +57,12 @@ fn only_reads(e: &Expr) -> bool {
     ok
 }
 
-/// Whether finding place `p` checks something that can fail: an index whose bounds aren't known,
-/// or a map entry that may be gone.
+/// Whether finding place `p` can fail on any of its steps: an index whose bounds aren't known, or
+/// a map entry that may be gone. Pass a place with its loop items resolved (`origin`): a loop item
+/// is a pointer with no steps, but lowering renames it to its checked element when the loop body
+/// may move the collection (`may_move`). Failing reads nested inside index expressions are not
+/// looked at; a place with an index expression has that index as a step, which counts already,
+/// since a written index is always checked.
 fn checks(p: &Place) -> bool {
     p.path.iter().any(|proj| match proj {
         Proj::Index { check, .. } => *check != IndexCheck::Known,
@@ -93,9 +97,11 @@ impl<'a> FnLowerer<'a> {
         let Expr { kind, ty, line } = rhs;
         let ExprKind::Load(mut src) = kind else { unreachable!("`reuses` accepts only a read of a place") };
         self.stabilize(&mut src, out);
-        if checks(&src) && checks(&dst) {
+        if checks(&self.origin(&src)) && checks(&self.origin(&dst)) {
             // The source's checks run before the target's, as when the value was copied first (a
             // call finds its arguments in order, the target first): a pointer to it is found now.
+            // (A loop item's pointer bound here is renamed with everything else if the loop re-finds
+            // its items.)
             let r = LocalIdx(self.locals.len() as u32);
             self.locals.push(Local { name: format!("tmp{}", r.0), ty, kind: LocalKind::RefParam });
             self.origins.insert(r, src.clone());

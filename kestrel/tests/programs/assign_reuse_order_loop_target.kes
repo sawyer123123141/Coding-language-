@@ -1,0 +1,15 @@
+// expect-exit: 101
+// expect-stderr: index 0 out of bounds for length 0 on line 10
+// The value is a loop item the body re-finds (it replaced the list), the target an index out of
+// bounds too: the value's error is reported, as when the value was copied first.
+main() {
+    var ring: list[list[string]] = [["a"], ["b"]]
+    let small: list[list[string]] = []
+    var other: list[list[string]] = [["z"]]
+    let k = 5
+    for x in ring {
+        ring = small
+        other[k] = x
+    }
+    print(other)
+}
