@@ -177,8 +177,8 @@ during, 6.7% after.
   11.6 GB and weren't run); after, the program stays at its set-up's 113 MB (the pool and one
   snapshot) for 10 and 100 pairs. A pair is two 58 MB copies, about 6 GB/s.
 - **Pong's `Game` is level** (about 1 ns a pair either way): it holds no list, so it was always a
-  plain copy; the 1,000,000-pair row is below the timer's resolution (a 1.3 ms difference of 7 ms
-  runs) and is given only because the plan asks for it.
+  plain copy; the 1,000,000-pair row is below the timer's resolution (whole runs of 7.7-11.4 ms,
+  of which the set-up takes 6.6; the measured net is 1.3 ms before and 1.6 ms after) and is given only because the plan asks for it.
 
 `checksum` (today's compiler only; the old one has none), with its controls:
 
@@ -198,7 +198,7 @@ the columns that changed.
 - **The JIT with the baseline ISA: 3.0% slower on `noise_corners`, 3.8-5.0% on `noise_wide`**, 0.7
   to 1.3% on `noise_scalar` and the `step` kernels; 2.5% faster on `race_arrays`.
 - **Exes with the baseline ISA: the frozen world `--release` 1.4% slower** (checked 1.6% faster),
-  generation 0.8% slower, engine p99 within 1-2% in most phases (edits, 51 frames, 7%).
+  generation 0.8% slower, engine p99 within 1-2% in most phases (edits, 51 frames: 7% against a host-ISA build and 3% against before; fly20 +4% against before, see the engine section).
 - Pinning the float mode: nothing measurable.
 
 ## The JIT's ISA: a proposal for the controller
