@@ -1,0 +1,63 @@
+// expect: true
+// expect: true
+// expect: true
+// expect: true
+// expect: true
+// expect: true
+// expect: true
+// `randi_range` stays inside its ends (swapped ends too) and hits every value, `randf` stays in
+// [0, 1), `randf_range` stays inside its ends, and the whole `int` range doesn't overflow.
+use { Rng from random }
+
+main() {
+    var r = Rng(seed: 2024)
+    var seen = [0, 0, 0, 0, 0, 0, 0]
+    var inside = true
+    for i from 0 to 1000 {
+        let d = r.randi_range(1, 6)
+        if d < 1 or d > 6 { inside = false } else { seen[d] += 1 }
+    }
+    print(inside)
+    var every = true
+    for f from 1 to 7 {
+        if seen[f] == 0 { every = false }
+    }
+    print(every)
+
+    var swapped = true
+    for i from 0 to 1000 {
+        let d = r.randi_range(6, 1)
+        if d < 1 or d > 6 { swapped = false }
+    }
+    print(swapped)
+
+    // 0x80000000 is the smallest `int`.
+    let smallest = 0x80000000
+    var negative = 0
+    var positive = 0
+    for i from 0 to 1000 {
+        let d = r.randi_range(smallest, 2147483647)
+        if d < 0 { negative += 1 } else { positive += 1 }
+    }
+    // Both halves of the range are hit, and nothing overflowed on the way.
+    print(negative > 400 and positive > 400)
+
+    var unit = true
+    var low = 1.0
+    var high = 0.0
+    for i from 0 to 10000 {
+        let f = r.randf()
+        if f < 0.0 or f >= 1.0 { unit = false }
+        low = min(low, f)
+        high = max(high, f)
+    }
+    print(unit)
+    print(low < 0.01 and high > 0.99)
+
+    var between = true
+    for i from 0 to 1000 {
+        let f = r.randf_range(2.0, 3.0)
+        if f < 2.0 or f > 3.0 { between = false }
+    }
+    print(between)
+}

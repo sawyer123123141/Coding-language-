@@ -15,6 +15,7 @@ use kestrel_syntax::link::{link, Module};
 use kestrel_syntax::{parse_at, render, render_short, Diagnostic, LineIndex, Span};
 
 pub use analysis::{analyze, Analysis};
+pub use builtin::needs_window;
 pub use prove::{prove, Proved};
 
 #[derive(Clone, Copy, PartialEq, Eq)]

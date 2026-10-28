@@ -1,0 +1,19 @@
+// expect: true
+// A generator in the state keeps `@prove(deterministic, no_alloc, no_panic)`.
+use { Rng from random }
+
+@prove(deterministic, no_alloc, no_panic)
+pure roll(var r: Rng) -> int {
+    r.randi_range(1, 6)
+}
+
+main() {
+    var a = Rng(seed: 5)
+    var b = Rng(seed: 5)
+    var ok = true
+    for i from 0 to 20 {
+        let x = roll(var a)
+        if x != roll(var b) or x < 1 or x > 6 { ok = false }
+    }
+    print(ok)
+}

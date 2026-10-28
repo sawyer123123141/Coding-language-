@@ -1,0 +1,57 @@
+// A seeded random number generator that lives in your game state (Godot's RandomNumberGenerator).
+// Keep one `Rng` in the state a deterministic function changes, and the same seed always gives the
+// same numbers, on every machine. Unlike the global `randf()` family, it is `pure`, so it can be
+// used under `@prove(deterministic)`, and it is copied and checksummed with the state it sits in.
+//
+//     use { Rng from random }
+//     var rng = Rng(seed: 42)
+//     let roll = rng.randi_range(1, 6)
+//
+// The algorithm is SplitMix64, a few lines every language can reproduce bit for bit.
+
+// The generator. `seed` is its state: it starts as the seed you give and moves on with every draw.
+pub struct Rng {
+    seed: i64
+
+    // The next 64 random bits, as an `i64`.
+    pure next(var self) -> i64 {
+        self.seed = self.seed +% 0x9E3779B97F4A7C15
+        var z: i64 = self.seed
+        // `>>` keeps the sign, so each shift is followed by a mask that leaves the logical shift.
+        z = (z ^ ((z >> 30) & 0x3FFFFFFFF)) *% 0xBF58476D1CE4E5B9
+        z = (z ^ ((z >> 27) & 0x1FFFFFFFFF)) *% 0x94D049BB133111EB
+        z ^ ((z >> 31) & 0x1FFFFFFFF)
+    }
+
+    // A float from 0 up to, but never including, 1.
+    pure randf(var self) -> float {
+        let bits: i64 = (self.next() >> 11) & 0x1FFFFFFFFFFFFF
+        let scale: f64 = 1.0 / 9007199254740992.0
+        let f = float(f64(bits) * scale)
+        // The top draws round up to 1 when narrowed; give back the largest float below 1.
+        if f >= 1.0 { 0.99999994 } else { f }
+    }
+
+    // A float from `lo` to `hi`.
+    pure randf_range(var self, lo: float, hi: float) -> float {
+        lo + (hi - lo) * self.randf()
+    }
+
+    // A whole number from `lo` to `hi`, both included. The ends may come in either order.
+    pure randi_range(var self, lo: int, hi: int) -> int {
+        var a = lo
+        var b = hi
+        if a > b {
+            a = hi
+            b = lo
+        }
+        // The top 32 bits of a draw times the number of values, high half: an unbiased enough
+        // pick that never overflows, even for the whole `int` range.
+        let span: i64 = i64(b) - i64(a) + 1
+        let top: i64 = (self.next() >> 32) & 0xFFFFFFFF
+        let offset: i64 = ((top *% span) >> 32) & 0xFFFFFFFF
+        // `offset` is below `span`, so `a + offset` fits an `int`; adding it as a shifted
+        // `int` with wrapping operators says so without a check that could fail.
+        a +% int(offset - 2147483648) +% 0x80000000
+    }
+}

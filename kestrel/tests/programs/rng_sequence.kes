@@ -1,0 +1,53 @@
+// expect: true
+// expect: true
+// expect: true
+// expect: true
+// The same seed gives the same draws, a copy of a generator keeps its place, and different seeds
+// give different draws.
+use { Rng from random }
+
+main() {
+    var a = Rng(seed: 123)
+    var b = Rng(seed: 123)
+    var same = true
+    for i from 0 to 100 {
+        if a.next() != b.next() { same = false }
+        if a.randf() != b.randf() { same = false }
+        if a.randf_range(-5.0, 5.0) != b.randf_range(-5.0, 5.0) { same = false }
+        if a.randi_range(1, 6) != b.randi_range(1, 6) { same = false }
+    }
+    print(same)
+
+    var r = Rng(seed: 9)
+    r.next()
+    let saved = r
+    var s = saved
+    var copy_same = true
+    for i from 0 to 10 {
+        if r.next() != s.next() { copy_same = false }
+    }
+    for i from 0 to 10 {
+        if r.randf() != s.randf() { copy_same = false }
+    }
+    for i from 0 to 10 {
+        if r.randf_range(2.0, 3.0) != s.randf_range(2.0, 3.0) { copy_same = false }
+    }
+    for i from 0 to 10 {
+        if r.randi_range(-4, 4) != s.randi_range(-4, 4) { copy_same = false }
+    }
+    print(copy_same)
+
+    var x = Rng(seed: 1)
+    var y = Rng(seed: 2)
+    var differ = false
+    for i from 0 to 8 {
+        if x.next() != y.next() { differ = true }
+    }
+    print(differ)
+
+    // The copy kept the state at the time of `let saved = r`.
+    var again = saved
+    var fresh = Rng(seed: 9)
+    fresh.next()
+    print(again.next() == fresh.next())
+}

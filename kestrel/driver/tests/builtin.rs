@@ -249,3 +249,16 @@ main() {}
     let copy = &m.funcs[m.tables.first().expect("one method table").copy.0 as usize];
     assert_eq!(copy.body, vec![kestrel_kir::Stmt::Fail(msg.to_string())]);
 }
+
+#[test]
+fn random_is_a_built_in_module_that_needs_no_window() {
+    let dir = project("random", &[]);
+    let src = "use random\nuse { Rng from random }\nmain() {\n    var r = Rng(seed: 1)\n    print(r.next())\n}\n";
+    let (compiled, text) = build(&dir, src);
+    assert_eq!(text, "");
+    assert_eq!(compiled.expect("compiles").builtins, ["random"]);
+    assert!(!kestrel_driver::needs_window("random"));
+    for name in ["window", "draw", "draw3d", "input"] {
+        assert!(kestrel_driver::needs_window(name), "{name}");
+    }
+}

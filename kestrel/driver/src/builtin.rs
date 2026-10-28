@@ -1,6 +1,6 @@
-//! The modules that ship inside the compiler: `window`, `draw`, `draw3d` and `input`.
-//! They are ordinary Kestrel files, embedded here, whose bodyless `native`
-//! functions Rust implements (see `kestrel-window`). A program loads one with
+//! The modules that ship inside the compiler: `window`, `draw`, `draw3d`, `input` and `random`.
+//! They are ordinary Kestrel files, embedded here; the window ones have bodyless `native`
+//! functions that Rust implements (see `kestrel-window`). A program loads one with
 //! `use window`, exactly as it would a file next to it.
 
 use std::path::Path;
@@ -9,12 +9,19 @@ use std::path::Path;
 const DIR: &str = "<builtin>";
 
 /// Each built-in module: its name, and its source.
-const MODULES: [(&str, &str); 4] = [
+const MODULES: [(&str, &str); 5] = [
     ("window", include_str!("../std/window.kes")),
     ("draw", include_str!("../std/draw.kes")),
     ("draw3d", include_str!("../std/draw3d.kes")),
     ("input", include_str!("../std/input.kes")),
+    ("random", include_str!("../std/random.kes")),
 ];
+
+/// Whether a program that uses built-in module `name` needs the window library (the window,
+/// drawing and input natives). `random` is plain Kestrel and needs only the runtime.
+pub fn needs_window(name: &str) -> bool {
+    matches!(name, "window" | "draw" | "draw3d" | "input")
+}
 
 /// The built-in module called `name`, as its name and source.
 pub(crate) fn find(name: &str) -> Option<(&'static str, &'static str)> {
@@ -52,7 +59,7 @@ mod tests {
 
     #[test]
     fn every_module_is_found_by_name() {
-        for name in ["window", "draw", "draw3d", "input"] {
+        for name in ["window", "draw", "draw3d", "input", "random"] {
             let (found, src) = find(name).expect(name);
             assert_eq!(found, name);
             assert!(src.starts_with("//"), "{name} starts with a comment");

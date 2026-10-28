@@ -122,10 +122,7 @@ fn run() -> ExitCode {
                 .map(|p| p.run_main())
         }
         _ => {
-            // Programs that use `window`, `draw`, `draw3d` or `input` need the window library, which
-            // carries the runtime as well.
-            let lib = if compiled.builtins.is_empty() { Lib::Runtime } else { Lib::Window };
-            build(&compiled.module, opts, &args, lib).map(|()| 0)
+            build(&compiled.module, opts, &args, lib_for(&compiled.builtins)).map(|()| 0)
         }
     };
     match result {
@@ -177,6 +174,17 @@ fn check_output(args: &Args) -> Result<(), String> {
     Ok(())
 }
 
+/// The library a program is linked with: programs that use `window`, `draw`, `draw3d` or `input`
+/// need the window library, which carries the runtime as well; the rest (`random` is plain
+/// Kestrel) need the runtime alone.
+fn lib_for(builtins: &[&str]) -> Lib {
+    if builtins.iter().any(|name| kestrel_driver::needs_window(name)) {
+        Lib::Window
+    } else {
+        Lib::Runtime
+    }
+}
+
 fn build(module: &kestrel_kir::Module, opts: Options, args: &Args, lib: Lib) -> Result<(), String> {
     let exe = output_path(args)?;
     let bytes = emit_object(module, opts).map_err(internal_error)?;
@@ -193,7 +201,7 @@ fn build(module: &kestrel_kir::Module, opts: Options, args: &Args, lib: Lib) -> 
 mod tests {
     use std::process::Command;
 
-    use super::{output_path, parse_args, proofs_checked, without_bom};
+    use super::{lib_for, output_path, parse_args, proofs_checked, without_bom, Lib};
 
     fn args(list: &[&str]) -> Option<super::Args> {
         parse_args(list.iter().map(|s| s.to_string()).collect())
@@ -230,6 +238,14 @@ mod tests {
         assert_eq!(without_bom("\u{feff}main() {}"), "main() {}");
         assert_eq!(without_bom("main() {}"), "main() {}");
         assert_eq!(without_bom("a\u{feff}"), "a\u{feff}");
+    }
+
+    #[test]
+    fn only_window_modules_link_the_window_library() {
+        assert_eq!(lib_for(&[]), Lib::Runtime);
+        assert_eq!(lib_for(&["random"]), Lib::Runtime);
+        assert_eq!(lib_for(&["random", "draw"]), Lib::Window);
+        assert_eq!(lib_for(&["input"]), Lib::Window);
     }
 
     const CHILD_ENV: &str = "KESTREL_PANIC_HOOK_CHILD";
