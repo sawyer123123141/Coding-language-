@@ -278,6 +278,12 @@ use {
   int]`.
 - **Creating generic values:** `list[vec3]()`, `array[int](n)`, or
   annotate and use a literal: `var tris: list[vec3] = []`.
+- **Floats are plain IEEE 754** (the determinism round, 2026-10-27, spec
+  `2026-10-27-determinism-design.md`): every operation rounds as written,
+  with no fused multiply-add, no reassociation and no fast-math, and there
+  is no "strict" flag because strict is the only mode. No optimization may
+  change a float result. `float` math functions widen their operands to
+  `f64`, compute, and narrow the result once.
 - **Vectors** (`vec2 vec3 vec4 ivec2 ivec3 ivec4`; the SIMD round of
   2026-10-22, spec `2026-10-21-simd-vectors-design.md`). One set of rules
   for all six, written in GDScript terms:
@@ -409,7 +415,11 @@ them is an error ("`min` is a built-in name; pick another").
   number in any argument fills every component (`clamp(v, 0.0, 1.0)`),
   `round` rounds halves away from zero as the scalar one does, and `abs`
   of an int vector is checked like `-v`. `sign` takes numbers only, and
-  the rest (`sin`, `pow`, ...) take numbers only.
+  the rest (`sin`, `pow`, ...) take numbers only. The transcendental
+  functions (`sin cos tan asin acos atan atan2 exp log pow`) and the float
+  remainder `%` are Kestrel's own, a port of musl's libm instead of the C
+  runtime's, so they give the same bits on every x86-64 CPU; `sqrt floor
+  ceil round abs min max` are exact and compiled to CPU instructions.
 - **Vector methods:** `v.sum()` on every vector (components add left to
   right, `((x + y) + z) + w`, so float results equal the written-out sum;
   an int vector's sum is checked like `+`); on float vectors `v.length()`,

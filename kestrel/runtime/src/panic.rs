@@ -157,12 +157,13 @@ pub unsafe extern "C" fn kestrel_rt_assume_failed(text: *const u8, len: i64, lin
 
 #[no_mangle]
 pub extern "C" fn kestrel_rt_fmod_f32(a: f32, b: f32) -> f32 {
-    a % b
+    // Kestrel's own remainder, like its other math (see `math.rs`): Rust's `%` calls the C runtime.
+    libm::fmodf(a, b)
 }
 
 #[no_mangle]
 pub extern "C" fn kestrel_rt_fmod_f64(a: f64, b: f64) -> f64 {
-    a % b
+    libm::fmod(a, b)
 }
 
 #[cfg(test)]

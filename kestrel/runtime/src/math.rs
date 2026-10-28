@@ -1,60 +1,68 @@
 //! Math and random numbers. Compiled code does `sqrt`, `floor` and the like
 //! with Cranelift instructions; the rest (trigonometry, exponentials) calls
 //! one function here per operation, in `f64`.
+//!
+//! Those functions are Kestrel's own: the `libm` crate, a pure-Rust port of
+//! musl's libm, instead of the C runtime's, which picks different code (and
+//! can round differently) on CPUs with FMA. So a program computes the same
+//! bits on every x86-64 CPU, which replays and networked games depend on.
+//! `libm` is pinned to one version, without its `arch` feature, so nothing in
+//! an exe's math looks at the CPU; `math/bits.rs` pins the results for a
+//! table of inputs.
 
 use std::cell::Cell;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[no_mangle]
 pub extern "C" fn kestrel_rt_sin(a: f64) -> f64 {
-    a.sin()
+    libm::sin(a)
 }
 
 #[no_mangle]
 pub extern "C" fn kestrel_rt_cos(a: f64) -> f64 {
-    a.cos()
+    libm::cos(a)
 }
 
 #[no_mangle]
 pub extern "C" fn kestrel_rt_tan(a: f64) -> f64 {
-    a.tan()
+    libm::tan(a)
 }
 
 #[no_mangle]
 pub extern "C" fn kestrel_rt_asin(a: f64) -> f64 {
-    a.asin()
+    libm::asin(a)
 }
 
 #[no_mangle]
 pub extern "C" fn kestrel_rt_acos(a: f64) -> f64 {
-    a.acos()
+    libm::acos(a)
 }
 
 #[no_mangle]
 pub extern "C" fn kestrel_rt_atan(a: f64) -> f64 {
-    a.atan()
+    libm::atan(a)
 }
 
 /// The angle of the point (`x`, `y`).
 #[no_mangle]
 pub extern "C" fn kestrel_rt_atan2(y: f64, x: f64) -> f64 {
-    y.atan2(x)
+    libm::atan2(y, x)
 }
 
 #[no_mangle]
 pub extern "C" fn kestrel_rt_exp(a: f64) -> f64 {
-    a.exp()
+    libm::exp(a)
 }
 
 /// The natural logarithm.
 #[no_mangle]
 pub extern "C" fn kestrel_rt_log(a: f64) -> f64 {
-    a.ln()
+    libm::log(a)
 }
 
 #[no_mangle]
 pub extern "C" fn kestrel_rt_pow(a: f64, b: f64) -> f64 {
-    a.powf(b)
+    libm::pow(a, b)
 }
 
 thread_local! {
@@ -161,3 +169,8 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod bits;
+#[cfg(test)]
+mod speed;
