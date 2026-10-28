@@ -144,6 +144,7 @@ pub fn walk_expr<V: VisitMut + ?Sized>(v: &mut V, e: &mut Expr) {
         | ExprKind::ArrayLit(xs)
         | ExprKind::VecLit(xs)
         | ExprKind::Math(_, xs)
+        | ExprKind::Hash(_, xs)
         | ExprKind::Str(_, xs) => {
             for x in xs {
                 v.visit_expr(x);

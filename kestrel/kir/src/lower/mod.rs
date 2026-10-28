@@ -3,6 +3,7 @@ mod assign_site;
 mod assume;
 mod builtins;
 mod call;
+mod checksum;
 mod closure;
 mod collections;
 mod compare;

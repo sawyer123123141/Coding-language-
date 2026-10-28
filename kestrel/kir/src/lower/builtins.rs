@@ -67,6 +67,9 @@ impl<'a> FnLowerer<'a> {
 
     /// A call to a global built-in function; the call's type is `ty`.
     pub(crate) fn builtin_call(&mut self, b: Builtin, args: &[ast::Arg], ty: KTy, line: u32) -> ExprKind {
+        if b == Builtin::Checksum {
+            return self.checksum(&args[0].value, line);
+        }
         // On vectors, lane by lane (`lerp` combines whole vectors); a SIMD vector is one operation.
         if ty.is_vector() && b != Builtin::Lerp {
             return self.simd_lane_call(b, args, ty, line);

@@ -1,4 +1,4 @@
-//! Operations that `ExprKind::Math`, `ExprKind::Map` and `ExprKind::Str` perform.
+//! Operations that `ExprKind::Math`, `ExprKind::Map`, `ExprKind::Str` and `ExprKind::Hash` perform.
 
 /// Float operations: the operands and the result all have the expression's type (F32 or F64).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -120,4 +120,18 @@ pub enum StrOp {
     ToInt,
     /// `[s]`: a `float?`, `none` unless `s` is a finite number.
     ToFloat,
+}
+
+/// What `ExprKind::Hash` does: one step of `checksum`'s fold (see the runtime's `checksum`). Both
+/// give an `i64`; neither allocates or fails.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HashOp {
+    /// `[h, x]`: `x` mixed into the fold `h` (an `i64`). `x` is a bool (0 or 1), a `u8` (its
+    /// value), an `int` or `i64` (sign-extended), a `float` (its 32 bits, zero-extended) or `f64`
+    /// (its 64 bits), each NaN made the canonical quiet NaN, a `vec4` or `ivec4` (its lanes in
+    /// order, as those numbers), or a string (its byte length, then its bytes in 8-byte
+    /// little-endian words, the last padded with zeros).
+    Mix,
+    /// `[h]`: the fold finished (SplitMix64's finaliser), the value `checksum` gives.
+    Finish,
 }

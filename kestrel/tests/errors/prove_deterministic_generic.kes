@@ -1,0 +1,30 @@
+interface Drawable {
+    draw(self)
+}
+
+struct Dot: Drawable {
+    n: int
+
+    draw(self) { print(self.n) }
+}
+
+struct Pool[T] {
+    items: list[T] = []
+}
+
+// A generic is judged at each copy: `fill[int]` holds, `fill[Drawable]` doesn't.
+@prove(deterministic)
+fill[T](var p: Pool[T], x: T) {
+    p.items.add(x)
+}
+
+main() {
+    var ints = Pool[int]()
+    fill(var ints, 3)
+    var shapes = Pool[Drawable]()
+    let d: Drawable = Dot(n: 1)
+    fill(var shapes, d)
+    print(ints.items.len, shapes.items.len)
+}
+
+// error 16: `fill[Drawable]` (made on line 26) can't be proven `deterministic`: its `var` parameter `p` holds an interface value (`p.items[i]`), which a snapshot can't copy and checksum

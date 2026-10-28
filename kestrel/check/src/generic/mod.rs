@@ -16,6 +16,7 @@ use crate::ty::Ty;
 
 pub(crate) mod copies;
 mod copies_cap;
+mod copies_checksum;
 pub(crate) mod declare;
 pub(crate) mod expand;
 pub(crate) mod graph;

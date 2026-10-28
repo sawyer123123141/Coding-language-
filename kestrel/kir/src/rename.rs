@@ -182,6 +182,7 @@ pub(crate) fn rename_expr(e: &mut Expr, subst: &[Subst]) {
         | ExprKind::ArrayLit(xs)
         | ExprKind::VecLit(xs)
         | ExprKind::Math(_, xs)
+        | ExprKind::Hash(_, xs)
         | ExprKind::Str(_, xs) => {
             for x in xs {
                 rename_expr(x, subst);

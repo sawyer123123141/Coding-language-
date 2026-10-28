@@ -1,0 +1,24 @@
+interface Drawable {
+    draw(self)
+}
+
+struct Dot: Drawable {
+    n: int
+
+    draw(self) { print(self.n) }
+}
+
+// A generic is judged at each copy: `total[int]` is fine, `total[Drawable]` isn't.
+pure total[T](xs: list[T]) -> i64 {
+    checksum(xs)
+}
+
+main() {
+    let ints: list[int] = [1, 2]
+    print(total(ints))
+    let d: Drawable = Dot(n: 1)
+    let shapes: list[Drawable] = [d]
+    print(total(shapes))
+}
+
+// error 13: `checksum` can't take a `list[Drawable]`, which holds an interface value; checksum the fields that hold the game's state instead

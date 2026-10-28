@@ -158,6 +158,7 @@ impl Inliner<'_> {
             | ExprKind::ArrayLit(xs)
             | ExprKind::VecLit(xs)
             | ExprKind::Math(_, xs)
+            | ExprKind::Hash(_, xs)
             | ExprKind::Str(_, xs) => {
                 for x in xs {
                     self.expr(x);

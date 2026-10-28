@@ -332,7 +332,7 @@ impl Walk<'_> {
                 self.expr(b);
                 self.effect(line, Effect::SharedRandom, "calls `randi_range`".to_string());
             }
-            ExprKind::Math(_, xs) | ExprKind::StructLit(_, xs) | ExprKind::VariantLit(_, _, xs) | ExprKind::VecLit(xs) => {
+            ExprKind::Math(_, xs) | ExprKind::Hash(_, xs) | ExprKind::StructLit(_, xs) | ExprKind::VariantLit(_, _, xs) | ExprKind::VecLit(xs) => {
                 for x in xs {
                     self.expr(x);
                 }

@@ -251,6 +251,8 @@ pub(super) fn write_expr(m: &Module, f: &Func, e: &Expr, s: &mut String) {
             s.push(')');
         }
         ExprKind::VecLit(_) | ExprKind::Splat(_) | ExprKind::Shuffle(..) | ExprKind::LaneOf(..) => super::vector::write_vector(m, f, e, s),
+        // A finished fold is a `checksum(x)` call; a step inside one has no source of its own.
+        ExprKind::Hash(HashOp::Finish, _) => s.push_str("checksum(...)"),
         _ => s.push_str("(...)"),
     }
 }

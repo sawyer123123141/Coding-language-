@@ -1,0 +1,92 @@
+// `checksum(x)` reads a value's contents: NaNs are one value, -0.0 and 0.0 differ, a number is its
+// value whatever its width, equal values built different ways are equal, and a list is its items
+// up to its length, never its capacity or the stale items storage reuse leaves past the length.
+struct P {
+    a: int
+    b: f64
+    s: string
+    xs: list[int]
+}
+
+struct Game {
+    ball: vec2
+    vel: vec4
+    scores: list[int]
+    seen: map[string, int]
+    hold: int?
+    seed: i64
+}
+
+@prove(deterministic, no_alloc, no_panic)
+pub pure sum(g: Game) -> i64 {
+    checksum(g)
+}
+
+nums(n: int) -> list[int] {
+    var xs: list[int] = []
+    for i from 0 to n { xs.add(i) }
+    xs
+}
+
+main() {
+    let z = 0.0
+    let nan_a = z / z
+    let nan_b = -nan_a
+    print(checksum(nan_a) == checksum(nan_b))
+    print(checksum(f64(nan_a)) == checksum(f64(nan_b)))
+    print(checksum(0.0) == checksum(-0.0))
+    print(checksum(1) == checksum(i64(1)))
+
+    // Equal structs built two ways.
+    let p1 = P(a: 1, b: 2.5, s: "hi", xs: [1, 2, 3])
+    var p2 = P(a: 0, b: 0.0, s: "", xs: [])
+    p2.a = 1
+    p2.b = 2.5
+    p2.s = "h" + "i"
+    for x in [1, 2, 3] { p2.xs.add(x) }
+    print(checksum(p1) == checksum(p2))
+
+    // Changing one list item changes it.
+    var p3 = p1
+    p3.xs[1] = 7
+    print(checksum(p3) != checksum(p1))
+
+    // A list that grew and then shrank (assigned over with storage reuse, or popped) equals one
+    // built fresh: the items past its length aren't read.
+    var big = P(a: 1, b: 2.5, s: "a longer string", xs: nums(8))
+    big = p1
+    print(big.xs, checksum(big) == checksum(p1))
+    var ys = nums(6)
+    ys.pop()
+    ys.pop()
+    ys.pop()
+    let fresh: list[int] = [0, 1, 2]
+    print(ys, checksum(ys) == checksum(fresh))
+    var ring: list[list[int]] = [nums(5), nums(7)]
+    let short: list[list[int]] = [nums(1), nums(2)]
+    ring = short
+    print(ring, checksum(ring) == checksum(short))
+
+    // A map is its live entries in insertion order.
+    var m = {"a": 1, "b": 2}
+    m.remove("a")
+    m["c"] = 3
+    let same = {"b": 2, "c": 3}
+    let other = {"c": 3, "b": 2}
+    print(checksum(m) == checksum(same), checksum(m) == checksum(other))
+
+    // A deterministic, allocation-free, panic-free function can checksum the state it gets.
+    let g = Game(ball: vec2(1, 2), vel: vec4(0.5), scores: [3, 4], seen: {"x": 1}, hold: 9, seed: 42)
+    print(sum(g) == checksum(g), sum(g) != checksum(p1))
+}
+// expect: true
+// expect: true
+// expect: false
+// expect: true
+// expect: true
+// expect: true
+// expect: [1, 2, 3] true
+// expect: [0, 1, 2] true
+// expect: [[0], [0, 1]] true
+// expect: true false
+// expect: true true

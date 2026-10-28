@@ -193,6 +193,7 @@ pub fn walk_expr<'a>(e: &'a Expr, f: &mut impl FnMut(Node<'a>)) {
         | ExprKind::ArrayLit(xs)
         | ExprKind::VecLit(xs)
         | ExprKind::Math(_, xs)
+        | ExprKind::Hash(_, xs)
         | ExprKind::Str(_, xs) => {
             for x in xs {
                 walk_expr(x, f);

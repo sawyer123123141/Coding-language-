@@ -38,10 +38,12 @@ pub enum Builtin {
     Cross,
     /// `v.sum()` on every vector: its components added left to right.
     Sum,
+    /// `checksum(x)`: a content hash of any value that can be copied and checksummed (an `i64`).
+    Checksum,
 }
 
 /// Every global function and constant. A new variant belongs here or in `METHODS`.
-const GLOBALS: [Builtin; 26] = [
+const GLOBALS: [Builtin; 27] = [
     Builtin::Sqrt,
     Builtin::Sin,
     Builtin::Cos,
@@ -68,6 +70,7 @@ const GLOBALS: [Builtin; 26] = [
     Builtin::RandSeed,
     Builtin::Pi,
     Builtin::Tau,
+    Builtin::Checksum,
 ];
 
 const METHODS: [Builtin; 6] = [Builtin::Length, Builtin::Normalized, Builtin::Dot, Builtin::DistanceTo, Builtin::Cross, Builtin::Sum];
@@ -130,6 +133,7 @@ impl Builtin {
             Builtin::DistanceTo => "distance_to",
             Builtin::Cross => "cross",
             Builtin::Sum => "sum",
+            Builtin::Checksum => "checksum",
         }
     }
 
@@ -149,7 +153,7 @@ impl Builtin {
         match self {
             Pi | Tau | Randf | Length | Normalized | Sum => 0,
             Sqrt | Sin | Cos | Tan | Asin | Acos | Atan | Exp | Log | Floor | Ceil | Round | Abs | Sign | RandSeed | Dot
-            | DistanceTo | Cross => 1,
+            | DistanceTo | Cross | Checksum => 1,
             Atan2 | Pow | Min | Max | RandfRange | RandiRange => 2,
             Clamp | Lerp => 3,
         }

@@ -431,6 +431,33 @@ them is an error ("`min` is a built-in name; pick another").
 - **Random numbers:** `randf()`, `randf_range(lo, hi)`,
   `randi_range(lo, hi)`, `rand_seed(n)`. Not `pure`: each call changes the
   generator.
+- **`checksum(x) -> i64`** (the determinism round, 2026-10-27): a content
+  hash of any value, to find where two runs of a game stopped agreeing.
+  `pure`; it allocates nothing and never fails, so `no_alloc`, `no_panic`
+  and `deterministic` hold through it. It returns `i64` until Kestrel has
+  `u64`: the 64 bits are the same, printed signed. It reads a value's
+  contents in a fixed order, never its padding: a bool is 0 or 1; `u8`,
+  `int` and `i64` are their value as 64 bits (`checksum(1) ==
+  checksum(i64(1))`); a `float` is its 32 bits and an `f64` its 64 bits,
+  every NaN made the one canonical quiet NaN (`-0.0` and `0.0` differ); a
+  vector is its components in order; a string is its byte length, then its
+  bytes; an array or list is its length, then its items (only the first
+  `len`: never its capacity or what a shrunk list keeps past its length); a
+  map is its live count, then each live key and value in insertion order;
+  an optional is 0, or 1 then its value; an enum is its variant number, then
+  that variant's fields; a struct is its fields in order. The exact fold
+  (start `0x243F6A8885A308D3`, each word mixed as `x = (h ^ w) *
+  0x9E3779B97F4A7C15; h = x ^ (x >> 32)`, SplitMix64's finaliser at the
+  end) is in `2026-10-27-determinism-design.md`, decision 8; it may change
+  between compiler versions until replay files pin it. It refuses, at
+  compile time, exactly what a snapshot can't copy: a value holding an
+  `Arena` or GPU object ("`checksum` can't take a `World`, which holds an
+  `Arena`; checksum the fields that hold the game's state instead"), a
+  function value, `pure` or not ("..., which holds a function value, whose
+  address differs between builds; checksum the other fields instead") or an
+  interface value ("..., which holds an interface value; ..."). In a
+  generic, each copy is judged with its own types: `checksum(xs)` with
+  `xs: list[T]` is fine for `T = int` and refused for `T` an interface.
 
 The full table of argument and result types is in
 `2026-10-10-window-design.md` ("Global math and random numbers").

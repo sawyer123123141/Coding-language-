@@ -98,7 +98,7 @@ impl Cx<'_> {
                 any
             }
             ExprKind::ArrayNew(_) | ExprKind::ArrayLit(_) | ExprKind::ListNew => self.new_list(st, e, sure),
-            ExprKind::StructLit(_, xs) | ExprKind::VariantLit(_, _, xs) | ExprKind::Math(_, xs) | ExprKind::Str(_, xs) => {
+            ExprKind::StructLit(_, xs) | ExprKind::VariantLit(_, _, xs) | ExprKind::Math(_, xs) | ExprKind::Str(_, xs) | ExprKind::Hash(_, xs) => {
                 self.all(st, xs, sure);
                 any
             }

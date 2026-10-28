@@ -66,6 +66,8 @@ pub(crate) struct RtFuncs {
     pub gpu_drop: FuncId,
     /// Sets the float mode back after a call into the window library.
     pub fpu_pin: FuncId,
+    /// Mixes a string's bytes into a `checksum` fold.
+    pub hash_bytes: FuncId,
     /// The runtime's `kestrel_rt_call_line`, the line of the latest call into a built-in function.
     pub call_line: DataId,
     /// The runtime's `kestrel_rt_call_file`, the file of that call.
@@ -153,6 +155,7 @@ impl RtFuncs {
             str_end: decl("kestrel_rt_str_end", &[ptr], None)?,
             gpu_drop: decl("kestrel_rt_gpu_drop", &[I64], None)?,
             fpu_pin: decl("kestrel_rt_fpu_pin", &[], None)?,
+            hash_bytes: decl("kestrel_rt_hash_bytes", &[I64, ptr, I64], Some(I64))?,
             call_line,
             call_file,
         })
@@ -175,7 +178,7 @@ pub(crate) const MATH: [(MathOp, &str, usize); 10] = [
 
 /// Addresses of every runtime export, for registering with the JIT.
 pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
-    use kestrel_runtime::{arena, fpu, gpu, list, map, math, panic, par, print, sort, start, string, string_find, string_make, string_parse};
+    use kestrel_runtime::{arena, checksum, fpu, gpu, list, map, math, panic, par, print, sort, start, string, string_find, string_make, string_parse};
     vec![
         ("kestrel_rt_print_i64", print::kestrel_rt_print_i64 as *const u8),
         ("kestrel_rt_print_f32", print::kestrel_rt_print_f32 as *const u8),
@@ -247,6 +250,7 @@ pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
         ("kestrel_rt_str_end", print::kestrel_rt_str_end as *const u8),
         ("kestrel_rt_gpu_drop", gpu::kestrel_rt_gpu_drop as *const u8),
         ("kestrel_rt_fpu_pin", fpu::kestrel_rt_fpu_pin as *const u8),
+        ("kestrel_rt_hash_bytes", checksum::kestrel_rt_hash_bytes as *const u8),
         ("kestrel_rt_call_line", std::ptr::addr_of!(panic::kestrel_rt_call_line).cast::<u8>()),
         ("kestrel_rt_call_file", std::ptr::addr_of!(panic::kestrel_rt_call_file).cast::<u8>()),
     ]

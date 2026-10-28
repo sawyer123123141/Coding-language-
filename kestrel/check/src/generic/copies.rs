@@ -19,6 +19,8 @@ use kestrel_syntax::ast::{Block, Expr, ExprId, Item, Program};
 use kestrel_syntax::visit::{each_expr, each_expr_in};
 use kestrel_syntax::{Diagnostic, Span};
 
+use crate::builtins::Builtin;
+use crate::generic::copies_checksum::{checksum_arg, ChecksumArg};
 use crate::generic::{expand, CopyInfo, GenericOwner, Subst, TyListId};
 use crate::tables::{EnumId, FnId, FnInfo, ParamSig, Res, StructId, Tables};
 use crate::ty::Ty;
@@ -149,18 +151,19 @@ impl<'a> Walk<'a> {
 
     fn block(&mut self, block: &Block, ctx: Ctx) -> Result<(), Diagnostic> {
         let mut exprs = Vec::new();
-        each_expr(block, &mut |e: &Expr| exprs.push((e.id, e.span)));
-        exprs.into_iter().try_for_each(|(id, span)| self.expr(id, span, ctx))
+        each_expr(block, &mut |e: &Expr| exprs.push((e.id, e.span, checksum_arg(e))));
+        exprs.into_iter().try_for_each(|(id, span, arg)| self.expr(id, span, arg, ctx))
     }
 
     fn expr_tree(&mut self, e: &Expr, ctx: Ctx) -> Result<(), Diagnostic> {
         let mut exprs = Vec::new();
-        each_expr_in(e, &mut |e: &Expr| exprs.push((e.id, e.span)));
-        exprs.into_iter().try_for_each(|(id, span)| self.expr(id, span, ctx))
+        each_expr_in(e, &mut |e: &Expr| exprs.push((e.id, e.span, checksum_arg(e))));
+        exprs.into_iter().try_for_each(|(id, span, arg)| self.expr(id, span, arg, ctx))
     }
 
     /// One expression: its types interned under `ctx`, and the copies and default walks it needs.
-    fn expr(&mut self, id: ExprId, span: Span, ctx: Ctx) -> Result<(), Diagnostic> {
+    /// `checksum` is the argument of a `checksum(x)` call, which each copy judges.
+    fn expr(&mut self, id: ExprId, span: Span, checksum: ChecksumArg, ctx: Ctx) -> Result<(), Diagnostic> {
         let at = ctx.made_at.unwrap_or(span);
         let ty = self.sub(self.t.ty(id), ctx)?;
         let type_args = match self.t.generic.type_args.get(&id) {
@@ -215,6 +218,11 @@ impl<'a> Walk<'a> {
             }
             Some(Res::Convert(ty) | Res::SimdMake(ty)) => {
                 self.sub(ty, ctx)?;
+            }
+            Some(Res::Builtin(Builtin::Checksum)) => {
+                if let Some((arg, root)) = checksum {
+                    self.checksum_copy(arg, root, span, ctx)?;
+                }
             }
             _ => {}
         }
@@ -316,7 +324,7 @@ impl<'a> Walk<'a> {
     /// `ty` under `ctx`'s substitution, interned. A type that would grow past `MAX_PARTS` stops the
     /// walk before anything is interned or named (P41); an instance it interns whose type
     /// arguments nest past the cap stops it after (P25).
-    fn sub(&mut self, ty: Ty, ctx: Ctx) -> Result<Ty, Diagnostic> {
+    pub(super) fn sub(&mut self, ty: Ty, ctx: Ctx) -> Result<Ty, Diagnostic> {
         let Some(s) = ctx.subst else { return Ok(ty) };
         if let Err(wide) = self.size_under(ty, s) {
             return Err(self.walk_cap(ctx, (wide, None), WIDE));

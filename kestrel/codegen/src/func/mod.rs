@@ -4,6 +4,7 @@ mod arith;
 mod assume;
 mod call;
 mod check;
+mod checksum;
 mod collections;
 mod divide;
 mod expr;

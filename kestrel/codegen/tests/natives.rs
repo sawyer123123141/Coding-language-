@@ -284,7 +284,7 @@ struct Mix {
 }
 
 /// A different decimal place for each field, so a wrong offset shows in the digits.
-extern "C" fn k_checksum(m: *const Mix) -> i64 {
+extern "C" fn k_digits(m: *const Mix) -> i64 {
     // SAFETY: Kestrel passes a pointer to a live `Mix`, whose string points at `len` bytes.
     let m = unsafe { &*m };
     let bytes = unsafe { std::slice::from_raw_parts(m.s.ptr, m.s.len as usize) };
@@ -302,14 +302,14 @@ fn a_struct_of_mixed_widths_has_the_layout_c_expects() {
     s: string
     v: vec3
 }
-native checksum(m: Mix) -> i64
+native digits(m: Mix) -> i64
 main() {
     let big: i64 = 7000000000000000
     let m = Mix(200, true, big, \"kes\", vec3(1, 2, 3))
-    print(checksum(m))
+    print(digits(m))
 }
 ";
-    let p = jit_natives(src, &[("kestrel_checksum", k_checksum as *const u8)]).expect("codegen");
+    let p = jit_natives(src, &[("kestrel_digits", k_digits as *const u8)]).expect("codegen");
     // a 200, b 1,000, the length 3 * 10,000, the bytes 323 * 1,000,000, v 321 * 10,000,000,000, c 7e15.
     assert_eq!(run_captured(&p), "7003210323031200\n");
 }

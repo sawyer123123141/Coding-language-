@@ -334,7 +334,7 @@ impl<'a> BodyChecker<'a> {
 
 /// A place as the user wrote it, for a message: `levels[0].items`. An index that isn't a
 /// number or a name shows as `_`, and a call as `f(...)`.
-pub(super) fn written(e: &Expr) -> String {
+pub(crate) fn written(e: &Expr) -> String {
     match &e.kind {
         ExprKind::Ident(n) => n.clone(),
         ExprKind::Field { base, name, .. } => format!("{}.{name}", written(base)),
