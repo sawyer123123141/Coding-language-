@@ -205,11 +205,11 @@ One honest difference remains: the error is noticed after the dispatch, so other
 
 - **noise:** `value2`, `value3`, `simplex2`, `fbm`
 - **lighting:** `lambert`, `half_lambert`, `blinn`, `fresnel`, `rim`
-- **colour:** `mix`, `srgb_to_linear`, `linear_to_srgb`, `hsv`, `luminance`
-- **shaping:** `smoothstep`, `step`, `remap`, `saturate`
-- **GPU only:** `sample(tex, uv)`, and later `dfdx`/`dfdy`
+- **colour:** `srgb_to_linear`, `linear_to_srgb`, `hsv`, `luminance` (mixing is the built-in `lerp`)
+- **shaping:** `remap` (`smoothstep` becomes a built-in; `step` and `saturate` are dropped, see "the review's changes")
+- **textures:** `sample(tex, uv)` (on the CPU too, for tests); GPU only: later `dfdx`/`dfdy`
 
-**Lighting today** is "none: colours are drawn as given". The shader package is how lighting arrives, as a library, not as engine magic.
+**Lighting today** is "none: colours are drawn as given". Lighting arrives with the shader package: a `Surface` shader is lit by the engine's sun, and a `Color` shader lights itself with the library's helpers.
 
 **Hot reload** works as in Scene D. It applies only to `kestrel run` (the JIT), because a built exe has no compiler inside it.
 
