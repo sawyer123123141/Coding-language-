@@ -73,38 +73,42 @@ Expected: a few ms of GPU time, plus about 1 ms of readback, against about 40 ms
 
 ### Scene C: a water material written as a Kestrel function
 
-```
-use { Fragment, lambert, mix from shader }
-use { octave from noise }                // the same file the terrain uses
+(Revised 2026-10-28 after a review of how shaders are written: section 5, "Writing shaders: the review's changes". The first version returned a `vec4`, multiplied the alpha by the light by mistake, used the terrain's integer noise, which made the water blocky and needs `i64` on the GPU, and kept its colours where hot reload couldn't see them.)
 
+```
+use { Fragment, Surface, value3 from shader }
+
+// Art values: plain constants the shader reads, so hot reload picks up a changed colour.
+let DEEP = Color(r: 0.05, g: 0.2, b: 0.4)
+let SHALLOW = Color(r: 0.2, g: 0.6, b: 0.7)
+
+// Uniforms: only what the game changes while it runs.
 struct Water {
-    time: float
-    deep: Color = Color(r: 0.05, g: 0.2, b: 0.4)
-    shallow: Color = Color(r: 0.2, g: 0.6, b: 0.7)
+    scale: float = 0.125
+    speed: float = 0.5
 }
 
-pure water(f: Fragment, w: Water) -> vec4 {
-    let n = octave(int(f.world.x * 8), int(w.time * 4), int(f.world.z * 8), 3, 7)
-    let light = lambert(f.normal, vec3(0.3, 1, 0.2))
-    let c = mix(w.deep, w.shallow, n)
-    vec4(c.r, c.g, c.b, 0.8) * (0.4 + 0.6 * light)
+@prove(gpu)
+pure water(px: Fragment, w: Water) -> Surface {
+    let p = vec3(px.world.x * w.scale, px.time * w.speed, px.world.z * w.scale)
+    Surface(albedo: lerp(DEEP, SHALLOW, value3(p)), alpha: 0.8, roughness: 0.1)
 }
 
 main() {
     ...
-    var mat = draw3d.material(fragment: water, params: Water(time: 0))
+    draw3d.sun(dir: vec3(-0.3, -1, -0.2), color: WHITE)
+    let mat = draw3d.material(fragment: water, params: Water(), blend: Blend.Alpha)
     while window.frame() {
-        mat.params.time += window.delta()
-        draw3d.mesh_with(lake, mat, vec3(0, 0, 0))
+        draw3d.mesh_with(lake, mat, vec3(0, 0, 0))   // lake: a Mesh made earlier with make_mesh
     }
 }
 ```
 
-In Godot terms, `water` is the `fragment()` function of a `shader_type spatial` shader. `Fragment` holds the built-ins (`VERTEX`, `NORMAL`, `UV`, `COLOR`, `TIME`), the `Water` struct is the list of `uniform`s, and the return value is `ALBEDO` plus `ALPHA`. The difference from Godot: `water` is an ordinary `pure` function. A unit test can call it on the CPU with a made-up `Fragment`, and it calls the same `octave` the terrain uses. (Calling the same 3D noise with `y` set to time is only an illustration.)
+In Godot terms, `water` is the `fragment()` function of a `shader_type spatial` shader. `Fragment` holds the built-ins (`VERTEX` in world space, `NORMAL`, `UV`, `COLOR`, `TIME`), the `Water` struct is the list of `uniform`s, and the returned `Surface` is the outputs (`ALBEDO`, `ALPHA`, `ROUGHNESS`, ...), which the engine then lights, as Godot does. The difference from Godot: `water` is an ordinary `pure` function. A unit test can call it on the CPU in one line, `water(Fragment(world: vec3(1, 0, 2)), Water())`, and it can call the same helpers CPU code uses.
 
 ### Scene D: hot-reloading the water
 
-With `kestrel run`, the compiler lives in the same process as the program (JIT). Save the file, and a watcher thread compiles the changed file again, only as far as needed to regenerate the shaders, which takes tens of ms. It hands the new GLSL to the window thread, and the next frame draws with it. If the edit has an error, the old shader stays and the error is printed. If the edit changes the `Water` struct's fields, the reload is refused ("`Water` changed its fields; restart to use the new shader"), because the running program's values have the old layout. CPU code isn't reloaded: that is the separate "standalone hot reload" item in the handoff. If `noise.kes` changes, shaders get the new version and CPU code keeps the old one until a restart, and the reload says so.
+With `kestrel run`, the compiler lives in the same process as the program (JIT). Save the file, and a watcher thread compiles the changed file again, only as far as needed to regenerate the shaders, which takes tens of ms. It hands the new GLSL to the window thread, and the next frame draws with it. If the edit has an error, the old shader stays and the error is printed. Changing `DEEP` or `SHALLOW` reloads (constants the shader reads are compiled into its GLSL); changing a default in `Water` doesn't, because defaults are applied where `Water()` is built, in CPU code. If the edit changes the `Water` struct's fields, the reload is refused ("`Water` changed its fields; restart to use the new shader"), because the running program's values have the old layout. CPU code isn't reloaded: that is the separate "standalone hot reload" item in the handoff. If `noise.kes` changes, shaders get the new version and CPU code keeps the old one until a restart, and the reload says so.
 
 ## 2. The GPU subset
 
@@ -209,6 +213,24 @@ One honest difference remains: the error is noticed after the dispatch, so other
 
 **Hot reload** works as in Scene D. It applies only to `kestrel run` (the JIT), because a built exe has no compiler inside it.
 
+### Writing shaders: the review's changes (2026-10-28)
+
+The user asked for a review of how shader functions are written before anything is built. An Opus reviewer and the controller each read this section independently and found the same core problems; these changes replace the rules above where they differ. Every new name is the user's call.
+
+1. **The return type says who does the lighting.** `-> shader.Surface` is lit by the engine: a struct of `albedo: Color`, `alpha = 1`, `emission = BLACK`, `normal`, `roughness = 1`, `metallic = 0`, every field with a default, so fields added later (or a feature the engine adds later) never break an old shader. `-> Color` is unlit, the final colour (Godot's `unshaded`, Shadertoy's `fragColor`); a shader that wants its own lighting returns `Color` and calls `lambert` itself. Engine lighting starts small: one sun plus ambient light, set with `draw3d.sun(dir:, color:)`. A material takes `blend: Blend.Opaque | Blend.Alpha | Blend.Add` (default opaque), and transparent materials are drawn after opaque ones. *Rejected:* returning `vec4` (no room for emission or normal maps without a new signature, and its example multiplied the alpha by the light); Godot-style writes to `ALBEDO` and friends (a `pure` function has no output variables); one function per output as in three.js TSL (spreads one material over several functions).
+2. **No second set of maths names.** Instead of `shader.mix`, `step` and `saturate`, the built-ins grow: `lerp` also takes two `Color`s, `smoothstep` becomes a built-in for floats and vectors, and `vec4(c)` / `Color(v)` convert. Kestrel has no overloading and `noise.kes` already exports a `mix`, so a `shader.mix` would clash in any file that imports both; `saturate` is `clamp(x, 0, 1)`. *Rejected:* operator overloading on `Color` (a language change much bigger than shaders); making `Color` an alias of `vec4` (its 16-byte alignment changes every struct that holds a colour).
+3. **Shader examples use float noise** (`shader.value3(p: vec3)`, `fbm`): smooth in space and time. `noise.kes`'s integer noise stays the terrain's (bit-exact, `i64` hashes, which a GPU emulates slowly). Sharing helpers between CPU and GPU still works; the example no longer pretends the terrain's noise suits water.
+4. **Art values are constants, uniforms are params.** Top-level `let` constants a shader reads are compiled into its GLSL, so hot reload picks up a changed colour. The params struct holds only what the game changes at run time. *Rejected:* re-applying struct defaults on reload (it would change hidden CPU state behind the program's back).
+5. **One clock:** `Fragment.time`, which the engine wraps every hour (as Godot's `TIME` does) so a `float` keeps its precision; no time field in params.
+6. **The inputs are defined:** `Fragment.world` is the world position, `Fragment.normal` is normalized and in world space, `Color` values are sRGB and the engine converts them to linear. Every `Fragment` field has a default, so a CPU test is one line.
+7. **Checks inside materials.** With OpenGL 4.3 present, the error flag of section 3 works in every stage. On 3.3 (no storage buffers there), a failed check in a checked build paints the pixel magenta, and `--report` lists the checks left in each material. `--release` has none, as everywhere.
+8. **Errors land where you'd look.** A signature error names both lines: "`water` (line 15) can't be a fragment shader: it takes `(Fragment, int)` ...; it is used as one on line 22". Examples put `@prove(gpu)` on shader functions so GPU errors appear at the definition. A shader with no params is allowed: `pure glow(px: Fragment) -> Color`. Stage-by-signature stays. *Rejected:* `@fragment` / `@vertex` annotations (an `@` is a promise the compiler proves, not a role), a `shader water { }` declaration (a second kind of function).
+9. **The future is additive.** Custom values from the vertex shader to the fragment shader (Godot's `varying`) become an optional middle parameter: `pure water(px: Fragment, v: Ripple, w: Water)`, where the vertex shader returns `Ripple`, a struct with a `vertex: shader.Vertex` field. 2D shaders get their own input type, `shader.Canvas`, instead of a `Fragment` whose `world` and `normal` mean nothing. The two-parameter form never changes.
+10. **`sample` runs on the CPU too**, reading a cached copy of the texture (slow, for tests), so a textured shader keeps its CPU unit test. Only screen-space derivatives (`dfdx`, `dfdy`) stay GPU-only.
+11. **Parameter names in examples:** `px` for the `Fragment`, not `f`. Section 5's `pure f(f: shader.Fragment, ...)` was itself an error: Kestrel allows no shadowing, so a parameter can't share its function's name.
+
+**Still open, noted by the review:** `draw3d.mesh_with(mesh, mat, pos)` reads awkwardly; `draw3d.mesh(m, pos, material: mat)` would be nicer but needs optional parameters, which Kestrel doesn't have. The user picks the name.
+
 ## 6. New syntax and names (all the user's call)
 
 | Name | What it is | Recommendation | Rejected |
@@ -220,6 +242,12 @@ One honest difference remains: the error is noticed after the dispatch, so other
 | `shader` module | `Fragment`, `Vertex`, `sample`, plus the helpers in section 5 | yes | putting it in `draw3d` (2D shaders want it too) |
 | `draw3d.material(fragment:, vertex:, params:)`, `draw3d.Material[P]`, `draw3d.mesh_with` | materials | yes | `@fragment`/`@vertex` stage annotations (not promises); a `shader water { }` declaration (a second kind of function) |
 | `draw.points(list, size:, color:)` | draws a `gpu_list` of items with a `pos: vec2` field, from the GPU | **the field-name rule for round 1** | a closure picking the field (`at: (p) -> p.pos`), nicer but a closure compiled to a vertex shader is more work |
+| `shader.Surface`, `-> Color` for unlit | a fragment shader's output: lit by the engine, or the final colour (section 5, "the review's changes") | **yes** | returning `vec4`; writing Godot-style output variables |
+| `draw3d.sun(dir:, color:)` | the engine's one light, plus ambient | yes | lighting only in user code |
+| `blend: Blend.Opaque/Alpha/Add` on `draw3d.material` | how a material mixes with what's behind it | yes | inferring blending from alpha |
+| `lerp` on `Color`, built-in `smoothstep`, `vec4(c)` / `Color(v)` | maths for colours without new module names | **yes** | `shader.mix`, `step`, `saturate` (clash with `noise.mix`; no overloading) |
+| `shader.Canvas` | the input of a 2D shader | yes, in round 4 | reusing `Fragment` in 2D |
+| `(px: Fragment, v: V, p: P)` | varyings as an optional middle parameter | yes, in round 4 | changing the first parameter's type |
 | `KESTREL_GPU=off` | an environment variable for the runtime | yes | |
 | `kestrel check --gpu-dump` | prints the generated GLSL | yes | |
 | (later) fixed-size arrays, e.g. `[float; 9]` or another spelling | local arrays in GPU code (a 3x3 kernel, 128 blocks in a struct) | the spec already lists fixed-size arrays as out of scope; the user picks the spelling when needed | |
