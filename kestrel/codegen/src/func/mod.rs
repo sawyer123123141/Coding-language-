@@ -23,6 +23,8 @@ mod simd_math;
 mod stmt;
 mod strings;
 mod wide;
+mod wide_atan;
+mod wide_exp;
 mod wide_trig;
 
 use std::collections::HashMap;

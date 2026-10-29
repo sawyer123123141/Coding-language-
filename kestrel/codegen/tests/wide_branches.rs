@@ -1,6 +1,6 @@
-//! The inline `float` `sin`, `cos` and `tan` are branch-free but for the one special-input branch
-//! to the cold runtime call: no float `select`, no `fmin`/`fmax` and no float-to-int conversion,
-//! each of which hides a jump inside an x64 pseudo-instruction.
+//! The inline `float` math (every function but `pow`, and float `%`) is branch-free but for the one
+//! special-input branch to the cold runtime call: no float `select`, no `fmin`/`fmax` and no
+//! float-to-int conversion, each of which hides a jump inside an x64 pseudo-instruction.
 
 mod common;
 
@@ -16,6 +16,8 @@ fn release() -> Options {
 /// `XmmMinMaxSeq` prints `xmm min seq` or `xmm max seq`, `CvtFloatToSintSeq` and
 /// `CvtFloatToUintSeq` print `cvt_float<N>_to_sint<M>_seq` and `cvt_float<N>_to_uint<M>_seq`
 /// (with `_sat` before `_seq` when saturating), and `CvtUint64ToFloatSeq` prints `u64_to_f<N>_seq`.
+/// `the_hidden_jump_names_are_right` makes the first four from Kestrel code; Kestrel has no unsigned
+/// conversion, so `_to_uint` and `u64_to_f` are checked only against the printer's source.
 const HIDDEN_JUMPS: [&str; 6] = ["$next:", "xmm min seq", "xmm max seq", "_to_sint", "_to_uint", "u64_to_f"];
 
 /// The release dump of `func` in `src` (with an empty `main` added).
@@ -33,7 +35,8 @@ fn parts(code: &str) -> (&str, &str) {
 /// that hold any of `HIDDEN_JUMPS`.
 fn fast_path(code: &str) -> (usize, usize, usize) {
     let (ir, asm) = parts(code);
-    let brifs = ir.lines().filter(|l| l.contains(" brif ")).count();
+    // `brif` prints typed (`brif.i8`) too.
+    let brifs = ir.lines().filter(|l| l.split_whitespace().any(|t| t == "brif" || t.starts_with("brif."))).count();
     let calls = ir.lines().filter(|l| l.contains(" call fn")).count();
     let hidden = asm.lines().filter(|l| HIDDEN_JUMPS.iter().any(|h| l.contains(h))).count();
     (brifs, calls, hidden)
@@ -52,6 +55,8 @@ fn conditional_jumps(code: &str) -> Vec<&str> {
 fn the_hidden_jump_names_are_right() {
     let code = release_dump("pure g(a: float, b: float) -> float { min(a, b) }", "g");
     assert!(code.contains("xmm min seq"), "{code}");
+    let code = release_dump("pure g(a: float, b: float) -> float { max(a, b) }", "g");
+    assert!(code.contains("xmm max seq"), "{code}");
     // Kestrel's `round` picks with a float `select`.
     let code = release_dump("pure g(x: float) -> float { round(x) }", "g");
     assert!(parts(&code).0.contains("select"), "{code}");
@@ -81,4 +86,42 @@ fn the_special_test_has_no_float_compare() {
     let code = release_dump("pure f(x: float) -> float { sin(x) }", "f");
     let (ir, _) = parts(&code);
     assert!(!ir.lines().any(|l| l.contains(" fcmp ")), "{code}");
+}
+
+#[test]
+fn sin_and_cos_of_one_angle_share_one_reduction() {
+    let code = release_dump("pure f(x: float) -> float { sin(x) * 3.0 + cos(x) }", "f");
+    let (ir, _) = parts(&code);
+    let promotes = ir.lines().filter(|l| l.contains(" fpromote")).count();
+    assert_eq!(promotes, 1, "{code}");
+    assert_eq!(fast_path(&code).2, 0, "{code}");
+}
+
+#[test]
+fn every_inline_float_function_has_one_branch() {
+    let sources = [
+        ("exp", "pure f(x: float) -> float { exp(x) }"),
+        ("log", "pure f(x: float) -> float { log(x) }"),
+        ("atan2", "pure f(y: float, x: float) -> float { atan2(y, x) }"),
+        ("atan", "pure f(x: float) -> float { atan(x) }"),
+        ("asin", "pure f(x: float) -> float { asin(x) }"),
+        ("acos", "pure f(x: float) -> float { acos(x) }"),
+        ("%", "pure f(a: float, b: float) -> float { a % b }"),
+    ];
+    for (op, src) in sources {
+        let code = release_dump(src, "f");
+        assert_eq!(fast_path(&code), (1, 1, 0), "{op}: {code}");
+        // The special tests are integer compares, and the float compares that pick values set
+        // flags, so the only conditional jump is the special branch.
+        let jumps = conditional_jumps(&code);
+        assert!(jumps.len() <= 1, "{op}: {jumps:?}
+{code}");
+    }
+}
+
+#[test]
+fn pow_stays_one_call() {
+    let code = release_dump("pure f(x: float, y: float) -> float { pow(x, y) }", "f");
+    let (brifs, calls, _) = fast_path(&code);
+    assert_eq!((brifs, calls), (0, 1), "{code}");
 }

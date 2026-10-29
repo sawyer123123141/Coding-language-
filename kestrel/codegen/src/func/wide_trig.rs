@@ -109,7 +109,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             _ => unreachable!("sin_cos_tan emits sin, cos and tan only"),
         };
         let special = self.magnitude_at_least(x, bound.to_bits());
-        let slow = self.mathf_id(op);
+        let slow = self.math_fn(op, kestrel_kir::KTy::F32);
         self.with_slow_path(special, fast, slow, &[x])
     }
 }

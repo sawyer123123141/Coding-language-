@@ -55,10 +55,9 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 BinOp::Sub => self.b.ins().fsub(a, b),
                 BinOp::Mul => self.b.ins().fmul(a, b),
                 BinOp::Div => self.b.ins().fdiv(a, b),
-                BinOp::Rem => {
-                    let f = if t == KTy::F32 { self.shared.rt.fmod_f32 } else { self.shared.rt.fmod_f64 };
-                    self.call_id(f, &[a, b]).expect("fmod returns a value")
-                }
+                // A `float` `%` is inline (`wide_exp`); an `f64` one calls `kestrel_rt_fmod_f64`.
+                BinOp::Rem if t == KTy::F32 => self.wide_fmod(a, b),
+                BinOp::Rem => self.call_id(self.shared.rt.fmod_f64, &[a, b]).expect("fmod returns a value"),
                 _ => unreachable!("comparisons handled above"),
             };
         }
