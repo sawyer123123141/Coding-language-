@@ -1,4 +1,5 @@
 mod contract;
+pub mod hoist;
 pub mod inline;
 pub mod ir;
 mod ir_expr;
@@ -24,9 +25,11 @@ pub use native::native_symbol;
 pub use stack_envs::check_stack_envs;
 
 /// Inlines small functions, then keeps plain structs and the fields of `var` parameters and loop
-/// elements in registers (see `scalarize` and `promote`). The driver runs it on every program.
+/// elements in registers (see `scalarize` and `promote`), then moves pure math whose operands a
+/// loop never changes out of the loop (see `hoist`). The driver runs it on every program.
 pub fn optimize(m: &mut Module) {
     inline::inline_small(m);
     scalarize::scalarize(m);
     promote::promote(m);
+    hoist::hoist_math(m);
 }

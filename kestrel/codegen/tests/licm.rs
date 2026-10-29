@@ -98,3 +98,18 @@ fn a_negated_loop_test_keeps_its_meaning() {
     let small: extern "C" fn(u8) -> i32 = unsafe { std::mem::transmute(p.fn_ptr("small").unwrap()) };
     assert_eq!((small(0), small(199), small(200)), (4, 1, 0));
 }
+
+#[test]
+fn pow_in_a_particle_loop_is_called_once_before_the_loop() {
+    // `pow(KEEP, dt)` reads the inliner's temporary for `dt`, which the hoisting pass sees through,
+    // so `kestrel_rt_powf` is called once per chunk, in the entry block, not once per particle.
+    let src = "let KEEP = 0.5\nstruct Particle {\n pos: vec2\n vel: vec2\n pure step(var self, dt: float, target: vec2) {\n  self.vel += (target - self.pos).normalized() * 900.0 * dt\n  self.vel *= pow(KEEP, dt)\n  self.pos += self.vel * dt\n }\n}\nrun(var ps: list[Particle], dt: float, target: vec2) {\n par for p in ps {\n  p.step(dt, target)\n }\n}\nmain() {}\n";
+    let m = common::optimized(src);
+    let body = &m.funcs[m.par_bodies[0].0 as usize].name;
+    let code = dump(&m, release(), body).unwrap();
+    let ir = code.split("\n}\n").next().unwrap();
+    let blocks: Vec<&str> = ir.split("\n\n").filter(|b| b.lines().any(|l| l.starts_with("block"))).collect();
+    let calls = |b: &str| b.lines().filter(|l| l.contains(" call ")).count();
+    assert_eq!(calls(blocks[0]), 1, "{code}");
+    assert_eq!(blocks.iter().map(|b| calls(b)).sum::<usize>(), 1, "{code}");
+}

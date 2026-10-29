@@ -112,7 +112,7 @@ fn assert_same_everywhere(name: &str, outputs: &[String]) {
 
 #[test]
 fn the_jit_and_both_exes_print_the_same() {
-    for name in ["det_rng_checksum", "det_sim", "det_snapshot", "det_par", "det_math_float"] {
+    for name in ["det_rng_checksum", "det_sim", "det_snapshot", "det_par", "hoist_math", "det_math_float"] {
         assert_same_everywhere(name, &four_builds(name));
     }
 }

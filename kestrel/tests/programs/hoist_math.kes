@@ -1,0 +1,200 @@
+// Hoisting pure math out of loops keeps every result: each case prints what its loops computed.
+// The expected lines were recorded before the pass existed.
+let KEEP = 0.5
+
+struct Particle {
+    pos: float
+    vel: float
+
+    pure step(var self, dt: float) {
+        self.vel *= pow(KEEP, dt)
+        self.pos += self.vel * dt
+    }
+}
+
+// 1. `pow(KEEP, dt)` in a method called in a `for` over a list of structs, and in a `par for`.
+particles() {
+    var ps: list[Particle] = []
+    for i from 0 to 100 {
+        ps.add(Particle(pos: float(i), vel: float(i % 7) - 3.0))
+    }
+    let dt = 1.0 / 60.0
+    for k from 0 to 10 {
+        for p in ps {
+            p.step(dt)
+        }
+        par for p in ps {
+            p.step(dt)
+        }
+    }
+    print("particles", ps[0].vel, ps[50].pos, ps[99].vel, checksum(ps))
+}
+
+// 2. Loops that run zero times.
+zero_trip(x: float, n: int) {
+    var s = 1.0
+    for i from 0 to n {
+        s += sin(x)
+    }
+    var j = 0
+    while j < n {
+        s += sin(x)
+        j += 1
+    }
+    print("zero trip", s)
+}
+
+// 3. An operand changed in the loop after its use.
+changed_after(n: int) {
+    var x = 0.25
+    var s = 0.0
+    for i from 0 to n {
+        s += sin(x)
+        x += 1.0
+    }
+    print("changed after", s, x)
+}
+
+// 4. An operand changed in an `if` branch.
+changed_in_branch(n: int) {
+    var x = 0.5
+    var s = 0.0
+    for i from 0 to n {
+        s += exp(x)
+        if i == 2 {
+            x = 2.0
+        }
+    }
+    print("changed in branch", s)
+}
+
+bump(var x: float, n: int) {
+    if n > 0 {
+        x += 0.5
+        bump(var x, n - 1)
+    }
+}
+
+// 5. An operand changed through a `var` argument of a function that calls itself.
+changed_by_var(n: int) {
+    var x = 0.1
+    var s = 0.0
+    for i from 0 to n {
+        s += cos(x)
+        bump(var x, 2)
+    }
+    print("changed by var", s, x)
+}
+
+// 6. The loop variable.
+loop_variable(n: int) {
+    var s = 0.0
+    for i from 0 to n {
+        s += sin(float(i))
+    }
+    print("loop variable", s)
+}
+
+// 7. An outer loop changing the operand of an inner loop's `exp`.
+outer_changes(n: int) {
+    var s = 0.0
+    for i from 0 to n {
+        let a = float(i) * 0.5
+        for j from 0 to 3 {
+            s += exp(a)
+        }
+    }
+    print("outer changes", s)
+}
+
+// 8. `%` by an invariant zero.
+rem_zero(n: int) {
+    let x = 7.5
+    let z = 0.0
+    var s = 0.0
+    var nans = 0
+    for i from 0 to n {
+        let r = x % z
+        if r != r {
+            nans += 1
+        }
+        s += x % 2.0
+    }
+    print("rem zero", s, nans)
+}
+
+// 9. A `while` whose condition holds `exp(x)`.
+while_condition(x: float) {
+    var s = 0.0
+    var steps = 0
+    while s < exp(x) {
+        s += 1.0
+        steps += 1
+    }
+    print("while condition", s, steps)
+}
+
+// 10. `f64` `pow`.
+wide_pow(n: int) {
+    let b: f64 = 1.0001
+    let e: f64 = 3.5
+    var s: f64 = 0
+    for i from 0 to n {
+        s += pow(b, e) * f64(i)
+    }
+    print("f64 pow", s)
+}
+
+// 11. A proven function whose loop holds `atan2(c, d)`.
+@prove(no_alloc, no_checks, deterministic)
+pub pure angles(c: float, d: float, n: int) -> float {
+    var s = 0.0
+    for i from 0 to n {
+        s += atan2(c, d) * float(i)
+    }
+    s
+}
+
+pure next(var x: float) -> int {
+    x += 1.0
+    3
+}
+
+// 12. An operand changed by a `for` loop's end, which runs after anything placed before the loop.
+changed_by_bound(x0: float) {
+    var x = x0
+    var s = 0.0
+    for i from 0 to next(var x) {
+        s += sin(x)
+    }
+    print("changed by bound", s)
+}
+
+main() {
+    particles()
+    zero_trip(0.5, 0)
+    zero_trip(0.5, -3)
+    changed_after(5)
+    changed_in_branch(6)
+    changed_by_var(4)
+    loop_variable(10)
+    outer_changes(4)
+    rem_zero(3)
+    while_condition(2.0)
+    wide_pow(5)
+    print("angles", angles(1.0, -2.0, 6), angles(-0.0, -1.0, 3))
+    changed_by_bound(0.5)
+}
+// expect: particles -2.3811007 49.408176 -1.5874004 -6487513740970798810
+// expect: zero trip 1
+// expect: zero trip 1
+// expect: changed after 0.97127724 5.25
+// expect: changed in branch 27.113335
+// expect: changed by var -0.05538088 4.1
+// expect: loop variable 1.9552093
+// expect: outer changes 29.546078
+// expect: rem zero 4.5 3
+// expect: while condition 8 8
+// expect: f64 pow 10.003500437521875
+// expect: angles 40.169178 -9.424778
+// expect: changed by bound 2.992485
