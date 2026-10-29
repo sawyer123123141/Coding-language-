@@ -15,6 +15,56 @@ the spec forbids. `trig_step.kes` **missed** its 22 ns target by 0.3 ns (22.3). 
 without hot math stayed within noise. Accuracy is at most 0.501177 ulp, and the results hash is
 the same in release, debug and `target-cpu=native` builds.
 
+**Second measurement (Task 8, below):** with the picks on float compares kept in the float
+registers (3986256) and the constants of the adds and multiplies read from memory (d691776),
+`atan` is now 6% faster than before the round, `exp` meets its target (3.52 ns), `trig_step.kes`
+meets its target (19.28 ns), and `sin`, `cos`, `tan`, `atan2` and `log` got faster again.
+`asin` and `acos` are still 5% and 9% slower than before the round, and float `%` still misses
+(4.53 against 3).
+
+## Second measurement: picks in the float registers, constants from memory (Task 8)
+
+Measured 2026-10-29, the same PC and method (`measure.py kernels 9 --only math_ trig`, here with
+four compilers in turn within each round, `bench/kernels` built with each in a `git worktree`):
+
+- **49ae9f0**, before the round; **1804848**, the first measurement's code (3a1a713's codegen);
+- **3986256**: every pick on a float compare (`atan_core`'s swap and `π/4` picks, the `exp`
+  clamps, `%`'s fix-up and zero picks) is a vector compare and a blend of lane 0 (`cmpltpd`,
+  `pblendvb`; the swap's two picks and the clamps become `minpd`/`maxpd`), where it was a scalar
+  `ucomisd` and an integer `cmov` with each value moved to a general register and back. The
+  picks on integer conditions (`tiny`, the quadrant, the sign) stay integer `select`s: a mask
+  moved to the float registers measured 0-20% slower at every one of those sites (`sin` +9% for
+  `tiny`, +15% for the quadrant);
+- **d691776**: the constants added or multiplied go second, so x64 reads them from memory
+  (`mulsd (%rip)`) instead of building each in a general register and moving it over
+  (`movabsq`, `movq`) at every use, inside the loops too. Same bits (IEEE `+` and `*` commute).
+
+Load: `math_` block 6.2% before, 13.0% during, 6.8% after; trig block 6.3%, 12.6%, 1.1%. No
+Godot before or after. ns per item, median (range); net is less `math_none` (0.62) or, for
+`atan2`, `pow` and `%`, `math_none2` (0.63).
+
+| function | 49ae9f0 | 1804848 | 3986256 | d691776 | d691776 / 49ae9f0 | net d691776 | target | met? |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| `sin` | 15.02 (14.91-15.16) | 4.21 | 4.20 | **3.92** (3.91-3.94) | 0.261 | 3.30 | ≤ 6 | yes |
+| `cos` | 15.09 (15.04-15.23) | 3.76 | 3.76 | **3.49** (3.48-3.52) | 0.231 | 2.87 | ≤ 5.5 | yes |
+| `tan` | 15.82 (15.71-15.89) | 5.10 | 5.11 | **4.66** (4.65-4.70) | 0.295 | 4.04 | no slower | yes |
+| `asin` | 8.53 (8.51-8.61) | 10.86 | 10.44 | 8.96 (8.95-9.00) | **1.050** | 8.34 | no slower | **no** |
+| `acos` | 8.26 (8.24-8.33) | 10.61 | 10.12 | 8.98 (8.98-9.01) | **1.087** | 8.36 | no slower | **no** |
+| `atan` | 7.08 (7.04-7.10) | 8.99 | 7.78 | **6.63** (6.62-6.68) | 0.936 | 6.01 | no slower | yes |
+| `atan2` | 20.29 (20.17-20.43) | 10.27 | 9.40 | **8.12** (8.11-8.16) | 0.400 | 7.49 | ≤ 11 | yes |
+| `exp` | 7.30 (7.28-7.35) | 5.58 | 4.79 | **3.52** (3.52-3.56) | 0.482 | 2.90 | ≤ 4 | yes |
+| `log` | 6.08 (6.06-6.14) | 4.36 | 4.36 | **3.61** (3.61-3.67) | 0.594 | 2.99 | ≤ 4.5 | yes |
+| `pow` (a call) | 37.65 (37.47-37.78) | 24.24 | 24.25 | 24.23 (24.22-24.30) | 0.644 | 23.60 | ≤ 12 | **no** |
+| float `%` | 5.63 (5.60-5.72) | 4.98 | 4.53 | 4.53 (4.52-4.56) | 0.805 | 3.90 | ≤ 3 | **no** |
+| `trig_step.kes` | 35.23 (35.02-36.99) | 22.35 | 21.12 | **19.28** (19.25-19.30) | 0.547 | | ≤ 22 | yes |
+
+1804848's column repeats the first measurement within 1% (its ranges are in the raw output,
+`.superpowers/sdd/2026-10-28-fast-math/task-8-raw/`, local only). The picks alone (3986256) take
+`atan` from 8.99 to 7.78, `exp` from 5.58 to 4.79, `%` from 4.98 to 4.53 and `trig_step.kes` to
+21.12, under its target; the constants (d691776) do the rest. `asin` and `acos` were never a pick
+problem: the inline code already beats the Rust function of the same operations (table below)
+and loses to `libm`'s branchy `asinf`/`acosf`, which the spike's cost model didn't foresee.
+
 ## How it was measured
 
 **Two compilers**, each built `--release` (and `bench/kernels` with each) in a `git worktree`
@@ -253,6 +303,16 @@ The 36 `det_math` float rows (raw values) and the 163 pinned `FLOAT_TABLE` rows 
 `int` captures are still passed by pointer (followups entry 55).
 
 ## The goals, met or missed
+
+**After Task 8 (d691776, the second measurement above):** G3: `sin`, `cos`, `tan`, `atan2`,
+`log` **met**, now with `exp` (3.52, ≤ 4) and `atan` (6.63 against 7.08, no slower) **met** too;
+`asin` (8.96 against 8.53, +5%) and `acos` (8.98 against 8.26, +9%) **missed**, though from +27%;
+`pow` (24.23) and float `%` (4.53) **missed**. G4: `trig_step.kes` **met** (19.28, ≤ 22). The
+other G4 rows were not measured again: the change touches only the inline math. G1 and G2:
+the same bits (the inline-against-Rust sweep, the `det_math`, `math`, `vec` and `hoist` programs,
+the determinism tests and `WIDE_HASH` pass unchanged).
+
+The first measurement (1804848), kept as it was:
 
 **G3, speed per call** (the `math_<op>.kes` kernels; met or missed is the same gross and net):
 
