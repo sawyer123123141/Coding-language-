@@ -61,8 +61,8 @@ Godot before or after. ns per item, median (range); net is less `math_none` (0.6
 1804848's column repeats the first measurement within 1% (its ranges are in the raw output,
 `.superpowers/sdd/2026-10-28-fast-math/task-8-raw/`, local only). The picks alone (3986256) take
 `atan` from 8.99 to 7.78, `exp` from 5.58 to 4.79, `%` from 4.98 to 4.53 and `trig_step.kes` to
-21.12, under its target; the constants (d691776) do the rest. `asin` and `acos` were never a pick
-problem: the inline code already beats the Rust function of the same operations (table below)
+21.12, under its target; the constants (d691776) do the rest. The picks gained `asin` and `acos`
+only 4-5% (10.86 to 10.44, 10.61 to 10.12), so most of their gap is elsewhere: the inline code already beats the Rust function of the same operations (table below)
 and loses to `libm`'s branchy `asinf`/`acosf`, which the spike's cost model didn't foresee.
 
 ## How it was measured

@@ -10,7 +10,7 @@
 //!
 //! A pick on an integer condition (an `i8`: a bit test, `tiny`, a sign) is an integer `select` on
 //! the bits. A mask moved to the float registers instead (`bmask`, `scalar_to_vector`,
-//! `bitselect`) measured 0 to 20% slower at every such site (Task 8 of the fast float math round):
+//! `bitselect`) measured 3.5 to 18% slower at every such site (Task 8 of the fast float math round):
 //! these loops are short of float ports, not of integer ones.
 
 use cranelift_codegen::ir::condcodes::FloatCC;

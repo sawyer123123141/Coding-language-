@@ -159,8 +159,7 @@ fn the_xmm_to_gpr_pattern_is_right() {
     // `checksum` hashes the bits of an `f64` in a general register.
     let code = release_dump("pure g(x: f64) -> i64 { checksum(x) }", "g");
     let moves = xmm_to_gpr(&code);
-    assert!(moves.iter().any(|l| l.starts_with("movq %xmm")), "{moves:?}
-{code}");
+    assert!(moves.iter().any(|l| l.starts_with("movq %xmm")), "{moves:?} in {code}");
 }
 
 #[test]
@@ -192,8 +191,7 @@ fn the_float_picks_stay_in_the_float_registers() {
         assert!(!asm.contains("ucomis"), "{op}: {code}");
         assert!(asm.contains("cmpltpd") || asm.contains("minpd"), "{op}: {code}");
         let moves: Vec<&str> = xmm_to_gpr(&code).into_iter().filter(|l| l.starts_with("movq")).collect();
-        assert_eq!(moves.len(), kept, "{op}: {moves:?}
-{code}");
+        assert_eq!(moves.len(), kept, "{op}: {moves:?} in {code}");
     }
 }
 
@@ -215,7 +213,8 @@ fn the_polynomials_read_their_constants_from_memory() {
     let exp = release_dump("pure f(x: float) -> float { exp(x) }", "f");
     let sin = release_dump("pure f(x: float) -> float { sin(x) }", "f");
     let log = release_dump("pure f(x: float) -> float { log(x) }", "f");
-    for (code, cs) in [(&atan, &wide::A7[..]), (&exp, &wide::E8[..]), (&sin, &[wide::S1, wide::S3, wide::C2][..]), (&log, &wide::L5[..])] {
+    let atan_cs = [&wide::A7[..], &[wide::TAN_PI_8, wide::PI_4][..]].concat();
+    for (code, cs) in [(&atan, &atan_cs[..]), (&exp, &wide::E8[..]), (&sin, &[wide::S1, wide::S3, wide::C2][..]), (&log, &wide::L5[..])] {
         for &c in cs {
             assert!(!builds_constant(code, c), "{c:e}: {code}");
         }
