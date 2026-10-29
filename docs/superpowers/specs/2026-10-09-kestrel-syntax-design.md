@@ -286,8 +286,12 @@ use {
   is no "strict" flag because strict is the only mode. No optimization may
   change a float result. The transcendental functions on `float` (`sin cos
   tan asin acos atan atan2 exp log pow`) widen their operands to `f64`,
-  compute, and narrow the result once; the others (`sqrt floor ceil round
-  abs min max`) are exact `float` instructions.
+  compute, and narrow the result once, with Kestrel's own wide functions
+  (the fast float math round, 2026-10-28, spec
+  `2026-10-28-fast-math-design.md`): at most 0.51 ulp from the true value,
+  inlined except `pow`. The others (`sqrt floor ceil round abs min max`)
+  are exact `float` instructions. Pure math whose operands a loop never
+  changes is computed once, before the loop, with the same bits.
 - **Vectors** (`vec2 vec3 vec4 ivec2 ivec3 ivec4`; the SIMD round of
   2026-10-22, spec `2026-10-21-simd-vectors-design.md`). One set of rules
   for all six, written in GDScript terms:
@@ -421,9 +425,16 @@ them is an error ("`min` is a built-in name; pick another").
   of an int vector is checked like `-v`. `sign` takes numbers only, and
   the rest (`sin`, `pow`, ...) take numbers only. The transcendental
   functions (`sin cos tan asin acos atan atan2 exp log pow`) and the float
-  remainder `%` are Kestrel's own, a port of musl's libm instead of the C
-  runtime's, so they give the same bits on every x86-64 CPU; `sqrt floor
-  ceil round abs min max` are exact and compiled to CPU instructions.
+  remainder `%` are Kestrel's own, so they give the same bits on every
+  x86-64 CPU. On `float` they are Kestrel's wide implementations: at most
+  0.51 ulp, computed in `f64` from exact operations and rounded once, and
+  inlined except `pow` (whose exponents 1, -1, 2 and 0.5 give `x`, `1/x`,
+  `x*x` and `sqrt(x)` exactly); NaN, infinities and huge arguments take
+  the `libm` path, and `%` is exact. On `f64` they call `libm`, a port of
+  musl's libm, instead of the C runtime's. Pure math whose operands a loop
+  never changes is computed once before the loop, with the same bits.
+  `sqrt floor ceil round abs min max` are exact and compiled to CPU
+  instructions.
 - **Vector methods:** `v.sum()` on every vector (components add left to
   right, `((x + y) + z) + w`, so float results equal the written-out sum;
   an int vector's sum is checked like `+`); on float vectors `v.length()`,
