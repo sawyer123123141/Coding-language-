@@ -1,7 +1,8 @@
 //! `exp`, `log` and the remainder `%` of a `float` inline, mirroring `kestrel_runtime::math::wide`:
 //! `exp_core`, `log_core`, `expf`, `logf` and `fmodf`, the same operations in the same order on the
-//! same constants. The `exp` clamps and the `%` fix-up compare floats, as the Rust does, but only to
-//! pick a value (an integer `select`); every special test is an integer test on the bits.
+//! same constants. The `exp` clamps (`maxpd` and `minpd`) and the `%` fix-up compare floats, as the
+//! Rust does, but only to pick a value, in the float registers (`fmask`); every special test is an
+//! integer test on the bits.
 
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{types, InstBuilder, Value};
@@ -16,10 +17,10 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// (never `fmin`/`fmax`), reduced by `k ln2`, `c` evaluated on the rest and scaled by `2^k`.
     pub(super) fn exp_core<const N: usize>(&mut self, z: Value, c: &[f64; N]) -> Value {
         let lo = self.f64c(wide::EXP_LO);
-        let below = self.b.ins().fcmp(FloatCC::LessThan, z, lo);
+        let below = self.fmask(FloatCC::LessThan, z, lo);
         let z = self.pick(below, lo, z);
         let hi = self.f64c(wide::EXP_HI);
-        let above = self.b.ins().fcmp(FloatCC::GreaterThan, z, hi);
+        let above = self.fmask(FloatCC::GreaterThan, z, hi);
         let z = self.pick(above, hi, z);
         let log2e = self.f64c(wide::LOG2E);
         let v = self.b.ins().fmul(z, log2e);
@@ -111,18 +112,17 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let r = self.b.ins().fsub(ad, qb);
         let bd_abs = self.b.ins().fabs(bd);
         let ab = self.b.ins().fcopysign(bd_abs, ad);
-        // fix = r != 0.0 && (r < 0.0) != (ad < 0.0)
+        // fix = r != 0.0 && (r < 0.0) != (ad < 0.0), as masks
         let zero = self.f64c(0.0);
-        let nonzero = self.b.ins().fcmp(FloatCC::NotEqual, r, zero);
-        let r_neg = self.b.ins().fcmp(FloatCC::LessThan, r, zero);
-        let a_neg = self.b.ins().fcmp(FloatCC::LessThan, ad, zero);
-        let signs = self.b.ins().icmp(IntCC::NotEqual, r_neg, a_neg);
+        let nonzero = self.fmask(FloatCC::NotEqual, r, zero);
+        let r_neg = self.fmask(FloatCC::LessThan, r, zero);
+        let a_neg = self.fmask(FloatCC::LessThan, ad, zero);
+        let signs = self.b.ins().bxor(r_neg, a_neg);
         let fix = self.b.ins().band(nonzero, signs);
         // over = !fix && r.abs() >= bd.abs()
-        let not_fix = self.b.ins().bxor_imm_u(fix, 1);
         let r_abs = self.b.ins().fabs(r);
-        let ge = self.b.ins().fcmp(FloatCC::GreaterThanOrEqual, r_abs, bd_abs);
-        let over = self.b.ins().band(not_fix, ge);
+        let ge = self.fmask(FloatCC::GreaterThanOrEqual, r_abs, bd_abs);
+        let over = self.b.ins().band_not(ge, fix);
         let up = self.b.ins().fadd(r, ab);
         let down = self.b.ins().fsub(r, ab);
         let r = {
@@ -130,7 +130,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             self.pick(fix, up, rest)
         };
         // if r == 0.0 { 0f32.copysign(a) } else { r as f32 }
-        let is_zero = self.b.ins().fcmp(FloatCC::Equal, r, zero);
+        let is_zero = self.fmask(FloatCC::Equal, r, zero);
         let zero32 = self.b.ins().f32const(0.0);
         let signed_zero = self.b.ins().fcopysign(zero32, a);
         let narrow = self.b.ins().fdemote(types::F32, r);

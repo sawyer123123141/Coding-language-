@@ -25,6 +25,7 @@ mod strings;
 mod wide;
 mod wide_atan;
 mod wide_exp;
+mod wide_pick;
 mod wide_trig;
 
 use std::collections::HashMap;

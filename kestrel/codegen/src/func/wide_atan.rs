@@ -1,7 +1,8 @@
 //! `atan2`, `atan`, `asin` and `acos` of a `float` inline, mirroring
 //! `kestrel_runtime::math::wide::trig`: one arctangent core (`atan_core`) with the swap and the
-//! `π/4` reduction picked by float compares, as the Rust does, through integer `select`s. Every
-//! special test and the tiny pick are integer tests on the bits.
+//! `π/4` reduction picked by float compares, as the Rust does, kept in the float registers
+//! (`fmask`; the swap's two picks are `minpd` and `maxpd`). Every special test, the sign pick and
+//! the tiny pick are integer tests on the bits.
 
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{types, InstBuilder, Value};
@@ -15,12 +16,12 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// Mirrors `wide::atan_core`: `atan2(ay, ax)` for the `f64`s `ay, ax >= 0`, or `π` minus it when
     /// the `i8` `x_negative` is set.
     pub(super) fn atan_core(&mut self, ay: Value, ax: Value, x_negative: Value) -> Value {
-        let swap = self.b.ins().fcmp(FloatCC::GreaterThan, ay, ax);
+        let swap = self.fmask(FloatCC::GreaterThan, ay, ax);
         let num = self.pick(swap, ax, ay);
         let den = self.pick(swap, ay, ax);
         let t8 = self.f64c(wide::TAN_PI_8);
         let t8d = self.b.ins().fmul(t8, den);
-        let big = self.b.ins().fcmp(FloatCC::GreaterThan, num, t8d);
+        let big = self.fmask(FloatCC::GreaterThan, num, t8d);
         let diff = self.b.ins().fsub(num, den);
         let tn = self.pick(big, diff, num);
         let sum = self.b.ins().fadd(num, den);

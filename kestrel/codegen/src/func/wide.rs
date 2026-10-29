@@ -4,9 +4,9 @@
 //! runtime function (`kestrel_rt_<op>f`), whose own test takes today's path for them.
 //!
 //! Each helper here mirrors the Rust helper of the same name: the same IEEE operations in the same
-//! order, on the same constants, read from `wide` and never copied. A pick between two values is an
-//! integer `select` on their bits, never a float `select`, which on x64 is a jump (`XmmCmove`);
-//! there is no `fmin`, `fmax` or float-to-int conversion either, which are jump sequences on x64.
+//! order, on the same constants, read from `wide` and never copied. A pick between two values is
+//! never a float `select`, which on x64 is a jump (`XmmCmove`), but `pick` (`wide_pick.rs`); there
+//! is no `fmin`, `fmax` or float-to-int conversion either, which are jump sequences on x64.
 
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::{types, InstBuilder, MemFlagsData, Opcode, Type, Value, ValueDef};
@@ -43,16 +43,6 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         self.b.ins().jump(merge, &[r.into()]);
         self.b.switch_to_block(merge);
         result
-    }
-
-    /// `if c { a } else { b }` for `f64` or `f32` values, as an integer `select` on their bits:
-    /// never a float `select`.
-    pub(super) fn pick(&mut self, c: Value, a: Value, b: Value) -> Value {
-        let ty = self.b.func.dfg.value_type(a);
-        let int = if ty == types::F64 { types::I64 } else { types::I32 };
-        let (ai, bi) = (self.bits(int, a), self.bits(int, b));
-        let v = self.b.ins().select(c, ai, bi);
-        self.float_of(ty, v)
     }
 
     /// The bits of the float `v` as the integer type `int` of its size. A float that `float_of`

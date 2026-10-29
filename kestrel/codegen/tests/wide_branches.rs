@@ -61,6 +61,21 @@ fn conditional_jumps(code: &str) -> Vec<&str> {
         .collect()
 }
 
+/// The machine-code lines that move an xmm register to a general register (`movq %xmm3, %rdx`,
+/// `movd %xmm0, %eax`): a float's bits leaving the float registers. A spill to the stack doesn't
+/// count.
+fn xmm_to_gpr(code: &str) -> Vec<&str> {
+    let (_, asm) = parts(code);
+    asm.lines()
+        .map(str::trim)
+        .filter(|l| {
+            let t: Vec<&str> = l.split_whitespace().collect();
+            matches!(t.as_slice(), [op, src, dst] if (*op == "movq" || *op == "movd") && src.starts_with("%xmm")
+                && dst.starts_with('%') && !dst.starts_with("%xmm"))
+        })
+        .collect()
+}
+
 #[test]
 fn the_hidden_jump_names_are_right() {
     let code = release_dump("pure g(a: float, b: float) -> float { min(a, b) }", "g");
@@ -125,8 +140,8 @@ fn every_inline_float_function_has_one_branch() {
         let code = release_dump(src, "f");
         assert_eq!(fast_path(&code), (1, 1, 0), "{op}: {code}");
         assert_eq!(machine_calls(&code).len(), 1, "{op}: {:?}\n{code}", machine_calls(&code));
-        // The special tests are integer compares, and the float compares that pick values set
-        // flags, so the only conditional jump is the special branch.
+        // The special tests are integer compares, and the float compares that pick values are
+        // vector compares giving masks, so the only conditional jump is the special branch.
         let jumps = conditional_jumps(&code);
         assert!(jumps.len() <= 1, "{op}: {jumps:?}\n{code}");
     }
@@ -137,4 +152,47 @@ fn pow_stays_one_call() {
     let code = release_dump("pure f(x: float, y: float) -> float { pow(x, y) }", "f");
     let (brifs, calls, _) = fast_path(&code);
     assert_eq!((brifs, calls), (0, 1), "{code}");
+}
+
+#[test]
+fn the_xmm_to_gpr_pattern_is_right() {
+    // `checksum` hashes the bits of an `f64` in a general register.
+    let code = release_dump("pure g(x: f64) -> i64 { checksum(x) }", "g");
+    let moves = xmm_to_gpr(&code);
+    assert!(moves.iter().any(|l| l.starts_with("movq %xmm")), "{moves:?}
+{code}");
+}
+
+#[test]
+fn the_scalar_float_compare_pattern_is_right() {
+    let code = release_dump("pure g(a: f64, b: f64) -> bool { a < b }", "g");
+    assert!(parts(&code).1.contains("ucomisd"), "{code}");
+}
+
+/// The functions whose picks compare floats, with the number of `movq`s from an xmm register to a
+/// general register each keeps: `exp`'s is `t`'s bits for `2^k`, `%`'s the quotient's bits for its
+/// special test, and `acos`'s and `atan2`'s the two values of the sign pick, an integer `select`
+/// (a mask in an xmm register measured slower there).
+const FLOAT_PICKS: [(&str, &str, usize); 6] = [
+    ("exp", "pure f(x: float) -> float { exp(x) }", 1),
+    ("atan", "pure f(x: float) -> float { atan(x) }", 0),
+    ("asin", "pure f(x: float) -> float { asin(x) }", 0),
+    ("acos", "pure f(x: float) -> float { acos(x) }", 2),
+    ("atan2", "pure f(y: float, x: float) -> float { atan2(y, x) }", 2),
+    ("%", "pure f(a: float, b: float) -> float { a % b }", 1),
+];
+
+#[test]
+fn the_float_picks_stay_in_the_float_registers() {
+    // A pick on a float compare is a vector compare and a blend (or `minpd`/`maxpd`): no scalar
+    // compare setting flags for a `cmov`, and no `f64` moved to a general register and back.
+    for (op, src, kept) in FLOAT_PICKS {
+        let code = release_dump(src, "f");
+        let (_, asm) = parts(&code);
+        assert!(!asm.contains("ucomis"), "{op}: {code}");
+        assert!(asm.contains("cmpltpd") || asm.contains("minpd"), "{op}: {code}");
+        let moves: Vec<&str> = xmm_to_gpr(&code).into_iter().filter(|l| l.starts_with("movq")).collect();
+        assert_eq!(moves.len(), kept, "{op}: {moves:?}
+{code}");
+    }
 }
