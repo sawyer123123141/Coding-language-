@@ -56,9 +56,11 @@ fn run_jit(name: &str, release: bool, threads: Option<&str>) -> String {
 }
 
 /// Builds the program into its own folder under `CARGO_TARGET_TMPDIR` and returns the exe's path.
-fn build_exe(name: &str, release: bool) -> PathBuf {
+/// The folder is named after the test too (`test`), so two tests running at once that build the
+/// same program never share one exe.
+fn build_exe(test: &str, name: &str, release: bool) -> PathBuf {
     let tag = if release { "release" } else { "checked" };
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("determinism_{name}_{tag}"));
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("determinism_{test}_{name}_{tag}"));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let exe = dir.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
@@ -81,13 +83,13 @@ fn run_exe(exe: &Path, what: &str, threads: Option<&str>) -> String {
     stdout_of(cmd, what)
 }
 
-/// The program's standard output in the four builds, in `BUILDS` order.
-fn four_builds(name: &str) -> Vec<String> {
+/// The program's standard output in the four builds, in `BUILDS` order, for the test `test`.
+fn four_builds(test: &str, name: &str) -> Vec<String> {
     vec![
         run_jit(name, false, None),
         run_jit(name, true, None),
-        run_exe(&build_exe(name, false), &format!("{name}: checked exe"), None),
-        run_exe(&build_exe(name, true), &format!("{name}: release exe"), None),
+        run_exe(&build_exe(test, name, false), &format!("{name}: checked exe"), None),
+        run_exe(&build_exe(test, name, true), &format!("{name}: release exe"), None),
     ]
 }
 
@@ -113,13 +115,13 @@ fn assert_same_everywhere(name: &str, outputs: &[String]) {
 #[test]
 fn the_jit_and_both_exes_print_the_same() {
     for name in ["det_rng_checksum", "det_sim", "det_snapshot", "det_par", "hoist_math", "det_math_float"] {
-        assert_same_everywhere(name, &four_builds(name));
+        assert_same_everywhere(name, &four_builds("same", name));
     }
 }
 
 #[test]
 fn the_jit_and_exe_math_agree_bit_for_bit() {
-    assert_same_everywhere("det_math", &four_builds("det_math"));
+    assert_same_everywhere("det_math", &four_builds("math", "det_math"));
 }
 
 /// The checksum of a `list[float]` the way compiled code folds it: the length, then each item's 32
@@ -179,9 +181,11 @@ fn the_float_sweep_matches_the_runtime() {
 
 #[test]
 fn the_thread_count_changes_nothing() {
-    for name in ["det_par", "det_sim"] {
+    // `hoist_math` computes math hoisted inside a `par for` body once per chunk of items, and the
+    // chunks change with the thread count.
+    for name in ["det_par", "det_sim", "hoist_math"] {
         let want = expected(name);
-        let exe = build_exe(name, true);
+        let exe = build_exe("threads", name, true);
         for threads in ["1", "2", "16"] {
             let jit = run_jit(name, false, Some(threads));
             assert!(jit.trim() == want.trim(), "{name}: JIT with {threads} threads, first difference at {}", first_difference(&jit, &want));
