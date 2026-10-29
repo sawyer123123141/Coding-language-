@@ -49,7 +49,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let m = self.float_of(types::F64, mb);
         let (one, two) = (self.f64c(1.0), self.f64c(2.0));
         let f = self.b.ins().fsub(m, one);
-        let d = self.b.ins().fadd(two, f);
+        let d = self.b.ins().fadd(f, two);
         let s = self.b.ins().fdiv(f, d);
         let u = self.b.ins().fmul(s, s);
         // g = L5[0] + u * (L5[1] + u * (L5[2] + u * (L5[3] + u * (L5[4] + u * L5[5]))))
@@ -57,7 +57,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let mut g = self.b.ins().fmul(u, c5);
         for i in (0..5).rev() {
             let ci = self.f64c(wide::L5[i]);
-            g = self.b.ins().fadd(ci, g);
+            g = self.b.ins().fadd(g, ci);
             if i > 0 {
                 g = self.b.ins().fmul(u, g);
             }
@@ -66,7 +66,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let ef = self.b.ins().fcvt_from_sint(types::F64, e);
         let ln2 = self.f64c(wide::LN2);
         let a = self.b.ins().fmul(ef, ln2);
-        let two_s = self.b.ins().fmul(two, s);
+        let two_s = self.b.ins().fmul(s, two);
         let b = self.b.ins().fmul(two_s, g);
         self.b.ins().fadd(a, b)
     }

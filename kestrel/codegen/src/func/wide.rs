@@ -7,6 +7,11 @@
 //! order, on the same constants, read from `wide` and never copied. A pick between two values is
 //! never a float `select`, which on x64 is a jump (`XmmCmove`), but `pick` (`wide_pick.rs`); there
 //! is no `fmin`, `fmax` or float-to-int conversion either, which are jump sequences on x64.
+//!
+//! A constant added or multiplied goes second (`x * c`, `t + c`, where the Rust may write `c * x`
+//! or `c + t`): x64 then reads it from memory (`mulsd (%rip)`), where first it is built in a general
+//! register and moved over (`movabsq`, `movq`) at every use, in loops too. IEEE addition and
+//! multiplication are commutative, so the bits are the same.
 
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::{types, InstBuilder, MemFlagsData, Opcode, Type, Value, ValueDef};
@@ -121,7 +126,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             9 => {
                 let c8 = self.f64c(c[8]);
                 let x8 = self.b.ins().fmul(x4, x4);
-                let t = self.b.ins().fmul(c8, x8);
+                let t = self.b.ins().fmul(x8, c8);
                 self.b.ins().fadd(s0, t)
             }
             10 => {
@@ -134,11 +139,11 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         }
     }
 
-    /// `a + b * x`, in that order (`estrin`'s pairs).
+    /// `a + b * x`, in that order (`estrin`'s pairs), the constants second (`x * b`, `t + a`).
     pub(super) fn lin(&mut self, a: f64, b: f64, x: Value) -> Value {
         let (a, b) = (self.f64c(a), self.f64c(b));
-        let t = self.b.ins().fmul(b, x);
-        self.b.ins().fadd(a, t)
+        let t = self.b.ins().fmul(x, b);
+        self.b.ins().fadd(t, a)
     }
 
     /// The `f64` constant `v`.

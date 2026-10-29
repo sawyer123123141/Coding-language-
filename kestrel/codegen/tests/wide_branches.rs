@@ -196,3 +196,28 @@ fn the_float_picks_stay_in_the_float_registers() {
 {code}");
     }
 }
+
+/// Whether the machine code builds the `f64` constant `c` in a general register (`movabsq`).
+fn builds_constant(code: &str, c: f64) -> bool {
+    parts(code).1.contains(&format!("movabsq $0x{:x},", c.to_bits()))
+}
+
+#[test]
+fn a_constant_first_is_built_in_a_general_register() {
+    let code = release_dump("pure g(x: f64) -> f64 { 1.5 - x }", "g");
+    assert!(builds_constant(&code, 1.5), "{code}");
+}
+
+#[test]
+fn the_polynomials_read_their_constants_from_memory() {
+    // The constants go second in the adds and multiplies, so x64 reads them from memory.
+    let atan = release_dump("pure f(x: float) -> float { atan(x) }", "f");
+    let exp = release_dump("pure f(x: float) -> float { exp(x) }", "f");
+    let sin = release_dump("pure f(x: float) -> float { sin(x) }", "f");
+    let log = release_dump("pure f(x: float) -> float { log(x) }", "f");
+    for (code, cs) in [(&atan, &wide::A7[..]), (&exp, &wide::E8[..]), (&sin, &[wide::S1, wide::S3, wide::C2][..]), (&log, &wide::L5[..])] {
+        for &c in cs {
+            assert!(!builds_constant(code, c), "{c:e}: {code}");
+        }
+    }
+}

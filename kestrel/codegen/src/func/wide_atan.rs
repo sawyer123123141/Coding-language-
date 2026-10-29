@@ -20,7 +20,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let num = self.pick(swap, ax, ay);
         let den = self.pick(swap, ay, ax);
         let t8 = self.f64c(wide::TAN_PI_8);
-        let t8d = self.b.ins().fmul(t8, den);
+        let t8d = self.b.ins().fmul(den, t8);
         let big = self.fmask(FloatCC::GreaterThan, num, t8d);
         let diff = self.b.ins().fsub(num, den);
         let tn = self.pick(big, diff, num);
@@ -31,7 +31,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let p = self.estrin(&wide::A7, tt);
         let a = self.b.ins().fmul(t, p);
         let pi_4 = self.f64c(wide::PI_4);
-        let shifted = self.b.ins().fadd(pi_4, a);
+        let shifted = self.b.ins().fadd(a, pi_4);
         let a = self.pick(big, shifted, a);
         let pi_2 = self.f64c(wide::PI_2);
         let rest = self.b.ins().fsub(pi_2, a);
@@ -110,7 +110,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let a = self.widened_abs(x);
         let one = self.f64c(1.0);
         let l = self.b.ins().fsub(one, a);
-        let r = self.b.ins().fadd(one, a);
+        let r = self.b.ins().fadd(a, one);
         let p = self.b.ins().fmul(l, r);
         (a, self.b.ins().sqrt(p))
     }
