@@ -1,7 +1,8 @@
 //! `par for`: the loop becomes a function of its own over a range of
 //! indexes (`__kestrel_par_N`), which the runtime runs on many threads
 //! through `Stmt::ParFor`. Variables from outside the body are passed to it
-//! by pointer; the body only reads them (the checker makes sure).
+//! by pointer (a `float` one as a copy); the body only reads them (the
+//! checker makes sure).
 
 use std::collections::BTreeSet;
 
@@ -56,12 +57,29 @@ impl<'a> FnLowerer<'a> {
             used.iter().copied().filter(|l| !defined.contains(l) && *l != start && *l != end).collect();
         let mut locals = Vec::new();
         let mut subst = vec![Subst::Local(LocalIdx(0)); self.locals.len()];
+        let mut args = Vec::with_capacity(captured.len());
         for &c in &captured {
-            // Passed by pointer, so a value kept in a register needs memory.
-            if self.locals[c.0 as usize].kind == LocalKind::Value {
-                self.locals[c.0 as usize].kind = LocalKind::Addressed;
-            }
-            let Local { name, ty, .. } = self.locals[c.0 as usize].clone();
+            let Local { name, ty, kind } = self.locals[c.0 as usize].clone();
+            // Passed by pointer, so a value kept in a register needs memory. A `float` gets a
+            // copy in memory instead, so the local itself stays a value and math reading it can
+            // still leave the loops around this `par for`. The body only reads it, and the
+            // `ParFor` ends before the next statement, so the copy holds the same value. Integers
+            // keep their address: range analysis tracks them, and a copy could change what
+            // `--report` says.
+            let arg = if kind == LocalKind::Value && ty.is_float() {
+                let copy = self.temp(ty);
+                self.locals[copy.0 as usize].kind = LocalKind::Addressed;
+                let load = Expr { kind: ExprKind::Load(Place::local(c)), ty, line };
+                out.push(Stmt::Let(copy, load));
+                copy
+            } else {
+                if kind == LocalKind::Value {
+                    self.locals[c.0 as usize].kind = LocalKind::Addressed;
+                }
+                c
+            };
+            args.push(Arg::Ref(Place::local(arg)));
+            // The body's parameter keeps the captured local's name, whichever is passed.
             subst[c.0 as usize] = Subst::Place(Place::local(LocalIdx(locals.len() as u32)));
             locals.push(Local { name, ty, kind: LocalKind::RefParam });
         }
@@ -89,7 +107,6 @@ impl<'a> FnLowerer<'a> {
             lines: (0, 0),
             native: None,
         });
-        let args = captured.into_iter().map(|c| Arg::Ref(Place::local(c))).collect();
         let count = Expr { kind: ExprKind::Len(list), ty: KTy::I64, line };
         out.push(Stmt::ParFor { func, args, count });
     }

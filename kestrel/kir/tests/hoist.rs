@@ -44,7 +44,32 @@ main() {}");
     pow_leaves_the_loop(func(&m, "frames"));
 }
 
-const SCALE: &str = "pure scale(v: float, k: float) -> float { v * pow(k, 2.0) }\n";
+#[test]
+fn a_par_for_beside_the_loop_leaves_its_float_captures_alone() {
+    // `hoist_math.kes` case 1: the `par for` gets a copy of `dt`, so `dt` keeps its register and
+    // the sequential loop's `pow` leaves both loops.
+    let src = STEP.replace("main() {}", "both(var ps: list[Particle], target: vec2) {
+ let dt = 1.0 / 60.0
+ for k from 0 to 10 {
+  for p in ps {
+   p.step(dt, target)
+  }
+  par for p in ps {
+   p.step(dt, target)
+  }
+ }
+}
+main() {}");
+    let m = optimized(&src);
+    pow_leaves_the_loop(func(&m, "both"));
+    // Each `par for` body's parameter keeps the captured local's name.
+    for fi in &m.par_bodies {
+        let body = &m.funcs[fi.0 as usize];
+        assert!(body.params.iter().any(|&p| name(body, p) == "dt"), "{:#?}", body.locals);
+    }
+}
+
+const SCALE: &str ="pure scale(v: float, k: float) -> float { v * pow(k, 2.0) }\n";
 
 #[test]
 fn an_inliner_temporary_is_seen_through() {
@@ -56,6 +81,31 @@ fn an_inliner_temporary_is_seen_through() {
     let args = math_args(lets[0], MathOp::Pow);
     assert_eq!(loaded(&args[0]), f.params[0], "{:#?}", lets[0]);
     assert!(!math_in_loops(&f.body, MathOp::Pow), "{:#?}", f.body);
+}
+
+#[test]
+fn hoist_math_case_1_computes_pow_once_before_its_loops() {
+    let m = optimized(include_str!("../../tests/programs/hoist_math.kes"));
+    let f = func(&m, "particles");
+    // The sequential loop's `pow`, once, before the frame loop (the `par for` body has its own).
+    assert!(!math_in_loops(&f.body, MathOp::Pow), "{:#?}", f.body);
+    let pows = f.body.iter().filter(|s| stmt_has_math(s, MathOp::Pow)).count();
+    assert_eq!(pows, 1, "{:#?}", f.body);
+}
+
+#[test]
+fn a_temporary_whose_initializer_left_the_loop_is_read_through_its_hoisted_local() {
+    // The inliner binds `let t = sin(k)` in the loop, and `sin(k)` is hoisted; `exp(t)` then reads
+    // that hoisted local instead of computing `sin(k)` a second time.
+    let src = "pure g(t: float) -> float { exp(t) }\npure f(k: float, n: int) -> float {\n var s = 0.0\n for i from 0 to n {\n  s += g(sin(k))\n }\n s\n}\nmain() {}\n";
+    let m = optimized(src);
+    let f = func(&m, "f");
+    let lets = hoisted_before(f, &f.body);
+    let sins = lets.iter().filter(|e| has_math(e, MathOp::Sin)).count();
+    assert_eq!((lets.len(), sins), (2, 1), "{:#?}", f.body);
+    let args = math_args(lets[1], MathOp::Exp);
+    assert!(is_hoisted(f, loaded(&args[0])), "{:#?}", lets[1]);
+    assert!(!math_in_loops(&f.body, MathOp::Sin) && !math_in_loops(&f.body, MathOp::Exp), "{:#?}", f.body);
 }
 
 #[test]

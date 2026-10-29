@@ -12,7 +12,8 @@
 //!
 //! The inliner binds each argument of an inlined call to a temporary inside the loop
 //! (`let dt2 = dt`), so `pow(KEEP, dt2)` reads a local the loop writes. Such temporaries are seen
-//! through, one level deep (see `temps`): the hoisted copy reads the temporary's initializer.
+//! through, one level deep (see `temps`): the hoisted copy reads the temporary's initializer, or
+//! the local it was hoisted into when the pass moved that initializer out already.
 
 use std::collections::{HashMap, HashSet};
 
@@ -85,7 +86,7 @@ fn hoist_loop(s: &mut Stmt, locals: &mut Vec<Local>, replaced: &mut Vec<(LocalId
         walk_expr(c, &mut |n| note_write(n, &mut written));
     }
     let temps = temps(body, cond.as_deref(), &written, locals);
-    let mut h = Hoist { written: &written, temps: &temps, locals, lets: Vec::new(), replaced };
+    let mut h = Hoist { written: &written, temps: &temps, moved: HashMap::new(), locals, lets: Vec::new(), replaced };
     if let Some(c) = cond {
         h.visit_expr(c);
     }
@@ -297,6 +298,9 @@ fn costly(e: &Expr) -> bool {
 struct Hoist<'a> {
     written: &'a HashSet<LocalIdx>,
     temps: &'a HashMap<LocalIdx, Expr>,
+    /// The temporaries whose whole initializer this pass has hoisted, with the new local that holds
+    /// it: a hoisted expression reads that local instead of computing the initializer again.
+    moved: HashMap<LocalIdx, LocalIdx>,
     locals: &'a mut Vec<Local>,
     lets: Vec<Stmt>,
     /// Each new local, with the expression it replaced (before any temporary is seen through).
@@ -308,6 +312,17 @@ impl VisitMut for Hoist<'_> {
         match s {
             // An assumption's conditions stay as written: range analysis reads facts from them.
             Stmt::Assume { body, .. } => self.visit_stmts(body),
+            Stmt::Let(l, e) if self.temps.contains_key(l) => {
+                let before = self.lets.len();
+                self.visit_expr(e);
+                // The `Let`s go before the loop in the order made, so this one comes before any
+                // expression hoisted later that reads it.
+                if let (ExprKind::Load(p), Some(Stmt::Let(h, _))) = (&e.kind, self.lets.last()) {
+                    if self.lets.len() == before + 1 && p.path.is_empty() && p.root == *h {
+                        self.moved.insert(*l, *h);
+                    }
+                }
+            }
             _ => walk_stmt(self, s),
         }
     }
@@ -320,7 +335,7 @@ impl VisitMut for Hoist<'_> {
             return;
         }
         let mut value = e.clone();
-        Substitute(temps).visit_expr(&mut value);
+        Substitute(temps, &self.moved).visit_expr(&mut value);
         self.locals.push(Local { name: HOISTED.into(), ty: e.ty, kind: LocalKind::Value });
         let l = LocalIdx(self.locals.len() as u32 - 1);
         self.lets.push(Stmt::Let(l, value));
@@ -329,15 +344,22 @@ impl VisitMut for Hoist<'_> {
     }
 }
 
-/// Puts each temporary's initializer in place of its loads.
-struct Substitute<'a>(&'a HashMap<LocalIdx, Expr>);
+/// Puts each temporary's initializer in place of its loads, or a load of the hoisted local that
+/// already holds that initializer (`Hoist::moved`).
+struct Substitute<'a>(&'a HashMap<LocalIdx, Expr>, &'a HashMap<LocalIdx, LocalIdx>);
 
 impl VisitMut for Substitute<'_> {
     fn visit_expr(&mut self, e: &mut Expr) {
-        if let ExprKind::Load(p) = &e.kind {
-            if let Some(init) = p.path.is_empty().then(|| self.0.get(&p.root)).flatten() {
-                *e = init.clone();
-                return;
+        if let ExprKind::Load(p) = &mut e.kind {
+            if p.path.is_empty() {
+                if let Some(&h) = self.1.get(&p.root) {
+                    p.root = h;
+                    return;
+                }
+                if let Some(init) = self.0.get(&p.root) {
+                    *e = init.clone();
+                    return;
+                }
             }
         }
         walk_expr_mut(self, e);
