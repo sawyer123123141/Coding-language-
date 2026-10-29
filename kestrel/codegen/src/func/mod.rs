@@ -22,6 +22,8 @@ mod simd_check;
 mod simd_math;
 mod stmt;
 mod strings;
+mod wide;
+mod wide_trig;
 
 use std::collections::HashMap;
 

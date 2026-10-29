@@ -1,13 +1,15 @@
 //! Float operations. `sqrt`, `floor`, `ceil`, `abs`, `min`, `max` and
-//! `round` are Cranelift instructions; the rest call the runtime's function
-//! for that operation: `kestrel_rt_pow` for `f64`, which works in `f64`, and
-//! `kestrel_rt_powf` for `float`, which works in `f32` (no widening). The
-//! random numbers call the runtime's generator.
+//! `round` are Cranelift instructions. A `float` `sin` or `cos`, and `tan`
+//! when `wide::TAN_INLINE` is true, is inline code (`wide`, `wide_trig`). The
+//! rest call the runtime's function for that operation: `kestrel_rt_pow` for
+//! `f64`, which works in `f64`, and `kestrel_rt_powf` for `float`, which works
+//! in `f32` (no widening). The random numbers call the runtime's generator.
 
 use cranelift_codegen::ir::condcodes::FloatCC;
 use cranelift_codegen::ir::{types, InstBuilder, Value};
 use cranelift_module::Module;
 use kestrel_kir::{self as kir, KTy, MathOp};
+use kestrel_runtime::math::wide;
 
 use super::{cl_type, FuncLowerer};
 
@@ -30,6 +32,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             MathOp::Min => self.b.ins().fmin(x, vals[1]),
             MathOp::Max => self.b.ins().fmax(x, vals[1]),
             MathOp::Round => self.round(x, ty),
+            MathOp::Sin | MathOp::Cos if ty == KTy::F32 => self.wide_math(op, &vals),
+            MathOp::Tan if ty == KTy::F32 && wide::TAN_INLINE => self.wide_math(op, &vals),
             MathOp::Sin
             | MathOp::Cos
             | MathOp::Tan
@@ -104,7 +108,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// Calls the runtime's function for `op`. `f64` operands call the `libm` function; `float`
     /// operands call the wide function over `f32`, with no widening, so the result is computed in
     /// `float`.
-    fn runtime_math(&mut self, op: MathOp, vals: &[Value], ty: KTy) -> Value {
+    pub(super) fn runtime_math(&mut self, op: MathOp, vals: &[Value], ty: KTy) -> Value {
         let table = if ty == KTy::F32 { &self.shared.rt.mathf } else { &self.shared.rt.math };
         let (_, id) = *table.iter().find(|(o, _)| *o == op).expect("a runtime function for every float operation");
         self.call_id(id, vals).expect("a runtime math function returns a value")
