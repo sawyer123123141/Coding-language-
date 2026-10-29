@@ -1,0 +1,26 @@
+// One `exp` per item: `bench(n, iters)` fills a list with `n` random floats in [-50, 50] from a
+// seeded `Rng`, then sums `exp` over the list `iters` times. The input changes every item, so `exp`
+// stays in the loop and its inline code is what is timed. Spec G3 is judged on these kernels; the
+// loop and the add are in every time, and `math_none.kes` times them alone.
+use { Rng from random }
+
+pub bench(n: int, iters: int) -> float {
+    var sum = 0.0
+    arena {
+        var r = Rng(seed: 7)
+        var xs = list[float]()
+        for i from 0 to n {
+            xs.add(r.randf_range(-50.0, 50.0))
+        }
+        for k from 0 to iters {
+            for x in xs {
+                sum += exp(x)
+            }
+        }
+    }
+    sum
+}
+
+main() {
+    print(bench(1000, 10))
+}

@@ -1,0 +1,47 @@
+// Movers that steer every frame with `atan2`, `cos` and `sin`: one of each per mover per frame,
+// with operands that change every item, so all three stay in the loop. `bench(n, iters)` steps `n`
+// movers `iters` times and returns a checksum. The fast float math round's kernel for spec G4.
+let TURN = 0.05
+let SPEED = 120.0
+
+struct Mover {
+    pos: vec2
+    vel: vec2
+
+    pure step(var self, dt: float) {
+        let a = atan2(self.vel.y, self.vel.x) + TURN
+        self.vel = vec2(cos(a), sin(a)) * SPEED
+        self.pos += self.vel * dt
+    }
+}
+
+spawn(var ms: list[Mover], count: int) {
+    for i from 0 to count {
+        let a = randf_range(-3.1, 3.1)
+        let pos = vec2(randf_range(0, 1280), randf_range(0, 720))
+        ms.add(Mover(pos: pos, vel: vec2(cos(a), sin(a)) * SPEED))
+    }
+}
+
+pub bench(n: int, iters: int) -> float {
+    var sum = 0.0
+    arena {
+        rand_seed(7)
+        var ms = list[Mover]()
+        spawn(var ms, n)
+        let dt = 1.0 / 60.0
+        for k from 0 to iters {
+            par for m in ms {
+                m.step(dt)
+            }
+        }
+        for m in ms {
+            sum += m.pos.x + m.pos.y
+        }
+    }
+    sum
+}
+
+main() {
+    print(bench(1000, 10))
+}

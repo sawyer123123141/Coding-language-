@@ -1,0 +1,29 @@
+// One `pow(x, y)` per item: `bench(n, iters)` fills two lists with `n` random floats each from a
+// seeded `Rng`, `x` in [0.01, 10] and `y` in [-10, 10], then sums `pow(x, y)` over them `iters`
+// times. The operands change every item, so the math stays in the loop and its code is what is
+// timed. Spec G3 is judged on these kernels; the loop and the add are in every time, and
+// `math_none.kes` times them alone (it reads one list, this reads two).
+use { Rng from random }
+
+pub bench(n: int, iters: int) -> float {
+    var sum = 0.0
+    arena {
+        var r = Rng(seed: 7)
+        var xs = list[float]()
+        var ys = list[float]()
+        for i from 0 to n {
+            xs.add(r.randf_range(0.01, 10.0))
+            ys.add(r.randf_range(-10.0, 10.0))
+        }
+        for k from 0 to iters {
+            for i, x in xs {
+                sum += pow(x, ys[i])
+            }
+        }
+    }
+    sum
+}
+
+main() {
+    print(bench(1000, 10))
+}

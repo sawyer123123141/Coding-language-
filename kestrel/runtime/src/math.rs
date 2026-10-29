@@ -241,4 +241,6 @@ mod bits_float;
 #[cfg(test)]
 mod speed;
 #[cfg(test)]
+mod wide_speed;
+#[cfg(test)]
 mod wide_test;

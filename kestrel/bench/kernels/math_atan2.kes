@@ -1,0 +1,29 @@
+// One `atan2(y, x)` per item: `bench(n, iters)` fills two lists with `n` random floats each from a
+// seeded `Rng`, `y` in [-100, 100] and `x` in [-100, 100], then sums `atan2(y, x)` over them `iters`
+// times. The operands change every item, so the math stays in the loop and its code is what is
+// timed. Spec G3 is judged on these kernels; the loop and the add are in every time, and
+// `math_none.kes` times them alone (it reads one list, this reads two).
+use { Rng from random }
+
+pub bench(n: int, iters: int) -> float {
+    var sum = 0.0
+    arena {
+        var r = Rng(seed: 7)
+        var ys = list[float]()
+        var xs = list[float]()
+        for i from 0 to n {
+            ys.add(r.randf_range(-100.0, 100.0))
+            xs.add(r.randf_range(-100.0, 100.0))
+        }
+        for k from 0 to iters {
+            for i, y in ys {
+                sum += atan2(y, xs[i])
+            }
+        }
+    }
+    sum
+}
+
+main() {
+    print(bench(1000, 10))
+}
