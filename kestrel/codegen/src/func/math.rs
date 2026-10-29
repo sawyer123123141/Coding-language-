@@ -3,7 +3,8 @@
 //! code (`wide`, `wide_trig`, `wide_exp`, `wide_atan`) but `pow`, and `tan`
 //! when `wide::TAN_INLINE` is false. The rest call the runtime's function for
 //! that operation: the `libm` one for `f64`, and `kestrel_rt_powf` (or
-//! `kestrel_rt_tanf`) for `float`, which works in `f32` (no widening).
+//! `kestrel_rt_tanf`) for `float`, which takes the `float` as it is, computes
+//! in `f64` and rounds once.
 //! The random numbers call the runtime's generator.
 
 use cranelift_codegen::ir::condcodes::FloatCC;
@@ -106,8 +107,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     }
 
     /// Calls the runtime's function for `op`. `f64` operands call the `libm` function; `float`
-    /// operands call the wide function over `f32`, with no widening, so the result is computed in
-    /// `float`.
+    /// operands are passed as they are to the wide function, which computes in `f64` and rounds
+    /// once.
     pub(super) fn runtime_math(&mut self, op: MathOp, vals: &[Value], ty: KTy) -> Value {
         let id = self.math_fn(op, ty);
         self.call_id(id, vals).expect("a runtime math function returns a value")

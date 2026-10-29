@@ -156,16 +156,16 @@ pub fn exp_core<const N: usize>(z: f64, c: &[f64; N]) -> f64 {
     let z = if z > EXP_HI { EXP_HI } else { z };
     let (k, ki) = round_k(z * LOG2E);
     let r = z - k * LN2;
-    estrin(c, r) * f64::from_bits(((ki + 1023) as u64) << 52)
+    estrin(c, r) * f64::from_bits(((ki + EXP_BIAS) as u64) << EXP_SHIFT)
 }
 
 /// `ln x` for a positive normal `f64` `x`: `x = 2^e m` with `m` in `[sqrt(1/2), sqrt(2))` from the
 /// bits, then `ln m = 2 atanh(s)` with `s = (m-1)/(m+1)`.
 #[inline(always)]
 pub fn log_core(x: f64) -> f64 {
-    let ix = x.to_bits().wrapping_add(0x3FF0_0000_0000_0000 - SQRT_HALF_BITS);
-    let e = (ix >> 52) as i64 - 1023;
-    let m = f64::from_bits((ix & 0x000F_FFFF_FFFF_FFFF) + SQRT_HALF_BITS);
+    let ix = x.to_bits().wrapping_add(ONE_BITS_64 - SQRT_HALF_BITS);
+    let e = (ix >> EXP_SHIFT) as i64 - EXP_BIAS;
+    let m = f64::from_bits((ix & MANTISSA_MASK_64) + SQRT_HALF_BITS);
     let f = m - 1.0;
     let s = f / (2.0 + f);
     let u = s * s;
@@ -187,16 +187,33 @@ pub fn logf(x: f32) -> f32 {
     log_core(x as f64) as f32
 }
 
+/// `x^y`. After the special test, the exponents 1, -1, 2 and 0.5 (an integer test on `y`'s bits,
+/// so on its value, however it was written) give `x`, `1/x`, `x*x` and `sqrt(x)`: one exact or
+/// correctly rounded `f64` operation rounded once to `f32`. That is what `libm::pow` returns early
+/// for them, so they keep today's bits, and it equals the same expression in `float`. Every other
+/// exponent, `-2` too, takes the wide path.
 pub fn powf(x: f32, y: f32) -> f32 {
     if pow_special(x, y) {
         return libm::pow(x as f64, y as f64) as f32;
     }
-    exp_core(y as f64 * log_core(x as f64), &E9) as f32
+    let xd = x as f64;
+    match y.to_bits() {
+        ONE_BITS => x,
+        POW_MINUS_ONE_BITS => (1.0 / xd) as f32,
+        POW_TWO_BITS => (xd * xd) as f32,
+        POW_HALF_BITS => xd.sqrt() as f32,
+        _ => exp_core(y as f64 * log_core(xd), &E9) as f32,
+    }
 }
 
 /// The exact remainder `a - trunc(a/b) b`, like `fmodf`, through `f64`: for a quotient below
-/// `2^29` the product and the difference are exact, and one step fixes a quotient that the
-/// division rounded to the next integer.
+/// `2^29` the product and the difference are exact.
+///
+/// The `fix` and `over` steps can't fire for such a quotient. For the division to round
+/// `a/b = n - e` up to the integer `n`, `n b - a` (a nonzero multiple of the smaller operand ulp,
+/// at least about `b 2^-23`) would have to be below `n b 2^-53`, which needs `n > 2^30`; and `over`
+/// needs a quotient of at least `n + 1` rounded below it, but `n + 1` is representable. They are
+/// kept as a guard, and so that the inline copy mirrors this one step for step.
 pub fn fmodf(a: f32, b: f32) -> f32 {
     let (ad, bd) = (a as f64, b as f64);
     let q = libm::trunc(ad / bd);
@@ -207,6 +224,7 @@ pub fn fmodf(a: f32, b: f32) -> f32 {
     let ab = bd.abs().copysign(ad);
     let fix = r != 0.0 && (r < 0.0) != (ad < 0.0);
     let over = !fix && r.abs() >= bd.abs();
+    debug_assert!(!fix && !over, "the remainder's fix-up fired for {a:e} % {b:e}");
     let r = if fix {
         r + ab
     } else if over {
@@ -235,6 +253,17 @@ pub mod special {
     pub const INF_BITS: u32 = 0x7F80_0000;
     /// The bits of `1.0f32`.
     pub const ONE_BITS: u32 = 0x3F80_0000;
+    /// The bits of `-1.0f32`, `2.0f32` and `0.5f32`: with `ONE_BITS`, the exponents `powf` computes
+    /// exactly.
+    pub const POW_MINUS_ONE_BITS: u32 = 0xBF80_0000;
+    pub const POW_TWO_BITS: u32 = 0x4000_0000;
+    pub const POW_HALF_BITS: u32 = 0x3F00_0000;
+    /// The `f64` format: the exponent bias, where the exponent field starts, the bits of `1.0` and
+    /// the mantissa field.
+    pub const EXP_BIAS: i64 = 1023;
+    pub const EXP_SHIFT: u32 = 52;
+    pub const ONE_BITS_64: u64 = 0x3FF0_0000_0000_0000;
+    pub const MANTISSA_MASK_64: u64 = 0x000F_FFFF_FFFF_FFFF;
     /// `bits(x) - 1` (wrapping) at or above this: `x` is zero, negative, infinite or NaN.
     pub const NOT_POSITIVE_FINITE: u32 = 0x7F7F_FFFF;
 

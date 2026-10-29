@@ -181,8 +181,9 @@ pub(crate) const MATH: [(MathOp, &str, usize); 10] = [
     (MathOp::Pow, "kestrel_rt_pow", 2),
 ];
 
-/// The same operations over `f32`: the wide functions `float` code calls, computed in `f32` with no
-/// widening. Each one's function and how many `f32`s it takes.
+/// The same operations over `f32`: the wide functions `float` code calls. The compiler passes the
+/// `float` straight to the wide function (or its inline copy), which computes in `f64` and rounds
+/// once. Each one's function and how many `f32`s it takes.
 pub(crate) const MATHF: [(MathOp, &str, usize); 10] = [
     (MathOp::Sin, "kestrel_rt_sinf", 1),
     (MathOp::Cos, "kestrel_rt_cosf", 1),

@@ -254,7 +254,8 @@ fn fmod_f32_matches_f64_for_exact_cases() {
 }
 
 /// The `float` inputs `tests/programs/det_math.kes` prints `sin`, `cos`, `atan2(x, 0.75)`, `exp`,
-/// `log` and `pow(1.25, x)` of (computed in `float` by the wide functions).
+/// `log` and `pow(1.25, x)` of (the wide functions: the `float` is passed as it is, computed in `f64`
+/// and rounded once).
 const FLOAT_INPUTS: [f32; 6] = [0.5, 1.0, 2.5, -3.0, 100.0, 1234.5];
 
 /// Prints `TABLE` with today's results, to paste over it when the pinned bits change on purpose,

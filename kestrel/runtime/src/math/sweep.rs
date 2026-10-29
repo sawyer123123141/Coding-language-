@@ -71,6 +71,9 @@ pub fn edges() -> Vec<f32> {
         // π/4, ±1 neighbours, subnormal `exp` results and a quotient just below 2^29.
         400000032.0, 268435456.0, 421657440.0, 2.3561945, 3.926991, -0.7853982, 5.4977875, -0.99999994,
         -1.0000001, -100.0, -102.0, 536870880.0, 0.0625, 1e-30, -1e-10, 6.0,
+        // The negative fast bound and its neighbour, and the high side of `log`'s sqrt(1/2) split:
+        // the floats just above 0.70710677 and 1.4142135 (0.7071068 prints as 0.70710683).
+        -399999968.0, -4.0e8, 0.7071068, 1.4142137,
     ];
     let mut v: Vec<f32> = Vec::with_capacity(all.len());
     for &x in all {
@@ -128,6 +131,13 @@ fn random(name: &str, r: &mut Rng) -> (f32, f32) {
                 r.bits()
             };
             (x, 0.0)
+        }
+        "pow" if p < 0.1 => {
+            // Integers and dyadic rationals to small integer and half-integer powers: the exponents
+            // `powf` computes exactly (1, -1, 2 and 0.5) and their neighbours.
+            let x = if r.u64() & 1 == 0 { (r.u64() % 5000 + 1) as f32 } else { (r.u64() % 4096 + 1) as f32 / 64.0 };
+            const Y: [f32; 10] = [1.0, -1.0, 2.0, 0.5, -2.0, 3.0, -0.5, 0.25, 4.0, -3.0];
+            (x, Y[(r.u64() % Y.len() as u64) as usize])
         }
         "pow" => {
             let x = if p < 0.5 {
@@ -245,8 +255,8 @@ pub fn today(name: &str, a: f32, b: f32) -> f32 {
 }
 
 /// The error of `got` in `f32` ulps of the true value `r`, taking the ulp from `r`'s exponent
-/// (subnormal results use the smallest ulp). Infinite for a wrong special value: a NaN, an infinity
-/// or a zero of the wrong sign where `r` has none.
+/// (subnormal results use the smallest ulp). Infinite for a wrong special value: a NaN, an infinity,
+/// or a zero whose sign differs from `r`'s where `r` rounds to a zero in `f32`.
 pub fn ulps(got: f32, r: f64) -> f64 {
     if r.is_nan() || got.is_nan() {
         return if r.is_nan() && got.is_nan() { 0.0 } else { f64::INFINITY };
@@ -256,8 +266,8 @@ pub fn ulps(got: f32, r: f64) -> f64 {
         // An infinite result is right when the true value rounds to it.
         return if rf == got { 0.0 } else { f64::INFINITY };
     }
-    if r == 0.0 && got == 0.0 {
-        return if r.is_sign_negative() == got.is_sign_negative() { 0.0 } else { f64::INFINITY };
+    if got == 0.0 && rf == 0.0 && r.is_sign_negative() != got.is_sign_negative() {
+        return f64::INFINITY;
     }
     let exponent = (((r.to_bits() >> 52) & 0x7FF) as i64 - 1023).max(-126) - 23;
     let ulp = f64::from_bits(((exponent + 1023) as u64) << 52);

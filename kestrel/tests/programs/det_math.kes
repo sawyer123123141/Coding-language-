@@ -1,12 +1,12 @@
 // Every row of the runtime's `f64` math table (`runtime/src/math/bits.rs`) through compiled code,
 // one result per line, then `sin`, `cos`, `atan2`, `exp`, `log` and `pow` of six `float` inputs,
 // then every row of the `float` table (`runtime/src/math/bits_float.rs`). `f64` math is the
-// runtime's `libm` functions; `float` math is computed in `float` by the wide functions, never
-// widened to `f64`. Printing is the shortest text that reads back as the same value, so equal text
-// is equal bits (NaN aside). `print_table` in `bits.rs` and `print_float_table` in `bits_float.rs`
-// print these lines. Kestrel has no exponent in literals: the long literals are 1e300, 1e22,
-// 1e-300, 1e-310 and the smallest subnormal, 5e-324 for `f64`, and 1e30, 3.4028235e38, 1e-40, 3e-41
-// and 1e-45 for `float`.
+// runtime's `libm` functions; `float` math is the wide functions (or their inline copies), which
+// take the `float` as it is, compute in `f64` and round once. Printing is the shortest text that
+// reads back as the same value, so equal text is equal bits (NaN aside). `print_table` in `bits.rs`
+// and `print_float_table` in `bits_float.rs` print these lines. Kestrel has no exponent in
+// literals: the long literals are 1e300, 1e22, 1e-300, 1e-310 and the smallest subnormal, 5e-324
+// for `f64`, and 1e30, 3.4028235e38, 1e-40, 3e-41 and 1e-45 for `float`.
 // expect: 0
 // expect: -0
 // expect: 0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001

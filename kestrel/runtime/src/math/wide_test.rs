@@ -176,9 +176,41 @@ fn the_36_det_math_float_rows_keep_their_bits() {
     assert!(wrong.is_empty(), "det_math rows that changed:\n{}", wrong.join("\n"));
 }
 
+/// `pow(x, y)` for `y` of 1, -1, 2 and 0.5 is `x`, `1/x`, `x*x` and `sqrt(x)` computed in `f64` and
+/// rounded once, which is what `libm::pow` returns for them (so today's bits) and what the same
+/// expression in `float` gives (one exact or correctly rounded `f64` step, then one rounding).
+#[test]
+fn pow_of_the_exact_exponents_is_todays_and_the_float_expression() {
+    let xs = &sweeps()[FUNCTIONS.iter().position(|&f| f == "pow").unwrap()];
+    let exact = [1.0f32, -1.0, 2.0, 0.5];
+    let integers = (1..=5000).flat_map(|x| exact.iter().map(move |&y| (x as f32, y)));
+    let mut wrong = Vec::new();
+    for (x, y) in xs.iter().copied().filter(|&(_, y)| exact.iter().any(|&e| same(e, y))).chain(integers) {
+        let (w, t) = (sweep::wide("pow", x, y), today("pow", x, y));
+        if !same(w, t) {
+            wrong.push(format!("pow({x:e}, {y:e}) = {w:e}, today {t:e}"));
+        }
+        if pow_special(x, y) {
+            continue;
+        }
+        let f = match y.to_bits() {
+            0x3F80_0000 => x,
+            0xBF80_0000 => 1.0 / x,
+            0x4000_0000 => x * x,
+            _ => x.sqrt(),
+        };
+        if !same(w, f) {
+            wrong.push(format!("pow({x:e}, {y:e}) = {w:e}, the float expression {f:e}"));
+        }
+    }
+    let count = wrong.len();
+    wrong.truncate(20);
+    assert!(wrong.is_empty(), "{count} results differ, among them:\n{}", wrong.join("\n"));
+}
+
 /// FNV-1a 64 of every function's results on its sweep, in `FUNCTIONS` order, NaN as `0x7FC0_0000`.
 /// Every build of the runtime must give this value.
-const WIDE_HASH: u64 = 0x2271_60C4_5A77_805E;
+const WIDE_HASH: u64 = 0xF896_2BD9_040E_8F6C;
 
 #[test]
 fn wide_results_hash_is_pinned() {
@@ -252,7 +284,7 @@ fn exhaustive_one_argument_functions() {
 #[test]
 #[ignore = "prints the accuracy table for results.md: run it by hand with --nocapture"]
 fn print_wide_report() {
-    println!("| function | inputs | max ulp | mean ulp | same as today | equal to the correctly rounded value |");
+    println!("| function | inputs | max ulp | mean ulp | same as today | same as libm's f64 result rounded once (today but for fmod) |");
     println!("|---|---:|---:|---:|---:|---:|");
     for (&name, xs) in FUNCTIONS.iter().zip(sweeps()) {
         let (mut max, mut sum, mut n, mut today_same, mut rounded) = (0f64, 0f64, 0usize, 0usize, 0usize);

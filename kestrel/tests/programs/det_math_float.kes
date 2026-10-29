@@ -1,9 +1,10 @@
 // Determinism: a million inputs through each `float` transcendental function (`sin`, `cos`, `tan`,
 // `sin` and `cos` of large arguments, `exp`, `log`, `pow`, `atan2`, `atan`, `asin`, `acos` and the
-// float remainder), one `checksum` of the results per function. `float` math is computed in
-// `float` by the runtime's wide functions, so the JIT and both exes print the same lines, and
-// `cli/tests/determinism.rs` (`the_float_sweep_matches_the_runtime`) computes the same checksums
-// in Rust with the same inputs. Every input is a dyadic rational, exact in `float`.
+// float remainder), one `checksum` of the results per function. `float` math is the runtime's wide
+// functions (or their inline copies), which compute in `f64` from exact steps and round once, so
+// the JIT and both exes print the same lines, and `cli/tests/determinism.rs`
+// (`the_float_sweep_matches_the_runtime`) computes the same checksums in Rust with the same inputs.
+// Every input is a dyadic rational, exact in `float`.
 // expect: -3334287783359690267
 // expect: -649865703456324329
 // expect: 6133251307751144864
@@ -11,7 +12,7 @@
 // expect: 5117384979804957051
 // expect: -3923256440608192342
 // expect: -37334485782490274
-// expect: 323258267209170825
+// expect: -2935346233227922869
 // expect: 7075047034228439608
 // expect: -4162651264050013955
 // expect: 3090838112910284600

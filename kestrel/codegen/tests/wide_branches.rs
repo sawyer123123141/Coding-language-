@@ -42,6 +42,16 @@ fn fast_path(code: &str) -> (usize, usize, usize) {
     (brifs, calls, hidden)
 }
 
+/// The machine-code lines that call a function (the cold slow-path call, or one Cranelift added
+/// while lowering, such as a libcall), not counting unwind directives.
+fn machine_calls(code: &str) -> Vec<&str> {
+    let (_, asm) = parts(code);
+    asm.lines()
+        .map(str::trim)
+        .filter(|l| l.split_whitespace().next().is_some_and(|t| t.starts_with("call")) && !l.contains("unwind"))
+        .collect()
+}
+
 /// The machine-code lines that jump on a condition (`j<cc> ...`), not counting `jmp`.
 fn conditional_jumps(code: &str) -> Vec<&str> {
     let (_, asm) = parts(code);
@@ -75,6 +85,7 @@ fn sin_cos_tan_have_one_branch_and_no_hidden_jumps() {
             continue;
         }
         assert_eq!((brifs, calls, hidden), (1, 1, 0), "{op}: {code}");
+        assert_eq!(machine_calls(&code).len(), 1, "{op}: {:?}\n{code}", machine_calls(&code));
         // The special test is an integer compare, so its branch is one jump (no parity jump).
         let jumps = conditional_jumps(&code);
         assert!(jumps.len() <= 1, "{op}: {jumps:?}\n{code}");
@@ -83,9 +94,11 @@ fn sin_cos_tan_have_one_branch_and_no_hidden_jumps() {
 
 #[test]
 fn the_special_test_has_no_float_compare() {
-    let code = release_dump("pure f(x: float) -> float { sin(x) }", "f");
-    let (ir, _) = parts(&code);
-    assert!(!ir.lines().any(|l| l.contains(" fcmp ")), "{code}");
+    for op in ["sin", "log"] {
+        let code = release_dump(&format!("pure f(x: float) -> float {{ {op}(x) }}"), "f");
+        let (ir, _) = parts(&code);
+        assert!(!ir.lines().any(|l| l.contains(" fcmp ")), "{op}: {code}");
+    }
 }
 
 #[test]
@@ -111,11 +124,11 @@ fn every_inline_float_function_has_one_branch() {
     for (op, src) in sources {
         let code = release_dump(src, "f");
         assert_eq!(fast_path(&code), (1, 1, 0), "{op}: {code}");
+        assert_eq!(machine_calls(&code).len(), 1, "{op}: {:?}\n{code}", machine_calls(&code));
         // The special tests are integer compares, and the float compares that pick values set
         // flags, so the only conditional jump is the special branch.
         let jumps = conditional_jumps(&code);
-        assert!(jumps.len() <= 1, "{op}: {jumps:?}
-{code}");
+        assert!(jumps.len() <= 1, "{op}: {jumps:?}\n{code}");
     }
 }
 

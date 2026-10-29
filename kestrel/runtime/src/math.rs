@@ -1,10 +1,12 @@
 //! Math and random numbers. Compiled code does `sqrt`, `floor` and the like
-//! with Cranelift instructions; the rest (trigonometry, exponentials) calls
-//! one function here per operation, in `f64`.
+//! with Cranelift instructions. `float` trigonometry, exponentials and `%` are
+//! inline code (a copy of the wide functions of `math/wide.rs`) whose special
+//! inputs call the `kestrel_rt_<op>f` functions here; `pow` is always a call.
+//! `f64` math calls one `libm` function here per operation.
 //!
-//! Those functions are Kestrel's own: the `libm` crate, a pure-Rust port of
-//! musl's libm, instead of the C runtime's, which picks different code (and
-//! can round differently) on CPUs with FMA. So a program computes the same
+//! All of it is Kestrel's own: the wide functions, and the `libm` crate, a
+//! pure-Rust port of musl's libm, instead of the C runtime's, which picks
+//! different code (and can round differently) on CPUs with FMA. So a program computes the same
 //! bits on every x86-64 CPU, which replays and networked games depend on.
 //! `libm` is pinned to one version, without its `arch` feature, so nothing in
 //! an exe's math looks at the CPU; `math/bits.rs` pins the results for a

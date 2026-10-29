@@ -28,9 +28,9 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         let t = self.b.ins().fmul(k, ln2);
         let r = self.b.ins().fsub(z, t);
         let p = self.estrin(c, r);
-        // f64::from_bits(((ki + 1023) as u64) << 52)
-        let e = self.b.ins().iadd_imm_s(ki, 1023);
-        let e = self.b.ins().ishl_imm_u(e, 52);
+        // f64::from_bits(((ki + EXP_BIAS) as u64) << EXP_SHIFT)
+        let e = self.b.ins().iadd_imm_s(ki, wide::EXP_BIAS);
+        let e = self.b.ins().ishl_imm_u(e, wide::EXP_SHIFT as i64);
         let scale = self.float_of(types::F64, e);
         self.b.ins().fmul(p, scale)
     }
@@ -40,10 +40,10 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// `i64` (`cvtsi2sd`, no branch).
     pub(super) fn log_core(&mut self, x: Value) -> Value {
         let xb = self.bits(types::I64, x);
-        let ix = self.b.ins().iadd_imm_u(xb, 0x3FF0_0000_0000_0000u64.wrapping_sub(wide::SQRT_HALF_BITS) as i64);
-        let e = self.b.ins().ushr_imm_u(ix, 52);
-        let e = self.b.ins().iadd_imm_s(e, -1023);
-        let mb = self.b.ins().band_imm_u(ix, 0x000F_FFFF_FFFF_FFFFu64 as i64);
+        let ix = self.b.ins().iadd_imm_u(xb, wide::ONE_BITS_64.wrapping_sub(wide::SQRT_HALF_BITS) as i64);
+        let e = self.b.ins().ushr_imm_u(ix, wide::EXP_SHIFT as i64);
+        let e = self.b.ins().iadd_imm_s(e, -wide::EXP_BIAS);
+        let mb = self.b.ins().band_imm_u(ix, wide::MANTISSA_MASK_64 as i64);
         let mb = self.b.ins().iadd_imm_u(mb, wide::SQRT_HALF_BITS as i64);
         let m = self.float_of(types::F64, mb);
         let (one, two) = (self.f64c(1.0), self.f64c(2.0));
@@ -96,8 +96,11 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     }
 
     /// The `float` remainder `a % b`, mirroring `wide::fmodf`: `a - q b` in `f64` with
-    /// `q = trunc(a/b)` (`roundsd`), one fix-up step for a quotient the division rounded up, and a
-    /// zero with `a`'s sign. `wide::fmod_special` inputs call `kestrel_rt_fmod_f32`.
+    /// `q = trunc(a/b)` (`roundsd`), the fix-up and `over` steps, and a zero with `a`'s sign.
+    /// `wide::fmod_special` inputs call `kestrel_rt_fmod_f32`. The two steps can't fire for a
+    /// quotient below `FMOD_Q_LIMIT`: the division can't round `a/b` up to an integer `n` unless
+    /// `n > 2^30`, and `n + 1` is representable (`wide::fmodf` gives the bounds). They are kept as
+    /// a guard and so that this mirrors `wide::fmodf` step for step.
     pub(crate) fn wide_fmod(&mut self, a: Value, b: Value) -> Value {
         let ad = self.b.ins().fpromote(types::F64, a);
         let bd = self.b.ins().fpromote(types::F64, b);
