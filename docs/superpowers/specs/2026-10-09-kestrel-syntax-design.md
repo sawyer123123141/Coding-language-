@@ -429,8 +429,10 @@ them is an error ("`min` is a built-in name; pick another").
   x86-64 CPU. On `float` they are Kestrel's wide implementations: at most
   0.51 ulp, computed in `f64` from exact operations and rounded once, and
   inlined except `pow` (whose exponents 1, -1, 2 and 0.5 give `x`, `1/x`,
-  `x*x` and `sqrt(x)` exactly); NaN, infinities and huge arguments take
-  the `libm` path, and `%` is exact. On `f64` they call `libm`, a port of
+  `x*x` and `sqrt(x)` exactly for `x > 0`); special inputs (NaN,
+  infinities, zeros, arguments outside a function's domain and huge
+  arguments) take the `libm` path and give today's results, and `%` is
+  exact. On `f64` they call `libm`, a port of
   musl's libm, instead of the C runtime's. Pure math whose operands a loop
   never changes is computed once before the loop, with the same bits.
   `sqrt floor ceil round abs min max` are exact and compiled to CPU

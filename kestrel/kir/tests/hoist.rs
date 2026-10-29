@@ -69,7 +69,7 @@ main() {}");
     }
 }
 
-const SCALE: &str ="pure scale(v: float, k: float) -> float { v * pow(k, 2.0) }\n";
+const SCALE: &str = "pure scale(v: float, k: float) -> float { v * pow(k, 2.0) }\n";
 
 #[test]
 fn an_inliner_temporary_is_seen_through() {

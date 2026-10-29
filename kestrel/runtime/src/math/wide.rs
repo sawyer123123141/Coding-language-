@@ -211,7 +211,7 @@ pub fn powf(x: f32, y: f32) -> f32 {
 ///
 /// The `fix` and `over` steps can't fire for such a quotient. For the division to round
 /// `a/b = n - e` up to the integer `n`, `n b - a` (a nonzero multiple of the smaller operand ulp,
-/// at least about `b 2^-23`) would have to be below `n b 2^-53`, which needs `n > 2^30`; and `over`
+/// more than `b 2^-24`) would have to be below `n b 2^-53`, which needs `n > 2^30`; and `over`
 /// needs a quotient of at least `n + 1` rounded below it, but `n + 1` is representable. They are
 /// kept as a guard, and so that the inline copy mirrors this one step for step.
 pub fn fmodf(a: f32, b: f32) -> f32 {
