@@ -90,6 +90,7 @@ pub fn lower(program: &Program, t: &Tables, lines: &LineIndex) -> Module {
         contracts,
         copies,
         uncopied,
+        hoisted: HashMap::new(),
         analysed: None,
     };
     // Stack environments live only as long as the call they are passed to.

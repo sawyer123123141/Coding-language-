@@ -1,0 +1,23 @@
+// Math moved out of a loop reads as written in a contract's message.
+@prove(no_checks)
+pub pick(xs: list[int], k: float, n: int) -> int {
+    var s = 0
+    for i from 0 to n {
+        s += xs[int(sin(k) * 4.0)]
+    }
+    s
+}
+
+@prove(no_checks)
+pub rem(xs: list[int], x: float, z: float, n: int) -> int {
+    var s = 0
+    for i from 0 to n {
+        s += xs[int(x % z)]
+    }
+    s
+}
+
+main() {}
+
+// error 2: `pick` can't be proven `no_checks`: it has a bounds check on line 6: `xs[int((...) * 4)]` may be outside `xs` (`int((...) * 4)` can be any `int`)
+// error 11: `rem` can't be proven `no_checks`: it has a bounds check on line 15: `xs[int(x % z)]` may be outside `xs` (`int(x % z)` can be any `int`)

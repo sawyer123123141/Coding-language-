@@ -93,6 +93,7 @@ fn module() -> Module {
         contracts: Vec::new(),
         copies: HashMap::new(),
         uncopied: Vec::new(),
+        hoisted: HashMap::new(),
         analysed: None,
     }
 }

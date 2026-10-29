@@ -7,7 +7,8 @@
 //! before the loop. Such an expression cannot fail (a float `/` or `%` by zero gives inf or NaN,
 //! never a trap) and changes nothing, so it may leave a loop that runs zero times, or an `if`
 //! inside the loop; it is deterministic, so it gives the same bits before the loop. It has no
-//! check and no event, so range analysis and contracts see the same program.
+//! check and no event, so range analysis and contracts see the same program, and the report
+//! writes a load of the new local as the expression it replaced (`Module::hoisted`).
 //!
 //! The inliner binds each argument of an inlined call to a temporary inside the loop
 //! (`let dt2 = dt`), so `pow(KEEP, dt2)` reads a local the loop writes. Such temporaries are seen
@@ -20,41 +21,51 @@ use crate::visit::{walk, walk_expr, Node};
 use crate::visit_mut::{walk_expr as walk_expr_mut, walk_place, walk_stmt, VisitMut};
 
 /// Moves each loop-invariant expression that holds a transcendental `Math` or a float `%` into a
-/// new `Value` local bound just before the loop (spec decision 5). Runs per function, outermost
-/// loop first; `par for` bodies are functions of their own.
+/// new `Value` local bound just before the loop (spec decision 5), and records in
+/// `Module::hoisted` the expression each new local replaced. Runs per function, innermost loop
+/// first; `par for` bodies are functions of their own.
 pub fn hoist_math(m: &mut Module) {
-    for f in m.funcs.iter_mut().filter(|f| f.native.is_none()) {
+    let Module { funcs, hoisted, .. } = m;
+    for (i, f) in funcs.iter_mut().enumerate().filter(|(_, f)| f.native.is_none()) {
         let mut body = std::mem::take(&mut f.body);
-        Loops { locals: &mut f.locals }.visit_stmts(&mut body);
+        let mut loops = Loops { locals: &mut f.locals, replaced: Vec::new() };
+        loops.visit_stmts(&mut body);
         f.body = body;
+        hoisted.extend(loops.replaced.into_iter().map(|(l, e)| ((FuncIdx(i as u32), l), e)));
     }
 }
 
-/// Finds the loops of a function, outermost first, and hoists out of each.
+/// Finds the loops of a function, innermost first, and hoists out of each. A `Let` hoisted out of
+/// an inner loop lands in the outer loop's body, where the outer loop's pass may move its
+/// initializer on (an inliner temporary of the inner loop is seen through only by the inner pass),
+/// so an expression leaves every loop it is invariant in.
 struct Loops<'a> {
     locals: &'a mut Vec<Local>,
+    /// Each new local, with the expression it replaced.
+    replaced: Vec<(LocalIdx, Expr)>,
 }
 
 impl VisitMut for Loops<'_> {
     fn visit_stmts(&mut self, list: &mut Vec<Stmt>) {
         let mut i = 0;
         while i < list.len() {
+            // Into the statement first: a loop nested inside gets its own pass before this one.
+            self.visit_stmt(&mut list[i]);
             if matches!(list[i], Stmt::While { .. } | Stmt::ForRange { .. }) {
-                let lets = hoist_loop(&mut list[i], self.locals);
+                let lets = hoist_loop(&mut list[i], self.locals, &mut self.replaced);
                 let n = lets.len();
                 list.splice(i..i, lets);
                 i += n;
             }
-            // Into the loop's body: a loop nested inside gets its own pass.
-            self.visit_stmt(&mut list[i]);
             i += 1;
         }
     }
 }
 
 /// Replaces the hoistable expressions of the loop `s` with loads of new locals, and returns the
-/// `Let`s that bind them, in the order found, to go just before the loop.
-fn hoist_loop(s: &mut Stmt, locals: &mut Vec<Local>) -> Vec<Stmt> {
+/// `Let`s that bind them, in the order found, to go just before the loop. Each new local and the
+/// expression it replaced go into `replaced`.
+fn hoist_loop(s: &mut Stmt, locals: &mut Vec<Local>, replaced: &mut Vec<(LocalIdx, Expr)>) -> Vec<Stmt> {
     // The hoisted `Let`s run before everything the loop runs: its condition on every pass, or its
     // bounds once, which may write a local too (an inlined call with a `var` argument).
     let mut written = HashSet::new();
@@ -74,7 +85,7 @@ fn hoist_loop(s: &mut Stmt, locals: &mut Vec<Local>) -> Vec<Stmt> {
         walk_expr(c, &mut |n| note_write(n, &mut written));
     }
     let temps = temps(body, cond.as_deref(), &written, locals);
-    let mut h = Hoist { written: &written, temps: &temps, locals, lets: Vec::new() };
+    let mut h = Hoist { written: &written, temps: &temps, locals, lets: Vec::new(), replaced };
     if let Some(c) = cond {
         h.visit_expr(c);
     }
@@ -138,8 +149,9 @@ fn is_scalar(ty: KTy) -> bool {
 /// "Top level" is any `Let` every pass runs, in the order codegen evaluates the body (see
 /// `Order`): a statement of the body itself, or one in a `Seq` that one of them evaluates, whose
 /// local is used only inside that `Seq` (an inlined call used as a value, `s += scale(x, k)`,
-/// binds its arguments there). Not inside an `if`, the second operand of `and`/`or`, an inner
-/// loop, or a `Prove` or `Assume` block.
+/// binds its arguments there). That includes a `Seq` in the condition of an expression `if`,
+/// which runs on every pass. Not inside an `if`'s branches (statement or expression), the second
+/// operand of `and`/`or`, an inner loop, or a `Prove` or `Assume` block.
 ///
 /// A use after such a `Let` runs after it in the same pass, and the local is written nowhere else
 /// in the loop, so it reads the initializer's value, which is the same on every pass. Exactly
@@ -224,9 +236,15 @@ impl VisitMut for Order {
                 self.visit_expr(a);
                 self.branch(|o| o.visit_expr(b));
             }
-            ExprKind::If { cond, .. } => {
+            // The condition runs on every pass, once; only the branches are conditional.
+            ExprKind::If { cond, then_body, then_val, else_body, else_val } => {
                 self.visit_expr(cond);
-                self.branch(|o| walk_expr_mut(o, e));
+                self.branch(|o| {
+                    o.visit_stmts(then_body);
+                    then_val.iter_mut().for_each(|x| o.visit_expr(x));
+                    o.visit_stmts(else_body);
+                    else_val.iter_mut().for_each(|x| o.visit_expr(x));
+                });
             }
             ExprKind::Seq(stmts, _) => {
                 let bound: Vec<LocalIdx> = stmts.iter().filter_map(|s| if let Stmt::Let(l, _) = s { Some(*l) } else { None }).collect();
@@ -281,6 +299,8 @@ struct Hoist<'a> {
     temps: &'a HashMap<LocalIdx, Expr>,
     locals: &'a mut Vec<Local>,
     lets: Vec<Stmt>,
+    /// Each new local, with the expression it replaced (before any temporary is seen through).
+    replaced: &'a mut Vec<(LocalIdx, Expr)>,
 }
 
 impl VisitMut for Hoist<'_> {
@@ -301,10 +321,11 @@ impl VisitMut for Hoist<'_> {
         }
         let mut value = e.clone();
         Substitute(temps).visit_expr(&mut value);
-        self.locals.push(Local { name: "__hoisted".into(), ty: e.ty, kind: LocalKind::Value });
+        self.locals.push(Local { name: HOISTED.into(), ty: e.ty, kind: LocalKind::Value });
         let l = LocalIdx(self.locals.len() as u32 - 1);
         self.lets.push(Stmt::Let(l, value));
-        *e = Expr { kind: ExprKind::Load(Place::local(l)), ty: e.ty, line: e.line };
+        let load = Expr { kind: ExprKind::Load(Place::local(l)), ty: e.ty, line: e.line };
+        self.replaced.push((l, std::mem::replace(e, load)));
     }
 }
 

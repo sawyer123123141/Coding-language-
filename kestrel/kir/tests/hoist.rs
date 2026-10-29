@@ -1,114 +1,11 @@
 //! `hoist::hoist_math`: pure math whose operands a loop never changes moves out of the loop, and
 //! nothing else does.
 
+mod hoist_common;
+
+use hoist_common::*;
 use kestrel_kir::visit::{walk, walk_expr, Node};
 use kestrel_kir::*;
-use kestrel_syntax::{parse, LineIndex};
-
-fn lowered(src: &str) -> Module {
-    let (p, d) = parse(src);
-    assert!(d.is_empty(), "parse: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
-    let (t, d) = kestrel_check::check(&p);
-    assert!(d.is_empty(), "check: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
-    lower(&p, &t.unwrap(), &LineIndex::new(src))
-}
-
-fn optimized(src: &str) -> Module {
-    let mut m = lowered(src);
-    optimize(&mut m);
-    m
-}
-
-fn func<'m>(m: &'m Module, name: &str) -> &'m Func {
-    m.funcs.iter().find(|f| f.name == name).unwrap()
-}
-
-fn par_body(m: &Module) -> &Func {
-    &m.funcs[m.par_bodies[0].0 as usize]
-}
-
-fn is_loop(s: &Stmt) -> bool {
-    matches!(s, Stmt::While { .. } | Stmt::ForRange { .. })
-}
-
-fn body_of(s: &Stmt) -> &[Stmt] {
-    match s {
-        Stmt::While { body, .. } | Stmt::ForRange { body, .. } => body,
-        _ => panic!("not a loop: {s:?}"),
-    }
-}
-
-/// The first loop in `list`, at its top level.
-fn first_loop(list: &[Stmt]) -> &Stmt {
-    list.iter().find(|s| is_loop(s)).unwrap_or_else(|| panic!("no loop in {list:#?}"))
-}
-
-fn is_hoisted(f: &Func, l: LocalIdx) -> bool {
-    f.locals[l.0 as usize].name == "__hoisted"
-}
-
-fn hoisted_locals(f: &Func) -> usize {
-    f.locals.iter().filter(|l| l.name == "__hoisted").count()
-}
-
-/// The initializers of the hoisted locals bound right before the first loop in `list`.
-fn hoisted_before<'a>(f: &Func, list: &'a [Stmt]) -> Vec<&'a Expr> {
-    let at = list.iter().position(is_loop).unwrap_or_else(|| panic!("no loop in {list:#?}"));
-    let mut out: Vec<&Expr> = list[..at]
-        .iter()
-        .rev()
-        .map_while(|s| match s {
-            Stmt::Let(l, e) if is_hoisted(f, *l) => Some(e),
-            _ => None,
-        })
-        .collect();
-    out.reverse();
-    out
-}
-
-fn has_math(e: &Expr, op: MathOp) -> bool {
-    let mut found = false;
-    walk_expr(e, &mut |n| found |= matches!(n, Node::Expr(Expr { kind: ExprKind::Math(o, _), .. }) if *o == op));
-    found
-}
-
-/// Whether a `Math(op)` is inside a loop's body or a `while`'s condition anywhere in `stmts`.
-fn math_in_loops(stmts: &[Stmt], op: MathOp) -> bool {
-    let mut found = false;
-    walk(stmts, &mut |n| match n {
-        Node::Stmt(Stmt::While { cond, body }) => {
-            found |= has_math(cond, op) || body.iter().any(|s| stmt_has_math(s, op));
-        }
-        Node::Stmt(Stmt::ForRange { body, .. }) => found |= body.iter().any(|s| stmt_has_math(s, op)),
-        _ => {}
-    });
-    found
-}
-
-fn stmt_has_math(s: &Stmt, op: MathOp) -> bool {
-    let mut found = false;
-    walk(std::slice::from_ref(s), &mut |n| found |= matches!(n, Node::Expr(Expr { kind: ExprKind::Math(o, _), .. }) if *o == op));
-    found
-}
-
-fn math_args(e: &Expr, op: MathOp) -> &[Expr] {
-    match &e.kind {
-        ExprKind::Math(o, xs) if *o == op => xs,
-        _ => panic!("not a {op:?}: {e:#?}"),
-    }
-}
-
-/// The local a whole-local `Load` reads.
-fn loaded(e: &Expr) -> LocalIdx {
-    match &e.kind {
-        ExprKind::Load(p) if p.path.is_empty() => p.root,
-        _ => panic!("not a load of a local: {e:#?}"),
-    }
-}
-
-fn name(f: &Func, l: LocalIdx) -> &str {
-    &f.locals[l.0 as usize].name
-}
 
 const STEP: &str = "let KEEP = 0.5\nstruct Particle {\n pos: vec2\n vel: vec2\n pure step(var self, dt: float, target: vec2) {\n  self.vel += (target - self.pos).normalized() * 900.0 * dt\n  self.vel *= pow(KEEP, dt)\n  self.pos += self.vel * dt\n }\n}\nrun(var ps: list[Particle], dt: float, target: vec2) {\n par for p in ps {\n  p.step(dt, target)\n }\n}\nwalk(var ps: list[Particle], dt: float, target: vec2) {\n for p in ps {\n  p.step(dt, target)\n }\n}\nmain() {}\n";
 
@@ -129,6 +26,22 @@ fn pow_of_a_constant_and_a_capture_leaves_the_particle_loop() {
     let m = optimized(STEP);
     pow_leaves_the_loop(par_body(&m));
     pow_leaves_the_loop(func(&m, "walk"));
+}
+
+#[test]
+fn pow_read_through_an_inner_loops_temporary_leaves_the_outer_loop_too() {
+    // The inliner binds `dt` to a temporary inside `for p in ps`; the `pow` hoisted out of that
+    // loop is invariant in the frame loop too, so it moves on before it, once.
+    let src = STEP.replace("main() {}", "frames(var ps: list[Particle], dt: float, target: vec2) {
+ for k from 0 to 10 {
+  for p in ps {
+   p.step(dt, target)
+  }
+ }
+}
+main() {}");
+    let m = optimized(&src);
+    pow_leaves_the_loop(func(&m, "frames"));
 }
 
 const SCALE: &str = "pure scale(v: float, k: float) -> float { v * pow(k, 2.0) }\n";
@@ -353,6 +266,9 @@ fn f64_math_is_hoisted_too() {
 
 #[test]
 fn a_var_argument_in_the_loop_keeps_math_of_that_variable() {
+    // `bump` calls itself, so it is never inlined and `x` stays `Addressed`: the rule that only
+    // `Value` locals are read keeps `sin(x)` here, before the `var` argument's write is looked at.
+    // (`hoist_rules.rs` tests each of the two rules on its own.)
     let src = "bump(var x: float, n: int) {\n if n > 0 {\n  x += 0.5\n  bump(var x, n - 1)\n }\n}\nf(x0: float, n: int) -> float {\n var s = 0.0\n var x = x0\n for i from 0 to n {\n  s += sin(x)\n  bump(var x, 2)\n }\n s\n}\nmain() {}\n";
     let m = optimized(src);
     let f = func(&m, "f");

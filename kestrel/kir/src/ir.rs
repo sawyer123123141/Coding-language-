@@ -209,6 +209,10 @@ pub struct Module {
     /// The generic functions and methods that have no copy, by name and packed lines (see
     /// `Func::lines`): nothing was checked in them.
     pub uncopied: Vec<(String, (u32, u32))>,
+    /// What each local `hoist::hoist_math` made held where it was written in the loop, by function
+    /// and local: the report and contracts write a load of the local as that expression, so their
+    /// text is what it was before the pass.
+    pub hoisted: HashMap<(FuncIdx, LocalIdx), Expr>,
     /// The build range analysis marked the module for, in place (`range::remove_checks` or
     /// `mark_proven`); `None` until then. Codegen compiles an analysed module as it is.
     pub analysed: Option<crate::range::Arith>,
@@ -336,6 +340,9 @@ pub struct Func {
 /// target's own list, array or map has too little room (see `lower::assign_into`): the report
 /// words that copy as the assignment's. (A name starting with `__` is one the compiler made.)
 pub(crate) const ROOM_COPY: &str = "__room";
+
+/// The name of each local `hoist::hoist_math` makes (see `Module::hoisted`).
+pub(crate) const HOISTED: &str = "__hoisted";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Local {

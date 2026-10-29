@@ -1,6 +1,7 @@
 //! Expressions and ranges as the report writes them: Kestrel syntax from KIR (local names,
-//! `xs.len`, `xs[i]`, `int(x)`), a value the compiler made with no name as `(...)`, and ranges as
-//! "is exactly 5", "is 0 to 99", "is 0 or more", "is at most 10" or "can be any `int`".
+//! `xs.len`, `xs[i]`, `int(x)`), a value the compiler made with no name as `(...)` (but math moved
+//! out of a loop as the expression it replaced), and ranges as "is exactly 5", "is 0 to 99", "is 0
+//! or more", "is at most 10" or "can be any `int`".
 
 use super::interval::{width, Interval};
 use super::sites::CheckKind;
@@ -180,12 +181,28 @@ fn op_text(op: BinOp) -> &'static str {
     }
 }
 
+/// The expression a local that `hoist::hoist_math` made replaced, when `l` is one of `f`'s (`f` is
+/// one of `m.funcs`): the text shows it as written.
+fn hoisted<'m>(m: &'m Module, f: &Func, l: LocalIdx) -> Option<&'m Expr> {
+    if m.hoisted.is_empty() || f.locals[l.0 as usize].name != HOISTED {
+        return None;
+    }
+    let fi = m.funcs.iter().position(|g| std::ptr::eq(g, f))?;
+    m.hoisted.get(&(FuncIdx(fi as u32), l))
+}
+
 /// An operand of a binary operation: in parentheses when it is itself one.
 pub(super) fn write_operand(m: &Module, f: &Func, e: &Expr, s: &mut String) {
-    let inner = match &e.kind {
+    let mut inner = match &e.kind {
         ExprKind::Proven(x) => x,
         _ => e,
     };
+    while let Some(x) = match &inner.kind {
+        ExprKind::Load(p) if p.path.is_empty() => hoisted(m, f, p.root),
+        _ => None,
+    } {
+        inner = x;
+    }
     if matches!(inner.kind, ExprKind::Binary(..) | ExprKind::And(..) | ExprKind::Or(..)) {
         s.push('(');
         write_expr(m, f, e, s);
@@ -266,6 +283,9 @@ fn filled(x: &Expr) -> &Expr {
 }
 
 fn write_place(m: &Module, f: &Func, p: &Place, upto: usize, s: &mut String) {
+    if let Some(e) = p.path.is_empty().then(|| hoisted(m, f, p.root)).flatten() {
+        return write_expr(m, f, e, s);
+    }
     s.push_str(&local_name(m, f, p.root));
     let mut ty = f.locals[p.root.0 as usize].ty;
     for proj in p.path.iter().take(upto) {
