@@ -1,6 +1,7 @@
 //! Float operations. `sqrt`, `floor`, `ceil`, `abs`, `min`, `max` and
 //! `round` are Cranelift instructions; the rest call the runtime's function
-//! for that operation (`kestrel_rt_pow`, ...), which works in `f64`. The
+//! for that operation: `kestrel_rt_pow` for `f64`, which works in `f64`, and
+//! `kestrel_rt_powf` for `float`, which works in `f32` (no widening). The
 //! random numbers call the runtime's generator.
 
 use cranelift_codegen::ir::condcodes::FloatCC;
@@ -100,15 +101,12 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         self.b.ins().select(ge, up, t)
     }
 
-    /// Calls the runtime's function for `op`; `f32` operands are widened to `f64` and the result narrowed back.
+    /// Calls the runtime's function for `op`. `f64` operands call the `libm` function; `float`
+    /// operands call the wide function over `f32`, with no widening, so the result is computed in
+    /// `float`.
     fn runtime_math(&mut self, op: MathOp, vals: &[Value], ty: KTy) -> Value {
-        let args: Vec<Value> = vals.iter().map(|&v| if ty == KTy::F32 { self.b.ins().fpromote(types::F64, v) } else { v }).collect();
-        let (_, id) = *self.shared.rt.math.iter().find(|(o, _)| *o == op).expect("a runtime function for every float operation");
-        let r = self.call_id(id, &args).expect("a runtime math function returns a value");
-        if ty == KTy::F32 {
-            self.b.ins().fdemote(types::F32, r)
-        } else {
-            r
-        }
+        let table = if ty == KTy::F32 { &self.shared.rt.mathf } else { &self.shared.rt.math };
+        let (_, id) = *table.iter().find(|(o, _)| *o == op).expect("a runtime function for every float operation");
+        self.call_id(id, vals).expect("a runtime math function returns a value")
     }
 }

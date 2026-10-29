@@ -30,5 +30,5 @@ main() {
     print(checksum(cells))
     print(cells[0].x, cells[4999].y, cells[9999].p, cells[9999].n)
 }
-// expect: -4727177381731691941
+// expect: 1766166045610435347
 // expect: 107.53390010538739 14.513191 vec2(x: 1.3409494, y: 0.78174263) 10160

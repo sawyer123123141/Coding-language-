@@ -254,7 +254,7 @@ fn fmod_f32_matches_f64_for_exact_cases() {
 }
 
 /// The `float` inputs `tests/programs/det_math.kes` prints `sin`, `cos`, `atan2(x, 0.75)`, `exp`,
-/// `log` and `pow(1.25, x)` of (each widened to `f64`, computed, narrowed once).
+/// `log` and `pow(1.25, x)` of (computed in `float` by the wide functions).
 const FLOAT_INPUTS: [f32; 6] = [0.5, 1.0, 2.5, -3.0, 100.0, 1234.5];
 
 /// Prints `TABLE` with today's results, to paste over it when the pinned bits change on purpose,
@@ -272,16 +272,15 @@ fn print_table() {
         println!("// expect: {}", own(name, xs));
     }
     for x in FLOAT_INPUTS {
-        let w = x as f64;
         let row = [
-            kestrel_rt_sin(w),
-            kestrel_rt_cos(w),
-            kestrel_rt_atan2(w, 0.75),
-            kestrel_rt_exp(w),
-            kestrel_rt_log(w),
-            kestrel_rt_pow(1.25, w),
+            kestrel_rt_sinf(x),
+            kestrel_rt_cosf(x),
+            kestrel_rt_atan2f(x, 0.75),
+            kestrel_rt_expf(x),
+            kestrel_rt_logf(x),
+            kestrel_rt_powf(1.25, x),
         ];
-        let row: Vec<String> = row.iter().map(|&r| (r as f32).to_string()).collect();
+        let row: Vec<String> = row.iter().map(|r| r.to_string()).collect();
         println!("// expect: {}", row.join(" "));
     }
 }

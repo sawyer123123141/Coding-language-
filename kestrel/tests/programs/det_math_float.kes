@@ -1,0 +1,70 @@
+// Determinism: a million inputs through each `float` transcendental function (`sin`, `cos`, `tan`,
+// `sin` and `cos` of large arguments, `exp`, `log`, `pow`, `atan2`, `atan`, `asin`, `acos` and the
+// float remainder), one `checksum` of the results per function. `float` math is computed in
+// `float` by the runtime's wide functions, so the JIT and both exes print the same lines, and
+// `cli/tests/determinism.rs` (`the_float_sweep_matches_the_runtime`) computes the same checksums
+// in Rust with the same inputs. Every input is a dyadic rational, exact in `float`.
+// expect: -3334287783359690267
+// expect: -649865703456324329
+// expect: 6133251307751144864
+// expect: 7333012618328903077
+// expect: 5117384979804957051
+// expect: -3923256440608192342
+// expect: -37334485782490274
+// expect: 323258267209170825
+// expect: 7075047034228439608
+// expect: -4162651264050013955
+// expect: 3090838112910284600
+// expect: 1209913059354301489
+// expect: 1457145073425243790
+main() {
+    var sins: list[float] = []
+    var coss: list[float] = []
+    var tans: list[float] = []
+    var big_sins: list[float] = []
+    var big_coss: list[float] = []
+    var exps: list[float] = []
+    var logs: list[float] = []
+    var pows: list[float] = []
+    var atan2s: list[float] = []
+    var atans: list[float] = []
+    var asins: list[float] = []
+    var acoss: list[float] = []
+    var mods: list[float] = []
+    for i from 0 to 1000000 {
+        let a = float(i - 500000) * 0.0009765625
+        let big = float(i - 500000) * 1024.0
+        let e = float(i - 500000) * 0.0001953125
+        let p = float(i + 1) * 0.0009765625
+        let y = float(i % 2001 - 1000) * 0.03125
+        let w = float(i % 1999 - 999) * 0.25
+        let u = float(i - 500000) * 0.0000019073486328125
+        let d = float(i % 97 + 1) * 0.0625
+        sins.add(sin(a))
+        coss.add(cos(a))
+        tans.add(tan(a))
+        big_sins.add(sin(big))
+        big_coss.add(cos(big))
+        exps.add(exp(e))
+        logs.add(log(p))
+        pows.add(pow(p, y))
+        atan2s.add(atan2(a, w))
+        atans.add(atan(a))
+        asins.add(asin(u))
+        acoss.add(acos(u))
+        mods.add(a % d)
+    }
+    print(checksum(sins))
+    print(checksum(coss))
+    print(checksum(tans))
+    print(checksum(big_sins))
+    print(checksum(big_coss))
+    print(checksum(exps))
+    print(checksum(logs))
+    print(checksum(pows))
+    print(checksum(atan2s))
+    print(checksum(atans))
+    print(checksum(asins))
+    print(checksum(acoss))
+    print(checksum(mods))
+}

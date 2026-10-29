@@ -10,6 +10,10 @@ mod common;
 use common::directives;
 use common::hermetic;
 
+use kestrel_runtime::checksum::{finish, mix, START};
+use kestrel_runtime::math;
+use kestrel_runtime::panic::kestrel_rt_fmod_f32;
+
 const BUILDS: [&str; 4] = ["jit", "jit --release", "exe", "exe --release"];
 
 fn program(name: &str) -> PathBuf {
@@ -108,7 +112,7 @@ fn assert_same_everywhere(name: &str, outputs: &[String]) {
 
 #[test]
 fn the_jit_and_both_exes_print_the_same() {
-    for name in ["det_rng_checksum", "det_sim", "det_snapshot", "det_par"] {
+    for name in ["det_rng_checksum", "det_sim", "det_snapshot", "det_par", "det_math_float"] {
         assert_same_everywhere(name, &four_builds(name));
     }
 }
@@ -116,6 +120,61 @@ fn the_jit_and_both_exes_print_the_same() {
 #[test]
 fn the_jit_and_exe_math_agree_bit_for_bit() {
     assert_same_everywhere("det_math", &four_builds("det_math"));
+}
+
+/// The checksum of a `list[float]` the way compiled code folds it: the length, then each item's 32
+/// bits zero-extended, every NaN as the canonical quiet NaN.
+fn list_checksum(items: &[f32]) -> i64 {
+    let mut h = mix(START, items.len() as u64);
+    for &x in items {
+        let bits = if x.is_nan() { 0x7FC0_0000 } else { x.to_bits() };
+        h = mix(h, u64::from(bits));
+    }
+    finish(h) as i64
+}
+
+/// A million inputs through each `float` function: the runtime's `kestrel_rt_*f` functions, called
+/// from Rust, fold to the checksums the compiled program prints, in the JIT and in the program's
+/// `// expect:` lines. The inputs are dyadic, so Rust computes the same `f32`s the program does.
+#[test]
+fn the_float_sweep_matches_the_runtime() {
+    const N: usize = 1_000_000;
+    let mut cols: Vec<Vec<f32>> = (0..13).map(|_| Vec::with_capacity(N)).collect();
+    for i in 0..N as i64 {
+        let a = (i - 500_000) as f32 * 0.0009765625f32;
+        let big = (i - 500_000) as f32 * 1024.0f32;
+        let e = (i - 500_000) as f32 * 0.0001953125f32;
+        let p = (i + 1) as f32 * 0.0009765625f32;
+        let y = (i % 2001 - 1000) as f32 * 0.03125f32;
+        let w = (i % 1999 - 999) as f32 * 0.25f32;
+        // 0.0000019073486328125 is 2^-19: the division by 2^19 gives the same bits as the program's product.
+        let u = (i - 500_000) as f32 / 524_288.0f32;
+        let d = (i % 97 + 1) as f32 * 0.0625f32;
+        let row = [
+            math::kestrel_rt_sinf(a),
+            math::kestrel_rt_cosf(a),
+            math::kestrel_rt_tanf(a),
+            math::kestrel_rt_sinf(big),
+            math::kestrel_rt_cosf(big),
+            math::kestrel_rt_expf(e),
+            math::kestrel_rt_logf(p),
+            math::kestrel_rt_powf(p, y),
+            math::kestrel_rt_atan2f(a, w),
+            math::kestrel_rt_atanf(a),
+            math::kestrel_rt_asinf(u),
+            math::kestrel_rt_acosf(u),
+            kestrel_rt_fmod_f32(a, d),
+        ];
+        for (col, x) in cols.iter_mut().zip(row) {
+            col.push(x);
+        }
+    }
+    let want: Vec<String> = cols.iter().map(|c| list_checksum(c).to_string()).collect();
+    println!("computed in Rust:\n{}", want.iter().map(|w| format!("// expect: {w}")).collect::<Vec<_>>().join("\n"));
+    let expected = expected("det_math_float");
+    assert_eq!(expected.lines().collect::<Vec<_>>(), want, "the program's `// expect:` lines against the checksums computed in Rust");
+    let jit = run_jit("det_math_float", false, None);
+    assert_eq!(jit.lines().collect::<Vec<_>>(), want, "the JIT's output against the checksums computed in Rust");
 }
 
 #[test]

@@ -113,3 +113,11 @@ main() {}
     assert!(ids[1] < ids[0] && ids[1] < ids[2] && ids[1] < ids[4], "{ids:?}");
     assert!(ids[0] != ids[2] && ids[4] != ids[0] && ids[4] != ids[2], "{ids:?}");
 }
+
+#[test]
+fn float_pow_calls_the_float_function_without_widening() {
+    let m = common::optimized("pure f(x: float) -> float { pow(x, 0.5) }\nmain() {}\n");
+    let code = dump(&m, release(), "f").unwrap();
+    assert_eq!(code.matches("call fn").count(), 1, "{code}");
+    assert!(!code.contains("fpromote") && !code.contains("fdemote"), "{code}");
+}

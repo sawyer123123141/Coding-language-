@@ -1,9 +1,12 @@
-// Every row of the runtime's math table (`runtime/src/math/bits.rs`) through compiled code, one
-// result per line, then `sin`, `cos`, `atan2`, `exp`, `log` and `pow` of six `float` inputs (widened
-// to `f64`, computed, narrowed once). Printing is the shortest text that reads back as the same
-// value, so equal text is equal bits (NaN aside). `print_table` in that file prints these lines.
-// Kestrel has no exponent in literals: the long literals are 1e300, 1e22, 1e-300, 1e-310 and the
-// smallest subnormal, 5e-324.
+// Every row of the runtime's `f64` math table (`runtime/src/math/bits.rs`) through compiled code,
+// one result per line, then `sin`, `cos`, `atan2`, `exp`, `log` and `pow` of six `float` inputs,
+// then every row of the `float` table (`runtime/src/math/bits_float.rs`). `f64` math is the
+// runtime's `libm` functions; `float` math is computed in `float` by the wide functions, never
+// widened to `f64`. Printing is the shortest text that reads back as the same value, so equal text
+// is equal bits (NaN aside). `print_table` in `bits.rs` and `print_float_table` in `bits_float.rs`
+// print these lines. Kestrel has no exponent in literals: the long literals are 1e300, 1e22,
+// 1e-300, 1e-310 and the smallest subnormal, 5e-324 for `f64`, and 1e30, 3.4028235e38, 1e-40, 3e-41
+// and 1e-45 for `float`.
 // expect: 0
 // expect: -0
 // expect: 0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001
@@ -145,6 +148,169 @@
 // expect: -0.14112 -0.9899925 -1.3258177 0.049787067 NaN 0.512
 // expect: -0.50636566 0.8623189 1.5632964 inf 4.6051702 4909093400
 // expect: 0.14539565 -0.98937356 1.5701888 inf 7.118421 inf
+// expect: 0
+// expect: -0
+// expect: 0.0000000000000000000000000000000000000001
+// expect: 0.00024414063
+// expect: -0.00024414063
+// expect: 0.47942555
+// expect: 0.84147096
+// expect: 0.5984721
+// expect: -0.14112
+// expect: 0.70710677
+// expect: 1
+// expect: -0.50636566
+// expect: 0.14539565
+// expect: 0.7855112
+// expect: 0.9965408
+// expect: -0.79116344
+// expect: NaN
+// expect: NaN
+// expect: NaN
+// expect: 1
+// expect: 1
+// expect: 1
+// expect: 1
+// expect: 1
+// expect: 0.87758255
+// expect: 0.5403023
+// expect: -0.8011436
+// expect: -0.9899925
+// expect: 0.70710677
+// expect: -0.00000004371139
+// expect: 0.8623189
+// expect: -0.98937356
+// expect: 0.6188474
+// expect: 0.08310514
+// expect: -0.6116048
+// expect: NaN
+// expect: NaN
+// expect: NaN
+// expect: 0
+// expect: -0
+// expect: 0.0000000000000000000000000000000000000001
+// expect: 0.00024414063
+// expect: -0.00024414063
+// expect: 0.5463025
+// expect: 1.5574077
+// expect: -0.7470223
+// expect: 0.14254655
+// expect: 1
+// expect: -22877332
+// expect: -0.58721393
+// expect: -0.14695728
+// expect: 1.2693132
+// expect: 11.991326
+// expect: 1.2935861
+// expect: NaN
+// expect: NaN
+// expect: NaN
+// expect: -1.5707964
+// expect: -0.5235988
+// expect: -0
+// expect: 0
+// expect: 0.30469266
+// expect: 0.5235988
+// expect: 0.7853981
+// expect: 1.570451
+// expect: 1.5707964
+// expect: NaN
+// expect: NaN
+// expect: 3.1415927
+// expect: 2.0943952
+// expect: 1.5707964
+// expect: 1.5707964
+// expect: 1.2661036
+// expect: 1.0471976
+// expect: 0.7853982
+// expect: 0.00034526698
+// expect: 0
+// expect: NaN
+// expect: NaN
+// expect: 0
+// expect: -0
+// expect: 0.4636476
+// expect: 0.7853982
+// expect: -0.7853982
+// expect: 0.3926991
+// expect: 1.5707964
+// expect: -1.5707964
+// expect: 1.5707964
+// expect: -1.5707964
+// expect: NaN
+// expect: 0
+// expect: 3.1415927
+// expect: -3.1415927
+// expect: 1.5707964
+// expect: -1.5707964
+// expect: 1.5707964
+// expect: 0.7853982
+// expect: -2.3561945
+// expect: 0
+// expect: -3.1415927
+// expect: 0.7853982
+// expect: 0
+// expect: NaN
+// expect: 0.3926991
+// expect: 1.3258177
+// expect: 1
+// expect: 1
+// expect: 2.7182817
+// expect: 0.36787945
+// expect: 1.6487212
+// expect: 22026.465
+// expect: 339318060000000000000000000000000000000
+// expect: inf
+// expect: inf
+// expect: inf
+// expect: 0.000000000000000000000000000000000000016458115
+// expect: 0.000000000000000000000000000000000000000000001
+// expect: 0
+// expect: 0
+// expect: 1
+// expect: inf
+// expect: 0
+// expect: NaN
+// expect: 0
+// expect: 0.6931472
+// expect: -0.6931472
+// expect: 2.3025851
+// expect: -0.34657362
+// expect: 0.34657356
+// expect: -92.10341
+// expect: -103.27893
+// expect: 88.72284
+// expect: -inf
+// expect: -inf
+// expect: NaN
+// expect: inf
+// expect: NaN
+// expect: 1.4142135
+// expect: 1024
+// expect: 0.001
+// expect: -512
+// expect: NaN
+// expect: 1
+// expect: 1
+// expect: 1
+// expect: 3.2939677
+// expect: inf
+// expect: 0.000000000000000000000000000000000000000000001
+// expect: inf
+// expect: 1.7469281
+// expect: 1.5
+// expect: -1.5
+// expect: 0
+// expect: 0.0000000000000000000000000000000000000001
+// expect: NaN
+// expect: NaN
+// expect: 1
+// expect: -0
+// expect: 0
+// expect: -0
+// expect: 0.000000000000000000000000000000000000000009998
+// expect: 0
+// expect: 1
 main() {
     let z: f64 = 0
     let inf = 1 / z
@@ -203,5 +369,59 @@ main() {
     let floats: list[float] = [0.5, 1.0, 2.5, -3.0, 100.0, 1234.5]
     for x in floats {
         print(sin(x), cos(x), atan2(x, 0.75), exp(x), log(x), pow(1.25, x))
+    }
+    float_table()
+}
+
+float_table() {
+    let z: float = 0
+    let inf = 1 / z
+    let nan = z / z
+    let sin_in: list[float] = [z, -z, 0.0000000000000000000000000000000000000001, 0.00024414063, -0.00024414063, 0.5, 1.0, 2.5, -3.0, 0.7853982, 1.5707964, 100.0, 1234.5, 399999970.0, 400000000.0, 1000000000000000000000000000000.0, inf, -inf, nan]
+    let cos_in: list[float] = [z, -z, 0.0000000000000000000000000000000000000001, 0.00024414063, -0.00024414063, 0.5, 1.0, 2.5, -3.0, 0.7853982, 1.5707964, 100.0, 1234.5, 399999970.0, 400000000.0, 1000000000000000000000000000000.0, inf, -inf, nan]
+    let tan_in: list[float] = [z, -z, 0.0000000000000000000000000000000000000001, 0.00024414063, -0.00024414063, 0.5, 1.0, 2.5, -3.0, 0.7853982, 1.5707964, 100.0, 1234.5, 399999970.0, 400000000.0, 1000000000000000000000000000000.0, inf, -inf, nan]
+    let asin_in: list[float] = [-1.0, -0.5, -z, z, 0.3, 0.5, 0.70710677, 0.99999994, 1.0, 1.0000001, nan]
+    let acos_in: list[float] = [-1.0, -0.5, -z, z, 0.3, 0.5, 0.70710677, 0.99999994, 1.0, 1.0000001, nan]
+    let atan_in: list[float] = [z, -z, 0.5, 1.0, -1.0, 0.41421357, 10000000000.0, -1000000000000000000000000000000.0, inf, -inf, nan]
+    let exp_in: list[float] = [z, -z, 1.0, -1.0, 0.5, 10.0, 88.72, 88.73, 89.0, 100.0, -87.0, -103.97, -104.0, -110.0, 0.0000000000000000000000000000000000000001, inf, -inf, nan]
+    let log_in: list[float] = [1.0, 2.0, 0.5, 10.0, 0.70710677, 1.4142135, 0.0000000000000000000000000000000000000001, 0.000000000000000000000000000000000000000000001, 340282350000000000000000000000000000000.0, z, -z, -1.0, inf, nan]
+    let atan2_a: list[float] = [z, z, -z, 1.0, -1.0, 1.0, 1.0, -1.0, z, -z, inf, 1.0, nan, 0.41421357, 3.0]
+    let atan2_b: list[float] = [1.0, -1.0, -1.0, z, z, -z, 1.0, -1.0, z, -z, inf, inf, 1.0, 1.0, 0.75]
+    let pow_a: list[float] = [2.0, 2.0, 10.0, -8.0, -8.0, z, nan, 1.0, 1.0000001, 2.0, 2.0, 0.5, 1.25]
+    let pow_b: list[float] = [0.5, 10.0, -3.0, 3.0, 0.33333334, z, z, nan, 10000000.0, 128.0, -150.0, -149.0, 2.5]
+    let fmod_a: list[float] = [7.5, -7.5, 1000000000000000000000000000000.0, 0.0000000000000000000000000000000000000001, 1.0, inf, 1.0, -z, 5.0, -5.0, 0.0000000000000000000000000000000000000001, 536870900.0, 3.0]
+    let fmod_b: list[float] = [2.0, 2.0, 3.0, 1.0, z, 1.0, inf, 1.0, 2.5, 2.5, 0.00000000000000000000000000000000000000003, 1.0, -2.0]
+    for x in sin_in {
+        print(sin(x))
+    }
+    for x in cos_in {
+        print(cos(x))
+    }
+    for x in tan_in {
+        print(tan(x))
+    }
+    for x in asin_in {
+        print(asin(x))
+    }
+    for x in acos_in {
+        print(acos(x))
+    }
+    for x in atan_in {
+        print(atan(x))
+    }
+    for i from 0 to atan2_a.len {
+        print(atan2(atan2_a[i], atan2_b[i]))
+    }
+    for x in exp_in {
+        print(exp(x))
+    }
+    for x in log_in {
+        print(log(x))
+    }
+    for i from 0 to pow_a.len {
+        print(pow(pow_a[i], pow_b[i]))
+    }
+    for i from 0 to fmod_a.len {
+        print(fmod_a[i] % fmod_b[i])
     }
 }

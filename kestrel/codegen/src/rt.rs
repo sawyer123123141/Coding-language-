@@ -59,6 +59,8 @@ pub(crate) struct RtFuncs {
     pub sort_by_float: FuncId,
     /// The function for each float operation the runtime does (see `MATH`).
     pub math: Vec<(MathOp, FuncId)>,
+    /// The same operations over `f32`, which `float` code calls (see `MATHF`).
+    pub mathf: Vec<(MathOp, FuncId)>,
     pub rand_float: FuncId,
     pub rand_int: FuncId,
     pub rand_seed: FuncId,
@@ -150,6 +152,7 @@ impl RtFuncs {
             sort_by_int: decl("kestrel_rt_sort_by_int", &[ptr, I64, I64, ptr, ptr], None)?,
             sort_by_float: decl("kestrel_rt_sort_by_float", &[ptr, I64, I64, ptr, ptr], None)?,
             math: MATH.iter().map(|&(op, name, args)| Ok((op, decl(name, &[F64, F64][..args], Some(F64))?))).collect::<Result<_, String>>()?,
+            mathf: MATHF.iter().map(|&(op, name, args)| Ok((op, decl(name, &[F32, F32][..args], Some(F32))?))).collect::<Result<_, String>>()?,
             rand_float: decl("kestrel_rt_rand_float", &[], Some(F64))?,
             rand_int: decl("kestrel_rt_rand_int", &[I64, I64], Some(I64))?,
             rand_seed: decl("kestrel_rt_rand_seed", &[I64], None)?,
@@ -176,6 +179,21 @@ pub(crate) const MATH: [(MathOp, &str, usize); 10] = [
     (MathOp::Exp, "kestrel_rt_exp", 1),
     (MathOp::Log, "kestrel_rt_log", 1),
     (MathOp::Pow, "kestrel_rt_pow", 2),
+];
+
+/// The same operations over `f32`: the wide functions `float` code calls, computed in `f32` with no
+/// widening. Each one's function and how many `f32`s it takes.
+pub(crate) const MATHF: [(MathOp, &str, usize); 10] = [
+    (MathOp::Sin, "kestrel_rt_sinf", 1),
+    (MathOp::Cos, "kestrel_rt_cosf", 1),
+    (MathOp::Tan, "kestrel_rt_tanf", 1),
+    (MathOp::Asin, "kestrel_rt_asinf", 1),
+    (MathOp::Acos, "kestrel_rt_acosf", 1),
+    (MathOp::Atan, "kestrel_rt_atanf", 1),
+    (MathOp::Atan2, "kestrel_rt_atan2f", 2),
+    (MathOp::Exp, "kestrel_rt_expf", 1),
+    (MathOp::Log, "kestrel_rt_logf", 1),
+    (MathOp::Pow, "kestrel_rt_powf", 2),
 ];
 
 /// Addresses of every runtime export, for registering with the JIT.
@@ -246,6 +264,16 @@ pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
         ("kestrel_rt_exp", math::kestrel_rt_exp as *const u8),
         ("kestrel_rt_log", math::kestrel_rt_log as *const u8),
         ("kestrel_rt_pow", math::kestrel_rt_pow as *const u8),
+        ("kestrel_rt_sinf", math::kestrel_rt_sinf as *const u8),
+        ("kestrel_rt_cosf", math::kestrel_rt_cosf as *const u8),
+        ("kestrel_rt_tanf", math::kestrel_rt_tanf as *const u8),
+        ("kestrel_rt_asinf", math::kestrel_rt_asinf as *const u8),
+        ("kestrel_rt_acosf", math::kestrel_rt_acosf as *const u8),
+        ("kestrel_rt_atanf", math::kestrel_rt_atanf as *const u8),
+        ("kestrel_rt_atan2f", math::kestrel_rt_atan2f as *const u8),
+        ("kestrel_rt_expf", math::kestrel_rt_expf as *const u8),
+        ("kestrel_rt_logf", math::kestrel_rt_logf as *const u8),
+        ("kestrel_rt_powf", math::kestrel_rt_powf as *const u8),
         ("kestrel_rt_rand_float", math::kestrel_rt_rand_float as *const u8),
         ("kestrel_rt_rand_int", math::kestrel_rt_rand_int as *const u8),
         ("kestrel_rt_rand_seed", math::kestrel_rt_rand_seed as *const u8),
@@ -278,5 +306,21 @@ mod tests {
         // Only the i8 parameter is extended.
         let sig = &module.declarations().get_function_decl(rt.print_i64).signature;
         assert_eq!(sig.params[0].extension, ArgumentExtension::None);
+    }
+
+    #[test]
+    fn every_float_operation_has_a_float_runtime_function() {
+        use super::{jit_symbols, MATH, MATHF};
+        assert_eq!(MATHF.len(), MATH.len());
+        for &(op, name, args) in &MATH {
+            let found: Vec<_> = MATHF.iter().filter(|&&(o, _, _)| o == op).collect();
+            assert_eq!(found.len(), 1, "{op:?} appears once in MATHF");
+            assert_eq!(found[0].2, args, "{op:?} takes {args} arguments");
+            assert_eq!(found[0].1, format!("{name}f"));
+        }
+        let symbols = jit_symbols();
+        for &(_, name, _) in &MATHF {
+            assert!(symbols.iter().any(|(s, _)| *s == name), "{name} is registered with the JIT");
+        }
     }
 }
