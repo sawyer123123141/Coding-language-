@@ -17,6 +17,7 @@ every block.
   kernels N --only TEXT ...   `bench/kernels` rows (through the JIT), every compiler in turn
   engine N    `bench/engine` (`voxel/bench.kes`): N runs per compiler in turn, p99 per phase
   math N --test-exe EXE   the runtime's speed tests: `libm` against the platform, and `fpu::pin`
+  compile N --compile FILE ...   `kestrel check`, `run` and `build --release` of each file, every compiler in turn
 
 Exes run at normal priority, with the matching empty program's median (process start-up, and for
 `snap` the state's set-up) subtracted. "During" is the whole machine's CPU use over the block,
@@ -318,6 +319,36 @@ def cmd_math(a, rounds):
     print("  raw", {f"{n}:{k}": v for (n, k), v in vals.items()}, flush=True)
 
 
+def cmd_compile(a, rounds):
+    """`kestrel check --release` (the front end, checks, KIR and its passes, no code), `kestrel run
+    --release` (all that, plus Cranelift into memory, and the program's `main`; not for `voxel/`,
+    which opens a window) and `kestrel build --release` (Cranelift, the object file and the link)
+    of `--compile`'s programs, every compiler in turn, `rounds` times. The empty program's time of
+    the same kind (the start-up, and for `build` the link) is subtracted from each."""
+    empty_kes = os.path.join(a.out, "empty.kes")
+    open(empty_kes, "w", newline=chr(10)).write(EMPTY)
+    progs = [empty_kes] + [os.path.join(KESTREL_DIR, p) for p in a.compile]
+    jobs = {}
+    for v in a.kestrel:
+        for src in progs:
+            name = "empty.kes" if src == empty_kes else os.path.relpath(src, KESTREL_DIR).replace(os.sep, "/")
+            jobs[(v, "check " + name)] = [a.kestrel[v], "check", src, "--release"]
+            if not name.startswith("voxel/"):
+                jobs[(v, "run " + name)] = [a.kestrel[v], "run", src, "--release"]
+            jobs[(v, "build " + name)] = [a.kestrel[v], "build", src, "--release", "-o", os.path.join(a.out, f"compile-{v}.exe")]
+    times, _ = timed_block(a, "compile (kestrel check, run and build --release)", jobs, rounds)
+    for k in dict.fromkeys(n for _, n in jobs):
+        kind, name = k.split(" ", 1)
+        cells, ref = [], None
+        for v in a.kestrel:
+            t = times[(v, k)]
+            net = statistics.median(t) - (statistics.median(times[(v, kind + " empty.kes")]) if name != "empty.kes" else 0)
+            ref = ref or net
+            cells.append(f"{v} {spread(t)} ms, net {net:.1f}" + (f" ({net / ref:.3f})" if ref else ""))
+        print(f"  {k:40} " + "   ".join(cells))
+    print("  raw", {f"{v}:{n}": [round(x, 1) for x in t] for (v, n), t in times.items()}, flush=True)
+
+
 def named(pairs):
     return dict(p.split("=", 1) for p in pairs)
 
@@ -329,6 +360,8 @@ def main():
     ap.add_argument("--out", default=os.path.join(HERE, "out"))
     ap.add_argument("--only", nargs="+", default=["race", "noise", "step"])
     ap.add_argument("--test-exe", help="for `math`: the kestrel-runtime test exe, built --release")
+    ap.add_argument("--compile", nargs="+", default=["voxel/main.kes"], metavar="FILE",
+                    help="for `compile`: programs, relative to kestrel/")
     ap.add_argument("cmd")
     ap.add_argument("n", type=int, nargs="?", default=9)
     a = ap.parse_args()
@@ -341,6 +374,8 @@ def main():
         cmd_exes(a, a.cmd, a.n)
     elif a.cmd == "math":
         cmd_math(a, a.n)
+    elif a.cmd == "compile":
+        cmd_compile(a, a.n)
     elif a.cmd == "jit":
         cmd_jit(a, a.n)
     elif a.cmd == "kernels":

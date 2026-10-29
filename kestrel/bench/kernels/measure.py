@@ -34,8 +34,10 @@ KERNELS = [
     ("step_pow.kes (pow per particle, the demo)", ["kernels", "step_pow.kes", "--release"], 15),
     ("trig_step.kes (atan2, cos, sin per mover)", ["kernels", "trig_step.kes", "--release"], 15),
     # One `float` function per item over 65,536 random inputs (spec G3 of the fast float math round);
-    # `math_none.kes` is the loop and the add alone, which every other row includes.
+    # `math_none.kes` is the loop and the add alone, which every one-argument row includes;
+    # `math_none2.kes` is the same over two lists, for `atan2`, `pow` and `rem`.
     ("math_none.kes (the loop alone: sums the input)", ["kernels", "math_none.kes", "--release", "--n", "65536"], 100),
+    ("math_none2.kes (the two-list loop alone: sums x + ys[i])", ["kernels", "math_none2.kes", "--release", "--n", "65536"], 100),
     ("math_sin.kes (one sin per item)", ["kernels", "math_sin.kes", "--release", "--n", "65536"], 100),
     ("math_cos.kes (one cos per item)", ["kernels", "math_cos.kes", "--release", "--n", "65536"], 100),
     ("math_tan.kes (one tan per item)", ["kernels", "math_tan.kes", "--release", "--n", "65536"], 100),
