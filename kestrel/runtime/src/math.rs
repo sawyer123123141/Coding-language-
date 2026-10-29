@@ -12,9 +12,70 @@
 //! turned on by Cranelift's own dependency on `libm`. The results are still
 //! equal: `arch` only changes `sqrt` and `fma`, `fma` is never called here, and
 //! `sqrt` is correctly rounded either way (spec decision 2).
+//!
+//! Which path each type takes: `f64` math calls `libm` (`kestrel_rt_sin` and so on below). `float`
+//! (`f32`) math calls the wide functions of `math/wide.rs` (`kestrel_rt_sinf` and so on), which
+//! compute in `f64` from `+ - * /` and exact steps and round once, so they are the same on every
+//! CPU by construction; their special inputs (NaN, infinities, huge arguments) take today's `libm`
+//! path. The compiler inlines their fast paths and calls these functions for the rest.
 
 use std::cell::Cell;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+pub mod wide;
+#[doc(hidden)]
+pub mod sweep;
+
+#[no_mangle]
+pub extern "C" fn kestrel_rt_sinf(x: f32) -> f32 {
+    wide::sinf(x)
+}
+
+#[no_mangle]
+pub extern "C" fn kestrel_rt_cosf(x: f32) -> f32 {
+    wide::cosf(x)
+}
+
+#[no_mangle]
+pub extern "C" fn kestrel_rt_tanf(x: f32) -> f32 {
+    wide::tanf(x)
+}
+
+#[no_mangle]
+pub extern "C" fn kestrel_rt_asinf(x: f32) -> f32 {
+    wide::asinf(x)
+}
+
+#[no_mangle]
+pub extern "C" fn kestrel_rt_acosf(x: f32) -> f32 {
+    wide::acosf(x)
+}
+
+#[no_mangle]
+pub extern "C" fn kestrel_rt_atanf(x: f32) -> f32 {
+    wide::atanf(x)
+}
+
+/// The angle of the point (`x`, `y`).
+#[no_mangle]
+pub extern "C" fn kestrel_rt_atan2f(y: f32, x: f32) -> f32 {
+    wide::atan2f(y, x)
+}
+
+#[no_mangle]
+pub extern "C" fn kestrel_rt_expf(x: f32) -> f32 {
+    wide::expf(x)
+}
+
+#[no_mangle]
+pub extern "C" fn kestrel_rt_logf(x: f32) -> f32 {
+    wide::logf(x)
+}
+
+#[no_mangle]
+pub extern "C" fn kestrel_rt_powf(x: f32, y: f32) -> f32 {
+    wide::powf(x, y)
+}
 
 #[no_mangle]
 pub extern "C" fn kestrel_rt_sin(a: f64) -> f64 {
@@ -176,4 +237,8 @@ mod tests {
 #[cfg(test)]
 mod bits;
 #[cfg(test)]
+mod bits_float;
+#[cfg(test)]
 mod speed;
+#[cfg(test)]
+mod wide_test;
