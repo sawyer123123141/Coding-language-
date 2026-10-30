@@ -4,11 +4,16 @@
 // for bit, and the checksums they swap every 30 frames prove it.
 //
 //   kestrel run demos/pong/pong.kes
+//   kestrel run demos/pong/pong.kes pong.replay
 //
 // Controls: W and S move player 1 (the left paddle); with neither held, a bot plays it. Player 2
 // is always a bot. Tab shows the other peer's view (peer 2's, which sees your moves 100 ms
 // late). R checks the in-memory replay: the confirmed inputs, run again from the seed, must give
 // the same checksums.
+//
+// At the end of a run the replay is saved to `pong.replay` next to the program. Given a file, as
+// in the second command (a relative path is next to the program too), Pong plays nothing: it
+// reads that replay, runs it again and prints the check's result, as the R key does.
 //
 // The game runs in fixed steps of 1/60 s, like Godot's `_physics_process`: each window frame
 // adds `window.delta()` to an accumulator and runs one network frame for each whole step in it.
@@ -19,11 +24,15 @@
 //   rollbacks <R> deepest <D> lost <L>
 //   checksums compared up to frame <K>
 //   replay matches (<F> frames)
+//   wrote pong.replay (<F> frames)
 //
-// or stops early with "peers differ at frame <F>" when the peers' checksums disagree.
+// or stops early with "peers differ at frame <F>" when the peers' checksums disagree (and still
+// saves the replay, which holds peer 1's frames).
 use window
 use draw
 use input
+use file
+use args
 use { Color from draw }
 use { Key from input }
 use { Pad, WIDTH, HEIGHT, DT, PAD_X, PAD_W, PAD_H, BALL_R, bot from game }
@@ -39,6 +48,9 @@ let MAX_STEPS = 4
 
 // Seconds the replay check's result stays on screen.
 let SHOW_CHECK = 3.0
+
+// The file a run saves its replay to, next to the program.
+let REPLAY_FILE = "pong.replay"
 
 let BACKGROUND = Color(0.06, 0.07, 0.1)
 let FOREGROUND = Color(0.92, 0.93, 0.96)
@@ -107,7 +119,48 @@ draw_view(p: Peer, shown: int, rollbacks: int, lost: int, check: int, check_fram
     }
 }
 
+// Prints a replay check's result: `bad` is the first frame whose checksum differs, or -1.
+print_check(bad: int, frames: int) {
+    if bad < 0 {
+        print("replay matches ({frames} frames)")
+    } else {
+        print("replay differs at frame {bad}")
+    }
+}
+
+// Saves the replay to REPLAY_FILE. Its bytes are made in an arena of their own, freed once
+// written.
+save_replay(replay: Replay) {
+    arena {
+        if file.write(REPLAY_FILE, to_bytes(replay)) {
+            print("wrote {REPLAY_FILE} ({replay.inputs.len} frames)")
+        } else {
+            print(file.error())
+        }
+    }
+}
+
+// Reads the replay saved at `path`, runs it again from its seed and prints the check's result.
+check_file(path: string) {
+    let bytes = file.read(path) else {
+        print(file.error())
+        return
+    }
+    let replay = from_bytes[Replay](bytes) else {
+        print("{path} is not a Pong replay; pass a file that a run of Pong wrote, like {REPLAY_FILE}")
+        return
+    }
+    print_check(replay.check(), replay.inputs.len)
+}
+
 main() {
+    // Given a file, Pong checks that replay instead of playing.
+    let given = args.all()
+    if given.len > 0 {
+        check_file(given[0])
+        return
+    }
+
     window.open(int(WIDTH), int(HEIGHT), "Kestrel rollback pong")
     var p1 = new_peer(1, SEED)
     var p2 = new_peer(2, SEED)
@@ -136,11 +189,7 @@ main() {
             check = replay.check()
             check_frames = replay.inputs.len
             check_at = window.time()
-            if check < 0 {
-                print("replay matches ({check_frames} frames)")
-            } else {
-                print("replay differs at frame {check}")
-            }
+            print_check(check, check_frames)
         }
 
         // The fixed steps.
@@ -170,17 +219,13 @@ main() {
 
     if differ >= 0 {
         print("peers differ at frame {differ}")
-        return
-    }
-    let c = p1.confirmed()
-    print("frames {tick} confirmed {c} checksum {checksum(p1.state_at(c))}")
-    print("rollbacks {p1.rollbacks + p2.rollbacks} deepest {max(p1.deepest, p2.deepest)} lost {net.lost}")
-    // Both peers have compared every checksum up to this frame and found them equal.
-    print("checksums compared up to frame {min(p1.compared, p2.compared)}")
-    let bad = replay.check()
-    if bad < 0 {
-        print("replay matches ({replay.inputs.len} frames)")
     } else {
-        print("replay differs at frame {bad}")
+        let c = p1.confirmed()
+        print("frames {tick} confirmed {c} checksum {checksum(p1.state_at(c))}")
+        print("rollbacks {p1.rollbacks + p2.rollbacks} deepest {max(p1.deepest, p2.deepest)} lost {net.lost}")
+        // Both peers have compared every checksum up to this frame and found them equal.
+        print("checksums compared up to frame {min(p1.compared, p2.compared)}")
+        print_check(replay.check(), replay.inputs.len)
     }
+    save_replay(replay)
 }

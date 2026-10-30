@@ -1,7 +1,7 @@
 // An in-memory replay: the seed, both players' confirmed inputs for every frame, and the
 // confirmed state's checksum every 60 frames. Running the inputs again from a new game made from
-// the seed must give the same checksums, since `step` is deterministic. A replay file would hold
-// the same three things (saving it is for a later round).
+// the seed must give the same checksums, since `step` is deterministic. `pong.kes` saves it to a
+// file with `to_bytes` and reads one back with `from_bytes[Replay]`.
 use { Game, Inputs, new_game, step from game }
 
 // Frames between the replay's checksums.
