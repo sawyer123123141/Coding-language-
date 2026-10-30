@@ -133,7 +133,7 @@ impl<'a> BodyChecker<'a> {
         self.check_par_write(target);
         if let ExprKind::Index { base, .. } = &target.kind {
             if let Some((_, v)) = self.map_of(self.t.ty(base.id)) {
-                return self.check_map_set(target, op, value, v);
+                return self.going_into(value, Site::MapValue, |c| c.check_map_set(target, op, value, v));
             }
         }
         if target_ty == Ty::Arena {
@@ -165,7 +165,11 @@ impl<'a> BodyChecker<'a> {
             let msg = format!("`{}` needs a number, found {}", op.symbol(), self.tn(target_ty));
             self.error(target.span, msg);
         }
-        let site = if matches!(target.kind, ExprKind::Field { .. }) { Site::Field } else { Site::Variable };
+        let site = match target.kind {
+            ExprKind::Field { .. } => Site::Field,
+            ExprKind::Index { .. } => Site::Item,
+            _ => Site::Variable,
+        };
         self.going_into(value, site, |c| c.check_value(value, Some(target_ty)));
         // (Nothing is stored then, so the memory rules have nothing to add.)
         if op == AssignOp::Set && self.check_iface_replace(target, value, target_ty) {

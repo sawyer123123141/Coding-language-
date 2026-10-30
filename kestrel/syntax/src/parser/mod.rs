@@ -56,8 +56,12 @@ pub struct Parser {
     hex_literals: Vec<ExprId>,
     /// Where a `..` range would be if one were written here, for its message (see `habits`).
     range_at: habits::RangeAt,
-    /// The first field of each enum variant read so far, for a `match` arm's message (see `habits`).
-    first_fields: HashMap<String, String>,
+    /// The first field of each enum variant read so far, for a `match` arm's message (see
+    /// `habits`); `None` when enums that share the variant's name start with different fields.
+    first_fields: HashMap<String, Option<String>>,
+    /// Where error recovery stops early: the token after a type written with angle brackets,
+    /// when a line break follows it that the `>` hid (see `angles`).
+    resume_at: Option<usize>,
 }
 
 /// What `Parser::attempt` puts back on a failure (see `snapshot`).
@@ -103,6 +107,7 @@ impl Parser {
             hex_literals: Vec::new(),
             range_at: habits::RangeAt::Plain,
             first_fields: HashMap::new(),
+            resume_at: None,
         }
     }
 
@@ -147,6 +152,7 @@ impl Parser {
 
     fn restore(&mut self, s: Snapshot) {
         self.pos = s.pos;
+        self.resume_at = None;
         self.diags.truncate(s.diags);
         self.depth = s.depth;
         self.type_depth = s.type_depth;
@@ -275,11 +281,23 @@ impl Parser {
         Err(())
     }
 
+    /// Whether error recovery stops at the current token (see `resume_at`).
+    fn resumes_here(&mut self) -> bool {
+        let here = self.resume_at == Some(self.pos);
+        if here {
+            self.resume_at = None;
+        }
+        here
+    }
+
     /// Skips to the end of the current statement: a newline or `;` at this
     /// nesting level, or the `}` that closes the enclosing block.
     fn recover_stmt(&mut self) {
         let mut depth = 0i32;
         loop {
+            if depth == 0 && self.resumes_here() {
+                return;
+            }
             match self.peek() {
                 Tok::Eof => return,
                 Tok::LBrace | Tok::LParen | Tok::LBracket => depth += 1,
@@ -296,6 +314,9 @@ impl Parser {
     fn recover_item(&mut self) {
         let mut depth = 0i32;
         loop {
+            if depth <= 0 && self.resumes_here() {
+                return;
+            }
             match self.peek() {
                 Tok::Eof => return,
                 Tok::LBrace => depth += 1,

@@ -5,6 +5,8 @@ use crate::ast::{Block, FnDecl, InterfaceDecl, Item};
 use crate::span::Span;
 use crate::token::Tok;
 
+const IFACE_PLACEHOLDERS: &str = "interfaces don't take placeholders yet; write the interface's methods with concrete types";
+
 impl Parser {
     /// `: A, B` after a type's name: the interfaces it implements. Empty without the colon.
     pub(super) fn iface_list(&mut self) -> PResult<Vec<(String, Span)>> {
@@ -25,10 +27,10 @@ impl Parser {
         self.bump();
         let (name, name_span) = self.expect_ident("an interface name")?;
         if self.at(&Tok::Lt) {
-            self.error_here("interfaces don't take placeholders yet");
+            self.error_here(IFACE_PLACEHOLDERS);
             return Err(());
         }
-        self.refuse_type_params("interfaces don't take placeholders yet")?;
+        self.refuse_type_params(IFACE_PLACEHOLDERS)?;
         self.expect(&Tok::LBrace, "`{`")?;
         let mut methods = Vec::new();
         self.skip_newlines();

@@ -306,6 +306,13 @@ fn a_value_in_the_type_place_says_where_it_goes() {
 
 #[test]
 fn nesting_too_deep_is_one_error_and_the_rest_of_the_file_is_skipped() {
+    // The compiler parses on a thread with a big stack (the CLI's and the language server's are
+    // 256 MB); a debug build needs about 2 MB for 1,000 levels of `[`, right at the default test
+    // thread's 2 MiB, so this runs on 16 MiB, where a small change to a parser frame can't fail it.
+    std::thread::Builder::new().stack_size(16 << 20).spawn(nesting_too_deep).unwrap().join().unwrap();
+}
+
+fn nesting_too_deep() {
     let too_deep = "this expression nests more than 1,000 levels deep; split it into smaller parts with `let`";
     let sum = |terms: usize| format!("main() {{\n    let a = )\n    print({})\n    let b = )\n}}\n", vec!["1"; terms].join(" + "));
     // The error before it stays; the one after it isn't reported.

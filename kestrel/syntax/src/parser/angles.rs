@@ -7,6 +7,7 @@ use crate::ast::{BinaryOp, Expr, ExprKind, TypeExpr};
 use crate::token::{Tok, Token};
 
 const GENERIC: &str = "Kestrel writes generic types with square brackets";
+const OPTIONAL: &str = "Kestrel writes an optional type with `?`";
 
 /// The most levels of angle brackets read for a message; past it there is no example.
 const MAX_LEVELS: u32 = 64;
@@ -121,12 +122,23 @@ impl Parser {
             self.expect_ident("a type")?;
             return Err(());
         };
-        let example = match self.angle_text(self.pos) {
-            Some((text, _)) => text,
-            None => format!("{}[...]", kestrel_type_name(&name)),
+        let scanned = self.angle_text(self.pos);
+        let (lead, example) = match &scanned {
+            // `Option<int>` is `int?`, which has no brackets.
+            Some((text, _)) if matches!(name.as_str(), "Option" | "Optional" | "Nullable") => (OPTIONAL, text.clone()),
+            Some((text, _)) => (GENERIC, text.clone()),
+            None => (GENERIC, format!("{}[...]", kestrel_type_name(&name))),
         };
+        // A field's `list<int>` at the end of its line hides the line break (a line ending in
+        // `>` goes on): recovery stops after the type instead, so the next field is read.
+        if let Some((_, after)) = scanned {
+            let (end, next) = (self.toks[after - 1].span.end, self.toks[after.min(self.toks.len() - 1)].span.start);
+            if self.line_breaks_between(end, next) > 0 {
+                self.resume_at = Some(after);
+            }
+        }
         self.bump();
-        self.error_here(format!("{GENERIC}: `{example}`"));
+        self.error_here(format!("{lead}: `{example}`"));
         Err(())
     }
 

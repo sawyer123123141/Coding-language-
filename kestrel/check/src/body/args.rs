@@ -238,21 +238,23 @@ impl<'a> BodyChecker<'a> {
         };
         self.check_not_matched(&a.value);
         let name = self.t.local(root).name.clone();
-        let problem = match self.immutable(root) {
-            None => None,
-            Some(Immutable::Let) => Some((
+        let problem = match (self.immutable(root), self.loop_var_reason(&a.value)) {
+            (None, _) => None,
+            // One of a loop's own variables says why it can't change (see `loop_vars`).
+            (Some(_), Some((n, why, help))) => Some((format!("can't pass `{n}` as `var`: {why}"), help)),
+            (Some(Immutable::Let), None) => Some((
                 format!("can't pass `{name}` as `var`: it was declared with `let`"),
                 "declare it with `var`".to_string(),
             )),
-            Some(Immutable::Param) => Some((
+            (Some(Immutable::Param), None) => Some((
                 format!("can't pass parameter `{name}` as `var`: it isn't `var`"),
                 format!("declare it as `var {name}`"),
             )),
-            Some(Immutable::SelfParam) => Some((
+            (Some(Immutable::SelfParam), None) => Some((
                 "can't pass `self` as `var`: the method takes `self`, not `var self`".to_string(),
                 "declare the method with `var self`".to_string(),
             )),
-            Some(Immutable::Captured) => Some((Self::captured_message(&name), String::new())),
+            (Some(Immutable::Captured), None) => Some((Self::captured_message(&name), String::new())),
         };
         match problem {
             Some((msg, help)) if help.is_empty() => self.error(a.value.span, msg),

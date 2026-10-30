@@ -34,7 +34,7 @@ fn methods_interfaces_and_natives_have_no_placeholders() {
     let m = "methods can't have placeholders of their own yet; use a generic function that takes the struct instead";
     assert!(errs("struct S[T] {\n    x: T\n    conv[U](self) -> int { 1 }\n}\nmain() {}\n").contains(&m.to_string()));
     assert!(errs("enum E[T] {\n    A\n    wrap[U](self) -> int { 1 }\n}\nmain() {}\n").contains(&m.to_string()));
-    assert_eq!(errs("interface N[T] {\n    pure name(self) -> string\n}\nmain() {}\n"), ["interfaces don't take placeholders yet"]);
+    assert_eq!(errs("interface N[T] {\n    pure name(self) -> string\n}\nmain() {}\n"), ["interfaces don't take placeholders yet; write the interface's methods with concrete types"]);
     assert_eq!(errs("native peek[T](x: T) -> int\nmain() {}\n"), ["native functions can't have placeholders"]);
     let (p, _) = kestrel_syntax::parse_at("native peek[T](x: T) -> int\nmain() {}\n", 0, 0, 0);
     assert_eq!(p.items.len(), 1, "the native is dropped (P35)");

@@ -308,6 +308,8 @@ impl<'a> BodyChecker<'a> {
             Ty::Enum(id) => self.t.enm(id).name.clone(),
             other => self.tn(other),
         };
+        // An instance of a generic one (`Box[int]`) is declared as `Box`.
+        let owner = owner.split('[').next().unwrap_or_default().to_string();
         let more = if self.t.func(fid).params.is_empty() { "" } else { ", ..." };
         let msg = format!(
             "`{name}` has no `self` parameter, so it can't be called on a value; make `self` its first parameter, like `{name}(self{more})`, or move it out of `{owner}` as a plain function"
@@ -341,7 +343,13 @@ impl<'a> BodyChecker<'a> {
         };
         self.check_not_matched(receiver);
         let name = self.t.local(root).name.clone();
-        let msg = match self.immutable(root) {
+        let immutable = self.immutable(root);
+        // One of a loop's own variables says why it can't change (see `loop_vars`).
+        if let (Some(_), Some((n, why, help))) = (immutable, self.loop_var_reason(receiver)) {
+            self.error_help(receiver.span, format!("can't call `{method}` on `{n}`: {why}"), help);
+            return None;
+        }
+        let msg = match immutable {
             None => {
                 self.mark_changed(root);
                 self.check_par_write(receiver);

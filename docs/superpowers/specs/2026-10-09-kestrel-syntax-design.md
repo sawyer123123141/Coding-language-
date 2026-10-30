@@ -105,12 +105,12 @@ main() {
 - **Line continuation:** a newline does *not* end a statement when
   inside an unclosed `(` or `[`, when the line ends with a binary
   operator or `,`, or when the next line starts with `else` or `.`.
-  Two exceptions keep another language's spelling to its own line, for
-  its error message: `++` or `--` written together at the end of a line
-  ends it (`n--`), and so does a `>` or `>>` when the next line starts a
-  field (`name:`) or a declaration (`let`, `var`, `for`, `while`,
-  `return`, `struct`, `enum`, `interface`, `use`, `pub`), as after
-  `items: list<int>`.
+  Outside `(` and `[`, two exceptions keep another language's spelling
+  to its own line, for its error message: `++` or `--` written together
+  at the end of a line ends it (`n--`), and so does a `>` or `>>` when
+  the next line starts with `let`, `var`, `for`, `while`, `return`,
+  `struct`, `enum`, `interface`, `use` or `pub` (as after
+  `let xs: list<int>`). No expression goes on with those words.
 - **Strings:** `"..."`, interpolation with `{expr}`, escapes `\n \t \"
   \\ \{ \}`.
 - **Numbers:** `42`, `3.14`, `1_000_000`, `0xFF`. An integer literal is

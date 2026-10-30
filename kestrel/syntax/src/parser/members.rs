@@ -111,7 +111,7 @@ impl Parser {
         }
         let fields = if self.at(&Tok::LBrace) { self.variant_fields()? } else { Vec::new() };
         if let Some(f) = fields.first() {
-            self.first_fields.insert(name.clone(), f.name.clone());
+            self.note_first_field(&name, f.name.clone());
         }
         variants.push(VariantDecl { name, name_span, fields });
         Ok(())

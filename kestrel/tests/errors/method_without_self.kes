@@ -1,5 +1,6 @@
-// error 19: `area` has no `self` parameter, so it can't be called on a value; make `self` its first parameter, like `area(self)`, or move it out of `Shape` as a plain function
-// error 20: `scaled` has no `self` parameter, so it can't be called on a value; make `self` its first parameter, like `scaled(self, ...)`, or move it out of `P` as a plain function
+// error 25: `area` has no `self` parameter, so it can't be called on a value; make `self` its first parameter, like `area(self)`, or move it out of `Shape` as a plain function
+// error 26: `scaled` has no `self` parameter, so it can't be called on a value; make `self` its first parameter, like `scaled(self, ...)`, or move it out of `P` as a plain function
+// error 27: `make` has no `self` parameter, so it can't be called on a value; make `self` its first parameter, like `make(self)`, or move it out of `Box` as a plain function
 enum Shape {
     Circle { r: float }
     Dot
@@ -13,9 +14,15 @@ struct P {
         by
     }
 }
+struct Box[T] {
+    v: T
+    make() -> int { 1 }
+}
 main() {
     let sh = Shape.Dot
     let p = P(x: 1)
+    let b = Box[int](v: 1)
     print(sh.area())
     print(p.scaled(2))
+    print(b.make())
 }

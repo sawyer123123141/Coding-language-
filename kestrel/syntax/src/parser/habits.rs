@@ -115,7 +115,7 @@ impl Parser {
         }
         let named = self.toks[self.pos + 2..close].iter().any(|t| t.tok == Tok::Colon);
         if let (true, Tok::Ident(field)) = (named, self.peek_at(2).clone()) {
-            self.first_fields.insert(name.clone(), field);
+            self.note_first_field(&name, field);
         }
         let inner = self.tokens_text(self.pos + 2, close);
         let msg = if named && !inner.is_empty() {
@@ -128,6 +128,16 @@ impl Parser {
         true
     }
 
+    /// Records `field` as the first field of a variant named `variant`. When enums that share
+    /// the name start with different fields, a `match` arm can't tell which, so none is kept.
+    pub(super) fn note_first_field(&mut self, variant: &str, field: String) {
+        let kept = match self.first_fields.get(variant) {
+            Some(known) if known.as_deref() != Some(field.as_str()) => None,
+            _ => Some(field),
+        };
+        self.first_fields.insert(variant.to_string(), kept);
+    }
+
     /// The other languages' forms of a `match` arm, after its variant's name (`name`, at
     /// `name_span`) and binding: `Slime(size, hp)` and `Slime s =>`. Reports one and fails.
     #[inline(never)]
@@ -136,8 +146,8 @@ impl Parser {
             let short: String = name.chars().next().map(|c| c.to_lowercase().collect()).unwrap_or_default();
             // The variant's first field, when its enum came earlier in the file.
             let used = match self.first_fields.get(name) {
-                Some(field) => format!(" and use `{short}.{field}`"),
-                None => format!(" and read its fields as `{short}.<field>`"),
+                Some(Some(field)) => format!(" and use `{short}.{field}`"),
+                _ => format!(" and read its fields as `{short}.<field>`"),
             };
             self.error_here(format!("a `match` arm takes the variant's data as one name: write `{name} {short} {{ ... }}`{used}"));
             return Err(());
@@ -226,11 +236,33 @@ impl Parser {
     /// `elif` being assigned, called or read.
     #[inline(never)]
     pub(super) fn at_elif(&self) -> bool {
-        matches!(self.peek(), Tok::Ident(k) if k == "elif")
-            && matches!(
-                self.peek_at(1),
-                Tok::Ident(_) | Tok::Int(_) | Tok::Hex(_) | Tok::Float(_) | Tok::Str(_) | Tok::StrParts(_) | Tok::True | Tok::False | Tok::Not | Tok::SelfKw
-            )
+        if !matches!(self.peek(), Tok::Ident(k) if k == "elif") {
+            return false;
+        }
+        match self.peek_at(1) {
+            Tok::Ident(_) | Tok::Int(_) | Tok::Hex(_) | Tok::Float(_) | Tok::Str(_) | Tok::StrParts(_) | Tok::True | Tok::False | Tok::Not | Tok::SelfKw => true,
+            // `elif (x > 0) {`, not a call `elif(...)`: the `)` is followed by a block on its line.
+            Tok::LParen => self.paren_then_block(self.pos + 1),
+            _ => false,
+        }
+    }
+
+    /// Whether the `(` at token `open` is closed on its line and a `{` follows the `)` there.
+    fn paren_then_block(&self, open: usize) -> bool {
+        let mut depth = 0u32;
+        for i in open..self.toks.len() {
+            match self.toks[i].tok {
+                Tok::LParen => depth += 1,
+                Tok::RParen if depth == 1 => {
+                    let (close, next) = (&self.toks[i], self.toks.get(i + 1));
+                    return next.is_some_and(|n| n.tok == Tok::LBrace && self.line_breaks_between(close.span.end, n.span.start) == 0);
+                }
+                Tok::RParen => depth -= 1,
+                Tok::Newline | Tok::Eof => return false,
+                _ => {}
+            }
+        }
+        false
     }
 
     /// `elif`, which Kestrel writes `else if`.

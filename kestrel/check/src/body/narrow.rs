@@ -14,6 +14,10 @@ pub(crate) enum Site {
     Parameter,
     Field,
     Return,
+    /// An element of a list or array (`ys[0] = a`).
+    Item,
+    /// A map's value (`m[k] = a`).
+    MapValue,
 }
 
 impl<'a> BodyChecker<'a> {
@@ -40,11 +44,13 @@ impl<'a> BodyChecker<'a> {
                 Site::Parameter => "parameter's type",
                 Site::Field => "field's type",
                 Site::Return => "return type",
+                Site::Item => "list's item type",
+                Site::MapValue => "map's value type",
             },
             _ => "type of what it goes into",
         };
         format!(
-            "keep it an `{f}`: make the {noun} `{f}`; `{t}(...)` also works, but in a normal build it stops the program if the value doesn't fit in {t} (a `--release` build wraps)"
+            "keep it an `{f}`: make the {noun} `{f}`; `{t}(...)` also works, but in a normal build it stops the program if the value doesn't fit in `{t}` (a `--release` build wraps)"
         )
     }
 }

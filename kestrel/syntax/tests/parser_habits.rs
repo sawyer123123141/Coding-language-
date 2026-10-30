@@ -24,8 +24,12 @@ fn comparisons_minus_minus_and_pipes_still_parse() {
     // A line ending in `>` or `>>` still goes on, unless a field or a declaration starts the next.
     assert_eq!(body("let n = a >\n b"), "{(let n (> a b))}");
     assert_eq!(body("let o = a >>\n b"), "{(let o (>> a b))}");
+    // ... and in a map literal, whose key may be a comparison or a shift.
+    assert_eq!(body("let p = { lo >\n hi: 1 }"), "{(let p (map ((> lo hi) 1)))}");
+    assert_eq!(body("let q = { x >>\n shift: 1 }"), "{(let q (map ((>> x shift) 1)))}");
     // `elif` is still a name.
     assert_eq!(body("var elif = 1\nelif = 2\nelif += 1\nprint(elif)"), "{(var elif 1); (= elif 2); (+= elif 1); (call print elif)}");
+    assert_eq!(body("print(elif.x, elif[0], elif(1))"), "{(call print (. elif x) (index elif 0) (call elif 1))}");
 }
 
 #[test]

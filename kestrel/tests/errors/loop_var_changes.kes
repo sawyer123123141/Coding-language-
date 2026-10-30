@@ -1,16 +1,28 @@
-// error 14: can't change `i`: a `for` loop's counter changes only with the loop
-// error 15: can't change `i`: a `for` loop's counter changes only with the loop
-// error 16: can't change `i`: a `for` loop's index changes only with the loop
-// error 17: can't change `x`: it is an item of `xs`, which was declared with `let`
-// error 18: can't change `y`: the loop's items come from a value that isn't stored in a variable
-// error 20: can't change `k`: a map loop's key can't be changed
-// error 21: can't change `c`: a `for` loop over a string reads its characters, which can't be changed
-// error 24: can't change `x`: it is an item of parameter `xs`, which isn't `var`
+// error 26: can't change `i`: a `for` loop's counter changes only with the loop
+// error 27: can't change `i`: a `for` loop's counter changes only with the loop
+// error 28: can't change `i`: a `for` loop's index changes only with the loop
+// error 29: can't change `x`: it is an item of `xs`, which was declared with `let`
+// error 30: can't change `y`: the loop's items come from a value that isn't stored in a variable
+// error 32: can't change `k`: a map loop's key can't be changed
+// error 33: can't change `c`: a `for` loop over a string reads its characters, which can't be changed
+// error 34: can't pass `i` as `var`: a `for` loop's counter changes only with the loop
+// error 35: can't pass `x` as `var`: it is an item of `xs`, which was declared with `let`
+// error 36: can't call `grow` on `p`: it is an item of `ps`, which was declared with `let`
+// error 37: can't call `grow` on `v`: the loop's items come from a value that isn't stored in a variable
+// error 40: can't change `x`: it is an item of parameter `xs`, which isn't `var`
 make() -> [int] { [1] }
+bump(var n: int) {
+    n += 1
+}
+struct P {
+    x: int
+    grow(var self) { self.x += 1 }
+}
 main() {
     let xs = [1, 2]
     var ys = [1, 2]
     var m = {1: 2}
+    let ps = [P(x: 1)]
     for i from 0 to 3 { i = 5 }
     for i from 0 to 3 { i += 1 }
     for i, y in ys { i = 3 }
@@ -19,6 +31,10 @@ main() {
     for y in ys { y = 2 }
     for k, v in m { k = 3 }
     for c in "ab" { c = "x" }
+    for i from 0 to 3 { bump(var i) }
+    for x in xs { bump(var x) }
+    for p in ps { p.grow() }
+    for k, v in {1: P(x: 1)} { v.grow() }
 }
 items(xs: [int]) {
     for x in xs { x = 1 }
