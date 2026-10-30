@@ -1,5 +1,5 @@
 use kestrel_syntax::ast::{Arg, Expr, ExprKind, Item, Program};
-use kestrel_syntax::Diagnostic;
+use kestrel_syntax::{Diagnostic, Span};
 
 use super::args::Receiver;
 use super::lists::written;
@@ -9,7 +9,7 @@ use super::generic_call::user_type_call;
 use super::{is_const_expr, BodyChecker};
 use crate::builtins::Builtin;
 use crate::generic::GenericOwner;
-use crate::tables::{ListMethod, LocalId, Res, StructId, Tables, BUILTIN_STRUCTS};
+use crate::tables::{FnId, ListMethod, LocalId, Res, StructId, Tables, BUILTIN_STRUCTS};
 use crate::ty::Ty;
 
 /// The error for a field default that isn't a constant expression.
@@ -272,6 +272,11 @@ impl<'a> BodyChecker<'a> {
             Ty::Iface(iface) => Res::IfaceCall { iface, slot: self.iface_method(iface, name).expect("found above").1 },
             _ => rule_call.unwrap_or(Res::Fn(fid)),
         };
+        // A method declared without `self` has no receiver to take (and nothing calls it yet).
+        if self.t.func(fid).params.first().is_none_or(|p| p.name != "self") {
+            self.no_self_method(fid, name, *name_span, receiver_ty, args);
+            return Ty::Error;
+        }
         self.t.res.insert(e.id, res);
         self.check_callee_purity(*name_span, fid);
         let by_pointer = self.t.func(fid).params[0].is_var || receiver_ty.is_aggregate();
@@ -293,6 +298,23 @@ impl<'a> BodyChecker<'a> {
             self.check_changed_later(&[receiver], &later);
         }
         ret
+    }
+
+    /// A call of a method declared without `self`: it has no receiver to take.
+    fn no_self_method(&mut self, fid: FnId, name: &str, name_span: Span, receiver_ty: Ty, args: &[Arg]) {
+        let owner = match receiver_ty {
+            Ty::Struct(sid) => self.t.strukt(sid).name.clone(),
+            Ty::Enum(id) => self.t.enm(id).name.clone(),
+            other => self.tn(other),
+        };
+        let more = if self.t.func(fid).params.is_empty() { "" } else { ", ..." };
+        let msg = format!(
+            "`{name}` has no `self` parameter, so it can't be called on a value; make `self` its first parameter, like `{name}(self{more})`, or move it out of `{owner}` as a plain function"
+        );
+        self.error(name_span, msg);
+        for a in args {
+            self.check_expr(&a.value, None);
+        }
     }
 
     /// Whether the built-in method call `e` takes its receiver before it evaluates the arguments,

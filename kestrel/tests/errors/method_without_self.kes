@@ -1,0 +1,21 @@
+// error 19: `area` has no `self` parameter, so it can't be called on a value; make `self` its first parameter, like `area(self)`, or move it out of `Shape` as a plain function
+// error 20: `scaled` has no `self` parameter, so it can't be called on a value; make `self` its first parameter, like `scaled(self, ...)`, or move it out of `P` as a plain function
+enum Shape {
+    Circle { r: float }
+    Dot
+    area() -> float {
+        1.0
+    }
+}
+struct P {
+    x: float
+    scaled(by: float) -> float {
+        by
+    }
+}
+main() {
+    let sh = Shape.Dot
+    let p = P(x: 1)
+    print(sh.area())
+    print(p.scaled(2))
+}
