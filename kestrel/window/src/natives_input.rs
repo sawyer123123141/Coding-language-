@@ -3,9 +3,11 @@
 //! Each one is `kestrel_input_<name>`. A `Key` arrives as a pointer to its tag
 //! byte (see `keys.rs`). A headless window, and a window that has closed, read
 //! as nothing held, nothing pressed, the mouse at (0, 0), no mouse movement and no scroll,
-//! and `capture` does nothing there.
+//! and `capture` does nothing there. Every result is recorded and replayed (`kestrel_runtime::replay`).
 
 use std::ffi::c_int;
+
+use kestrel_runtime::replay::{record_or_play, NativeId};
 
 use crate::abi::{read, write, V2};
 use crate::keys::{self, Binding};
@@ -41,45 +43,47 @@ unsafe fn key_state(
 /// `key` must point to a live `Key` value.
 #[no_mangle]
 pub unsafe extern "C" fn kestrel_input_held(key: *const u8) -> u8 {
-    key_state("input.held", key, rl::IsKeyDown, rl::IsMouseButtonDown)
+    u8::from(record_or_play(NativeId::InputHeld, || key_state("input.held", key, rl::IsKeyDown, rl::IsMouseButtonDown) != 0))
 }
 
 /// # Safety
 /// `key` must point to a live `Key` value.
 #[no_mangle]
 pub unsafe extern "C" fn kestrel_input_pressed(key: *const u8) -> u8 {
-    key_state("input.pressed", key, rl::IsKeyPressed, rl::IsMouseButtonPressed)
+    u8::from(record_or_play(NativeId::InputPressed, || key_state("input.pressed", key, rl::IsKeyPressed, rl::IsMouseButtonPressed) != 0))
 }
 
 /// # Safety
 /// `key` must point to a live `Key` value.
 #[no_mangle]
 pub unsafe extern "C" fn kestrel_input_released(key: *const u8) -> u8 {
-    key_state("input.released", key, rl::IsKeyReleased, rl::IsMouseButtonReleased)
+    u8::from(record_or_play(NativeId::InputReleased, || {
+        key_state("input.released", key, rl::IsKeyReleased, rl::IsMouseButtonReleased) != 0
+    }))
 }
 
 /// # Safety
 /// `out` must be valid for writing a `vec2`.
 #[no_mangle]
 pub unsafe extern "C" fn kestrel_input_mouse(out: *mut V2) {
-    let at = match state::view("input.mouse") {
-        View::Fixed(_) => V2 { x: 0.0, y: 0.0 },
+    let [x, y] = record_or_play(NativeId::InputMouse, || match state::view("input.mouse") {
+        View::Fixed(_) => [0.0, 0.0],
         View::Real { .. } => {
             // SAFETY: the window is open.
             let p = unsafe { rl::GetMousePosition() };
-            V2 { x: p.x, y: p.y }
+            [p.x, p.y]
         }
-    };
-    write(out, at);
+    });
+    write(out, V2 { x, y });
 }
 
 #[no_mangle]
 pub extern "C" fn kestrel_input_wheel() -> f32 {
-    match state::view("input.wheel") {
+    record_or_play(NativeId::InputWheel, || match state::view("input.wheel") {
         View::Fixed(_) => 0.0,
         // SAFETY: the window is open.
         View::Real { .. } => unsafe { rl::GetMouseWheelMove() },
-    }
+    })
 }
 
 /// Locks and hides the mouse (`on` is not 0), or gives it back.
@@ -104,13 +108,13 @@ pub extern "C" fn kestrel_input_capture(on: u8) {
 /// `out` must be valid for writing a `vec2`.
 #[no_mangle]
 pub unsafe extern "C" fn kestrel_input_mouse_delta(out: *mut V2) {
-    let by = match state::view("input.mouse_delta") {
-        View::Fixed(_) => V2 { x: 0.0, y: 0.0 },
+    let [x, y] = record_or_play(NativeId::InputMouseDelta, || match state::view("input.mouse_delta") {
+        View::Fixed(_) => [0.0, 0.0],
         View::Real { .. } => {
             // SAFETY: the window is open.
             let d = unsafe { rl::GetMouseDelta() };
-            V2 { x: d.x, y: d.y }
+            [d.x, d.y]
         }
-    };
-    write(out, by);
+    });
+    write(out, V2 { x, y });
 }

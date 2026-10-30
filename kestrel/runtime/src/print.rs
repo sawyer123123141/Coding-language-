@@ -12,7 +12,16 @@ enum Sink {
 impl Write for Sink {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         match self {
-            Sink::Stdout(w) => w.write(bytes),
+            Sink::Stdout(w) => {
+                let n = w.write(bytes)?;
+                // A recording keeps what reaches stdout; a replay compares it, and stops at a
+                // line that differs, after showing the output that came before it.
+                if let Err(stop) = crate::replay::print_bytes(&bytes[..n]) {
+                    let _ = w.flush();
+                    stop.exit();
+                }
+                Ok(n)
+            }
             Sink::Buffer(b) => b.write(bytes),
         }
     }

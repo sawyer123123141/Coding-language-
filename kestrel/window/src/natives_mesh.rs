@@ -27,6 +27,7 @@
 use std::ffi::c_int;
 
 use kestrel_runtime::panic::fail_at_call;
+use kestrel_runtime::replay::{record_or_play, NativeId};
 
 use crate::abi::{read, write, KColor, KMesh, KMeshData, KTexture, V2, V3};
 use crate::gpu::{self, Object};
@@ -48,10 +49,13 @@ pub unsafe extern "C" fn kestrel_draw3d_make_mesh(out: *mut KMesh, data: *const 
     // `vec3`, `Color`, `vec2` and `int` elements, alive for the call.
     let lists = unsafe { Lists::of(&read(data)) };
     let mode = state::drawing("draw3d.make_mesh");
-    let mesh = make_mesh_in(mode, &lists).unwrap_or_else(|msg| fail_at_call(&msg));
+    let mut mesh = make_mesh_in(mode, &lists).unwrap_or_else(|msg| fail_at_call(&msg));
     if mode == Mode::Headless {
         headless::line("draw3d.make_mesh", &[lists.arg()]);
     }
+    // Recorded like every result, though the counts follow from `data`.
+    [mesh.vertex_count, mesh.triangle_count] =
+        record_or_play(NativeId::Draw3dMakeMesh, || [mesh.vertex_count, mesh.triangle_count]);
     write(out, mesh);
 }
 

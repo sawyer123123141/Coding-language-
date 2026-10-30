@@ -14,6 +14,7 @@
 use std::path::Path;
 
 use kestrel_runtime::panic::fail_at_call;
+use kestrel_runtime::replay::{record_or_play, NativeId};
 
 use crate::abi::{elems, read, span, str_bytes, write, KColor, KRect, KSeq, KStr, KTexture, V2};
 use crate::gpu::{self, Object};
@@ -32,10 +33,12 @@ use crate::state::{self, Mode};
 pub unsafe extern "C" fn kestrel_draw_load_texture(out: *mut KTexture, path: *const KStr) {
     let path = str_bytes(path);
     let mode = state::drawing("draw.load_texture");
-    let texture = load_texture_in(mode, path, &paths::resolve(path)).unwrap_or_else(|msg| fail_at_call(&msg));
+    let mut texture = load_texture_in(mode, path, &paths::resolve(path)).unwrap_or_else(|msg| fail_at_call(&msg));
     if mode == Mode::Headless {
         headless::line("draw.load_texture", &[Arg::Str(path)]);
     }
+    // The size is recorded, so a replay (which reads the file again) gives the size the recording saw.
+    [texture.width, texture.height] = record_or_play(NativeId::DrawLoadTexture, || [texture.width, texture.height]);
     write(out, texture);
 }
 
@@ -47,10 +50,11 @@ pub unsafe extern "C" fn kestrel_draw_load_texture(out: *mut KTexture, path: *co
 pub unsafe extern "C" fn kestrel_draw_make_texture(out: *mut KTexture, width: i32, height: i32, pixels: *const KSeq) {
     let colors = elems::<KColor>(pixels);
     let mode = state::drawing("draw.make_texture");
-    let texture = make_texture_in(mode, width, height, colors).unwrap_or_else(|msg| fail_at_call(&msg));
+    let mut texture = make_texture_in(mode, width, height, colors).unwrap_or_else(|msg| fail_at_call(&msg));
     if mode == Mode::Headless {
         headless::line("draw.make_texture", &[Arg::Int(width), Arg::Int(height), Arg::Count(colors.len() as i64)]);
     }
+    [texture.width, texture.height] = record_or_play(NativeId::DrawMakeTexture, || [texture.width, texture.height]);
     write(out, texture);
 }
 

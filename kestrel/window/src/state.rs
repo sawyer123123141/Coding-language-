@@ -8,6 +8,10 @@
 //!   `frame()` gives `true` `n` times, the clock is 60 frames a second, and
 //!   the natives print what they would have drawn (see `headless.rs`), unless
 //!   `KESTREL_HEADLESS_QUIET=1` turns the lines off.
+//! - The **replay** backend (`kestrel replay`) is the headless one, whatever the environment
+//!   says, with as many frames as the recording ran (`kestrel_runtime::replay::note_frame`). It
+//!   prints the headless lines only when the recording was made headless and not quiet, since
+//!   only that recording has them to compare.
 //!
 //! Both follow the same rules, so a program behaves alike on either:
 //! `close()` only asks, and the next `frame()` closes the window and gives
@@ -28,6 +32,7 @@ use std::cell::RefCell;
 use std::env;
 
 use kestrel_runtime::panic::fail_at_call;
+use kestrel_runtime::replay::{self, WindowMode};
 
 use crate::abi::V2;
 use crate::gpu;
@@ -76,6 +81,16 @@ pub struct Settings {
 }
 
 impl Settings {
+    /// The window mode a recording made with these settings names in its file.
+    pub fn window_mode(&self) -> WindowMode {
+        match (self.headless, self.quiet, self.hidden) {
+            (Some(_), true, _) => WindowMode::HeadlessQuiet,
+            (Some(_), false, _) => WindowMode::Headless,
+            (None, _, true) => WindowMode::Hidden,
+            (None, _, false) => WindowMode::Real,
+        }
+    }
+
     pub fn from_env() -> Result<Settings, String> {
         let var = |name| env::var(name).ok();
         Settings::parse(var("KESTREL_HEADLESS").as_deref(), var("KESTREL_HIDDEN").as_deref(), var("KESTREL_HEADLESS_QUIET").as_deref())
@@ -96,6 +111,8 @@ impl Settings {
 enum Kind {
     Real { time_base: f64 },
     Headless { frames_to_run: u64 },
+    /// A replay: the headless path, its frames counted by the replay.
+    Replay,
 }
 
 struct Window {
@@ -129,7 +146,7 @@ impl Window {
     fn mode(&self) -> Mode {
         match self.kind {
             Kind::Real { .. } => Mode::Real,
-            Kind::Headless { .. } => Mode::Headless,
+            Kind::Headless { .. } | Kind::Replay => Mode::Headless,
         }
     }
 
@@ -145,8 +162,12 @@ impl Window {
     /// closed, with the values its queries keep giving.
     fn next_frame(&mut self) -> Option<Fixed> {
         match self.kind {
-            Kind::Headless { frames_to_run } => {
-                if self.close_requested || self.frames >= frames_to_run {
+            Kind::Headless { .. } | Kind::Replay => {
+                let more = match self.kind {
+                    Kind::Headless { frames_to_run } => self.frames < frames_to_run,
+                    _ => replay::note_frame(),
+                };
+                if self.close_requested || !more {
                     gpu::close_all(false);
                     return Some(self.headless_values());
                 }
@@ -197,12 +218,16 @@ pub fn open(settings: &Settings, width: i32, height: i32, title: &[u8]) -> Resul
         if width <= 0 || height <= 0 {
             return Err(format!("window.open needs a width and height above 0, not {width} by {height}"));
         }
-        let kind = match settings.headless {
-            Some(frames_to_run) => {
+        let kind = match (replay::window_mode_for_replay(), settings.headless) {
+            (Some(recorded), _) => {
+                headless::set_quiet(recorded != WindowMode::Headless);
+                Kind::Replay
+            }
+            (None, Some(frames_to_run)) => {
                 headless::set_quiet(settings.quiet);
                 Kind::Headless { frames_to_run }
             }
-            None => Kind::Real { time_base: real::init(settings, width, height, title)? },
+            (None, None) => Kind::Real { time_base: real::init(settings, width, height, title)? },
         };
         let size = V2 { x: width as f32, y: height as f32 };
         let window = Window { kind, size, frames: 0, close_requested: false };
@@ -257,7 +282,7 @@ pub fn check_view(name: &str) -> Result<View, String> {
         State::Closed(last) => Ok(View::Fixed(*last)),
         State::Open(window) => match window.kind {
             Kind::Real { time_base } => Ok(View::Real { time_base }),
-            Kind::Headless { .. } => Ok(View::Fixed(window.headless_values())),
+            Kind::Headless { .. } | Kind::Replay => Ok(View::Fixed(window.headless_values())),
         },
     })
 }
@@ -273,115 +298,5 @@ pub fn view(name: &str) -> View {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Runs `body` on a fresh thread, so it starts with no window.
-    fn on_a_thread<T: Send + 'static>(body: impl FnOnce() -> T + Send + 'static) -> T {
-        std::thread::spawn(body).join().unwrap()
-    }
-
-    fn headless(frames: u64) -> Settings {
-        Settings { headless: Some(frames), hidden: false, quiet: false }
-    }
-
-    #[test]
-    fn settings_come_from_the_environment_values() {
-        assert_eq!(Settings::parse(None, None, None), Ok(Settings { headless: None, hidden: false, quiet: false }));
-        assert_eq!(Settings::parse(Some("3"), None, None).unwrap().headless, Some(3));
-        assert_eq!(Settings::parse(Some(" 100000 "), None, None).unwrap().headless, Some(100_000));
-        assert_eq!(Settings::parse(Some("0"), None, None).unwrap().headless, Some(0));
-        assert_eq!(Settings::parse(Some(""), None, None).unwrap().headless, None, "empty is unset");
-        assert!(Settings::parse(None, Some("1"), None).unwrap().hidden);
-        assert!(!Settings::parse(None, Some("0"), None).unwrap().hidden);
-        assert!(!Settings::parse(None, Some("yes"), None).unwrap().hidden);
-        assert!(Settings::parse(None, None, Some("1")).unwrap().quiet);
-        assert!(!Settings::parse(None, None, Some("0")).unwrap().quiet);
-        assert!(!Settings::parse(None, None, Some("true")).unwrap().quiet);
-        let err = Settings::parse(Some("lots"), None, None).unwrap_err();
-        assert!(err.starts_with("KESTREL_HEADLESS must be a whole number of frames"), "{err}");
-        assert!(Settings::parse(Some("-1"), None, None).is_err());
-    }
-
-    #[test]
-    fn calls_before_open_name_the_function() {
-        on_a_thread(|| {
-            assert_eq!(check_drawing("draw.circle"), Err("draw.circle was called before window.open".to_string()));
-            assert_eq!(check_view("input.held"), Err("input.held was called before window.open".to_string()));
-            assert_eq!(frame(), Err("window.frame was called before window.open".to_string()));
-            assert_eq!(close(), Err("window.close was called before window.open".to_string()));
-        });
-    }
-
-    #[test]
-    fn a_second_open_is_refused() {
-        on_a_thread(|| {
-            assert_eq!(open(&headless(1), 10, 10, b"a"), Ok(Mode::Headless));
-            assert_eq!(open(&headless(1), 10, 10, b"a"), Err("the window is already open".to_string()));
-        });
-    }
-
-    #[test]
-    fn a_window_needs_a_size() {
-        on_a_thread(|| {
-            let err = open(&headless(1), 0, 10, b"a").unwrap_err();
-            assert_eq!(err, "window.open needs a width and height above 0, not 0 by 10");
-            assert!(open(&headless(1), 10, -5, b"a").is_err());
-            // Refusing a size left the window unopened.
-            assert_eq!(open(&headless(1), 10, 10, b"a"), Ok(Mode::Headless));
-        });
-    }
-
-    #[test]
-    fn a_headless_window_runs_its_frames_then_closes() {
-        on_a_thread(|| {
-            open(&headless(2), 320, 200, b"hi").unwrap();
-            assert_eq!(check_drawing("draw.clear"), Ok(Mode::Headless));
-            let at = |frames: i64| {
-                let (size, time, ticks) = (V2 { x: 320.0, y: 200.0 }, frames as f32 / 60.0, frames * 1_000_000 / 60);
-                View::Fixed(Fixed { size, time, ticks, delta: 1.0 / 60.0, fps: 60 })
-            };
-            assert_eq!(check_view("window.time"), Ok(at(0)));
-            assert_eq!(frame(), Ok(true));
-            assert_eq!(check_view("window.time"), Ok(at(1)));
-            assert_eq!(frame(), Ok(true));
-            assert_eq!(check_view("window.time"), Ok(at(2)));
-            assert_eq!(frame(), Ok(false));
-            assert_eq!(frame(), Ok(false), "and it stays closed");
-            // Closed: drawing is an error; the queries keep their last values.
-            assert_eq!(check_drawing("draw.circle"), Err("draw.circle was called after the window closed".to_string()));
-            assert_eq!(check_view("window.size"), Ok(at(2)), "and the clock stops at 33333 microseconds");
-            assert_eq!(close(), Ok(None), "closing a closed window does nothing");
-            assert_eq!(open(&headless(1), 10, 10, b"a"), Err("window.open was called after the window closed".to_string()));
-        });
-    }
-
-    #[test]
-    fn zero_frames_never_start() {
-        on_a_thread(|| {
-            open(&headless(0), 10, 10, b"a").unwrap();
-            assert_eq!(frame(), Ok(false));
-        });
-    }
-
-    #[test]
-    fn close_takes_effect_at_the_next_frame() {
-        on_a_thread(|| {
-            open(&headless(100), 10, 10, b"a").unwrap();
-            assert_eq!(frame(), Ok(true));
-            assert_eq!(close(), Ok(Some(Mode::Headless)));
-            assert_eq!(check_drawing("draw.circle"), Ok(Mode::Headless), "still open until the frame ends");
-            assert_eq!(frame(), Ok(false));
-            assert_eq!(frame(), Ok(false));
-        });
-    }
-
-    #[test]
-    fn closing_before_the_first_frame_runs_no_frame() {
-        on_a_thread(|| {
-            open(&headless(100), 10, 10, b"a").unwrap();
-            close().unwrap();
-            assert_eq!(frame(), Ok(false));
-        });
-    }
-}
+#[path = "state_test.rs"]
+mod tests;

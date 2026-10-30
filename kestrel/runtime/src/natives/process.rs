@@ -15,7 +15,7 @@ use crate::string::KStr;
 /// The arguments a replay hands the program in place of its own (`args.all()` under
 /// `kestrel replay` gives the recorded ones). `None` when nothing is being replayed.
 pub fn replay_args_override() -> Option<Vec<String>> {
-    None
+    crate::replay::recorded_args()
 }
 
 /// The program's path and its arguments: `set` when the host gave them, else split from `os`,

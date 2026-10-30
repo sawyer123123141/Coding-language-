@@ -5,6 +5,8 @@
 //! that the window is open first, then either prints its line (headless) or
 //! draws with raylib.
 
+use kestrel_runtime::replay::{record_or_play, NativeId};
+
 use crate::abi::{c_string, elems, read, span, str_bytes, KColor, KSeq, KStr, V2};
 use crate::bulk;
 use crate::headless::{self, Arg};
@@ -177,7 +179,8 @@ pub unsafe extern "C" fn kestrel_draw_text(text: *const KStr, pos: *const V2, si
 #[no_mangle]
 pub unsafe extern "C" fn kestrel_draw_text_width(text: *const KStr, size: f32) -> f32 {
     let text = str_bytes(text);
-    match state::drawing("draw.text_width") {
+    // Recorded, so a replay (which has no font) gives what the real window measured.
+    record_or_play(NativeId::DrawTextWidth, || match state::drawing("draw.text_width") {
         Mode::Headless => {
             headless::line("draw.text_width", &[Arg::Str(text), Arg::Float(size)]);
             headless::text_width(text, size)
@@ -188,7 +191,7 @@ pub unsafe extern "C" fn kestrel_draw_text_width(text: *const KStr, size: f32) -
             // SAFETY: the window is open, so the default font is loaded.
             unsafe { rl::MeasureTextEx(rl::GetFontDefault(), text.as_ptr(), size, spacing(size)).x }
         }
-    }
+    })
 }
 
 #[cfg(test)]

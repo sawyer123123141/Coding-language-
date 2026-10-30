@@ -34,6 +34,12 @@ pub use paths::set_program_dir;
 
 use raylib::{GetImageColor, UnloadImage};
 
+/// The window mode the environment asks for (`KESTREL_HEADLESS`, `KESTREL_HEADLESS_QUIET`,
+/// `KESTREL_HIDDEN`), as a recording names it in its file.
+pub fn window_mode() -> Result<kestrel_runtime::replay::WindowMode, String> {
+    state::Settings::from_env().map(|settings| settings.window_mode())
+}
+
 /// The native functions, as `(symbol, address)` pairs: what the JIT needs to
 /// link a program that uses `window`, `draw`, `draw3d` or `input`. A built program finds
 /// the same symbols in this crate's staticlib.

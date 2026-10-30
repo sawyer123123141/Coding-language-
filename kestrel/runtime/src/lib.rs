@@ -15,6 +15,8 @@ pub mod natives;
 pub mod panic;
 pub mod par;
 pub mod print;
+pub mod replay;
+pub mod replay_file;
 pub mod sort;
 pub mod start;
 pub mod string;

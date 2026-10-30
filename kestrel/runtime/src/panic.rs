@@ -32,6 +32,10 @@ pub fn fail(msg: &str) -> ! {
     let msg = crate::par::fail_in_job(msg).unwrap_or_else(|| msg.to_string());
     let msg = msg.as_str();
     crate::print::flush();
+    // A recording saves its file, with this failure last; a replay compares it and reports.
+    if let Some(code) = crate::replay::on_failure(msg) {
+        std::process::exit(code);
+    }
     if let Some(hook) = FAILURE_HOOK.get() {
         hook(msg);
     }

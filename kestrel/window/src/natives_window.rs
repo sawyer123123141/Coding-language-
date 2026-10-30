@@ -1,11 +1,13 @@
 //! The `window` module's natives (`driver/std/window.kes`).
 //!
 //! Each one is `kestrel_window_<name>`. Strings arrive as a pointer to their
-//! header, and `size` writes its `vec2` through the pointer it is given.
+//! header, and `size` writes its `vec2` through the pointer it is given. Every result is
+//! recorded and replayed (`kestrel_runtime::replay`).
 
 use std::path::Path;
 
 use kestrel_runtime::panic::fail_at_call;
+use kestrel_runtime::replay::{self, record_or_play, NativeId};
 
 use crate::abi::{str_bytes, write, KStr, V2};
 use crate::gpu;
@@ -21,7 +23,11 @@ use crate::state::{self, Mode, Settings, View};
 /// `title` must point to a live string header.
 #[no_mangle]
 pub unsafe extern "C" fn kestrel_window_open(width: i32, height: i32, title: *const KStr) {
-    let settings = Settings::from_env().unwrap_or_else(|msg| fail_at_call(&msg));
+    // A replay's window is the replay backend whatever the environment says (`state::open`).
+    let settings = match replay::window_mode_for_replay() {
+        Some(_) => Settings { headless: None, hidden: false, quiet: true },
+        None => Settings::from_env().unwrap_or_else(|msg| fail_at_call(&msg)),
+    };
     open_with(&settings, width, height, title);
 }
 
@@ -45,7 +51,7 @@ pub extern "C" fn kestrel_window_frame() -> u8 {
     // `print` is buffered until the program ends. A program that runs frames for
     // minutes would show nothing meanwhile, so show it once per frame.
     kestrel_runtime::print::flush();
-    state::frame().unwrap_or_else(|msg| fail_at_call(&msg)) as u8
+    replay::frame(|| state::frame().unwrap_or_else(|msg| fail_at_call(&msg))) as u8
 }
 
 #[no_mangle]
@@ -58,48 +64,51 @@ pub extern "C" fn kestrel_window_close() {
 
 #[no_mangle]
 pub extern "C" fn kestrel_window_delta() -> f32 {
-    match state::view("window.delta") {
+    record_or_play(NativeId::WindowDelta, || match state::view("window.delta") {
         // SAFETY: the window is open.
         View::Real { .. } => unsafe { rl::GetFrameTime() },
         View::Fixed(values) => values.delta,
-    }
+    })
 }
 
 #[no_mangle]
 pub extern "C" fn kestrel_window_time() -> f32 {
-    match state::view("window.time") {
+    record_or_play(NativeId::WindowTime, || match state::view("window.time") {
         View::Real { time_base } => real::time(time_base),
         View::Fixed(values) => values.time,
-    }
+    })
 }
 
 /// Microseconds since `window.open`. A headless window counts 60 frames a second.
 #[no_mangle]
 pub extern "C" fn kestrel_window_ticks_usec() -> i64 {
-    match state::view("window.ticks_usec") {
+    record_or_play(NativeId::WindowTicksUsec, || match state::view("window.ticks_usec") {
         View::Real { time_base } => real::ticks(time_base),
         View::Fixed(values) => values.ticks,
-    }
+    })
 }
 
 /// # Safety
 /// `out` must be valid for writing a `vec2`.
 #[no_mangle]
 pub unsafe extern "C" fn kestrel_window_size(out: *mut V2) {
-    let size = match state::view("window.size") {
-        View::Real { .. } => real::size(),
-        View::Fixed(values) => values.size,
-    };
-    write(out, size);
+    let [x, y] = record_or_play(NativeId::WindowSize, || {
+        let size = match state::view("window.size") {
+            View::Real { .. } => real::size(),
+            View::Fixed(values) => values.size,
+        };
+        [size.x, size.y]
+    });
+    write(out, V2 { x, y });
 }
 
 #[no_mangle]
 pub extern "C" fn kestrel_window_fps() -> i32 {
-    match state::view("window.fps") {
+    record_or_play(NativeId::WindowFps, || match state::view("window.fps") {
         // SAFETY: the window is open.
         View::Real { .. } => unsafe { rl::GetFPS() },
         View::Fixed(values) => values.fps,
-    }
+    })
 }
 
 /// # Safety

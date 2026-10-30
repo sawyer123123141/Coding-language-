@@ -1,4 +1,5 @@
 mod link;
+mod replay_cmd;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -8,7 +9,8 @@ use kestrel_codegen::{emit_object, has_sse41, JitProgram, Options, NO_SSE41, TAR
 use link::Lib;
 
 const USAGE: &str = "usage: kestrel <run|check|build> <file.kes> [-o <exe>] [--release] [--report] [--diagnostics=short]
-       kestrel run <file.kes> [--release] [<args>...] [-- <args>...]";
+       kestrel run <file.kes> [--release] [--record <file.replay>] [<args>...] [-- <args>...]
+       kestrel replay <file.kes> <file.replay> [--release]";
 
 /// What `--report` on anything but `check` says.
 const REPORT_NEEDS_CHECK: &str = "`--report` goes with `check`: kestrel check --report file.kes";
@@ -31,31 +33,42 @@ struct Args {
     /// The words `run` passes to the program (`args.all()`): every word after the file that is not
     /// one of the compiler's flags, and every word after `--`.
     program_args: Vec<String>,
+    /// `run --record <file.replay>`: where to write the recording.
+    record: Option<String>,
+    /// `replay <file.kes> <file.replay>`: the recording to replay.
+    replay: Option<String>,
 }
 
 fn parse_args(raw: Vec<String>) -> Option<Args> {
     let mut it = raw.into_iter();
     let (mut positional, mut out, mut release, mut report, mut style) = (Vec::new(), None, false, false, DiagStyle::Full);
-    let mut program_args = Vec::new();
+    let (mut program_args, mut record) = (Vec::new(), None);
     while let Some(a) = it.next() {
         match a.as_str() {
             "--" => program_args.extend(it.by_ref()),
             "-o" => out = Some(it.next()?),
+            "--record" => record = Some(it.next()?),
             "--release" => release = true,
             "--report" => report = true,
             "--diagnostics=short" => style = DiagStyle::Short,
             s if s.starts_with('-') => return None,
-            // The command, then the file; any later word is the program's.
-            _ if positional.len() == 2 => program_args.push(a),
+            // The command, then the file (and for `replay` the recording); any later word is the program's.
+            _ if positional.len() == 2 && positional[0] != "replay" => program_args.push(a),
             _ => positional.push(a),
         }
     }
+    let replay = if positional.first().is_some_and(|c| c == "replay") { Some(positional.pop()?) } else { None };
     let [cmd, path]: [String; 2] = positional.try_into().ok()?;
-    // Only `run` starts the program, so only it has words to pass on.
-    if cmd != "run" && !program_args.is_empty() {
+    // Only `run` starts the program with words of its own; a replay has the recorded ones.
+    if cmd != "run" && (!program_args.is_empty() || record.is_some()) {
         return None;
     }
-    matches!(cmd.as_str(), "run" | "check" | "build").then_some(Args { cmd, path, out, release, report, style, program_args })
+    // A replay runs the program, so it takes only `--release` of the compiler's flags.
+    if cmd == "replay" && (out.is_some() || report) {
+        return None;
+    }
+    let known = matches!(cmd.as_str(), "run" | "check" | "build" | "replay");
+    known.then_some(Args { cmd, path, out, release, report, style, program_args, record, replay })
 }
 
 /// The compiler recurses over the syntax tree, so it runs on a stack far bigger than the
@@ -91,6 +104,17 @@ fn run() -> ExitCode {
         eprintln!("{REPORT_NEEDS_CHECK}");
         return ExitCode::from(2);
     }
+    // A replay reads its file first: one it can't replay stops it before anything is compiled.
+    let replaying = match &args.replay {
+        Some(file) => match replay_cmd::read(file, &args) {
+            Ok(read) => Some(read),
+            Err(e) => {
+                eprintln!("kestrel: {e}");
+                return ExitCode::from(2);
+            }
+        },
+        None => None,
+    };
     let src = match std::fs::read_to_string(&args.path) {
         Ok(s) => s,
         Err(e) => {
@@ -128,8 +152,8 @@ fn run() -> ExitCode {
         ..Options::default()
     };
     let result = match args.cmd.as_str() {
-        "run" if !has_sse41() => Err(NO_SSE41.to_string()),
-        "run" => {
+        "run" | "replay" if !has_sse41() => Err(NO_SSE41.to_string()),
+        "run" | "replay" => {
             // The program's relative paths (`file`, `window.screenshot`, textures) are read from its own folder.
             kestrel_window::set_program_dir(Path::new(&args.path).parent().unwrap_or(Path::new("")));
             // `args.program()` is the `.kes` path, and `args.all()` the words meant for the program.
@@ -137,9 +161,11 @@ fn run() -> ExitCode {
             // The window crate's natives, then the runtime's own (`file`, `time`, `args`, `env`).
             let natives: Vec<(&str, *const u8)> =
                 kestrel_window::symbols().into_iter().chain(kestrel_runtime::natives::native_symbols()).collect();
-            JitProgram::compile_with(&compiled.module, opts, &natives)
-                .map_err(internal_error)
-                .map(|p| p.run_main())
+            JitProgram::compile_with(&compiled.module, opts, &natives).map_err(internal_error).and_then(|p| {
+                // Recording or replaying starts with the program, once it is compiled.
+                replay_cmd::start(&args, replaying);
+                replay_cmd::finish(p.run_main())
+            })
         }
         _ => {
             build(&compiled.module, opts, &args, lib_for(&compiled.builtins)).map(|()| 0)
@@ -266,6 +292,25 @@ mod tests {
         assert!(args(&["run", "--", "g.kes"]).is_none());
         assert!(args(&["check", "g.kes", "--", "a"]).is_none());
         assert!(args(&["build", "g.kes", "a"]).is_none());
+    }
+
+    #[test]
+    fn record_and_replay_take_their_files() {
+        let a = args(&["run", "g.kes", "--record", "r.replay", "a"]).unwrap();
+        assert_eq!((a.record.as_deref(), a.replay.as_deref()), (Some("r.replay"), None));
+        assert_eq!(a.program_args, ["a"]);
+        let a = args(&["replay", "g.kes", "r.replay", "--release"]).unwrap();
+        assert_eq!((a.cmd.as_str(), a.path.as_str(), a.replay.as_deref()), ("replay", "g.kes", Some("r.replay")));
+        assert!(a.release && a.record.is_none() && a.program_args.is_empty());
+        // `--record` needs its file and goes with `run` only.
+        assert!(args(&["run", "g.kes", "--record"]).is_none());
+        assert!(args(&["build", "g.kes", "--record", "r.replay"]).is_none());
+        // A replay needs exactly the program and the recording, and runs nothing else.
+        assert!(args(&["replay", "g.kes"]).is_none());
+        assert!(args(&["replay", "g.kes", "r.replay", "extra"]).is_none());
+        assert!(args(&["replay", "g.kes", "r.replay", "--", "a"]).is_none());
+        assert!(args(&["replay", "g.kes", "r.replay", "--record", "s.replay"]).is_none());
+        assert!(args(&["replay", "g.kes", "r.replay", "-o", "x"]).is_none());
     }
 
     #[test]

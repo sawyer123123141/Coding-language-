@@ -2,20 +2,23 @@
 //!
 //! `now` counts from `start::started()`, which `kestrel_rt_start` fixes before `main` runs. None of
 //! them stops the program: a clock before 1970 gives a negative `unix`, and a wait that is not a
-//! positive number of seconds returns at once.
+//! positive number of seconds returns at once. `now` and `unix` are recorded and replayed
+//! (`crate::replay`); `sleep` gives nothing, so it isn't, and still waits in a replay.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use crate::replay::{record_or_play, NativeId};
 
 /// `time.now() -> f64`: seconds since the program started, never going backwards.
 #[no_mangle]
 pub extern "C" fn kestrel_time_now() -> f64 {
-    crate::start::started().elapsed().as_secs_f64()
+    record_or_play(NativeId::TimeNow, || crate::start::started().elapsed().as_secs_f64())
 }
 
 /// `time.unix() -> i64`: whole seconds since the start of 1970 (UTC), by the system clock.
 #[no_mangle]
 pub extern "C" fn kestrel_time_unix() -> i64 {
-    unix_seconds(SystemTime::now())
+    record_or_play(NativeId::TimeUnix, || unix_seconds(SystemTime::now()))
 }
 
 /// Whole seconds from 1970 to `at`, negative before it (rounded toward 1970).
