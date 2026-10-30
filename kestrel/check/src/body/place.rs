@@ -1,5 +1,6 @@
 use kestrel_syntax::ast::{AssignOp, Expr, ExprKind};
 
+use super::narrow::Site;
 use super::BodyChecker;
 use crate::tables::{LocalId, Res};
 use crate::ty::Ty;
@@ -109,6 +110,8 @@ impl<'a> BodyChecker<'a> {
         self.check_not_matched(target);
         let name = self.t.local(root).name.clone();
         match self.immutable(root) {
+            // A loop's own variable says why it can't change (see `loop_vars`).
+            Some(_) if self.loop_var_assign_error(target) => {}
             Some(Immutable::Let) => {
                 self.error_help(target.span, format!("can't change `{name}`: it was declared with `let`"), "declare it with `var`")
             }
@@ -162,7 +165,8 @@ impl<'a> BodyChecker<'a> {
             let msg = format!("`{}` needs a number, found {}", op.symbol(), self.tn(target_ty));
             self.error(target.span, msg);
         }
-        self.check_value(value, Some(target_ty));
+        let site = if matches!(target.kind, ExprKind::Field { .. }) { Site::Field } else { Site::Variable };
+        self.going_into(value, site, |c| c.check_value(value, Some(target_ty)));
         // (Nothing is stored then, so the memory rules have nothing to add.)
         if op == AssignOp::Set && self.check_iface_replace(target, value, target_ty) {
             return;

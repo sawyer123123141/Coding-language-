@@ -95,7 +95,7 @@ impl Parser {
                 Ok(Stmt::Return { value, span })
             }
             // `remove b`: `remove` isn't a keyword, so only a name right after it makes this statement.
-            Tok::Ident(kw) if kw == "elif" => {
+            Tok::Ident(_) if self.at_elif() => {
                 self.elif();
                 Err(())
             }

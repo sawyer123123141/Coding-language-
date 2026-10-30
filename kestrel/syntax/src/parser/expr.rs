@@ -45,11 +45,12 @@ impl Parser {
     fn cmp_expr(&mut self) -> PResult<Expr> {
         let lhs = self.bit_or()?;
         let Some(op) = cmp_op(self.peek()) else { return Ok(lhs) };
+        let op_at = self.pos;
         self.bump();
         let rhs = self.bit_or()?;
         let e = self.binary(op, lhs, rhs);
-        if cmp_op(self.peek()).is_some() {
-            self.chained_comparison(&e);
+        // Another comparison (or `list<int>()`, `Map<string, int>()`) after it.
+        if self.after_comparison(&e, op_at) {
             return Err(());
         }
         Ok(e)
@@ -86,7 +87,7 @@ impl Parser {
     fn add_expr(&mut self) -> PResult<Expr> {
         let mut lhs = self.mul_expr()?;
         loop {
-            if (self.at(&Tok::Plus) && self.peek_at(1) == &Tok::Plus) || self.at_decrement() {
+            if self.at_step() {
                 self.step_spelling(&lhs);
                 return Err(());
             }
@@ -155,6 +156,10 @@ impl Parser {
             }
             if self.at(&Tok::Dot) && self.peek_at(1) == &Tok::Dot {
                 self.range_spelling();
+                return Err(());
+            }
+            if self.at(&Tok::Colon) && self.peek_at(1) == &Tok::Colon {
+                self.path_spelling(&e);
                 return Err(());
             }
             if !self.eat(&Tok::Dot) {

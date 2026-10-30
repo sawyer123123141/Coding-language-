@@ -31,7 +31,7 @@ main() {
 // error 11: `ivec4` has 4 components, but these values give 2; give 4, one value for all of them, or none for zeros
 // error 12: `ivec4` takes ints and int vectors, found vec2; convert it with `ivec2(...)` first
 // error 13: `ivec4` has no `%`: the CPU can't divide integer lanes at once; for a power of two use `&`, or take each lane, like `v.x % n`
-// error 15: `ivec4` holds ints, found i64; convert it with `int(...)` first, which stops the program if the value doesn't fit in int
+// error 15: `ivec4` holds ints, found i64; convert it with `int(...)` first, which in a normal build stops the program if the value doesn't fit in int
 // error 16: `<` doesn't compare vectors; compare components, like `a.x < b.x`
 // error 17: `==` can't mix ivec4 and ivec3
 // error 18: `ivec4` has no field `q`

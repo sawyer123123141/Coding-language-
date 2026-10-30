@@ -103,20 +103,31 @@ impl<'a> BodyChecker<'a> {
         Ty::Error
     }
 
-    /// For a name that isn't one but is a variant of an enum (the first by name when several have
-    /// it): the message that says how to write it, "`Slime` is a variant of `Enemy`: write
-    /// `Enemy.Slime(...)`" (with `(...)` when it has fields).
+    /// For a name that isn't one but is a variant of one or more enums: the message that says
+    /// how to write it, "`Slime` is a variant of `Enemy`: write `Enemy.Slime(...)`" (with `(...)`
+    /// when it has fields, and the types written for a generic enum's variant without fields,
+    /// which they can't be worked out for).
     pub(crate) fn bare_variant(&self, name: &str) -> Option<String> {
-        let mut owners: Vec<(&String, &crate::tables::VariantInfo)> = self
+        let mut owners: Vec<(&String, EnumId, bool)> = self
             .t
             .enum_by_name
             .iter()
-            .filter_map(|(en, &eid)| self.t.enm(eid).variants.iter().find(|v| v.name == name).map(|v| (en, v)))
+            .filter_map(|(en, &eid)| self.t.enm(eid).variants.iter().find(|v| v.name == name).map(|v| (en, eid, v.fields.is_empty())))
             .collect();
-        owners.sort_by_key(|(en, _)| *en);
-        let (en, v) = owners.first()?;
-        let args = if v.fields.is_empty() { "" } else { "(...)" };
-        Some(format!("`{name}` is a variant of `{en}`: write `{en}.{name}{args}`"))
+        owners.sort_by_key(|(en, ..)| *en);
+        if owners.is_empty() {
+            return None;
+        }
+        if let [(en, eid, true)] = owners[..] {
+            if !self.t.enm(eid).params.is_empty() {
+                let typed = self.int_types(GenericOwner::Enum(eid), en);
+                return Some(format!("`{name}` is a variant of `{en}`: write it with its types, like `{typed}.{name}`"));
+            }
+        }
+        let written = |(en, _, plain): &(&String, EnumId, bool)| format!("`{en}.{name}{}`", if *plain { "" } else { "(...)" });
+        let enums: Vec<String> = owners.iter().map(|(en, ..)| format!("`{en}`")).collect();
+        let ways: Vec<String> = owners.iter().map(written).collect();
+        Some(format!("`{name}` is a variant of {}: write {}", either(&enums, "and"), either(&ways, "or")))
     }
 
     /// How to build a value of enum `eid` written `prefix` (`Maybe`, `Maybe[int]`): from its
@@ -173,5 +184,14 @@ impl<'a> BodyChecker<'a> {
     /// Whether `fid` is a generic function (not a method of a generic type).
     pub(crate) fn is_generic_fn(&self, fid: FnId) -> bool {
         matches!(self.t.func(fid).generic, Some(GenericOwner::Fn(_)))
+    }
+}
+
+/// `a`, `a and b`, or `a, b and c` (with `or` for `word` "or").
+fn either(items: &[String], word: &str) -> String {
+    match items {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} {word} {last}", rest.join(", ")),
     }
 }

@@ -94,10 +94,11 @@ impl<'a> BodyChecker<'a> {
             if a.is_var {
                 self.error(a.span, "constructor arguments can't be `var`");
             }
-            match checked {
-                Some(tys) => self.finish_value(&a.value, tys[ai], Some(info.fields[fi].ty)),
-                None => self.check_value(&a.value, Some(info.fields[fi].ty)),
-            };
+            let field_ty = info.fields[fi].ty;
+            self.going_into(&a.value, super::narrow::Site::Field, |c| match checked {
+                Some(tys) => c.finish_value(&a.value, tys[ai], Some(field_ty)),
+                None => c.check_value(&a.value, Some(field_ty)),
+            });
             // Pre-checked arguments were moved as they were checked (`infer`; a vector make's
             // numbers move nothing).
             if checked.is_none() {

@@ -1,3 +1,4 @@
+mod angles;
 mod annot;
 mod branch;
 mod brackets;
@@ -55,6 +56,8 @@ pub struct Parser {
     hex_literals: Vec<ExprId>,
     /// Where a `..` range would be if one were written here, for its message (see `habits`).
     range_at: habits::RangeAt,
+    /// The first field of each enum variant read so far, for a `match` arm's message (see `habits`).
+    first_fields: HashMap<String, String>,
 }
 
 /// What `Parser::attempt` puts back on a failure (see `snapshot`).
@@ -99,6 +102,7 @@ impl Parser {
             proves: Vec::new(),
             hex_literals: Vec::new(),
             range_at: habits::RangeAt::Plain,
+            first_fields: HashMap::new(),
         }
     }
 

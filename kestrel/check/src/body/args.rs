@@ -2,6 +2,7 @@
 
 use kestrel_syntax::ast::{Arg, Expr, ExprKind};
 
+use super::narrow::Site;
 use super::exclusive::RecvChange;
 use super::lists::written;
 use super::place::Immutable;
@@ -106,10 +107,10 @@ impl<'a> BodyChecker<'a> {
                             self.note_stack_closure(a);
                         }
                     }
-                    match checked {
-                        Some(found) => self.finish_arg_value(&a.value, found, p.ty),
-                        None => self.check_arg_value(&a.value, p.ty),
-                    };
+                    self.going_into(&a.value, Site::Parameter, |c| match checked {
+                        Some(found) => c.finish_arg_value(&a.value, found, p.ty),
+                        None => c.check_arg_value(&a.value, p.ty),
+                    });
                 }
             }
         }

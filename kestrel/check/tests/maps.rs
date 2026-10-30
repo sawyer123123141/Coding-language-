@@ -63,5 +63,5 @@ fn a_loop_value_changes_the_map_only_when_the_map_can_change() {
     let src = "main() {\n let m = {1: 2}\n for k, v in m {\n v = 3\n }\n}\n";
     let (_, d) = run(src);
     assert_eq!(d.len(), 1, "{d:?}");
-    assert_eq!(d[0], "can't change `m`: it was declared with `let`");
+    assert_eq!(d[0], "can't change `v`: it is a value in `m`, which was declared with `let`");
 }

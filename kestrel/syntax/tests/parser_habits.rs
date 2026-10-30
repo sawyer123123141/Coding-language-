@@ -14,6 +14,27 @@ fn comparisons_minus_minus_and_pipes_still_parse() {
     assert_eq!(body("let d = xs[i < n]"), "{(let d (index xs (< i n)))}");
     // `a -` at the end of a line still goes on to the next one.
     assert_eq!(body("let e = a -\n -b"), "{(let e (- a (- b)))}");
+    // `--` and `++` mean a step only at the end of a statement.
+    assert_eq!(body("let f = a --b"), "{(let f (- a (- b)))}");
+    assert_eq!(body("let g = f(a < b, c > d)"), "{(let g (call f (< a b) (> c d)))}");
+    assert_eq!(body("let h = f(a < b, c > (d))"), "{(let h (call f (< a b) (> c d)))}");
+    assert_eq!(body("let k = xs[i] < n"), "{(let k (< (index xs i) n))}");
+    assert_eq!(body("let l = x\n .len"), "{(let l (. x len))}");
+    assert_eq!(body("let m = 1.5 + 0.5"), "{(let m (+ 1.5 0.5))}");
+    // A line ending in `>` or `>>` still goes on, unless a field or a declaration starts the next.
+    assert_eq!(body("let n = a >\n b"), "{(let n (> a b))}");
+    assert_eq!(body("let o = a >>\n b"), "{(let o (>> a b))}");
+    // `elif` is still a name.
+    assert_eq!(body("var elif = 1\nelif = 2\nelif += 1\nprint(elif)"), "{(var elif 1); (= elif 2); (+= elif 1); (call print elif)}");
+}
+
+#[test]
+fn a_comparison_or_a_plus_that_isnt_another_spelling_keeps_its_message() {
+    assert_eq!(errs("main() {\n let j = 2 ++ 3\n}\n"), ["expected an expression, found `+`"]);
+    assert_eq!(errs("main() {\n let j = 2 + +3\n}\n"), ["expected an expression, found `+`"]);
+    assert_eq!(errs("main() {\n let y = &&x\n}\n"), ["Kestrel uses `and`, not `&&`"]);
+    assert_eq!(errs("main() {\n let z = x < y > (z)\n}\n"), ["comparisons can't be chained; combine them with `and`"]);
+    assert_eq!(errs("main() {\n let ok = best[int](a) < b\n}\n"), Vec::<String>::new());
 }
 
 #[test]

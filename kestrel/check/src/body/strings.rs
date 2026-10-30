@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use kestrel_syntax::ast::{Arg, Binding, Block, Expr};
 use kestrel_syntax::Span;
 
+use super::loop_vars::LoopVar;
 use super::remove::Over;
 use super::BodyChecker;
 use crate::tables::{Res, StrMethod};
@@ -111,9 +112,11 @@ impl<'a> BodyChecker<'a> {
         }
         self.scopes.push(HashMap::new());
         if let Some(i) = index {
-            self.declare(i, Ty::Int, false, false, false);
+            let i = self.declare(i, Ty::Int, false, false, false);
+            self.note_loop_var(i, LoopVar::Index);
         }
         let c = self.declare(var, Ty::Str, false, false, false);
+        self.note_loop_var(c, LoopVar::Char);
         self.enter_item_loop(c, Over::Str, iter, body);
         let entry = self.moved.clone();
         self.item_loop_body(Some(c), entry.clone(), Some(entry), body);

@@ -1,14 +1,23 @@
-// error 15: `Slime` is a variant of `Enemy`: write `Enemy.Slime(...)`
-// error 16: `Boss` is a variant of `Enemy`: write `Enemy.Boss`
-// error 17: Kestrel writes a missing value as `none`, not `null`
-// error 18: Kestrel writes a missing value as `none`, not `nil`
-// error 19: Kestrel writes a missing value as `none`, not `None`
-// error 13: expected int, found i64
-// error 20: expected int, found i64
+// error 24: `Slime` is a variant of `Enemy`: write `Enemy.Slime(...)`
+// error 25: `Boss` is a variant of `Enemy` and `Rank`: write `Enemy.Boss` or `Rank.Boss`
+// error 26: Kestrel writes a missing value as `none`, not `null`
+// error 27: Kestrel writes a missing value as `none`, not `nil`
+// error 28: Kestrel writes a missing value as `none`, not `None`
+// error 22: expected int, found i64
+// error 29: expected int, found i64
+// error 30: `Nothing` is a variant of `Maybe`: write it with its types, like `Maybe[int].Nothing`
+// error 31: `Just` is a variant of `Maybe`: write `Maybe.Just(...)`
 struct G { x: int }
 enum Enemy {
     Slime { size: int }
     Boss
+}
+enum Rank {
+    Boss
+}
+enum Maybe[T] {
+    Just { v: T }
+    Nothing
 }
 total(g: G) -> int { checksum(g) }
 main() {
@@ -18,4 +27,6 @@ main() {
     let d = nil
     let e = None
     let s: int = checksum(G(1))
+    let n = Nothing
+    let j = Just(v: 1)
 }

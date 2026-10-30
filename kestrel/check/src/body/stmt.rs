@@ -4,6 +4,8 @@ use std::collections::HashMap;
 
 use kestrel_syntax::ast::{Block, ExprKind, Stmt};
 
+use super::loop_vars::LoopVar;
+use super::narrow::Site;
 use super::{regions, BodyChecker, Expect};
 use crate::ty::Ty;
 
@@ -35,7 +37,7 @@ impl<'a> BodyChecker<'a> {
             }
             Stmt::Let { is_var, bind, ty, value, .. } => {
                 let ann = ty.as_ref().map(|t| self.resolve(t));
-                let mut local_ty = self.check_value(value, ann);
+                let mut local_ty = self.going_into(value, Site::Variable, |c| c.check_value(value, ann));
                 if matches!(local_ty, Ty::Unit | Ty::Never) {
                     self.error(value.span, "this expression has no value to store");
                     local_ty = Ty::Error;
@@ -82,7 +84,8 @@ impl<'a> BodyChecker<'a> {
                     }
                 };
                 self.scopes.push(HashMap::new());
-                self.declare(var, var_ty, false, false, false);
+                let counter = self.declare(var, var_ty, false, false, false);
+                self.note_loop_var(counter, LoopVar::Counter);
                 let entry = self.moved.clone();
                 self.loop_body(entry.clone(), Some(entry), body);
                 self.scopes.pop();
@@ -138,7 +141,7 @@ impl<'a> BodyChecker<'a> {
                         self.error(v.span, format!("this {what} doesn't return a value"));
                     }
                     (Some(v), r) => {
-                        self.check_value(v, Some(r));
+                        self.going_into(v, Site::Return, |c| c.check_value(v, Some(r)));
                         self.consume(v);
                         self.check_return_region(v);
                     }

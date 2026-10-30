@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use kestrel_syntax::ast::{Arg, AssignOp, Binding, Block, Expr, ExprKind, TypeExpr};
 use kestrel_syntax::Span;
 
+use super::loop_vars::LoopVar;
 use super::BodyChecker;
 use crate::collect_ty::map_ty;
 use crate::tables::Res;
@@ -145,14 +146,20 @@ impl<'a> BodyChecker<'a> {
         self.scopes.push(HashMap::new());
         let item = match key {
             Some(key) => {
-                self.declare(key, k, false, false, false);
+                let key = self.declare(key, k, false, false, false);
+                self.note_loop_var(key, LoopVar::Key);
                 let value = self.declare(var, v, changeable, false, false);
+                self.note_loop_var(value, LoopVar::Item { stored: root.is_some(), map: true });
                 self.t.locals[value.0 as usize].alias = root;
                 self.views.insert(value);
                 self.note_view(value, iter);
                 value
             }
-            None => self.declare(var, k, false, false, false),
+            None => {
+                let key = self.declare(var, k, false, false, false);
+                self.note_loop_var(key, LoopVar::Key);
+                key
+            }
         };
         self.enter_item_loop(item, super::remove::Over::Map, iter, body);
         self.enter_map_loop(item, iter);

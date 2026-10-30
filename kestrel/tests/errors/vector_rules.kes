@@ -20,7 +20,7 @@ main() {
 
 // error 3: `ivec3` has 3 components, but these values give 2; give 3, one value for all of them, or none for zeros
 // error 4: `ivec2` holds ints, found float; convert it with `int(...)` first
-// error 6: `ivec2` holds ints, found i64; convert it with `int(...)` first, which stops the program if the value doesn't fit in int
+// error 6: `ivec2` holds ints, found i64; convert it with `int(...)` first, which in a normal build stops the program if the value doesn't fit in int
 // error 7: `ivec3` takes ints and int vectors, found vec2; convert it with `ivec2(...)` first
 // error 8: `vec3` takes floats and float vectors, found ivec2; convert it with `vec2(...)` first
 // error 9: labels only work when every component is a number, like `vec4(x: 1, y: 2, z: 3, w: 4)`

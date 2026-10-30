@@ -1,0 +1,25 @@
+// error 14: can't change `i`: a `for` loop's counter changes only with the loop
+// error 15: can't change `i`: a `for` loop's counter changes only with the loop
+// error 16: can't change `i`: a `for` loop's index changes only with the loop
+// error 17: can't change `x`: it is an item of `xs`, which was declared with `let`
+// error 18: can't change `y`: the loop's items come from a value that isn't stored in a variable
+// error 20: can't change `k`: a map loop's key can't be changed
+// error 21: can't change `c`: a `for` loop over a string reads its characters, which can't be changed
+// error 24: can't change `x`: it is an item of parameter `xs`, which isn't `var`
+make() -> [int] { [1] }
+main() {
+    let xs = [1, 2]
+    var ys = [1, 2]
+    var m = {1: 2}
+    for i from 0 to 3 { i = 5 }
+    for i from 0 to 3 { i += 1 }
+    for i, y in ys { i = 3 }
+    for x in xs { x = 1 }
+    for y in make() { y = 2 }
+    for y in ys { y = 2 }
+    for k, v in m { k = 3 }
+    for c in "ab" { c = "x" }
+}
+items(xs: [int]) {
+    for x in xs { x = 1 }
+}

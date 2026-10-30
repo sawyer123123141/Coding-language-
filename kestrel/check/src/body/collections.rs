@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use kestrel_syntax::ast::{Arg, Binding, Block, Expr, ExprKind};
 use kestrel_syntax::Span;
 
+use super::loop_vars::LoopVar;
 use super::remove::Over;
 use super::BodyChecker;
 use crate::ty::Ty;
@@ -186,9 +187,11 @@ impl<'a> BodyChecker<'a> {
         self.scopes.push(HashMap::new());
         let first_local = self.t.locals.len() as u32;
         if let Some(i) = index {
-            self.declare(i, Ty::Int, false, false, false);
+            let i = self.declare(i, Ty::Int, false, false, false);
+            self.note_loop_var(i, LoopVar::Index);
         }
         let v = self.declare(var, elem, changeable, false, false);
+        self.note_loop_var(v, LoopVar::Item { stored: root.is_some(), map: false });
         self.t.locals[v.0 as usize].alias = root;
         self.views.insert(v);
         // An item of an inner `par for` is a view for the outer ones too.

@@ -205,7 +205,7 @@ impl<'a> BodyChecker<'a> {
                         self.error_help(a.span, format!("{} isn't `var`", param_ref(p, shown)), "remove `var`");
                     }
                     self.note_stack_closure(a);
-                    self.check_arg_value(&a.value, p.ty);
+                    self.going_into(&a.value, super::narrow::Site::Parameter, |c| c.check_arg_value(&a.value, p.ty));
                 }
                 None => {
                     self.check_expr(&a.value, None);

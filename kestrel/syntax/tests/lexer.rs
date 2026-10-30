@@ -117,6 +117,8 @@ fn helpful_errors() {
     assert_eq!(errors("!a"), vec!["Kestrel uses `not`, not `!`"]);
     // `&&` and `||` between values still lex as `and` and `or`, so nothing else is reported.
     assert_eq!(toks_ignoring_errors("a && b || c"), vec![id("a"), Tok::And, id("b"), Tok::Or, id("c"), Tok::Eof]);
+    // Where a value starts there is no left side: nothing is lexed for the `&&`.
+    assert_eq!(toks_ignoring_errors("(&&x)"), vec![Tok::LParen, id("x"), Tok::RParen, Tok::Eof]);
     // Where a value starts, `||` is a closure with no parameters.
     assert_eq!(errors("f(|| 1)"), vec!["Kestrel writes closures as `() { ... }`"]);
     assert_eq!(errors("let g = || 1"), vec!["Kestrel writes closures as `() { ... }`"]);

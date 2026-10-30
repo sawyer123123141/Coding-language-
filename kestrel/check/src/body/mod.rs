@@ -25,10 +25,12 @@ mod instance_calls;
 mod lanes;
 mod list_fns;
 mod lists;
+mod loop_vars;
 mod maps;
 mod match_guard;
 mod matching;
 mod moves;
+mod narrow;
 mod nested;
 mod par;
 mod param_calls;
@@ -124,6 +126,10 @@ pub(crate) struct BodyChecker<'a> {
     /// The generic whose placeholders `type_scope` lists. The bare name of a generic struct or
     /// enum means itself with these placeholders (G2).
     own: Option<GenericOwner>,
+    /// The expression being checked against a type, and what it goes into (see `narrow`).
+    into_site: Option<(ExprId, narrow::Site)>,
+    /// The locals the enclosing loops declared, and as what (see `loop_vars`).
+    loop_vars: HashMap<LocalId, loop_vars::LoopVar>,
 }
 
 pub(crate) fn check_fn(program: &Program, fn_id: FnId, t: &mut Tables, diags: &mut Vec<Diagnostic>) {
@@ -145,7 +151,12 @@ pub(crate) fn check_fn(program: &Program, fn_id: FnId, t: &mut Tables, diags: &m
         return;
     }
     let expect = if ret == Ty::Unit { Expect::Discard } else { Expect::Value(Some(ret)) };
+    // The body's last expression is the function's result.
+    if let Some(Stmt::Expr(tail)) = decl.body.stmts.last() {
+        bc.set_into(Some((tail.id, narrow::Site::Return)));
+    }
     let body = bc.check_block(&decl.body, expect);
+    bc.set_into(None);
     if let (Some(Stmt::Expr(tail)), false) = (decl.body.stmts.last(), ret == Ty::Unit) {
         bc.consume(tail);
         bc.check_return_region(tail);
@@ -191,6 +202,8 @@ impl<'a> BodyChecker<'a> {
             unstored: HashSet::new(),
             type_scope: Vec::new(),
             own: None,
+            into_site: None,
+            loop_vars: HashMap::new(),
         }
     }
 
@@ -356,12 +369,7 @@ impl<'a> BodyChecker<'a> {
         }
         let msg = format!("expected {}, found {}", self.tn(to), self.tn(from));
         if from.is_numeric() && to.is_numeric() && !from.is_float() && !to.is_float() {
-            // A narrower int: the conversion stops the program when the value doesn't fit (a
-            // checksum's `i64` rarely does), so keeping the wider type comes first.
-            let (f, t) = (from.name(), to.name());
-            let help = format!(
-                "store it as `{f}` instead (annotate the variable or the return type `{f}`); `{t}(...)` also works, but stops the program if the value doesn't fit in {t}"
-            );
+            let help = self.narrowing_help(e, from, to);
             self.error_help(e.span, msg, help);
         } else if from.is_numeric() && to.is_numeric() {
             self.error_help(e.span, msg, format!("convert it explicitly: `{}(...)`", to.name()));

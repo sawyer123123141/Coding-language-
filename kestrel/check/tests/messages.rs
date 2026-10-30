@@ -70,12 +70,22 @@ fn a_vector_needs_every_component_or_none() {
 
 #[test]
 fn a_narrowing_that_can_stop_the_program_suggests_the_wider_type_first() {
-    let src = "struct G {\n x: int\n}\ntotal(g: G) -> int {\n checksum(g)\n}\nmain() {}\n";
-    let help = "store it as `i64` instead (annotate the variable or the return type `i64`); `int(...)` also works, but stops the program if the value doesn't fit in int";
-    assert_eq!(errors(src), one("expected int, found i64", help));
-    let help = "store it as `int` instead (annotate the variable or the return type `int`); `u8(...)` also works, but stops the program if the value doesn't fit in u8";
-    assert_eq!(errors("main() {\n var n = 300\n let b: u8 = n\n}\n"), one("expected u8, found int", help));
+    let help = |noun: &str, wide: &str, narrow: &str| {
+        format!("keep it an `{wide}`: make the {noun} `{wide}`; `{narrow}(...)` also works, but in a normal build it stops the program if the value doesn't fit in {narrow} (a `--release` build wraps)")
+    };
+    let i64_to_int = |noun: &str| one("expected int, found i64", &help(noun, "i64", "int"));
+    // What it goes into: a function's result (its last expression or a `return`), a variable, a
+    // parameter, a field, or something else.
+    let g = "struct G {\n x: int\n}\n";
+    assert_eq!(errors(&format!("{g}total(g: G) -> int {{\n checksum(g)\n}}\nmain() {{}}\n")), i64_to_int("return type"));
+    assert_eq!(errors(&format!("{g}total(g: G) -> int {{\n return checksum(g)\n}}\nmain() {{}}\n")), i64_to_int("return type"));
+    assert_eq!(errors("main() {\n var n = 300\n let b: u8 = n\n}\n"), one("expected u8, found int", &help("variable's type", "int", "u8")));
+    let a = "main() {\n let a: i64 = 5\n";
+    assert_eq!(errors(&format!("{a} var v = 0\n v = a\n print(v)\n}}\n")), i64_to_int("variable's type"));
+    assert_eq!(errors(&format!("f(x: int) {{}}\n{a} f(a)\n}}\n")), i64_to_int("parameter's type"));
+    assert_eq!(errors(&format!("struct S {{\n v: int\n}}\n{a} let s = S(v: a)\n print(s)\n}}\n")), i64_to_int("field's type"));
+    assert_eq!(errors(&format!("struct S {{\n v: int\n}}\n{a} var s = S(v: 1)\n s.v = a\n print(s)\n}}\n")), i64_to_int("field's type"));
+    assert_eq!(errors(&format!("{a} var xs: list[int] = []\n xs.add(a)\n}}\n")), i64_to_int("type of what it goes into"));
     // A float converts without stopping the program: it is cut to the nearest value in range.
     assert_eq!(errors("main() {\n let f = 1.5\n let i: int = f\n}\n"), one("expected int, found float", "convert it explicitly: `int(...)`"));
 }
-

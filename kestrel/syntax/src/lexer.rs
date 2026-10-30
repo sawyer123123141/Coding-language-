@@ -259,14 +259,17 @@ impl<'a> Lexer<'a> {
         }
         if &two == b"&&" || &two == b"||" {
             self.pos += 2;
+            let after_value = self.after_value();
             // Where a value starts, `||` is another language's closure with no parameters.
-            if two[0] == b'|' && !self.after_value() {
+            if two[0] == b'|' && !after_value {
                 return self.error(start, "Kestrel writes closures as `() { ... }`");
             }
-            // Between values it is lexed as the keyword, so the rest of the line still parses.
             let (msg, tok) = if two[0] == b'&' { ("Kestrel uses `and`, not `&&`", Tok::And) } else { ("Kestrel uses `or`, not `||`", Tok::Or) };
             self.error(start, msg);
-            self.push(tok, start);
+            // Between values it is lexed as the keyword, so the rest of the line still parses.
+            if after_value {
+                self.push(tok, start);
+            }
             return;
         }
         let ch = self.src[self.pos..].chars().next().unwrap();

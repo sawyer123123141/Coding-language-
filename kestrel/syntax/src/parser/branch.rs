@@ -71,7 +71,7 @@ impl Parser {
         let start = self.expect(&Tok::If, "`if`")?;
         let cond = self.in_head(Self::expr)?;
         let (then_block, mut inner) = self.block_with_height()?;
-        if matches!(self.peek(), Tok::Ident(k) if k == "elif") {
+        if self.at_elif() {
             self.elif();
             return Err(());
         }

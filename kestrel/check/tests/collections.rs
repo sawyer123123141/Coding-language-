@@ -79,7 +79,7 @@ fn collection_errors() {
         ("main() {\n let l = list[int](3)\n}\n", "`list[T]()` takes no arguments"),
         ("main() {\n let a = array[int](1.5)\n}\n", "an array length must be an integer, found float"),
         ("main() {\n for v in 5 { }\n}\n", "can't loop over int; `for ... in` needs an array, list, map or string"),
-        ("main() {\n let a = [1]\n for v in a { v = 2 }\n}\n", "can't change `a`: it was declared with `let`"),
+        ("main() {\n let a = [1]\n for v in a { v = 2 }\n}\n", "can't change `v`: it is an item of `a`, which was declared with `let`"),
         ("main() {\n let list = 3\n}\n", "`list` is a built-in name; pick another"),
         ("f(xs: [int]) {\n xs[0] = 1\n}\nmain() {}\n", "can't change parameter `xs`"),
         ("main() {\n let m = map[vec3, int]()\n}\n", "map keys must be integers, bools or strings, not `vec3`"),
