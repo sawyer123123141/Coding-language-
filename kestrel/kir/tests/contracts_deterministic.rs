@@ -152,6 +152,38 @@ pub c(s: Plain) -> int { s.score() }";
 }
 
 #[test]
+fn the_time_args_and_env_help_lines_say_what_to_do() {
+    let src = "native now() -> f64
+native sleep(s: f64)
+native all() -> int
+native get() -> int
+@prove(deterministic)
+pub t() -> f64 { now() }
+@prove(deterministic)
+pub nap() { sleep(1.0) }
+@prove(deterministic)
+pub words() -> int { all() }
+@prove(deterministic)
+pub var_of() -> int { get() }";
+    let rename = [("now", "time.now"), ("sleep", "time.sleep"), ("all", "args.all"), ("get", "env.get")];
+    let found: Vec<(String, Option<String>)> = errors_renamed(src, &rename).into_iter().map(|e| (e.message, e.help)).collect();
+    let want = [
+        ("`t` can't be proven `deterministic`: it calls `time.now` (line 6), which reads the clock", "pass the time step in as a parameter, like `step(var g, i, DT)`"),
+        ("`nap` can't be proven `deterministic`: it calls `time.sleep` (line 8), which waits on the clock", "wait outside the function, after it returns"),
+        (
+            "`words` can't be proven `deterministic`: it calls `args.all` (line 10), which reads the command line",
+            "read the command line outside and pass the value in as a parameter",
+        ),
+        (
+            "`var_of` can't be proven `deterministic`: it calls `env.get` (line 12), which reads the environment",
+            "read the environment outside and pass the value in as a parameter",
+        ),
+    ];
+    let want: Vec<(String, Option<String>)> = want.iter().map(|(m, h)| (m.to_string(), Some(h.to_string()))).collect();
+    assert_eq!(found, want);
+}
+
+#[test]
 fn randf_range_is_named_as_written() {
     let src = "@prove(deterministic)\npub roll() -> float { randf_range(1.0, 2.0) }\n@prove(deterministic)\npub plain() -> float { randf() }";
     let found: Vec<String> = errors(src).into_iter().map(|e| e.message).collect();

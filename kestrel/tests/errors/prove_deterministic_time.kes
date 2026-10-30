@@ -1,0 +1,25 @@
+use time
+
+// The clock is outside the program: what it reads, and how long a wait takes, depend on more
+// than the arguments.
+
+@prove(deterministic)
+pub elapsed(since: f64) -> f64 {
+    time.now() - since
+}
+
+@prove(deterministic)
+pub stamp() -> i64 {
+    time.unix()
+}
+
+@prove(deterministic)
+pub pause(seconds: f64) {
+    time.sleep(seconds)
+}
+
+main() {}
+
+// error 6: `elapsed` can't be proven `deterministic`: it calls `time.now` (line 8), which reads the clock
+// error 11: `stamp` can't be proven `deterministic`: it calls `time.unix` (line 13), which reads the clock
+// error 16: `pause` can't be proven `deterministic`: it calls `time.sleep` (line 18), which waits on the clock

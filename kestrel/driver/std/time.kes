@@ -1,0 +1,19 @@
+// Time: the clock, without a window. No window is needed.
+//
+// `time.now()` is for measuring: it never goes backwards, and it starts at 0 when the program
+// does. `time.unix()` is the date, as the computer's clock says it, so it can jump when that clock
+// is set. Inside a window's frame loop, `window.delta()` is the time step to move things by.
+//
+//     use time
+//     let start = time.now()
+//     work()
+//     print("took {time.now() - start} seconds")
+
+// Seconds since the program started. It only ever grows.
+pub native now() -> f64
+
+// Seconds since the start of 1970 (UTC), by the computer's clock.
+pub native unix() -> i64
+
+// Waits for `seconds` before returning. A wait of zero or less (or NaN) returns at once.
+pub native sleep(seconds: f64)

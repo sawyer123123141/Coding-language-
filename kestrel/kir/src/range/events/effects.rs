@@ -10,8 +10,13 @@ use crate::ir::FuncIdx;
 /// Something that makes a function's result depend on more than its arguments.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Effect {
-    /// A native that reads the clock (`window.delta`).
+    /// A native that reads the clock (`window.delta`, `time.now`).
     Clock,
+    /// `time.sleep`, which waits on the clock.
+    Sleep,
+    /// A native of the `args` module, which reads the command line, or `env.get`, which reads the
+    /// environment (`environment`).
+    Process { environment: bool },
     /// A native that reads the keyboard (`input.held`).
     Keyboard,
     /// A native that reads the mouse (`input.mouse`).
@@ -34,7 +39,10 @@ impl Effect {
     /// The effect of calling the native called `name` (as its module names it: `window.delta`).
     pub fn of_native(name: &str) -> Effect {
         match name {
-            "window.delta" | "window.time" | "window.ticks_usec" | "window.fps" => Effect::Clock,
+            "window.delta" | "window.time" | "window.ticks_usec" | "window.fps" | "time.now" | "time.unix" => Effect::Clock,
+            "time.sleep" => Effect::Sleep,
+            "args.all" | "args.program" => Effect::Process { environment: false },
+            "env.get" => Effect::Process { environment: true },
             "input.held" | "input.pressed" | "input.released" => Effect::Keyboard,
             "input.mouse" | "input.wheel" | "input.mouse_delta" => Effect::Mouse,
             "file.write" | "file.write_text" | "file.make_dir" | "file.remove" => Effect::File { writes: true },
@@ -47,6 +55,9 @@ impl Effect {
     pub fn tail(self) -> &'static str {
         match self {
             Effect::Clock => ", which reads the clock",
+            Effect::Sleep => ", which waits on the clock",
+            Effect::Process { environment: false } => ", which reads the command line",
+            Effect::Process { environment: true } => ", which reads the environment",
             Effect::Keyboard => ", which reads the keyboard",
             Effect::Mouse => ", which reads the mouse",
             Effect::File { writes: false } => ", which reads a file",

@@ -277,3 +277,24 @@ main() {
     assert_eq!(compiled.expect("compiles").builtins, ["file"]);
     assert!(!kestrel_driver::needs_window("file"));
 }
+
+#[test]
+fn time_args_and_env_are_built_in_modules_that_need_no_window() {
+    let dir = project("small", &[]);
+    let src = "use time
+use args
+use env
+main() {
+    let start = time.now()
+    time.sleep(0.0)
+    let home = env.get(\"HOME\") else { return }
+    print(start, time.unix(), args.all().len, args.program(), home)
+}
+";
+    let (compiled, text) = build(&dir, src);
+    assert_eq!(text, "");
+    assert_eq!(compiled.expect("compiles").builtins, ["time", "args", "env"]);
+    for name in ["time", "args", "env"] {
+        assert!(!kestrel_driver::needs_window(name), "{name}");
+    }
+}

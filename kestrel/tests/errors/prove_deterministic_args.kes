@@ -1,0 +1,26 @@
+use args
+use env
+
+// The command line and the environment are outside the program: they change from run to run.
+
+@prove(deterministic)
+pub count() -> int {
+    args.all().len
+}
+
+@prove(deterministic)
+pub name() -> string {
+    args.program()
+}
+
+@prove(deterministic)
+pub home() -> string {
+    let v = env.get("HOME") else { return "" }
+    v
+}
+
+main() {}
+
+// error 6: `count` can't be proven `deterministic`: it calls `args.all` (line 8), which reads the command line
+// error 11: `name` can't be proven `deterministic`: it calls `args.program` (line 13), which reads the command line
+// error 16: `home` can't be proven `deterministic`: it calls `env.get` (line 18), which reads the environment

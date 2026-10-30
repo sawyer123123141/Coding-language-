@@ -7,7 +7,8 @@ use kestrel_driver::{without_bom, DiagStyle};
 use kestrel_codegen::{emit_object, has_sse41, JitProgram, Options, NO_SSE41, TARGET_CPUS};
 use link::Lib;
 
-const USAGE: &str = "usage: kestrel <run|check|build> <file.kes> [-o <exe>] [--release] [--report] [--diagnostics=short]";
+const USAGE: &str = "usage: kestrel <run|check|build> <file.kes> [-o <exe>] [--release] [--report] [--diagnostics=short]
+       kestrel run <file.kes> [--release] [<args>...] [-- <args>...]";
 
 /// What `--report` on anything but `check` says.
 const REPORT_NEEDS_CHECK: &str = "`--report` goes with `check`: kestrel check --report file.kes";
@@ -27,23 +28,34 @@ struct Args {
     release: bool,
     report: bool,
     style: DiagStyle,
+    /// The words `run` passes to the program (`args.all()`): every word after the file that is not
+    /// one of the compiler's flags, and every word after `--`.
+    program_args: Vec<String>,
 }
 
 fn parse_args(raw: Vec<String>) -> Option<Args> {
     let mut it = raw.into_iter();
     let (mut positional, mut out, mut release, mut report, mut style) = (Vec::new(), None, false, false, DiagStyle::Full);
+    let mut program_args = Vec::new();
     while let Some(a) = it.next() {
         match a.as_str() {
+            "--" => program_args.extend(it.by_ref()),
             "-o" => out = Some(it.next()?),
             "--release" => release = true,
             "--report" => report = true,
             "--diagnostics=short" => style = DiagStyle::Short,
             s if s.starts_with('-') => return None,
+            // The command, then the file; any later word is the program's.
+            _ if positional.len() == 2 => program_args.push(a),
             _ => positional.push(a),
         }
     }
     let [cmd, path]: [String; 2] = positional.try_into().ok()?;
-    matches!(cmd.as_str(), "run" | "check" | "build").then_some(Args { cmd, path, out, release, report, style })
+    // Only `run` starts the program, so only it has words to pass on.
+    if cmd != "run" && !program_args.is_empty() {
+        return None;
+    }
+    matches!(cmd.as_str(), "run" | "check" | "build").then_some(Args { cmd, path, out, release, report, style, program_args })
 }
 
 /// The compiler recurses over the syntax tree, so it runs on a stack far bigger than the
@@ -120,7 +132,9 @@ fn run() -> ExitCode {
         "run" => {
             // The program's relative paths (`file`, `window.screenshot`, textures) are read from its own folder.
             kestrel_window::set_program_dir(Path::new(&args.path).parent().unwrap_or(Path::new("")));
-            // The window crate's natives, then the runtime's own (`file`).
+            // `args.program()` is the `.kes` path, and `args.all()` the words meant for the program.
+            kestrel_runtime::start::set_args(args.path.clone(), args.program_args.clone());
+            // The window crate's natives, then the runtime's own (`file`, `time`, `args`, `env`).
             let natives: Vec<(&str, *const u8)> =
                 kestrel_window::symbols().into_iter().chain(kestrel_runtime::natives::native_symbols()).collect();
             JitProgram::compile_with(&compiled.module, opts, &natives)
@@ -229,6 +243,29 @@ mod tests {
         assert!(args(&["frob", "x.kes"]).is_none());
         assert!(args(&["build"]).is_none());
         assert!(args(&["build", "x.kes", "extra"]).is_none());
+    }
+
+    #[test]
+    fn words_after_the_file_go_to_the_program() {
+        let a = args(&["run", "g.kes", "a", "--", "--b"]).unwrap();
+        assert_eq!(a.program_args, ["a", "--b"]);
+        // Its own flags are taken wherever they are, until `--`.
+        let a = args(&["run", "g.kes", "a", "--release", "b"]).unwrap();
+        assert!(a.release);
+        assert_eq!(a.program_args, ["a", "b"]);
+        let a = args(&["run", "--release", "g.kes", "--", "--release", "-o", "--"]).unwrap();
+        assert!(a.release);
+        assert_eq!(a.program_args, ["--release", "-o", "--"]);
+        let a = args(&["run", "g.kes"]).unwrap();
+        assert!(a.program_args.is_empty());
+        assert_eq!(a.path, "g.kes");
+        // An unknown flag before `--` is still a mistake.
+        assert!(args(&["run", "g.kes", "--bogus"]).is_none());
+        assert!(args(&["run", "g.kes", "a", "--bogus"]).is_none());
+        // A file is still needed, and only `run` passes words on.
+        assert!(args(&["run", "--", "g.kes"]).is_none());
+        assert!(args(&["check", "g.kes", "--", "a"]).is_none());
+        assert!(args(&["build", "g.kes", "a"]).is_none());
     }
 
     #[test]

@@ -1,5 +1,33 @@
+use std::sync::OnceLock;
+use std::time::Instant;
+
 /// Stack for the Kestrel program, so deep recursion fits.
 const STACK_SIZE: usize = 256 * 1024 * 1024;
+
+/// When the program started: `time.now()` counts from here.
+static STARTED: OnceLock<Instant> = OnceLock::new();
+
+/// The program's path and arguments, when the host set them (`kestrel run`).
+static ARGS: OnceLock<(String, Vec<String>)> = OnceLock::new();
+
+/// When the program started: the first `kestrel_rt_start`, or the first call of this when a host
+/// runs Kestrel code without it. `time.now()` counts from here.
+pub fn started() -> Instant {
+    *STARTED.get_or_init(Instant::now)
+}
+
+/// Gives the program its path and arguments, for `args.program()` and `args.all()`. `kestrel run`
+/// calls this before `run_main`, with the `.kes` path and the words meant for the program. A built
+/// executable never calls it, so the natives read the process's own command line instead. Only the
+/// first call counts.
+pub fn set_args(program: String, args: Vec<String>) {
+    let _ = ARGS.set((program, args));
+}
+
+/// What `set_args` gave, if it was called.
+pub fn args() -> Option<&'static (String, Vec<String>)> {
+    ARGS.get()
+}
 
 /// Runs `entry` and flushes on the calling thread, since output is buffered per thread.
 fn run_entry(entry: extern "C" fn()) {
@@ -43,6 +71,7 @@ fn poison_setting(setting: Option<&str>) -> bool {
 /// Returns the exit code. `KESTREL_POISON` is read here, once, before `entry` runs.
 #[no_mangle]
 pub extern "C" fn kestrel_rt_start(entry: extern "C" fn()) -> i32 {
+    started();
     if !crate::fpu::has_sse41() {
         eprintln!("kestrel: {}", crate::fpu::NO_SSE41);
         return 101;
@@ -99,6 +128,14 @@ mod tests {
         for setting in [None, Some("0"), Some("true")] {
             assert_eq!(arena_count_report(setting, || panic!("counted with {setting:?}")), None);
         }
+    }
+
+    #[test]
+    fn the_start_instant_is_fixed_once_and_never_after_now() {
+        let first = super::started();
+        assert_eq!(kestrel_rt_start(entry), 0);
+        assert_eq!(super::started(), first);
+        assert!(first <= std::time::Instant::now());
     }
 
     #[test]

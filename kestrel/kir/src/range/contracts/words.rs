@@ -178,6 +178,9 @@ pub(super) fn help(m: &Module, help: Help, c: Contract) -> String {
     match help {
         Help::Effect(effect) => match effect {
             Effect::Clock => "pass the time step in as a parameter, like `step(var g, i, DT)`".to_string(),
+            Effect::Sleep => "wait outside the function, after it returns".to_string(),
+            Effect::Process { environment: false } => "read the command line outside and pass the value in as a parameter".to_string(),
+            Effect::Process { environment: true } => "read the environment outside and pass the value in as a parameter".to_string(),
             Effect::Keyboard | Effect::Mouse => "read input outside and pass it in an `Inputs` struct".to_string(),
             Effect::File { writes: false } => "read the file outside and pass what it holds in as a parameter".to_string(),
             Effect::File { writes: true } => "write the file outside, after the function returns what to write".to_string(),

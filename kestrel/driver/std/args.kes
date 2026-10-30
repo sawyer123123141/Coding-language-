@@ -1,0 +1,16 @@
+// The command line the program was started with. No window is needed.
+//
+// Under `kestrel run game.kes a b`, `args.all()` is `["a", "b"]`: every word after the file that
+// is not one of the compiler's own flags, and every word after `--`, whatever it is. A built
+// program gets every word after its own name.
+//
+//     use args
+//     let words = args.all()
+//     if words.len > 0 { print("loading {words[0]}") }
+
+// The words after the program's name.
+pub native all() -> list[string]
+
+// The program's own path, as it was started: the `.kes` file under `kestrel run`, the executable
+// when built.
+pub native program() -> string
