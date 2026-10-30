@@ -64,7 +64,7 @@ Not now, with the reason:
 
 ## Open questions for the user
 
-1. **Order.** Keep the GPU first, as you chose on 2026-10-27, or take the I/O round, hot reload and the rollback library first, as picked here?
+1. **Order.** Keep the GPU first, as you chose on 2026-10-27, or take the I/O round, hot reload and the rollback library first, as picked here? **Ruled 2026-10-29: the I/O round first ("sure").** Not started: another chat is working on math; the user said to build nothing yet.
 2. **The reloadable program shape.** Hot reload needs the state to live somewhere the runtime can snapshot: an init that returns it and a frame function that takes it, or another shape of your choosing. Syntax is yours; the round cannot start without it.
 3. **Names and imports.** `file`, `time`, `args`, `env` as module names; `rollback` for the library; whether `kestrel run` reloads by default or behind a flag; and how a program imports a module from another directory (the rollback library needs it before packages exist).
 4. **`pure`:** inferred, with a written `pure` as an optional checked promise, or written as today.
