@@ -9,7 +9,8 @@
 // renderer meshes them again in the same frame (`render.kes`). Chunks that aren't meshed or
 // waiting are left alone: they read the new block when they are meshed.
 //
-// Edits are forgotten when their column unloads (there is no saving in version 1).
+// The world remembers each edit (`World.remember`), so an edited block is back when its column
+// unloads and loads again, and F5 saves the edits with the world (`save.kes`).
 use { World, ChunkRef, CHUNK_QUEUED, CHUNK_MESHED from world }
 use { Player, Intent, eye, look, box_of, box_has from player }
 use { cast from ray }
@@ -51,12 +52,14 @@ pub pure dirty_for(w: World, cell: ivec3) -> list[ChunkRef] {
     out
 }
 
-// Puts block `id` at `cell` and gives the chunks to mesh again. Refused, with an empty list,
-// outside the world's height (0 to 127) or in a column that isn't Ready.
+// Puts block `id` at `cell`, remembers the edit in the world, and gives the chunks to mesh
+// again. Refused, with an empty list and nothing remembered, outside the world's height (0 to
+// 127) or in a column that isn't Ready.
 pub edit_at(var w: World, cell: ivec3, id: u8) -> list[ChunkRef] {
     if not w.set_block(cell.x, cell.y, cell.z, id) {
         return []
     }
+    w.remember(cell, id)
     dirty_for(w, cell)
 }
 

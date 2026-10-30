@@ -1,0 +1,60 @@
+// Saving and loading (the I/O round, decision 9): F5 writes the world to `world.save` next to
+// the program, F9 reads it back. In Godot terms it is a `FileAccess.store_var` of the game's
+// state and a `get_var` that puts it back.
+//
+// A save holds only what can't be made again: the seed, the player and the edits. The blocks
+// come back from the seed, as they do whenever a column loads: loading a save resets the world
+// to the save's seed (`reset_world`), takes its edits and its player, and streaming generates the
+// columns around the player again, writing the edits in each as it becomes Ready. So the edits
+// made since the last save are gone, and a save made with another seed loads.
+//
+// The bytes are `to_bytes` of a `Save`: a header naming the type's shape, then the values, about
+// 13 bytes per edit. A file of another shape (an older engine's, or damaged) gives `none` from
+// `from_bytes` and nothing changes.
+use file
+use { World, Edit, reset_world from world }
+use { Player from player }
+
+// The save's file name, next to the program.
+pub let SAVE_FILE = "world.save"
+
+pub struct Save {
+    seed: int
+    player: Player
+    edits: list[Edit]
+}
+
+// Writes the world's seed and edits and the player to SAVE_FILE, replacing it. Gives false when
+// the file can't be written; `file.error()` then says why. The bytes live in an arena freed here.
+pub save_world(w: World, p: Player) -> bool {
+    var ok = false
+    arena {
+        ok = file.write(SAVE_FILE, to_bytes(Save(seed: w.seed, player: p, edits: w.edits)))
+    }
+    ok
+}
+
+// Reads SAVE_FILE and puts the world and the player back as they were saved (see the top of the
+// file); the renderer drops the old meshes on its own, since every slot was released. Gives false,
+// changing nothing, when the file can't be read or isn't a save; `load_failure` then says why.
+pub load_world(var w: World, var p: Player) -> bool {
+    let bytes = file.read(SAVE_FILE) else { return false }
+    let save = from_bytes[Save](bytes) else { return false }
+    reset_world(var w, save.seed)
+    w.edits = save.edits
+    p = save.player
+    true
+}
+
+// Why the `load_world` just called gave false, as the line to print. Call it right after: it
+// reads `file.error()`, which the next file call replaces.
+pub load_failure() -> string {
+    let why = file.error()
+    if not file.exists(SAVE_FILE) {
+        return "no {SAVE_FILE} to load"
+    }
+    if why != "" {
+        return "could not load: {why}"
+    }
+    "could not load: {SAVE_FILE} is damaged or was saved by another version of the engine; press F5 to save the world again"
+}

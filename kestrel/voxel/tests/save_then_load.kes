@@ -1,0 +1,132 @@
+// Saving and loading (the I/O round, decision 9; `save_then_load_restores_player_and_edits`):
+// a world streamed around the start gets three edits (one cell edited twice) and a moved player,
+// and is saved to `world.save` in the test's scratch folder (made fresh for each run, so no save
+// is there at the start). A fresh world of another seed and a default player load it: the seed,
+// the player (its `checksum`) and the edits come back, and once streaming has made the columns
+// around the player Ready again, the three cells hold the edited blocks and the three edited
+// columns hold exactly the saved world's blocks. Loading over the running world forgets an edit
+// made after the save. A missing and a damaged save give false, change nothing, and say why.
+//
+// `stream_step` reads the clock, which needs an open window: a quiet headless one.
+use window
+use file
+use { World, new_world from world }
+use { Stream, new_stream, stream_step from stream }
+use { Player, new_player from player }
+use { edit_at from edit }
+use { save_world, load_world, load_failure from save }
+use { column_of from column }
+use { AIR, STONE, DIRT from blocks }
+
+let VIEW = 2
+// Every column within VIEW + 2 of any point (E13).
+let SLOTS = (2 * (VIEW + 2) + 1) * (2 * (VIEW + 2) + 1)
+
+// Streams at `at` until a step starts nothing: every column around `at` is Ready. Gives false
+// when it hadn't settled after 1,000 steps (a hang).
+settle(var s: Stream, var w: World, at: vec3) -> bool {
+    for n from 0 to 1000 {
+        if stream_step(var s, var w, at).started == 0 {
+            return true
+        }
+    }
+    false
+}
+
+pure block_at(w: World, c: ivec3) -> u8 {
+    w.block(c.x, c.y, c.z)
+}
+
+// The checksum of the blocks of the column holding `c`, or 0 when it isn't Ready.
+pure column_sum(w: World, c: ivec3) -> i64 {
+    let slot = w.slot_at(column_of(c.x), column_of(c.z))
+    if slot < 0 {
+        return i64(0)
+    }
+    checksum(w.columns.items[slot].blocks)
+}
+
+main() {
+    window.open(64, 64, "save")
+    var w = new_world(1337, SLOTS)
+    var s = new_stream(VIEW, 8)
+    let home = vec3(16.5, 100.0, 16.5)
+    var p = new_player(home)
+    print("settled", settle(var s, var w, home))
+
+    // Sky at the top of the world, stone at the bottom, in three columns.
+    let a = ivec3(3, 127, 4)
+    let b = ivec3(-7, 1, 9)
+    let c = ivec3(40, 127, -20)
+    print("generated", block_at(w, a), block_at(w, b), block_at(w, c))
+    print("missing", load_world(var w, var p), load_failure(), w.seed, w.edits.len)
+
+    edit_at(var w, a, DIRT)
+    edit_at(var w, a, STONE)
+    edit_at(var w, b, AIR)
+    edit_at(var w, c, DIRT)
+    print("edited", block_at(w, a), block_at(w, b), block_at(w, c), "edits", w.edits.len)
+
+    p.pos = vec3(20.25, 90.5, 12.75)
+    p.vel = vec3(0.5, -1.0, 0.25)
+    p.yaw = 33.0
+    p.pitch = -12.5
+    p.fly = false
+    p.speed = 55.0
+    p.standing = true
+    let saved = checksum(p)
+    let sums = [column_sum(w, a), column_sum(w, b), column_sum(w, c)]
+    print("saved", save_world(w, p))
+    let bytes = file.read("world.save") else {
+        print("world.save can't be read back: {file.error()}")
+        return
+    }
+    print("size", bytes.len)
+
+    // A fresh world of another seed and a default player.
+    var w2 = new_world(99, SLOTS)
+    var s2 = new_stream(VIEW, 8)
+    var p2 = new_player(vec3(0.5, 120.0, 0.5))
+    print("fresh", checksum(p2) == saved, w2.seed)
+    print("loaded", load_world(var w2, var p2), w2.seed, "edits", w2.edits.len)
+    print("player", checksum(p2) == saved, p2.pos, p2.yaw, p2.fly, p2.speed)
+    print("streamed", settle(var s2, var w2, p2.pos))
+    print("blocks", block_at(w2, a), block_at(w2, b), block_at(w2, c))
+    print("columns", column_sum(w2, a) == sums[0], column_sum(w2, b) == sums[1], column_sum(w2, c) == sums[2])
+
+    // An edit after the save is gone once the save is loaded over the running world.
+    let d = ivec3(10, 127, 10)
+    edit_at(var w, d, STONE)
+    print("unsaved", block_at(w, d), "edits", w.edits.len)
+    print("reloaded", load_world(var w, var p), "edits", w.edits.len)
+    print("restreamed", settle(var s, var w, p.pos))
+    print("after", block_at(w, d), block_at(w, a), block_at(w, b), block_at(w, c), checksum(p) == saved)
+    print("columns", column_sum(w, a) == sums[0], column_sum(w, b) == sums[1], column_sum(w, c) == sums[2])
+
+    // A damaged save: refused, nothing changes.
+    let junk: list[u8] = [1, 2, 3]
+    print("damaged", file.write("world.save", junk), load_world(var w2, var p2), w2.edits.len)
+    print(load_failure())
+}
+// env: KESTREL_HEADLESS=1
+// env: KESTREL_HEADLESS_QUIET=1
+// release
+// expect: settled true
+// expect: generated 0 1 0
+// expect: missing false no world.save to load 1337 0
+// expect: edited 1 0 2 edits 3
+// expect: saved true
+// expect: size 98
+// expect: fresh false 99
+// expect: loaded true 1337 edits 3
+// expect: player true vec3(x: 20.25, y: 90.5, z: 12.75) 33 false 55
+// expect: streamed true
+// expect: blocks 1 0 2
+// expect: columns true true true
+// expect: unsaved 1 edits 4
+// expect: reloaded true edits 3
+// expect: restreamed true
+// expect: after 0 1 0 2 true
+// expect: columns true true true
+// expect: damaged true false 3
+// expect: could not load: world.save is damaged or was saved by another version of the engine; press F5 to save the world again

@@ -7,13 +7,14 @@
 //      player: its chunk states go back to none, its key leaves the index, its slot is freed.
 //      (The renderer notices a freed or reused slot on its own and drops the old meshes.)
 //      Its 8 neighbours' meshed chunks go back to none too, keeping their meshes until then:
-//      their meshes read one block into this column, which comes back without its edits
-//      (E16) when it loads again, so they are meshed again when next in view (E69).
+//      their meshes read one block into this column, which may come back different (a load
+//      resets the world), so they are meshed again when next in view (E69).
 //   2. Start up to `batch` jobs for the nearest missing columns: take a slot each, mark it
 //      Generating and index its key, so the next step doesn't start it again.
 //   3. Generate the jobs' columns on all cores, each into the job's own grid (E35), inside an
 //      `arena { }` (a `par for` outside one leaks its thread arenas, E31).
-//   4. Finish, outside the arena: copy each job's blocks into its slot's grid, mark it Ready.
+//   4. Finish, outside the arena: copy each job's blocks into its slot's grid, write the
+//      world's edits in that column over them (`apply_edits_in`), and mark it Ready.
 //   5. Queue the chunks that became meshable (E43): around each finished column, and every
 //      column within `view` whenever the player moved into another column (or the queue
 //      was full last step, so a refused chunk is retried).
@@ -38,7 +39,7 @@
 // Nothing here allocates once `new_stream` has returned, except map entries for new keys
 // (the index reuses removed entries' room, so it stops growing).
 use window
-use { World, ChunkRef, CHUNK_NONE, CHUNK_QUEUED, CHUNK_MESHED from world }
+use { World, ChunkRef, apply_edits_in, CHUNK_NONE, CHUNK_QUEUED, CHUNK_MESHED from world }
 use { Grid, grid from grid }
 use { ColumnState, column_key, column_of from column }
 use { generate from gen }
@@ -274,6 +275,7 @@ pure finish_jobs(var s: Stream, var w: World, p: ivec2, var st: StreamStats) {
         if s.jobs[i].active {
             let slot = s.jobs[i].slot
             copy_blocks(var w.columns.items[slot].blocks, s.jobs[i].blocks)
+            apply_edits_in(var w, slot)
             w.columns.items[slot].state = ColumnState.Ready
             st.generated += 1
         }

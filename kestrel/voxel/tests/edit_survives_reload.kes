@@ -1,0 +1,55 @@
+// An edit survives its column unloading and loading again (the I/O round's Review Focus 5;
+// `an_edit_survives_unload_and_reload`): stone placed in the sky and a hole dug at the bottom
+// of column (0, 0), then the player goes 300 blocks away, so `unload_far` frees the column, and
+// comes back. The column is generated again from the seed and the world's edits are written
+// over it as it becomes Ready, so both blocks are as edited, and the column's blocks are
+// exactly what they were before it unloaded.
+//
+// `stream_step` reads the clock, which needs an open window: a quiet headless one.
+use window
+use { World, new_world from world }
+use { Stream, new_stream, stream_step from stream }
+use { edit_at from edit }
+use { STONE, AIR from blocks }
+
+let VIEW = 2
+// Every column within VIEW + 2 of any point (E13).
+let SLOTS = (2 * (VIEW + 2) + 1) * (2 * (VIEW + 2) + 1)
+
+// Streams at `at` until a step starts nothing: every column around `at` is Ready. Gives false
+// when it hadn't settled after 1,000 steps (a hang).
+settle(var s: Stream, var w: World, at: vec3) -> bool {
+    for n from 0 to 1000 {
+        if stream_step(var s, var w, at).started == 0 {
+            return true
+        }
+    }
+    false
+}
+
+main() {
+    window.open(64, 64, "edit reload")
+    var w = new_world(1337, SLOTS)
+    var s = new_stream(VIEW, 8)
+    let home = vec3(16.5, 100.0, 16.5)
+    print("settled", settle(var s, var w, home))
+    print("generated", w.block(5, 127, 5), w.block(6, 1, 6))
+
+    edit_at(var w, ivec3(5, 127, 5), STONE)
+    edit_at(var w, ivec3(6, 1, 6), AIR)
+    let sum = checksum(w.columns.items[w.slot_at(0, 0)].blocks)
+    print("edited", w.block(5, 127, 5), w.block(6, 1, 6))
+
+    print("away", settle(var s, var w, vec3(316.5, 100.0, 16.5)), "unloaded", w.slot_at(0, 0) < 0)
+    print("back", settle(var s, var w, home), "loaded", w.slot_at(0, 0) >= 0)
+    print("blocks", w.block(5, 127, 5), w.block(6, 1, 6), "same", checksum(w.columns.items[w.slot_at(0, 0)].blocks) == sum)
+}
+// env: KESTREL_HEADLESS=1
+// env: KESTREL_HEADLESS_QUIET=1
+// release
+// expect: settled true
+// expect: generated 0 1
+// expect: edited 1 0
+// expect: away true unloaded true
+// expect: back true loaded true
+// expect: blocks 1 0 same true

@@ -9,6 +9,11 @@
 //
 // Reads go in place through `self.columns.items[slot].blocks.items[i]`: taking a `Column`
 // out of the pool into a variable would copy its 128 KB grid.
+//
+// The world remembers every edit (`edits`), and a column that is loaded gets the edits that fall
+// in it written over its generated blocks (`apply_edits_in`). So an edited block is back after
+// its column unloads and loads again, and a save needs only the seed, the edits and the player
+// (`save.kes`).
 use { Solid from grid }
 use { Handle, Pool, pool from pool }
 use { Ring, ring from ring }
@@ -29,6 +34,12 @@ pub struct ChunkRef {
     layer: int
 }
 
+// An edit: block `id` was put at `cell`.
+pub struct Edit {
+    cell: ivec3
+    id: u8
+}
+
 pub struct World: Solid {
     seed: int
     columns: Pool[Column]
@@ -36,6 +47,9 @@ pub struct World: Solid {
     index: map[i64, int]
     chunk_state: list[u8]
     queue: Ring[ChunkRef]
+    // Every cell edited since the world was made or loaded, once each with its latest block, in
+    // the order the cells were first edited.
+    edits: list[Edit]
 
     // The slot of column (cx, cz), or -1 when it isn't loaded or isn't Ready yet.
     pure slot_at(self, cx: int, cz: int) -> int {
@@ -83,6 +97,19 @@ pub struct World: Solid {
         self.columns.items[slot].blocks.items[(y * SIZE + local(z)) * SIZE + local(x)] = id
         true
     }
+
+    // Remembers that `cell` now holds block `id`, replacing the cell's earlier edit if it has
+    // one, so the list holds each cell once however often it is edited. It scans the edits:
+    // its cost is their number, once per edit.
+    pure remember(var self, cell: ivec3, id: u8) {
+        for i from 0 to self.edits.len {
+            if self.edits[i].cell == cell {
+                self.edits[i].id = id
+                return
+            }
+        }
+        self.edits.add(Edit(cell: cell, id: id))
+    }
 }
 
 // An empty world with `capacity` column slots, each with its grid built, every chunk state
@@ -92,15 +119,51 @@ pub struct World: Solid {
 pub new_world(seed: int, capacity: int) -> World {
     let nowhere = ChunkRef(column: Handle(slot: -1, gen: -1), layer: 0)
     var w = World(seed: seed, columns: pool[Column](capacity, new_column()), index: {}, chunk_state: [],
-        queue: ring[ChunkRef](capacity * LAYERS, nowhere))
+        queue: ring[ChunkRef](capacity * LAYERS, nowhere), edits: [])
     for i from 0 to capacity * LAYERS {
         w.chunk_state.add(CHUNK_NONE)
     }
     w
 }
 
-// Loads column (cx, cz) now: takes a slot, generates the column into it in place, marks it
-// Ready and indexes it. Nothing is queued for meshing. This is for tests and for building a
+// Empties the world in place and gives it `seed`, as if it had just been made with
+// `new_world(seed, capacity)` for the capacity it has: every slot is released (so the slots'
+// handles die and the renderer drops their meshes), and the index, the chunk states, the queue
+// and the edits are emptied. Loading a save uses it (`save.kes`): making a new world instead
+// would leave the old one's grids (128 KB a slot) in the arena.
+pub pure reset_world(var w: World, seed: int) {
+    for slot from 0 to w.columns.items.len {
+        if w.columns.used[slot] {
+            w.index.remove(w.columns.items[slot].key)
+            w.columns.items[slot].state = ColumnState.Free
+            w.columns.release(w.columns.handle(slot))
+        }
+    }
+    for i from 0 to w.chunk_state.len {
+        w.chunk_state[i] = CHUNK_NONE
+    }
+    w.queue.clear()
+    w.edits.clear()
+    w.seed = seed
+}
+
+// Writes every remembered edit in the column in `slot` over its blocks. A column calls it when
+// it becomes Ready, after its blocks are generated (`load_now`, and streaming's `finish_jobs`).
+// It scans every edit: its cost is the number of edits, once per column loaded. An edit outside
+// the world's height (only a damaged save could hold one) is skipped.
+pub pure apply_edits_in(var w: World, slot: int) {
+    let cx = w.columns.items[slot].cx
+    let cz = w.columns.items[slot].cz
+    for i from 0 to w.edits.len {
+        let c = w.edits[i].cell
+        if column_of(c.x) == cx and column_of(c.z) == cz and c.y >= 0 and c.y < HEIGHT {
+            w.columns.items[slot].blocks.items[(c.y * SIZE + local(c.z)) * SIZE + local(c.x)] = w.edits[i].id
+        }
+    }
+}
+
+// Loads column (cx, cz) now: takes a slot, generates the column into it in place, writes the
+// world's edits in it, marks it Ready and indexes it. Nothing is queued for meshing. This is for tests and for building a
 // region at once; streaming loads columns in batches across cores instead (`stream.kes`).
 // A column that already has a slot is left as it is.
 pub load_now(var w: World, cx: int, cz: int) {
@@ -117,6 +180,7 @@ pub load_now(var w: World, cx: int, cz: int) {
     w.columns.items[h.slot].key = key
     w.columns.items[h.slot].state = ColumnState.Generating
     generate(var w.columns.items[h.slot].blocks, cx, cz, w.seed)
+    apply_edits_in(var w, h.slot)
     w.columns.items[h.slot].state = ColumnState.Ready
     for layer from 0 to LAYERS {
         w.chunk_state[h.slot * LAYERS + layer] = CHUNK_NONE

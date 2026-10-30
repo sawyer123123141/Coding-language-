@@ -8,10 +8,11 @@
 // the block under the crosshair and right click places stone. The mouse starts free: drag
 // with the right button held to look (a right click that moves less than 4 pixels places a
 // block instead). Tab captures the mouse, as in a first-person game: moving it looks, and
-// Tab frees it again.
+// Tab frees it again. F5 saves the world to `world.save` next to this file and F9 loads it
+// (`save.kes`); nothing is loaded at the start.
 //
-// Each frame, in order (as a Godot `_process` would): input to an `Intent`, spawning until the
-// first column is ready, the player, the edit, streaming, meshing and uploading, drawing, the
+// Each frame, in order (as a Godot `_process` would): input to an `Intent`, saving or loading,
+// spawning until the first column is ready, the player, the edit, streaming, meshing and uploading, drawing, the
 // HUD. A stats line is printed once a second:
 //
 //   voxel fps <f> work_ms <f> columns <n> chunks <n> faces <n> queue <n> mode <walk|fly>
@@ -22,6 +23,7 @@
 use window
 use draw
 use input
+use file
 use { Color from draw }
 use { Key from input }
 use { new_world from world }
@@ -31,6 +33,7 @@ use { apply_edit, REACH from edit }
 use { new_render, mesh_step, draw_world, meshed_chunks from render }
 use { draw_hud, two from hud }
 use { cast from ray }
+use { save_world, load_world, load_failure, SAVE_FILE from save }
 
 let SEED = 1337
 let SCREEN_WIDTH = 1280
@@ -109,6 +112,24 @@ main() {
         let i = Intent(move: vec3(input.axis(Key.A, Key.D), input.axis(Key.Shift, Key.Space), input.axis(Key.S, Key.W)),
             turn: turn, jump: input.held(Key.Space), wheel: input.wheel(), break_block: input.pressed(Key.MouseLeft),
             place_block: place, toggle_fly: input.pressed(Key.F))
+
+        // Saving and loading. A loaded player is where it was saved, so it doesn't spawn again;
+        // until its columns are Ready again it stands still (a column that isn't Ready is stone).
+        if input.pressed(Key.F5) {
+            if save_world(w, p) {
+                print("saved {SAVE_FILE}")
+            } else {
+                print("could not save: {file.error()}")
+            }
+        }
+        if input.pressed(Key.F9) {
+            if load_world(var w, var p) {
+                spawned = true
+                print("loaded {SAVE_FILE}")
+            } else {
+                print(load_failure())
+            }
+        }
 
         // The world.
         if not spawned {

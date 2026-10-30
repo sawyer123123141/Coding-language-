@@ -5,9 +5,11 @@
 // With `view` 2, stone is placed at x = -1 (column -1) beside a solid block of column 0, which
 // hides a face of column 0's chunk. The player then moves to x = 128.5: column -1 unloads (its
 // centre is over 4 columns away) but column 0 stays loaded (3.5 columns away) and out of view,
-// so nothing re-meshes it there. Back home, column -1 is generated again without the stone (an
-// unloaded column's edits are lost, E16), and every meshed chunk must have the face count a
-// fresh mesh gives. Before the fix, column 0's chunk kept its old mesh: one face short.
+// so nothing re-meshes it there. While away the world forgets the edit (an unloaded column gets
+// its edits back when it loads, so the test drops it from `w.edits` to make the column come back
+// different, as it could after loading a save), so back home column -1 is generated again
+// without the stone, and every meshed chunk must have the face count a fresh mesh gives. Before
+// the fix, column 0's chunk kept its old mesh: one face short.
 //
 // `make_mesh` and the clock need an open window: a quiet headless one (nothing appears).
 use window
@@ -79,6 +81,7 @@ main() {
 
     let away = vec3(128.5, 100.0, 16.5)
     print("away", settle(var s, var w, var r, away) > 0, w.slot_at(-1, 0) < 0, w.slot_at(0, 0) >= 0)
+    w.edits.clear()
     print("back", settle(var s, var w, var r, home) > 0, "stone gone", not w.solid(-1, y, z), "stale", stale(w, r))
 }
 // env: KESTREL_HEADLESS=1
