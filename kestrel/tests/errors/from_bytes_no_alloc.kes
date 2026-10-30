@@ -1,0 +1,16 @@
+// Reading numbers allocates nothing; reading a string makes it in the current arena.
+@prove(no_alloc, no_panic)
+pure count(b: list[u8]) -> int? {
+    from_bytes[int](b)
+}
+
+@prove(no_alloc)
+pure name(b: list[u8]) -> string? {
+    from_bytes[string](b)
+}
+
+main() {
+    print(count(to_bytes(1)), name(to_bytes("a")))
+}
+
+// error 7: `name` can't be proven `no_alloc`: it calls `from_bytes` (line 9), which makes the strings it reads (line 9)

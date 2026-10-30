@@ -66,7 +66,8 @@ impl Parser {
                 if self.at(&Tok::LParen) {
                     return self.call(name, span);
                 }
-                if matches!(name.as_str(), "array" | "list" | "map") && self.at(&Tok::LBracket) {
+                // The built-ins whose brackets hold types: `list[int]()`, `from_bytes[Game](b)`.
+                if matches!(name.as_str(), "array" | "list" | "map" | "from_bytes") && self.at(&Tok::LBracket) {
                     return self.type_call(name, span);
                 }
                 return Ok(self.expr_node(ExprKind::Ident(name), span));
@@ -165,6 +166,10 @@ impl Parser {
         }
         self.expect(&Tok::RBracket, "`]`")?;
         if !self.at(&Tok::LParen) {
+            if name == "from_bytes" {
+                self.error_here("expected `(` with the bytes to read, like `from_bytes[Game](bytes)`");
+                return Err(());
+            }
             self.error_here(format!("expected `(` to create the {name}, like `{name}[...]()`"));
             return Err(());
         }

@@ -104,5 +104,7 @@ fn the_struct_programs_checksum_is_the_references() {
     let h = bytes.iter().fold(mix(START, bytes.len() as u64), |h, &b| mix(h, u64::from(b)));
     let want = finish(h) as i64;
     let program = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/programs/to_bytes_struct.kes")).unwrap();
-    assert!(program.contains(&format!("// expect: {want}\n")), "to_bytes_struct.kes should expect the checksum {want}");
+    // Line by line: a Windows checkout may end its lines with `\r\n`.
+    let line = format!("// expect: {want}");
+    assert!(program.lines().any(|l| l == line), "to_bytes_struct.kes should expect the checksum {want}");
 }

@@ -1,0 +1,10 @@
+// `from_bytes` reads a value of the type in its brackets; without them it can't know which.
+main() {
+    let b = to_bytes(1)
+    let x = from_bytes(b)
+    print(x)
+    let f = from_bytes
+}
+
+// error 4: `from_bytes` needs the type to read, like `from_bytes[Game](bytes)`
+// error 6: `from_bytes` needs the type to read, like `from_bytes[Game](bytes)`

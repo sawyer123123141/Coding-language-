@@ -377,8 +377,9 @@ pub fn chain_rest(m: &Module, chain: &Chain, line: u32) -> String {
         if step.line != 0 {
             at = step.line;
         }
-        // (A thunk only passes the call on.)
-        if m.funcs[step.callee.0 as usize].name.starts_with("__kestrel_fn_") {
+        // (A thunk only passes the call on; `from_bytes`'s read functions are `from_bytes`.)
+        let name = &m.funcs[step.callee.0 as usize].name;
+        if name.starts_with("__kestrel_fn_") || name.starts_with("__kestrel_bytes_read_") {
             continue;
         }
         s.push_str(&format!(", which calls {} ({})", super::report::callee_name(m, step.callee), line_ref(m, at, home)));

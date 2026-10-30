@@ -1,0 +1,125 @@
+// `from_bytes[T](b)` reads back what `to_bytes` wrote: the same value, with the same `checksum`,
+// for every kind of type: numbers, bools, strings, vectors, lists, arrays, maps, optionals, enums
+// with fields, structs, and a type that holds itself through a list. A float keeps its bits.
+enum Shape {
+    Dot
+    Circle { r: float }
+    Box { w: u8, h: u8 }
+}
+
+struct Node {
+    id: u8
+    kids: list[Node]
+}
+
+struct Holder {
+    shape: Shape
+    maybe: int?
+    names: [string]
+}
+
+struct Rng {
+    seed: i64
+}
+
+struct Game {
+    ball: vec2
+    vel: vec4
+    cell: ivec4
+    score: int
+    big: f64
+    alive: bool
+    rng: Rng
+    log: list[u8]
+    seen: map[string, int]
+}
+
+/// `x` read back from its own bytes has the same checksum.
+pure same[T](x: T) -> bool {
+    let y = from_bytes[T](to_bytes(x)) else { return false }
+    checksum(x) == checksum(y)
+}
+
+@prove(deterministic, no_panic)
+pub pure load(b: list[u8]) -> Game? {
+    from_bytes[Game](b)
+}
+
+main() {
+    print(same(7), same(true), same(u8(200)), same(i64(-5)), same(1.5), same(f64(-0.25)))
+    print(same("hé"), same(""), same(vec2(1, 2)), same(vec4(1, 2, 3, 4)), same(ivec4(1, -1, 256, 0)))
+    let xss: list[list[int]] = [[1, 2], [3], []]
+    print(same(xss))
+    var m = {"a": 1, "b": 2, "c": 3}
+    m.remove("a")
+    m["d"] = 4
+    print(same(m))
+    let none_int: int? = none
+    let some_int: int? = 5
+    let maybe_none = from_bytes[int?](to_bytes(none_int)) else { return }
+    let maybe_five = from_bytes[int?](to_bytes(some_int)) else { return }
+    print(maybe_none, maybe_five, checksum(maybe_five) == checksum(some_int))
+    print(same(Shape.Dot), same(Shape.Circle(r: 1.0)), same(Shape.Box(w: 3, h: 4)))
+    let tree = Node(id: 1, kids: [Node(id: 2, kids: []), Node(id: 3, kids: [Node(id: 4, kids: [])])])
+    print(same(tree))
+    let names: [string] = ["ab", "c"]
+    let h = Holder(shape: Shape.Box(w: 9, h: 8), maybe: none, names: names)
+    print(same(h))
+    let shapes: list[Shape] = [Shape.Dot, Shape.Circle(r: 2.0)]
+    print(same(shapes))
+    let nested: map[int, list[string?]] = {1: ["x", none], 2: []}
+    print(same(nested))
+
+    // Read without a generic: the values themselves.
+    let back = from_bytes[Node](to_bytes(tree)) else { return }
+    print(back)
+    let mb = from_bytes[map[string, int]](to_bytes(m)) else { return }
+    print(mb, mb["b"], mb["d"], mb.len)
+    let hb = from_bytes[Holder](to_bytes(h)) else { return }
+    print(hb)
+    let nb = from_bytes[map[int, list[string?]]](to_bytes(nested)) else { return }
+    print(nb)
+
+    // A read list's room is its length, so adding to it grows it.
+    var xs = from_bytes[list[int]](to_bytes(xss[0])) else { return }
+    xs.add(9)
+    print(xs)
+
+    let g = Game(ball: vec2(1.5, -2.0), vel: vec4(0, 1, 2, 3), cell: ivec4(-1, 0, 1, 2), score: 3,
+        big: f64(123456.75), alive: true, rng: Rng(seed: 258), log: [1, 2, 3], seen: {"ana": 3, "bo": 1})
+    let gb = load(to_bytes(g)) else { return }
+    print(gb)
+    print(checksum(gb) == checksum(g))
+
+    // A float's bits come back as they were: -0.0 stays -0.0, and a NaN keeps its payload (its
+    // bytes are the same when written again).
+    let neg = from_bytes[float](to_bytes(-0.0)) else { return }
+    print(1.0 / neg)
+    var nan_bytes = to_bytes(1.0)
+    nan_bytes[13] = 5
+    nan_bytes[14] = 0
+    nan_bytes[15] = 192
+    nan_bytes[16] = 127
+    let nan = from_bytes[float](nan_bytes) else { return }
+    let again = to_bytes(nan)
+    print(again[13], again[14], again[15], again[16])
+}
+// expect: true true true true true true
+// expect: true true true true true
+// expect: true
+// expect: true
+// expect: none 5 true
+// expect: true true true
+// expect: true
+// expect: true
+// expect: true
+// expect: true
+// expect: Node(id: 1, kids: [Node(id: 2, kids: []), Node(id: 3, kids: [Node(id: 4, kids: [])])])
+// expect: {"b": 2, "c": 3, "d": 4} 2 4 3
+// expect: Holder(shape: Shape.Box(w: 9, h: 8), maybe: none, names: ["ab", "c"])
+// expect: {1: [x, none], 2: []}
+// expect: [1, 2, 9]
+// expect: Game(ball: vec2(x: 1.5, y: -2), vel: vec4(x: 0, y: 1, z: 2, w: 3), cell: ivec4(x: -1, y: 0, z: 1, w: 2), score: 3, big: 123456.75, alive: true, rng: Rng(seed: 258), log: [1, 2, 3], seen: {"ana": 3, "bo": 1})
+// expect: true
+// expect: -inf
+// expect: 5 0 192 127

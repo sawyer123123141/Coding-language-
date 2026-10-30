@@ -1,0 +1,45 @@
+struct World {
+    mem: Arena
+    n: int
+}
+
+struct Fighter {
+    hp: int
+    on_hit: (int) -> int
+}
+
+interface Drawable {
+    draw(self)
+}
+
+struct Scene {
+    root: Drawable
+}
+
+look(b: list[u8], ints: list[int]) {
+    print(from_bytes[World](b))
+    print(from_bytes[Fighter](b))
+    print(from_bytes[Scene](b))
+    print(from_bytes[Arena](b))
+    print(from_bytes[(int) -> int](b))
+    print(from_bytes[int](ints))
+    print(from_bytes[int]())
+    print(from_bytes[int](b, b))
+    print(from_bytes[int, float](b))
+    print(from_bytes[Nope](b))
+    print(from_bytes[int](var b))
+}
+
+main() {}
+
+// error 20: `from_bytes` can't read a `World`, which holds an `Arena`; read the fields that hold the game's state instead
+// error 21: `from_bytes` can't read a `Fighter`, which holds a function value, whose address differs between builds; read the other fields instead
+// error 22: `from_bytes` can't read a `Scene`, which holds an interface value; read the fields that hold the game's state instead
+// error 23: `from_bytes` can't read an `Arena`; read the values that hold the game's state instead
+// error 24: `from_bytes` can't read a function value, whose address differs between builds
+// error 25: expected list[u8], found list[int]
+// error 26: `from_bytes[T](bytes)` takes one list of bytes
+// error 27: `from_bytes[T](bytes)` takes one list of bytes
+// error 28: `from_bytes[...]` takes one type, the type to read
+// error 29: unknown type `Nope`
+// error 30: `from_bytes[T](bytes)` takes one list of bytes

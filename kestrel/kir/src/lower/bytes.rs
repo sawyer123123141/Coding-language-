@@ -34,9 +34,9 @@ pub(crate) use super::bytes_fingerprint::fingerprint;
 /// The header's length: the magic, the version and the fingerprint.
 pub(crate) const HEADER: i64 = 13;
 /// The magic `KESB`, as the `int` whose little-endian bytes it is.
-const MAGIC: i64 = i32::from_le_bytes(*b"KESB") as i64;
+pub(super) const MAGIC: i64 = i32::from_le_bytes(*b"KESB") as i64;
 /// The format version.
-const VERSION: i64 = 1;
+pub(super) const VERSION: i64 = 1;
 
 // The locals of a size function: the value, the size so far and a loop index.
 const S_X: LocalIdx = LocalIdx(0);
@@ -54,7 +54,7 @@ const T_OUT: LocalIdx = LocalIdx(2);
 
 /// Whether `WriteBytes` writes a value of type `ty` whole, and how many bytes (a string's are its
 /// length's four and its own, so `None` there).
-fn word_size(ty: KTy) -> Option<i64> {
+pub(super) fn word_size(ty: KTy) -> Option<i64> {
     match ty {
         KTy::Bool | KTy::U8 => Some(1),
         KTy::I32 | KTy::F32 => Some(4),
@@ -65,26 +65,26 @@ fn word_size(ty: KTy) -> Option<i64> {
 }
 
 /// The size of every value of type `ty`, when they all have one: words, and structs of them.
-fn fixed_size(ty: KTy, t: &Tables) -> Option<i64> {
+pub(super) fn fixed_size(ty: KTy, t: &Tables) -> Option<i64> {
     match ty {
         KTy::Struct(s) => t.structs[s.0 as usize].fields.iter().map(|f| fixed_size(kty(f.ty), t)).sum(),
         _ => word_size(ty),
     }
 }
 
-fn int(n: i64, ty: KTy) -> Expr {
+pub(super) fn int(n: i64, ty: KTy) -> Expr {
     expr(ExprKind::Int(n), ty)
 }
 
-fn load(p: Place, ty: KTy) -> Expr {
+pub(super) fn load(p: Place, ty: KTy) -> Expr {
     expr(ExprKind::Load(p), ty)
 }
 
-fn local(l: LocalIdx) -> Expr {
+pub(super) fn local(l: LocalIdx) -> Expr {
     load(Place::local(l), KTy::I64)
 }
 
-fn wrapping(op: BinOp, a: Expr, b: Expr) -> Expr {
+pub(super) fn wrapping(op: BinOp, a: Expr, b: Expr) -> Expr {
     expr(ExprKind::Binary(op, Box::new(a), Box::new(b)), KTy::I64)
 }
 
@@ -104,7 +104,7 @@ fn put(op: ListOp, value: Expr, size: Expr) -> Vec<Stmt> {
 }
 
 /// A parameter's kind: an aggregate is passed by pointer.
-fn param_kind(ty: KTy) -> LocalKind {
+pub(super) fn param_kind(ty: KTy) -> LocalKind {
     if ty.is_aggregate() {
         LocalKind::RefParam
     } else {
@@ -112,12 +112,12 @@ fn param_kind(ty: KTy) -> LocalKind {
     }
 }
 
-fn number(name: &str) -> Local {
+pub(super) fn number(name: &str) -> Local {
     Local { name: name.into(), ty: KTy::I64, kind: LocalKind::Value }
 }
 
 /// A generated function's frame: pure, with no lines.
-fn helper(name: String, params: Vec<LocalIdx>, ret: KTy, locals: Vec<Local>, body: Vec<Stmt>, mutates_params: bool) -> Func {
+pub(super) fn helper(name: String, params: Vec<LocalIdx>, ret: KTy, locals: Vec<Local>, body: Vec<Stmt>, mutates_params: bool) -> Func {
     Func { name, params, ret: Some(ret), locals, body, is_pure: true, io: false, mutates_params, exported: false, lines: (0, 0), native: None }
 }
 

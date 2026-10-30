@@ -54,15 +54,19 @@ pub fn snapshot_fault(t: &Tables, ty: Ty, root: &str) -> Option<SnapshotFault> {
     Some(SnapshotFault { param: root.to_string(), path, kind })
 }
 
-/// What built-in `func` (`checksum`, `to_bytes`, `first_difference`) says when it can't take a
-/// value of type `ty`: the message, which says to `verb` ("checksum", "save", "compare") the other
-/// parts instead (with the verb "compare" it says "can't compare", not "can't take"), and a help
-/// line that says where the part it can't read is when the value is a name (`root`, written as `w`
-/// or `g.level`) and the part is inside it. `None` when it can take the value.
+/// What built-in `func` (`checksum`, `to_bytes`, `first_difference`, `from_bytes`) says when it
+/// can't take a value of type `ty`: the message, which says to `verb` ("checksum", "save",
+/// "compare", "read") the other parts instead (with the verb "compare" it says "can't compare",
+/// with "read" "can't read", not "can't take"), and a help line that says where the part it can't
+/// read is when the value is a name (`root`, written as `w` or `g.level`) and the part is inside it.
+/// `None` when it can take the value.
 pub fn snapshot_refusal(t: &Tables, ty: Ty, root: Option<&str>, func: &str, verb: &str) -> Option<(String, Option<String>)> {
     let fault = snapshot_fault(t, ty, root.unwrap_or(""))?;
     let whole = fault.path == fault.param;
-    let take = if verb == "compare" { "compare" } else { "take" };
+    let take = match verb {
+        "compare" | "read" => verb,
+        _ => "take",
+    };
     let msg = match (fault.kind, whole) {
         (FaultKind::Fn, true) => format!("`{func}` can't {take} a function value, whose address differs between builds"),
         (kind, true) => format!("`{func}` can't {take} {}; {verb} the values that hold the game's state instead", kind.holds()),

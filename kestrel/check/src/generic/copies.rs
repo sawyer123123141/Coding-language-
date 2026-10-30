@@ -224,6 +224,7 @@ impl<'a> Walk<'a> {
                     self.checksum_copy(b, arg, root, span, ctx)?;
                 }
             }
+            Some(Res::Builtin(Builtin::FromBytes)) => self.decode_copy(id, ty, span, ctx)?,
             _ => {}
         }
         Ok(())

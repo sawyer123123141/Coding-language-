@@ -150,6 +150,7 @@ impl<'a> FnLowerer<'a> {
             }
             ast::ExprKind::Index { base, index } => self.index_value(e, base, index, ty, line),
             ast::ExprKind::ArrayLit(items) => ExprKind::ArrayLit(items.iter().map(|i| self.value(i)).collect()),
+            ast::ExprKind::TypeCall { name, args, .. } if name == "from_bytes" => self.decode_call(&args[0].value, ty),
             ast::ExprKind::TypeCall { args, .. } => match ty {
                 KTy::Array(_) => ExprKind::ArrayNew(Box::new(self.expr(&args[0].value))),
                 KTy::Map(..) => ExprKind::MapNew,
@@ -224,11 +225,11 @@ impl<'a> FnLowerer<'a> {
     }
 }
 
-/// Whether `e` is a `TypeCall` of a built-in collection (`array[int](n)`, `list[T]()`,
-/// `map[K, V]()`). Every other `TypeCall` names a user generic and is lowered like the `Call` it
-/// stands for (P28).
+/// Whether `e` is a `TypeCall` of a built-in (`array[int](n)`, `list[T]()`, `map[K, V]()`,
+/// `from_bytes[T](b)`). Every other `TypeCall` names a user generic and is lowered like the `Call`
+/// it stands for (P28).
 pub(crate) fn builtin_type_call(e: &ast::Expr) -> bool {
-    matches!(&e.kind, ast::ExprKind::TypeCall { name, .. } if matches!(name.as_str(), "array" | "list" | "map"))
+    matches!(&e.kind, ast::ExprKind::TypeCall { name, .. } if matches!(name.as_str(), "array" | "list" | "map" | "from_bytes"))
 }
 
 /// The value of a numeric literal or `PI` / `TAU` (possibly negated) as float type `to`,

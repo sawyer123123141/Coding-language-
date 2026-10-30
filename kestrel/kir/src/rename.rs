@@ -137,7 +137,7 @@ pub(crate) fn rename_expr(e: &mut Expr, subst: &[Subst]) {
     match &mut e.kind {
         ExprKind::Format(parts) => rename_print(parts, subst),
         ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::Cap(p) | ExprKind::Move(p) | ExprKind::FnEnv(p) => rename_place(p, subst),
-        ExprKind::Map(_, p, xs) => {
+        ExprKind::Map(_, p, xs) | ExprKind::ReadBytes(p, xs) => {
             rename_place(p, subst);
             for x in xs {
                 rename_expr(x, subst);

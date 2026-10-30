@@ -1,0 +1,22 @@
+interface Drawable {
+    draw(self)
+}
+
+struct Dot: Drawable {
+    n: int
+
+    draw(self) { print(self.n) }
+}
+
+// A generic is judged at each copy: `load[int]` is fine, `load[Drawable]` isn't.
+pure load[T](b: list[u8]) -> list[T]? {
+    from_bytes[list[T]](b)
+}
+
+main() {
+    let b = to_bytes(1)
+    print(load[int](b))
+    print(load[Drawable](b))
+}
+
+// error 13: `from_bytes` can't read a `list[Drawable]`, which holds an interface value; read the fields that hold the game's state instead

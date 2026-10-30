@@ -152,6 +152,12 @@ pub fn walk_expr<'a>(e: &'a Expr, f: &mut impl FnMut(Node<'a>)) {
             }
             place(p, matches!(op, MapOp::Remove | MapOp::Lock | MapOp::CopyInto), f);
         }
+        ExprKind::ReadBytes(p, xs) => {
+            for x in xs {
+                walk_expr(x, f);
+            }
+            place(p, false, f);
+        }
         ExprKind::Format(parts) => print_args(parts, f),
         ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::Cap(p) | ExprKind::FnEnv(p) => place(p, false, f),
         ExprKind::Unary(_, x)

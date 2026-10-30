@@ -1,0 +1,96 @@
+// `from_bytes` on damaged bytes: every truncation of a value's bytes is `none`, and of 200 random
+// single-byte changes per value (a fixed-seed generator, so the counts below never change), each
+// is either `none` or a value whose own bytes are exactly the changed ones (the format has one
+// way to write each value). Nothing crashes.
+enum Shape {
+    Dot
+    Circle { r: float }
+    Label { text: string, size: u8 }
+}
+
+struct Item {
+    name: string
+    count: int
+    shape: Shape
+    tag: i64?
+}
+
+struct Save {
+    seed: i64
+    pos: vec2
+    alive: bool
+    items: list[Item]
+    flags: [bool]
+    names: map[string, list[u8]]
+    best: f64?
+}
+
+/// The next number from a 64-bit linear congruential generator.
+next(var s: i64) -> int {
+    s = s *% 6364136223846793005 +% 1442695040888963407
+    int((s >> 33) & 0x7FFFFFFF)
+}
+
+same_bytes(a: list[u8], b: list[u8]) -> bool {
+    if a.len != b.len { return false }
+    for i from 0 to a.len {
+        if a[i] != b[i] { return false }
+    }
+    true
+}
+
+/// Whether `b` reads as a `T`.
+reads[T](b: list[u8]) -> bool {
+    let y = from_bytes[T](b) else { return false }
+    checksum(y) == checksum(y)
+}
+
+cut(b: list[u8], n: int) -> list[u8] {
+    var out: list[u8] = []
+    for i from 0 to n { out.add(b[i]) }
+    out
+}
+
+/// Tries every truncation and 200 changes of `x`'s bytes; prints how many changes read back.
+check_all[T](x: T, var seed: i64) {
+    let b = to_bytes(x)
+    var short_ok = 0
+    for n from 0 to b.len {
+        if reads[T](cut(b, n)) { short_ok += 1 }
+    }
+    var read = 0
+    var wrong = 0
+    for k from 0 to 200 {
+        var m = cut(b, b.len)
+        let at = next(var seed) % m.len
+        m[at] = u8(next(var seed) % 256)
+        let y = from_bytes[T](m) else { continue }
+        read += 1
+        if not same_bytes(to_bytes(y), m) { wrong += 1 }
+    }
+    print(b.len, short_ok, read > 0, wrong)
+}
+
+main() {
+    var seed = i64(12345)
+    let items: list[Item] = [
+        Item(name: "sword", count: 1, shape: Shape.Dot, tag: none),
+        Item(name: "gem", count: 12, shape: Shape.Circle(r: 0.5), tag: i64(7)),
+        Item(name: "", count: -3, shape: Shape.Label(text: "hé", size: 2), tag: none),
+    ]
+    let flags: [bool] = [true, false, true]
+    let s = Save(seed: 99, pos: vec2(1, -2), alive: true, items: items, flags: flags,
+        names: {"a": [1, 2], "bb": [], "c": [3]}, best: f64(2.5))
+    check_all(s, var seed)
+    check_all(items, var seed)
+    check_all(Shape.Label(text: "abc", size: 9), var seed)
+    let words: list[string] = ["one", "two", "three"]
+    check_all(words, var seed)
+    let m = {1: "x", 2: "yy"}
+    check_all(m, var seed)
+}
+// expect: 152 0 true 0
+// expect: 84 0 true 0
+// expect: 25 0 true 0
+// expect: 40 0 true 0
+// expect: 36 0 true 0

@@ -13,6 +13,7 @@ mod enums;
 mod exclusive;
 mod expr;
 mod fnvalue;
+mod from_bytes;
 mod generic_call;
 mod generic_variants;
 mod hex;

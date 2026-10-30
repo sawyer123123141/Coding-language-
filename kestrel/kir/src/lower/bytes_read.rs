@@ -1,0 +1,319 @@
+//! `from_bytes[T](b)`: the value `to_bytes` wrote (see `bytes` and the runtime's `bytes` for the
+//! format), or `none` when the bytes are anything else. A generated function per type,
+//! `__kestrel_from_bytes_N(b: list[u8]) -> T?`, checks the 13-byte header (`KESB`, the version, the
+//! type's `fingerprint`), reads the value, and gives it when the value ends exactly where the bytes
+//! do:
+//!
+//! - `__kestrel_bytes_read_N(src: list[u8], at: i64, var out: T) -> i64` reads a `T` from byte
+//!   `at` of `src` into `out` and gives the byte after it, or -1 when the bytes are wrong. A
+//!   number is one `ReadBytes`; a bool or an optional's byte must be 0 or 1, an enum's variant
+//!   number one of its variants. A struct is its fields in order (one bounds check for a struct of
+//!   numbers); an enum's fields and an optional's payload are read into temporaries, then stored
+//!   whole. An array, list or map always goes through its own function, so types that contain
+//!   themselves through a collection work, as `to_bytes`'s do.
+//! - Every read checks that its bytes are there first. A length or count is checked, before
+//!   anything is made for it, to be at most `i32::MAX` and at most the bytes left divided by the
+//!   fewest bytes an item takes (`min_size`), so a hostile length never allocates more than a fixed
+//!   multiple of the input's size. A list is made with exactly its length as its room. A string
+//!   must be valid UTF-8 (`ReadBytes` gives the empty string otherwise). A map is built by adding
+//!   each key, and a key already there fails it.
+//!
+//! On `none`, whatever was built so far stays in the current arena until the arena is freed.
+//! Offsets never overflow: `at` stays between 0 and the input's length, which a list keeps below
+//! `i32::MAX`, so the sums are wrapping and nothing is checked.
+
+use kestrel_check::Tables;
+use kestrel_syntax::ast;
+
+use super::bytes::{fingerprint, fixed_size, helper, int, load, local, number, word_size, wrapping, HEADER, MAGIC, VERSION};
+use super::helpers::{elem_of, expr, with, Helpers};
+use super::map_helpers::key_value;
+use super::{kty, FnLowerer};
+use crate::ir::*;
+
+// The locals of a read function: the bytes, the next byte, the value read, a count and a loop
+// index; temporaries follow.
+const R_SRC: LocalIdx = LocalIdx(0);
+const R_AT: LocalIdx = LocalIdx(1);
+const R_OUT: LocalIdx = LocalIdx(2);
+const R_N: LocalIdx = LocalIdx(3);
+const R_I: LocalIdx = LocalIdx(4);
+// The locals of a `from_bytes` function: the bytes, the byte after the value, and the value.
+const F_SRC: LocalIdx = LocalIdx(0);
+const F_AT: LocalIdx = LocalIdx(1);
+const F_OUT: LocalIdx = LocalIdx(2);
+
+/// The fewest bytes a value of type `ty` takes, at least 1: what a claimed length is checked
+/// against. (An empty struct takes none but counts as 1, so a list of them is bounded too.)
+fn min_size(ty: KTy, t: &Tables) -> i64 {
+    match ty {
+        KTy::Struct(s) => t.structs[s.0 as usize].fields.iter().map(|f| min_size(kty(f.ty), t)).sum::<i64>().max(1),
+        KTy::Str | KTy::Array(_) | KTy::List(_) | KTy::Map(..) | KTy::Enum(_) => 4,
+        KTy::Optional(_) => 1,
+        _ => word_size(ty).unwrap_or_else(|| unreachable!("the checker refuses `from_bytes` of a {ty:?}")),
+    }
+}
+
+fn src() -> Place {
+    Place::local(R_SRC)
+}
+
+fn at() -> Expr {
+    local(R_AT)
+}
+
+fn len(p: &Place) -> Expr {
+    expr(ExprKind::Len(p.clone()), KTy::I64)
+}
+
+fn cmp(op: BinOp, a: Expr, b: Expr) -> Expr {
+    expr(ExprKind::Binary(op, Box::new(a), Box::new(b)), KTy::Bool)
+}
+
+/// `if cond { return -1 }`
+fn fail_if(cond: Expr) -> Stmt {
+    Stmt::If { cond, then_body: vec![Stmt::Return(Some(int(-1, KTy::I64)))], else_body: Vec::new() }
+}
+
+/// Fails unless `n` more bytes are left after `at`.
+fn need(n: Expr) -> Stmt {
+    fail_if(cmp(BinOp::Gt, n, left()))
+}
+
+/// The bytes left after `at`.
+fn left() -> Expr {
+    wrapping(BinOp::SubWrap, len(&src()), at())
+}
+
+/// The value of type `ty` at `at`.
+fn read(ty: KTy) -> Expr {
+    expr(ExprKind::ReadBytes(src(), vec![at()]), ty)
+}
+
+/// `at` moved past `n` bytes.
+fn skip(n: Expr) -> Stmt {
+    Stmt::Assign(Place::local(R_AT), wrapping(BinOp::AddWrap, at(), n))
+}
+
+/// The `u32` at `at`, widened, into the local `n`, then past it; fails unless it is at most
+/// `i32::MAX` and that many items of at least `min` bytes fit in the bytes left.
+fn count(n: LocalIdx, min: i64) -> Vec<Stmt> {
+    vec![
+        need(int(4, KTy::I64)),
+        Stmt::Let(n, expr(ExprKind::Cast(Box::new(read(KTy::I32))), KTy::I64)),
+        skip(int(4, KTy::I64)),
+        // Read as an `int`, a length past `i32::MAX` is negative.
+        fail_if(cmp(BinOp::Lt, local(n), int(0, KTy::I64))),
+        // At most `i32::MAX` items of at most a few thousand bytes: the product fits.
+        fail_if(cmp(BinOp::Gt, wrapping(BinOp::MulWrap, local(n), int(min, KTy::I64)), left())),
+    ]
+}
+
+/// The locals of the read function being built.
+struct Frame {
+    locals: Vec<Local>,
+}
+
+impl Frame {
+    /// A new temporary: in memory when it is an aggregate.
+    fn temp(&mut self, name: &str, ty: KTy) -> LocalIdx {
+        let kind = if ty.is_aggregate() { LocalKind::Addressed } else { LocalKind::Value };
+        self.locals.push(Local { name: name.into(), ty, kind });
+        LocalIdx(self.locals.len() as u32 - 1)
+    }
+}
+
+impl Helpers {
+    /// Statements that read a value of type `ty` at `at` into the place `p`, move `at` past it, and
+    /// return -1 when the bytes are wrong. `room` says the bytes are known to be there (a struct of
+    /// numbers checked whole, or an item of a list whose length was checked against its size).
+    fn read_stmts(&mut self, fr: &mut Frame, p: Place, ty: KTy, room: bool, list: KTy, t: &Tables) -> Vec<Stmt> {
+        let mut out = Vec::new();
+        match ty {
+            KTy::Bool => {
+                let byte = fr.temp("byte", KTy::U8);
+                if !room {
+                    out.push(need(int(1, KTy::I64)));
+                }
+                let b = || load(Place::local(byte), KTy::U8);
+                out.push(Stmt::Let(byte, read(KTy::U8)));
+                out.push(fail_if(cmp(BinOp::Gt, b(), int(1, KTy::U8))));
+                out.push(Stmt::Assign(p, cmp(BinOp::Ne, b(), int(0, KTy::U8))));
+                out.push(skip(int(1, KTy::I64)));
+            }
+            _ if word_size(ty).is_some() => {
+                let n = int(word_size(ty).unwrap_or(0), KTy::I64);
+                if !room {
+                    out.push(need(n.clone()));
+                }
+                out.push(Stmt::Assign(p, read(ty)));
+                out.push(skip(n));
+            }
+            KTy::Str => {
+                let n = fr.temp("len", KTy::I64);
+                out.extend(count(n, 1));
+                out.push(Stmt::Assign(p.clone(), expr(ExprKind::ReadBytes(src(), vec![at(), local(n)]), KTy::Str)));
+                // Bytes that aren't UTF-8 read as the empty string.
+                out.push(fail_if(cmp(BinOp::Ne, len(&p), local(n))));
+                out.push(skip(local(n)));
+            }
+            KTy::Struct(s) => {
+                let mut room = room;
+                if let (Some(n), false) = (fixed_size(ty, t), room) {
+                    out.push(need(int(n, KTy::I64)));
+                    room = true;
+                }
+                for (i, f) in t.structs[s.0 as usize].fields.iter().enumerate() {
+                    out.extend(self.read_stmts(fr, with(&p, Proj::Field(i as u32)), kty(f.ty), room, list, t));
+                }
+            }
+            KTy::Enum(e) => {
+                let v = fr.temp("variant", KTy::I64);
+                let variants = &t.enums[e.0 as usize].variants;
+                out.push(need(int(4, KTy::I64)));
+                out.push(Stmt::Let(v, expr(ExprKind::Cast(Box::new(read(KTy::I32))), KTy::I64)));
+                out.push(skip(int(4, KTy::I64)));
+                let below = cmp(BinOp::Lt, local(v), int(0, KTy::I64));
+                let past = cmp(BinOp::Ge, local(v), int(variants.len() as i64, KTy::I64));
+                out.push(fail_if(expr(ExprKind::Or(Box::new(below), Box::new(past)), KTy::Bool)));
+                for (n, variant) in variants.iter().enumerate() {
+                    let (mut then_body, mut fields) = (Vec::new(), Vec::new());
+                    for f in &variant.fields {
+                        let fty = kty(f.ty);
+                        let tmp = fr.temp("field", fty);
+                        then_body.extend(self.read_stmts(fr, Place::local(tmp), fty, false, list, t));
+                        fields.push(load(Place::local(tmp), fty));
+                    }
+                    then_body.push(Stmt::Assign(p.clone(), expr(ExprKind::VariantLit(e, n as u32, fields), ty)));
+                    let cond = cmp(BinOp::Eq, local(v), int(n as i64, KTy::I64));
+                    out.push(Stmt::If { cond, then_body, else_body: Vec::new() });
+                }
+            }
+            KTy::Optional(e) => {
+                let pty = kty(t.elems[e.0 as usize]);
+                let byte = fr.temp("byte", KTy::U8);
+                let b = || load(Place::local(byte), KTy::U8);
+                out.push(need(int(1, KTy::I64)));
+                out.push(Stmt::Let(byte, read(KTy::U8)));
+                out.push(skip(int(1, KTy::I64)));
+                let payload = fr.temp("payload", pty);
+                let mut some = self.read_stmts(fr, Place::local(payload), pty, false, list, t);
+                some.push(Stmt::Assign(p.clone(), expr(ExprKind::Some(Box::new(load(Place::local(payload), pty))), ty)));
+                let one = Stmt::If { cond: cmp(BinOp::Eq, b(), int(1, KTy::U8)), then_body: some, else_body: vec![fail_if(expr(ExprKind::Bool(true), KTy::Bool))] };
+                let none = vec![Stmt::Assign(p, expr(ExprKind::NoneLit, ty))];
+                out.push(Stmt::If { cond: cmp(BinOp::Eq, b(), int(0, KTy::U8)), then_body: none, else_body: vec![one] });
+            }
+            KTy::Array(_) | KTy::List(_) | KTy::Map(..) => {
+                let f = self.bytes_read_fn(ty, list, t);
+                let args = vec![Arg::Value(load(src(), list)), Arg::Value(at()), Arg::Ref(p)];
+                out.push(Stmt::Assign(Place::local(R_AT), expr(ExprKind::Call(f, args), KTy::I64)));
+                out.push(fail_if(cmp(BinOp::Lt, at(), int(0, KTy::I64))));
+            }
+            _ => unreachable!("the checker refuses `from_bytes` of a value holding a {ty:?}"),
+        }
+        out
+    }
+
+    /// `__kestrel_bytes_read_N(src: list[u8], at: i64, var out: T) -> i64`: reads a `T` from byte
+    /// `at` of `src` (of type `list`, `list[u8]`) into `out`, and gives the byte after it, or -1 when
+    /// the bytes are wrong.
+    pub(crate) fn bytes_read_fn(&mut self, ty: KTy, list: KTy, t: &Tables) -> FuncIdx {
+        if let Some(&f) = self.bytes_read.get(&ty) {
+            return f;
+        }
+        let idx = self.reserve();
+        self.bytes_read.insert(ty, idx);
+        let locals = vec![
+            Local { name: "src".into(), ty: list, kind: LocalKind::RefParam },
+            number("at"),
+            Local { name: "out".into(), ty, kind: LocalKind::RefParam },
+            number("n"),
+            number("i"),
+        ];
+        let mut fr = Frame { locals };
+        let out = Place::local(R_OUT);
+        let n = || local(R_N);
+        let mut body = Vec::new();
+        match ty {
+            KTy::Array(_) | KTy::List(_) => {
+                let elem = elem_of(ty, t);
+                body.extend(count(R_N, min_size(elem, t)));
+                if matches!(ty, KTy::List(_)) {
+                    body.push(Stmt::Assign(out.clone(), expr(ExprKind::ListNew, ty)));
+                    body.push(Stmt::List(ListOp::Reserve, out.clone(), vec![n()]));
+                    // The room is exactly `n`, and every item is written before anything reads it.
+                    body.push(Stmt::SetLen(out.clone(), n()));
+                } else {
+                    body.push(Stmt::Assign(out.clone(), expr(ExprKind::ArrayNew(Box::new(n())), ty)));
+                }
+                // The loop never changes the list's length, so `i` stays below it. Items of a fixed
+                // size are all there: the length was checked against it.
+                let item = with(&out, Proj::Index { at: local(R_I), check: IndexCheck::Known });
+                let each = self.read_stmts(&mut fr, item, elem, fixed_size(elem, t).is_some(), list, t);
+                body.push(Stmt::ForRange { var: R_I, start: int(0, KTy::I64), end: n(), body: each });
+            }
+            KTy::Map(..) => {
+                let (k, v) = key_value(ty, t);
+                body.extend(count(R_N, min_size(k, t) + min_size(v, t)));
+                body.push(Stmt::Assign(out.clone(), expr(ExprKind::MapNew, ty)));
+                let (key, value, before) = (fr.temp("key", k), fr.temp("value", v), fr.temp("before", KTy::I64));
+                let mut each = self.read_stmts(&mut fr, Place::local(key), k, false, list, t);
+                each.extend(self.read_stmts(&mut fr, Place::local(value), v, false, list, t));
+                each.push(Stmt::Let(before, len(&out)));
+                each.push(Stmt::MapSet(out.clone(), load(Place::local(key), k), load(Place::local(value), v), false));
+                // A key already there replaced its value instead of adding an entry.
+                each.push(fail_if(cmp(BinOp::Eq, len(&out), local(before))));
+                body.push(Stmt::ForRange { var: R_I, start: int(0, KTy::I64), end: n(), body: each });
+            }
+            _ => body.extend(self.read_stmts(&mut fr, out, ty, false, list, t)),
+        }
+        body.push(Stmt::Return(Some(at())));
+        let name = format!("__kestrel_bytes_read_{}", idx.0);
+        self.funcs[(idx.0 - self.base) as usize] = helper(name, vec![R_SRC, R_AT, R_OUT], KTy::I64, fr.locals, body, true);
+        idx
+    }
+
+    /// `__kestrel_from_bytes_N(src: list[u8]) -> T?`: the `T` that `src` (of type `list`) holds
+    /// with its header, or `none`; `ret` is the `T?`.
+    pub(crate) fn decode_fn(&mut self, ty: KTy, list: KTy, ret: KTy, t: &Tables) -> FuncIdx {
+        if let Some(&f) = self.from_bytes.get(&ty) {
+            return f;
+        }
+        let idx = self.reserve();
+        self.from_bytes.insert(ty, idx);
+        let read_fn = self.bytes_read_fn(ty, list, t);
+        let src = Place::local(F_SRC);
+        let none = |cond: Expr| Stmt::If { cond, then_body: vec![Stmt::Return(Some(expr(ExprKind::NoneLit, ret)))], else_body: Vec::new() };
+        let header = |at: i64, ty: KTy| expr(ExprKind::ReadBytes(src.clone(), vec![int(at, KTy::I64)]), ty);
+        let args = vec![Arg::Value(load(src.clone(), list)), Arg::Value(int(HEADER, KTy::I64)), Arg::Ref(Place::local(F_OUT))];
+        let body = vec![
+            none(cmp(BinOp::Lt, len(&src), int(HEADER, KTy::I64))),
+            none(cmp(BinOp::Ne, header(0, KTy::I32), int(MAGIC, KTy::I32))),
+            none(cmp(BinOp::Ne, header(4, KTy::U8), int(VERSION, KTy::U8))),
+            none(cmp(BinOp::Ne, header(5, KTy::I64), int(fingerprint(ty, t), KTy::I64))),
+            Stmt::Let(F_AT, expr(ExprKind::Call(read_fn, args), KTy::I64)),
+            // -1 or short of the end: wrong bytes, or bytes after the value.
+            none(cmp(BinOp::Ne, local(F_AT), len(&src))),
+            Stmt::Return(Some(expr(ExprKind::Some(Box::new(load(Place::local(F_OUT), ty))), ret))),
+        ];
+        let locals = vec![
+            Local { name: "src".into(), ty: list, kind: LocalKind::RefParam },
+            number("at"),
+            Local { name: "out".into(), ty, kind: LocalKind::Addressed },
+        ];
+        self.funcs[(idx.0 - self.base) as usize] = helper(format!("__kestrel_from_bytes_{}", idx.0), vec![F_SRC], ret, locals, body, false);
+        idx
+    }
+}
+
+impl FnLowerer<'_> {
+    /// `from_bytes[T](b)`, whose result has type `ret` (`T?`): a call to the type's `from_bytes`
+    /// function.
+    pub(crate) fn decode_call(&mut self, arg: &ast::Expr, ret: KTy) -> ExprKind {
+        let KTy::Optional(e) = ret else { unreachable!("`from_bytes` gives an optional") };
+        let ty = kty(self.t.elems[e.0 as usize]);
+        let list = kty(self.ty(arg.id));
+        let b = self.expr(arg);
+        ExprKind::Call(self.helpers.decode_fn(ty, list, ret, self.t), vec![Arg::Value(b)])
+    }
+}

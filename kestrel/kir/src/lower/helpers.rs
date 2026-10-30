@@ -66,6 +66,10 @@ pub(crate) struct Helpers {
     /// `difference`).
     pub(super) difference: HashMap<KTy, FuncIdx>,
     pub(super) first_difference: HashMap<KTy, FuncIdx>,
+    /// The `from_bytes` function of each type, and the read function of each type it reads (see
+    /// `bytes_read`).
+    pub(super) from_bytes: HashMap<KTy, FuncIdx>,
+    pub(super) bytes_read: HashMap<KTy, FuncIdx>,
     /// The storage-reusing assignment of each type assigned that way (see `assign_into`).
     pub(super) assign: HashMap<KTy, FuncIdx>,
     /// The locals of the assign helper being built (see `assign_into`), which its copies add
@@ -120,6 +124,8 @@ impl Helpers {
             bytes_write: HashMap::new(),
             difference: HashMap::new(),
             first_difference: HashMap::new(),
+            from_bytes: HashMap::new(),
+            bytes_read: HashMap::new(),
             assign: HashMap::new(),
             assign_locals: Vec::new(),
             drop,

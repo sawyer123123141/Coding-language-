@@ -83,12 +83,19 @@ impl Walk<'_> {
                 self.place_walk(p);
                 let at = self.place(p);
                 self.alloc(key.line, Some(format!("setting a key of {at} may grow the map")), format!("sets a key of {at}"), " and may grow the map");
-                // A new key while looping over the map is a logic failure; too many keys is running
-                // out of resources. The report prints them together.
-                let logic = format!("setting a key of {at} fails if it adds a new key while looping over the map");
-                self.fail_part(key.line, Some(logic), format!("sets a key of {at}"), " and fails if it adds a new key while looping over it", Part::Logic);
-                let direct = format!("setting a key of {at} fails if it adds a new key while looping over the map, or if the map would hold more than 2,147,483,647 keys");
-                let tail = " and fails if it adds a new key while looping over it, or if the map would hold more than 2,147,483,647 keys";
+                // `from_bytes` adds keys only to the map it has just made, which nothing loops over.
+                let fresh = self.builtin_of(p.root) == Some("from_bytes");
+                let (direct, tail) = if fresh {
+                    let tail = " and fails if the map would hold more than 2,147,483,647 keys";
+                    (format!("setting a key of {at} fails if the map would hold more than 2,147,483,647 keys"), tail)
+                } else {
+                    // A new key while looping over the map is a logic failure; too many keys is
+                    // running out of resources. The report prints them together.
+                    let logic = format!("setting a key of {at} fails if it adds a new key while looping over the map");
+                    self.fail_part(key.line, Some(logic), format!("sets a key of {at}"), " and fails if it adds a new key while looping over it", Part::Logic);
+                    let tail = " and fails if it adds a new key while looping over it, or if the map would hold more than 2,147,483,647 keys";
+                    (format!("setting a key of {at} fails if it adds a new key while looping over the map, or if the map would hold more than 2,147,483,647 keys"), tail)
+                };
                 self.fail_part(key.line, Some(direct), format!("sets a key of {at}"), tail, Part::Resource);
             }
             Stmt::Trap => {
@@ -174,9 +181,11 @@ impl Walk<'_> {
                 }
             }
             ListOp::Reserve => {
-                // Only `to_bytes` reserves room (see `lower::bytes`): for the list it gives.
+                // Only `to_bytes` and `from_bytes` reserve room (see `lower::bytes` and
+                // `lower::bytes_read`): for the lists they make.
                 let (direct, via, fails) = match self.builtin_of(p.root) {
                     Some("to_bytes") => ("`to_bytes` allocates its result", "saves a value with `to_bytes`", "`to_bytes`"),
+                    Some("from_bytes") => ("`from_bytes` makes the lists it reads", "makes the lists it reads", "`from_bytes`"),
                     _ => ("making room in the list allocates", "makes room in a list", "making room in the list"),
                 };
                 self.alloc(line, Some(direct.to_string()), via.to_string(), " and allocates its result");

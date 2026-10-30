@@ -58,7 +58,7 @@ impl Cx<'_> {
                 self.place(st, p, sure);
                 any
             }
-            ExprKind::Map(_, p, xs) => {
+            ExprKind::Map(_, p, xs) | ExprKind::ReadBytes(p, xs) => {
                 self.all(st, xs, sure);
                 self.place(st, p, sure);
                 any

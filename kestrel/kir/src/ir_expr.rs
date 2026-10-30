@@ -34,6 +34,13 @@ pub enum ExprKind {
     Map(MapOp, Place, Vec<Expr>),
     /// The length (i64) of the array or list at a place; of a string, its bytes.
     Len(Place),
+    /// What `from_bytes` reads (see `lower::bytes_read`) from the `list[u8]` at a place, from byte
+    /// `args[0]` (an `i64`), little-endian and unaligned: a value of this expression's type, a `u8`
+    /// one byte, a number its width (a float its raw bits, NaN payload kept), a `vec4` or `ivec4`
+    /// its lanes in order. Nothing is checked: the caller has checked that the bytes are there. A
+    /// string (`[at, n]`, `n` an `i64`) is the `n` bytes from `at` as a new string in the current
+    /// arena when they are valid UTF-8, and the empty string when they aren't.
+    ReadBytes(Place, Vec<Expr>),
     /// The room (i64) of the array or list at a place: a list's capacity, an array's length. Only an
     /// assign helper reads it (see `Helpers::assign_fn`), to decide whether the source fits.
     Cap(Place),

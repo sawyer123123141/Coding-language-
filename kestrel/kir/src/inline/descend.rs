@@ -116,7 +116,7 @@ impl Inliner<'_> {
             }
             ExprKind::Format(parts) => self.print(parts),
             ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::Cap(p) | ExprKind::Move(p) | ExprKind::FnEnv(p) => self.place(p),
-            ExprKind::Map(_, p, xs) => {
+            ExprKind::Map(_, p, xs) | ExprKind::ReadBytes(p, xs) => {
                 self.place(p);
                 for x in xs {
                     self.expr(x);

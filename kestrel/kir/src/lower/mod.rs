@@ -4,6 +4,7 @@ mod assume;
 mod builtins;
 mod bytes;
 mod bytes_fingerprint;
+mod bytes_read;
 mod call;
 mod checksum;
 mod closure;

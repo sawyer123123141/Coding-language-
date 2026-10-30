@@ -226,6 +226,18 @@ pub(super) fn write_expr(m: &Module, f: &Func, e: &Expr, s: &mut String) {
             write_place(m, f, p, p.path.len(), s);
             s.push_str(".len");
         }
+        // (Only `from_bytes` reads bytes this way; the language has no name for it.)
+        ExprKind::ReadBytes(p, xs) => {
+            write_place(m, f, p, p.path.len(), s);
+            s.push_str(".read(");
+            for (i, x) in xs.iter().enumerate() {
+                if i > 0 {
+                    s.push_str(", ");
+                }
+                write_expr(m, f, x, s);
+            }
+            s.push(')');
+        }
         // (Only an assign helper reads a capacity; the language has no name for it.)
         ExprKind::Cap(p) => {
             write_place(m, f, p, p.path.len(), s);

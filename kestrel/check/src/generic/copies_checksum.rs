@@ -1,6 +1,6 @@
-//! `checksum(x)`, `to_bytes(x)` and `first_difference(a, b)` in each copy of a generic (see
-//! `copies`): the checker judges a placeholder's value as having no fault (see `snapshot`), so each
-//! copy judges its argument with its own types.
+//! `checksum(x)`, `to_bytes(x)`, `first_difference(a, b)` and `from_bytes[T](b)` in each copy of a
+//! generic (see `copies`): the checker judges a placeholder's value as having no fault (see
+//! `snapshot`), so each copy judges its argument, or the type it reads, with its own types.
 
 use kestrel_syntax::ast::{Expr, ExprId, ExprKind};
 use kestrel_syntax::{Diagnostic, Span};
@@ -9,6 +9,7 @@ use crate::body::{checksum_root, snapshot_verb};
 use crate::builtins::Builtin;
 use crate::generic::copies::{Ctx, Walk};
 use crate::snapshot::snapshot_refusal;
+use crate::ty::Ty;
 
 /// A `checksum(x)` or `to_bytes(x)` call's argument and how it is written (see
 /// `body::checksum_root`).
@@ -35,6 +36,21 @@ impl Walk<'_> {
             return Ok(());
         }
         let ty = self.sub(written, ctx)?;
+        self.refuse_in_copy(ty, root, b, span, ctx)
+    }
+
+    /// `from_bytes[T](b)`, the expression `id` whose type in this copy is `ty` (a `T?`): the type
+    /// it reads with the copy's types in it can be read.
+    pub(super) fn decode_copy(&mut self, id: ExprId, ty: Ty, span: Span, ctx: Ctx) -> Result<(), Diagnostic> {
+        if ctx.subst.is_none() || self.t.is_concrete(self.t.ty(id)) {
+            return Ok(());
+        }
+        let Ty::Optional(read) = ty else { return Ok(()) };
+        self.refuse_in_copy(self.t.elem(read), None, Builtin::FromBytes, span, ctx)
+    }
+
+    /// The error when built-in `b` can't take (or read) a `ty` in this copy, when it can't.
+    fn refuse_in_copy(&mut self, ty: Ty, root: Option<String>, b: Builtin, span: Span, ctx: Ctx) -> Result<(), Diagnostic> {
         let Some((msg, part)) = snapshot_refusal(self.t, ty, root.as_deref(), b.name(), snapshot_verb(b)) else { return Ok(()) };
         let copy = ctx.made_by.map(|f| format!("in the copy `{}`", self.t.func(f).name));
         let help = match (copy, part) {

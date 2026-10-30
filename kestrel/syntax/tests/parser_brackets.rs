@@ -162,3 +162,14 @@ fn types_after_a_field_of_a_value_name_the_field() {
     let msgs: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
     assert_eq!(msgs, ["`[...]` after `items` indexes it, but `int, string` isn't a value; types go after a generic type or function"]);
 }
+
+#[test]
+fn from_bytes_takes_types_in_its_brackets() {
+    // Like `list[int]()`: the brackets hold types whatever they look like, with no item named so.
+    assert_eq!(settled("from_bytes[Game](b)"), "{(make from_bytes[Game] b)}");
+    assert_eq!(settled("from_bytes[list[int]](b)"), "{(make from_bytes[list[int]] b)}");
+    assert_eq!(settled("from_bytes[(int) -> int](b)"), "{(make from_bytes[(int) -> int] b)}");
+    let (_, diags) = parse("main() {\n    let g = from_bytes[Game]\n}\n");
+    let msgs: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    assert_eq!(msgs, ["expected `(` with the bytes to read, like `from_bytes[Game](bytes)`"]);
+}

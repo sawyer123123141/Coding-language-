@@ -16,9 +16,9 @@ use crate::tables::{EnumId, FnId, Res};
 use crate::ty::Ty;
 
 /// Whether `e` is a `TypeCall` of a user name (`best[int](xs)`, `Stack[int]()`), not `array`,
-/// `list` or `map`. It is handled like the `Call` it stands for (P28).
+/// `list`, `map` or `from_bytes`. It is handled like the `Call` it stands for (P28).
 pub(crate) fn user_type_call(e: &Expr) -> bool {
-    matches!(&e.kind, ExprKind::TypeCall { name, .. } if !matches!(name.as_str(), "array" | "list" | "map"))
+    matches!(&e.kind, ExprKind::TypeCall { name, .. } if !matches!(name.as_str(), "array" | "list" | "map" | "from_bytes"))
 }
 
 impl<'a> BodyChecker<'a> {

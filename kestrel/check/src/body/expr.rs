@@ -171,6 +171,8 @@ impl<'a> BodyChecker<'a> {
         }
         if self.param_named(name).is_some() {
             self.error(e.span, format!("`{name}` is a type, not a value"));
+        } else if name == "from_bytes" {
+            self.error(e.span, super::from_bytes::NEEDS_TYPE);
         } else if name == "print" || Builtin::global(name).is_some() {
             let msg = format!("`{name}` is built in; wrap it: `{}`", builtin_wrapper(name));
             self.error(e.span, msg);

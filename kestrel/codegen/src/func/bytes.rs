@@ -1,15 +1,17 @@
 //! The list operations behind `to_bytes` (`kir::lower::bytes`): giving its `list[u8]` exactly the
 //! room it needs (`ListOp::Reserve`), and writing a value's bytes into it at a byte index
 //! (`ListOp::WriteBytes`, `ListOp::WriteCount`). The writes are unaligned little-endian stores into
-//! the list's buffer, never checked: the list's length already covers them.
+//! the list's buffer, never checked: the list's length already covers them. And the reads behind
+//! `from_bytes` (`kir::lower::bytes_read`, `ExprKind::ReadBytes`): unaligned little-endian loads,
+//! never checked either (the read walk checks the length first), and a string made from bytes.
 
 use cranelift_codegen::ir::{types, Endianness, InstBuilder, MemFlagsData, Value};
 use cranelift_module::Module;
 use kestrel_kir::{self as kir, KTy, ListOp, Place};
 
-use super::FuncLowerer;
+use super::{cl_type, FuncLowerer};
 
-/// The flags of a store into a byte buffer: any alignment, little-endian.
+/// The flags of a load from or store into a byte buffer: any alignment, little-endian.
 fn byte_flags() -> MemFlagsData {
     MemFlagsData::new().with_notrap().with_endianness(Endianness::Little)
 }
@@ -49,6 +51,24 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             }
             other => unreachable!("{other:?} isn't a `to_bytes` operation"),
         }
+        Ok(())
+    }
+
+    /// `ReadBytes` of a number or vector (`ty`) from the `list[u8]` at `list`. The index is
+    /// evaluated first, then the place is found.
+    pub(crate) fn read_bytes(&mut self, list: &Place, args: &[kir::Expr], ty: KTy) -> Result<Value, String> {
+        let at = self.expr(&args[0])?;
+        let src = self.byte_at(list, at)?;
+        Ok(self.b.ins().load(cl_type(ty), byte_flags(), src, 0))
+    }
+
+    /// `ReadBytes` of a string from the `list[u8]` at `list`, written at `dest`: the empty string
+    /// when the bytes aren't UTF-8.
+    pub(crate) fn read_str_into(&mut self, list: &Place, args: &[kir::Expr], dest: Value) -> Result<(), String> {
+        let at = self.expr(&args[0])?;
+        let n = self.expr(&args[1])?;
+        let src = self.byte_at(list, at)?;
+        self.call_id(self.shared.rt.bytes_read_str, &[src, n, dest]);
         Ok(())
     }
 

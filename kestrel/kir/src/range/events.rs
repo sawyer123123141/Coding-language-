@@ -300,6 +300,15 @@ impl Walk<'_> {
                 }
                 self.place_walk(p);
             }
+            ExprKind::ReadBytes(p, xs) => {
+                for x in xs {
+                    self.expr(x);
+                }
+                self.place_walk(p);
+                if e.ty == KTy::Str {
+                    self.alloc(line, Some("`from_bytes` makes the strings it reads".to_string()), "makes the strings it reads".to_string(), "");
+                }
+            }
             ExprKind::Len(p) | ExprKind::Cap(p) | ExprKind::Tag(p) | ExprKind::FnEnv(p) | ExprKind::Load(p) | ExprKind::Move(p) => self.place_walk(p),
             ExprKind::Str(op, xs) => {
                 for x in xs {

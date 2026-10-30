@@ -1,7 +1,8 @@
-//! The byte format of `to_bytes` (the I/O round's spec, decision 2). Compiled code writes the
-//! bytes itself, field by field, into one `list[u8]` it sizes first; it comes here to give that
-//! list its room and to copy a string's bytes in. `encode` is a reference encoder in Rust over
-//! `RefValue`, for tests and tools.
+//! The byte format of `to_bytes` and `from_bytes` (the I/O round's spec, decision 2). Compiled code
+//! writes the bytes itself, field by field, into one `list[u8]` it sizes first, and reads them back
+//! field by field; it comes here to give that list its room, to copy a string's bytes in, and to
+//! make a string of bytes it reads. `encode` and `decode` are a reference encoder and decoder in
+//! Rust over `RefValue` and `RefTy`, for tests and tools.
 //!
 //! The format, little-endian throughout and with no padding: a header of the 4 bytes `KESB`
 //! (`MAGIC`), the format version (`VERSION`) and the type's fingerprint as an `i64` (the
@@ -15,6 +16,7 @@
 
 use crate::arena::{list_too_long, List, MAX_ITEMS};
 use crate::checksum::{finish, mix_bytes, START};
+use crate::string::KStr;
 
 /// The first four bytes of every value `to_bytes` writes.
 pub const MAGIC: [u8; 4] = *b"KESB";
@@ -82,6 +84,22 @@ pub unsafe extern "C" fn kestrel_rt_bytes_write_str(dst: *mut u8, ptr: *const u8
     }
 }
 
+/// Reads the `len` bytes at `src` as a new string in the current arena, written at `out`, and
+/// gives 1; gives 0, with the empty string at `out`, when they aren't valid UTF-8. (Compiled code
+/// has checked that the bytes are there.)
+///
+/// # Safety
+/// `src` must be valid for reading `len` bytes unless `len` is 0, and `out` for writing 16 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kestrel_rt_bytes_read_str(src: *const u8, len: i64, out: *mut KStr) -> i8 {
+    // SAFETY: the caller guarantees `src` for `len` bytes.
+    let bytes = unsafe { KStr::bytes(src, len) };
+    let ok = std::str::from_utf8(bytes).is_ok();
+    // SAFETY: the caller guarantees `out`.
+    unsafe { KStr::make(if ok { bytes } else { &[] }, out) };
+    i8::from(ok)
+}
+
 /// A value for the reference encoder: the shape the byte format sees. A vector is a `Struct` of
 /// its lanes; an array is a `List`.
 #[derive(Clone, Debug, PartialEq)]
@@ -147,6 +165,110 @@ pub fn write_value(value: &RefValue, out: &mut Vec<u8>) {
         }
         RefValue::Struct(fields) => fields.iter().for_each(|v| write_value(v, out)),
     }
+}
+
+/// A type for the reference decoder: the shape the byte format sees, as `RefValue` is a value's. A
+/// vector is a `Struct` of its lanes; an array is a `List`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum RefTy {
+    Bool,
+    U8,
+    Int,
+    I64,
+    Float,
+    F64,
+    Str,
+    List(Box<RefTy>),
+    Map(Box<RefTy>, Box<RefTy>),
+    Opt(Box<RefTy>),
+    /// Each variant's fields.
+    Enum(Vec<Vec<RefTy>>),
+    Struct(Vec<RefTy>),
+}
+
+impl RefTy {
+    /// The fewest bytes a value of this type takes, at least 1: the bound a length is checked
+    /// against before anything is made for it.
+    pub fn min_size(&self) -> usize {
+        match self {
+            RefTy::Bool | RefTy::U8 | RefTy::Opt(_) => 1,
+            RefTy::Int | RefTy::Float | RefTy::Str | RefTy::List(_) | RefTy::Map(..) | RefTy::Enum(_) => 4,
+            RefTy::I64 | RefTy::F64 => 8,
+            RefTy::Struct(fields) => fields.iter().map(RefTy::min_size).sum::<usize>().max(1),
+        }
+    }
+}
+
+/// The value `bytes` hold, of type `ty` whose fingerprint is `fingerprint`, as `from_bytes` reads
+/// it: `None` for a wrong magic, version or fingerprint, bytes that end early or go on after the
+/// value, a bool or optional byte that isn't 0 or 1, a variant number past the enum, a string that
+/// isn't UTF-8, a length past `i32::MAX` or past what the bytes left can hold, or a map key twice.
+pub fn decode(bytes: &[u8], ty: &RefTy, fingerprint: i64) -> Option<RefValue> {
+    let header = bytes.get(..HEADER)?;
+    if header[..4] != MAGIC || header[4] != VERSION || header[5..] != fingerprint.to_le_bytes() {
+        return None;
+    }
+    let mut at = HEADER;
+    let value = read_value(bytes, &mut at, ty)?;
+    (at == bytes.len()).then_some(value)
+}
+
+/// The value of type `ty` at byte `*at` of `bytes`, moving `*at` past it; `None` as for `decode`.
+pub fn read_value(bytes: &[u8], at: &mut usize, ty: &RefTy) -> Option<RefValue> {
+    fn take<const N: usize>(bytes: &[u8], at: &mut usize) -> Option<[u8; N]> {
+        let word = bytes.get(*at..at.checked_add(N)?)?;
+        *at += N;
+        word.try_into().ok()
+    }
+    // A length or count: at most `i32::MAX`, and no more items than the bytes left can hold.
+    let count = |at: &mut usize, item: usize| -> Option<usize> {
+        let n = u32::from_le_bytes(take(bytes, at)?) as usize;
+        (n <= i32::MAX as usize && n.checked_mul(item)? <= bytes.len() - *at).then_some(n)
+    };
+    Some(match ty {
+        RefTy::Bool => match take::<1>(bytes, at)?[0] {
+            b @ (0 | 1) => RefValue::Bool(b == 1),
+            _ => return None,
+        },
+        RefTy::U8 => RefValue::U8(take::<1>(bytes, at)?[0]),
+        RefTy::Int => RefValue::Int(i32::from_le_bytes(take(bytes, at)?)),
+        RefTy::I64 => RefValue::I64(i64::from_le_bytes(take(bytes, at)?)),
+        RefTy::Float => RefValue::Float(f32::from_bits(u32::from_le_bytes(take(bytes, at)?))),
+        RefTy::F64 => RefValue::F64(f64::from_bits(u64::from_le_bytes(take(bytes, at)?))),
+        RefTy::Str => {
+            let n = count(at, 1)?;
+            let text = std::str::from_utf8(&bytes[*at..*at + n]).ok()?;
+            *at += n;
+            RefValue::Str(text.to_string())
+        }
+        RefTy::List(item) => {
+            let n = count(at, item.min_size())?;
+            RefValue::List((0..n).map(|_| read_value(bytes, at, item)).collect::<Option<_>>()?)
+        }
+        RefTy::Map(k, v) => {
+            let n = count(at, k.min_size() + v.min_size())?;
+            let mut entries: Vec<(RefValue, RefValue)> = Vec::with_capacity(n);
+            for _ in 0..n {
+                let key = read_value(bytes, at, k)?;
+                if entries.iter().any(|(e, _)| *e == key) {
+                    return None;
+                }
+                entries.push((key, read_value(bytes, at, v)?));
+            }
+            RefValue::Map(entries)
+        }
+        RefTy::Opt(inner) => match take::<1>(bytes, at)?[0] {
+            0 => RefValue::Opt(None),
+            1 => RefValue::Opt(Some(Box::new(read_value(bytes, at, inner)?))),
+            _ => return None,
+        },
+        RefTy::Enum(variants) => {
+            let v = u32::from_le_bytes(take(bytes, at)?);
+            let fields = variants.get(v as usize)?;
+            RefValue::Enum(v, fields.iter().map(|f| read_value(bytes, at, f)).collect::<Option<_>>()?)
+        }
+        RefTy::Struct(fields) => RefValue::Struct(fields.iter().map(|f| read_value(bytes, at, f)).collect::<Option<_>>()?),
+    })
 }
 
 #[cfg(test)]

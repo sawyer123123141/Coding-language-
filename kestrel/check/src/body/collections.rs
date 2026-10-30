@@ -89,9 +89,12 @@ impl<'a> BodyChecker<'a> {
         }
     }
 
-    /// `array[T](n)` (zero-filled) and `list[T]()` (empty).
+    /// `array[T](n)` (zero-filled), `list[T]()` (empty), `map[K, V]()` and `from_bytes[T](b)`.
     pub(crate) fn check_type_call(&mut self, e: &Expr) -> Ty {
         let ExprKind::TypeCall { name, name_span, type_args, args } = &e.kind else { unreachable!("not a type call") };
+        if name == "from_bytes" {
+            return self.check_from_bytes(e, *name_span, type_args, args);
+        }
         if !matches!(name.as_str(), "array" | "list" | "map") {
             // A user name with its types written (`best[int](xs)`, `Stack[int]()`).
             return self.check_user_type_call(e);

@@ -39,6 +39,7 @@ pub(crate) fn snapshot_verb(b: Builtin) -> &'static str {
     match b {
         Builtin::Checksum => "checksum",
         Builtin::FirstDifference => "compare",
+        Builtin::FromBytes => "read",
         _ => "save",
     }
 }
@@ -99,7 +100,7 @@ impl<'a> BodyChecker<'a> {
             },
             Builtin::FirstDifference => self.check_first_difference(e, args),
             Builtin::FromBytes => {
-                self.error(e.span, "`from_bytes` needs the type to read, like `from_bytes[Game](bytes)`");
+                self.error(e.span, super::from_bytes::NEEDS_TYPE);
                 self.check_loose_args(args);
                 Ty::Error
             }

@@ -100,7 +100,7 @@ pub fn walk_expr<V: VisitMut + ?Sized>(v: &mut V, e: &mut Expr) {
     match &mut e.kind {
         ExprKind::Format(parts) => walk_print(v, parts),
         ExprKind::Load(p) | ExprKind::Tag(p) | ExprKind::Len(p) | ExprKind::Cap(p) | ExprKind::Move(p) | ExprKind::FnEnv(p) => v.visit_place(p),
-        ExprKind::Map(_, p, xs) => {
+        ExprKind::Map(_, p, xs) | ExprKind::ReadBytes(p, xs) => {
             for x in xs {
                 v.visit_expr(x);
             }

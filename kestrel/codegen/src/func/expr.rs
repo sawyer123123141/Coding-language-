@@ -21,6 +21,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
             ExprKind::Load(p) => self.load_place(p)?,
             ExprKind::Len(p) => self.len(p)?,
             ExprKind::Cap(p) => self.cap(p)?,
+            ExprKind::ReadBytes(p, args) => self.read_bytes(p, args, e.ty)?,
             ExprKind::Map(op, p, args) => self.map_op(*op, p, args)?,
             ExprKind::Str(op, args) => self.str_scalar(*op, args)?,
             ExprKind::FieldOf(base, i) => {

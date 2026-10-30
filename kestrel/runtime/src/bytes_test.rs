@@ -87,3 +87,184 @@ fn a_string_is_written_as_its_length_then_its_bytes() {
     unsafe { kestrel_rt_bytes_write_str(buf.as_mut_ptr(), std::ptr::null(), 0) };
     assert_eq!(&buf[..5], &[0, 0, 0, 0, 0]);
 }
+
+fn list(ty: RefTy) -> RefTy {
+    RefTy::List(Box::new(ty))
+}
+
+fn opt(ty: RefTy) -> RefTy {
+    RefTy::Opt(Box::new(ty))
+}
+
+/// `value` written and read back as a `ty`.
+fn round_trip(value: &RefValue, ty: &RefTy) -> Option<RefValue> {
+    decode(&encode(value, 77), ty, 77)
+}
+
+#[test]
+fn decode_reads_back_what_encode_wrote() {
+    let shape = RefTy::Enum(vec![vec![], vec![RefTy::Float], vec![RefTy::U8, RefTy::U8]]);
+    let cases: Vec<(RefValue, RefTy)> = vec![
+        (RefValue::Bool(true), RefTy::Bool),
+        (RefValue::U8(200), RefTy::U8),
+        (RefValue::Int(-2), RefTy::Int),
+        (RefValue::I64(i64::MIN), RefTy::I64),
+        (RefValue::Float(f32::from_bits(0x7FC0_0001)), RefTy::Float),
+        (RefValue::F64(-0.0), RefTy::F64),
+        (s("h\u{e9}"), RefTy::Str),
+        (RefValue::List(vec![RefValue::U8(1), RefValue::U8(2)]), list(RefTy::U8)),
+        (RefValue::Map(vec![(s("b"), RefValue::Int(1)), (s("a"), RefValue::Int(2))]), RefTy::Map(Box::new(RefTy::Str), Box::new(RefTy::Int))),
+        (RefValue::Opt(None), opt(RefTy::Int)),
+        (RefValue::Opt(Some(Box::new(s("x")))), opt(RefTy::Str)),
+        (RefValue::Enum(2, vec![RefValue::U8(3), RefValue::U8(4)]), shape.clone()),
+        (RefValue::List(vec![RefValue::Enum(0, vec![]), RefValue::Enum(1, vec![RefValue::Float(1.5)])]), list(shape)),
+        (RefValue::Struct(vec![RefValue::Bool(false), RefValue::List(vec![])]), RefTy::Struct(vec![RefTy::Bool, list(RefTy::Str)])),
+    ];
+    for (value, ty) in cases {
+        let back = round_trip(&value, &ty).unwrap_or_else(|| panic!("{value:?} didn't read back"));
+        assert_eq!(encode(&back, 77), encode(&value, 77), "{value:?}");
+    }
+}
+
+#[test]
+fn decode_refuses_every_wrong_input() {
+    let good = encode(&RefValue::Int(7), 77);
+    assert!(decode(&good, &RefTy::Int, 77).is_some());
+    // The header: the magic, the version, the fingerprint.
+    for (at, byte) in [(0, b'X'), (4, 2), (5, 76)] {
+        let mut bad = good.clone();
+        bad[at] = byte;
+        assert_eq!(decode(&bad, &RefTy::Int, 77), None, "byte {at}");
+    }
+    assert_eq!(decode(&good, &RefTy::Int, 78), None);
+    // Every truncation, and one byte too many.
+    for n in 0..good.len() {
+        assert_eq!(decode(&good[..n], &RefTy::Int, 77), None);
+    }
+    let mut long = good.clone();
+    long.push(0);
+    assert_eq!(decode(&long, &RefTy::Int, 77), None);
+    // A bool or optional byte of 2, a variant past the enum.
+    let body = |b: &[u8]| [&good[..13], b].concat();
+    assert_eq!(decode(&body(&[2]), &RefTy::Bool, 77), None);
+    assert_eq!(decode(&body(&[2, 1, 0, 0, 0]), &opt(RefTy::Int), 77), None);
+    assert_eq!(decode(&body(&[2, 0, 0, 0]), &RefTy::Enum(vec![vec![], vec![]]), 77), None);
+    // A string that isn't UTF-8 (a lone 0xFF, an encoded surrogate).
+    assert_eq!(decode(&body(&[1, 0, 0, 0, 0xFF]), &RefTy::Str, 77), None);
+    assert_eq!(decode(&body(&[3, 0, 0, 0, 0xED, 0xA0, 0x80]), &RefTy::Str, 77), None);
+    // Lengths past `i32::MAX`, or past what the bytes left can hold.
+    assert_eq!(decode(&body(&[0xFF, 0xFF, 0xFF, 0x7F, 0, 0, 0]), &list(RefTy::U8), 77), None);
+    assert_eq!(decode(&body(&[0, 0, 0, 0x80]), &list(RefTy::Struct(vec![])), 77), None);
+    assert_eq!(decode(&body(&[2, 0, 0, 0, 1, 0, 0, 0]), &list(RefTy::Int), 77), None);
+    // An empty struct counts as one byte: a list of them is bounded by the bytes left.
+    assert_eq!(decode(&body(&[1, 0, 0, 0]), &list(RefTy::Struct(vec![])), 77), None);
+    // A key twice.
+    let m = RefValue::Map(vec![(RefValue::U8(1), RefValue::U8(2)), (RefValue::U8(1), RefValue::U8(3))]);
+    assert_eq!(round_trip(&m, &RefTy::Map(Box::new(RefTy::U8), Box::new(RefTy::U8))), None);
+}
+
+/// A fixed-seed 64-bit linear congruential generator.
+struct Lcg(u64);
+
+impl Lcg {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 >> 33
+    }
+
+    fn below(&mut self, n: usize) -> usize {
+        (self.next() % n as u64) as usize
+    }
+}
+
+/// A random value of type `ty`, with lists and maps of up to three items.
+fn random_value(ty: &RefTy, rng: &mut Lcg) -> RefValue {
+    match ty {
+        RefTy::Bool => RefValue::Bool(rng.below(2) == 1),
+        RefTy::U8 => RefValue::U8(rng.below(256) as u8),
+        RefTy::Int => RefValue::Int(rng.next() as i32),
+        RefTy::I64 => RefValue::I64((rng.next() << 32 | rng.next()) as i64),
+        RefTy::Float => RefValue::Float(f32::from_bits(rng.next() as u32)),
+        RefTy::F64 => RefValue::F64(f64::from_bits(rng.next() << 32 | rng.next())),
+        RefTy::Str => RefValue::Str(["", "a", "h\u{e9}", "\u{1F600}x"][rng.below(4)].to_string()),
+        RefTy::List(item) => RefValue::List((0..rng.below(4)).map(|_| random_value(item, rng)).collect()),
+        RefTy::Map(k, v) => {
+            let mut entries: Vec<(RefValue, RefValue)> = Vec::new();
+            for _ in 0..rng.below(4) {
+                let key = random_value(k, rng);
+                if !entries.iter().any(|(e, _)| *e == key) {
+                    entries.push((key, random_value(v, rng)));
+                }
+            }
+            RefValue::Map(entries)
+        }
+        RefTy::Opt(inner) => RefValue::Opt((rng.below(2) == 1).then(|| Box::new(random_value(inner, rng)))),
+        RefTy::Enum(variants) => {
+            let v = rng.below(variants.len());
+            RefValue::Enum(v as u32, variants[v].iter().map(|f| random_value(f, rng)).collect())
+        }
+        RefTy::Struct(fields) => RefValue::Struct(fields.iter().map(|f| random_value(f, rng)).collect()),
+    }
+}
+
+#[test]
+fn damaged_bytes_never_panic_and_never_read_as_another_value() {
+    let shape = RefTy::Enum(vec![vec![], vec![RefTy::Float, RefTy::Str], vec![list(RefTy::U8)]]);
+    let item = RefTy::Struct(vec![RefTy::Str, RefTy::Int, shape.clone(), opt(RefTy::I64)]);
+    let types = [
+        RefTy::Struct(vec![RefTy::I64, RefTy::F64, RefTy::Bool, list(item.clone()), RefTy::Map(Box::new(RefTy::Str), Box::new(list(RefTy::U8))), opt(RefTy::F64)]),
+        list(item),
+        RefTy::Map(Box::new(RefTy::Int), Box::new(opt(shape.clone()))),
+        list(list(RefTy::Str)),
+        shape,
+    ];
+    let mut rng = Lcg(0x5EED);
+    let (mut read, mut refused) = (0, 0);
+    for i in 0..50 {
+        let ty = &types[i % types.len()];
+        let value = random_value(ty, &mut rng);
+        let bytes = encode(&value, 77);
+        assert_eq!(decode(&bytes, ty, 77).map(|v| encode(&v, 77)), Some(bytes.clone()));
+        for n in 0..bytes.len() {
+            assert_eq!(decode(&bytes[..n], ty, 77), None, "{value:?} cut to {n} bytes");
+        }
+        for _ in 0..200 {
+            let mut bad = bytes.clone();
+            let at = rng.below(bad.len());
+            bad[at] = rng.below(256) as u8;
+            // The format has one way to write each value, so whatever reads back writes the same
+            // bytes.
+            match decode(&bad, ty, 77) {
+                Some(v) => {
+                    assert_eq!(encode(&v, 77), bad, "{value:?} changed at byte {at}");
+                    read += 1;
+                }
+                None => refused += 1,
+            }
+        }
+    }
+    assert!(read > 0 && refused > 0, "{read} read, {refused} refused");
+}
+
+#[test]
+fn a_string_is_read_when_its_bytes_are_utf8() {
+    // On a thread of its own: the strings go in that thread's program arena.
+    std::thread::spawn(|| {
+        let mut out = crate::string::KStr { ptr: std::ptr::null(), len: 7 };
+        let text = "h\u{e9}";
+        // SAFETY: `text` has these bytes, and `out` is a string's room.
+        let ok = unsafe { kestrel_rt_bytes_read_str(text.as_ptr(), text.len() as i64, &mut out) };
+        // SAFETY: the string was just made.
+        assert_eq!((ok, unsafe { crate::string::KStr::bytes(out.ptr, out.len) }), (1, text.as_bytes()));
+        assert_ne!(out.ptr, text.as_ptr());
+        let bad = [b'a', 0xFF];
+        // SAFETY: as above.
+        let ok = unsafe { kestrel_rt_bytes_read_str(bad.as_ptr(), 2, &mut out) };
+        assert_eq!((ok, out.ptr, out.len), (0, std::ptr::null(), 0));
+        // SAFETY: no bytes are read.
+        let ok = unsafe { kestrel_rt_bytes_read_str(std::ptr::null(), 0, &mut out) };
+        assert_eq!((ok, out.len), (1, 0));
+    })
+    .join()
+    .unwrap();
+}

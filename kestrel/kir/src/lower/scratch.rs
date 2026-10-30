@@ -109,6 +109,8 @@ fn expr_builds(e: &Expr, calls: &mut Vec<FuncIdx>) -> bool {
         ExprKind::Map(op, ..) => match op {
             MapOp::Get | MapOp::Has | MapOp::Remove | MapOp::Used | MapOp::Live | MapOp::Lock | MapOp::CopyInto => false,
         },
+        // A string read from bytes is made in the current arena.
+        ExprKind::ReadBytes(..) => e.ty == KTy::Str,
         ExprKind::Call(g, _) => {
             calls.push(*g);
             false
