@@ -130,10 +130,13 @@ impl Parser {
             None => (GENERIC, format!("{}[...]", kestrel_type_name(&name))),
         };
         // A field's `list<int>` at the end of its line hides the line break (a line ending in
-        // `>` goes on): recovery stops after the type instead, so the next field is read.
+        // `>` goes on): recovery stops after the type instead, so the next field is read. Only
+        // when a name starts the next line (a field, statement or item): a `)`, `]` or `{` there
+        // belongs to the type's own declaration, which recovery already finishes.
         if let Some((_, after)) = scanned {
-            let (end, next) = (self.toks[after - 1].span.end, self.toks[after.min(self.toks.len() - 1)].span.start);
-            if self.line_breaks_between(end, next) > 0 {
+            let next_tok = &self.toks[after.min(self.toks.len() - 1)];
+            let (end, next) = (self.toks[after - 1].span.end, next_tok.span.start);
+            if matches!(next_tok.tok, Tok::Ident(_)) && self.line_breaks_between(end, next) > 0 {
                 self.resume_at = Some(after);
             }
         }

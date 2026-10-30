@@ -1,0 +1,11 @@
+// error 8: Kestrel writes generic types with square brackets: `list[int]`
+// A parameter list broken across lines, with one parameter written the way other languages write
+// it, gives one error: recovery doesn't stop at the closing `)` on the next line.
+
+main() {
+}
+total(
+    xs: list<int>
+) -> int {
+    return 0
+}
