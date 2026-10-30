@@ -14,7 +14,8 @@ const BAD_TYPE_HELP: &str = concat!(
     "a native can take int, i64, u8, float, f64, bool, string, vec2, vec3, ivec2, ivec3, an enum with no fields, ",
     "an array `[T]` of numbers, bools or structs of those, or a struct of all of these (a struct field ",
     "can also be a `list[T]` of those, but not an enum); it can return nothing, a number, a bool, a ",
-    "vector, or a struct of numbers, bools and vectors"
+    "vector, a struct of numbers, bools and vectors, a string, a `list[T]` of those or of strings, or an ",
+    "optional `T?` of any of these"
 );
 
 /// Whether a call to `f` with these arguments builds its text in a scratch arena that is
@@ -29,8 +30,17 @@ const BAD_TYPE_HELP: &str = concat!(
 /// to push and pop the arena. The checker, which treats the call's arguments as a region that
 /// is freed at the call's end (like an `arena { }` block), has to decide before checking them,
 /// so it asks `may_want_scratch`, which says yes whenever this may.
+///
+/// A native whose result holds memory (a string, a list or an optional, like `file.read`) never
+/// runs in a scratch arena: its result is made in the current arena and outlives the call, so the
+/// checker's region for its arguments is the enclosing one.
 pub fn wants_scratch(f: &FnInfo, args: &[Arg], t: &Tables) -> bool {
-    f.is_native && args.iter().any(|a| builds_text(&a.value, t))
+    f.is_native && !returns_memory(f) && args.iter().any(|a| builds_text(&a.value, t))
+}
+
+/// Whether native `f`'s result holds memory the caller keeps: a string, a list or an optional.
+fn returns_memory(f: &FnInfo) -> bool {
+    matches!(f.ret, Ty::Str | Ty::List(_) | Ty::Optional(_))
 }
 
 /// Whether `wants_scratch` may say yes once the arguments are checked: `f` is a native and some
@@ -43,7 +53,7 @@ pub(crate) fn may_want_scratch(f: &FnInfo, args: &[Arg]) -> bool {
             ExprKind::Interp(_) | ExprKind::Binary { op: BinaryOp::Add, .. } | ExprKind::MethodCall { .. } | ExprKind::Index { .. }
         )
     };
-    f.is_native && args.iter().any(|a| shaped(&a.value))
+    f.is_native && !returns_memory(f) && args.iter().any(|a| shaped(&a.value))
 }
 
 /// Whether checked expression `e` builds a new string (see `wants_scratch`).
@@ -131,10 +141,18 @@ fn param_ok(t: &Tables, ty: Ty) -> bool {
     }
 }
 
+/// A result a native can write through the pointer it is given: a scalar, a struct of plain values
+/// (or a GPU object), a string, a list of plain items or strings, or an optional of any of these.
+/// What it holds is made in the current arena (see `wants_scratch`).
 fn result_ok(t: &Tables, ty: Ty) -> bool {
     match ty {
         // A built-in module's struct that holds a GPU object, like `Texture`.
         Ty::Struct(s) => t.strukt(s).fields.iter().all(|f| plain(t, f.ty) || f.ty == Ty::Gpu),
-        other => simple(other) && other != Ty::Str,
+        Ty::List(e) => {
+            let item = t.elem(e);
+            plain(t, item) || item == Ty::Str
+        }
+        Ty::Optional(e) => result_ok(t, t.elem(e)),
+        other => simple(other),
     }
 }

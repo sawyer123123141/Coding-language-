@@ -10,6 +10,7 @@ pub mod list;
 pub mod map;
 pub mod map_copy;
 pub mod math;
+pub mod natives;
 pub mod panic;
 pub mod par;
 pub mod print;

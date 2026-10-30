@@ -179,6 +179,8 @@ pub(super) fn help(m: &Module, help: Help, c: Contract) -> String {
         Help::Effect(effect) => match effect {
             Effect::Clock => "pass the time step in as a parameter, like `step(var g, i, DT)`".to_string(),
             Effect::Keyboard | Effect::Mouse => "read input outside and pass it in an `Inputs` struct".to_string(),
+            Effect::File { writes: false } => "read the file outside and pass what it holds in as a parameter".to_string(),
+            Effect::File { writes: true } => "write the file outside, after the function returns what to write".to_string(),
             Effect::Window => "talk to the window outside and pass what the function needs in as parameters".to_string(),
             Effect::SharedRandom => "keep an `Rng` from the `random` module in the game state and call `g.rng.randi_range(1, 6)`".to_string(),
             Effect::ImpureFnValue => "give it a `pure` function type, like `pure (Fighter) -> int`".to_string(),

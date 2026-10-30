@@ -118,9 +118,12 @@ fn run() -> ExitCode {
     let result = match args.cmd.as_str() {
         "run" if !has_sse41() => Err(NO_SSE41.to_string()),
         "run" => {
-            // The program's relative paths (`window.screenshot`, textures) are read from its own folder.
+            // The program's relative paths (`file`, `window.screenshot`, textures) are read from its own folder.
             kestrel_window::set_program_dir(Path::new(&args.path).parent().unwrap_or(Path::new("")));
-            JitProgram::compile_with(&compiled.module, opts, &kestrel_window::symbols())
+            // The window crate's natives, then the runtime's own (`file`).
+            let natives: Vec<(&str, *const u8)> =
+                kestrel_window::symbols().into_iter().chain(kestrel_runtime::natives::native_symbols()).collect();
+            JitProgram::compile_with(&compiled.module, opts, &natives)
                 .map_err(internal_error)
                 .map(|p| p.run_main())
         }

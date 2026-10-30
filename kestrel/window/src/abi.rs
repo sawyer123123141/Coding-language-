@@ -9,17 +9,15 @@
 //!
 //! The compiled code's stack slots are not promised to be aligned for their
 //! type, so every access here is unaligned.
+//!
+//! The helpers every native needs (`read`, `write`, `str_bytes`, `elems`, the `string` and the
+//! array header) are the runtime's (`kestrel_runtime::natives::abi`), shared with the `file`
+//! module's natives; this file adds the window's own types.
+
+pub use kestrel_runtime::natives::abi::{elems, read, str_bytes, write, KSeq};
+pub use kestrel_runtime::string::KStr;
 
 use crate::raylib;
-
-/// A `string`: bytes and a length. A zero-filled or empty string has a null
-/// `ptr` and a `len` of 0.
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct KStr {
-    pub ptr: *const u8,
-    pub len: i64,
-}
 
 /// A `vec2`.
 #[repr(C)]
@@ -74,15 +72,6 @@ pub struct KTexture {
     pub id: i64,
     pub width: i32,
     pub height: i32,
-}
-
-/// The first 16 bytes of an array or list header, which the two share: where the elements
-/// are, and how many.
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct KSeq {
-    pub ptr: *const u8,
-    pub len: i64,
 }
 
 /// A `list[T]` stored in a struct field: its whole 32-byte header, in place. The first two words
@@ -182,57 +171,6 @@ pub fn float_text(v: f32) -> String {
     v.to_string()
 }
 
-/// Reads the value `p` points at.
-///
-/// # Safety
-/// `p` must point to a live `T`.
-pub unsafe fn read<T: Copy>(p: *const T) -> T {
-    p.read_unaligned()
-}
-
-/// Writes `v` where `out` points: the result pointer of an aggregate return.
-///
-/// # Safety
-/// `out` must be valid for writing a `T`.
-pub unsafe fn write<T>(out: *mut T, v: T) {
-    out.write_unaligned(v)
-}
-
-/// The bytes of the string `s` points at. A null `s`, a null `ptr` or a
-/// non-positive `len` gives an empty slice; `from_raw_parts` never sees null.
-///
-/// # Safety
-/// `s` must be null or point to a string header whose `ptr` addresses `len`
-/// readable bytes that outlive the returned slice.
-pub unsafe fn str_bytes<'a>(s: *const KStr) -> &'a [u8] {
-    if s.is_null() {
-        return &[];
-    }
-    let s = read(s);
-    if s.ptr.is_null() || s.len <= 0 {
-        return &[];
-    }
-    std::slice::from_raw_parts(s.ptr, s.len as usize)
-}
-
-/// The elements of the array or list `s` points at. A null `s`, a null `ptr` or a non-positive
-/// `len` gives an empty slice; `from_raw_parts` never sees null.
-///
-/// # Safety
-/// `s` must be null or point to an array or list header whose `ptr` addresses `len` live `T`s
-/// that outlive the returned slice. Kestrel allocates the elements aligned for their type, so
-/// a slice of them is aligned for `T` as long as `T` has the layout of the element type.
-pub unsafe fn elems<'a, T>(s: *const KSeq) -> &'a [T] {
-    if s.is_null() {
-        return &[];
-    }
-    let s = read(s);
-    if s.ptr.is_null() || s.len <= 0 {
-        return &[];
-    }
-    std::slice::from_raw_parts(s.ptr.cast::<T>(), s.len as usize)
-}
-
 /// A NUL-terminated copy of `bytes` for raylib. C strings end at the first NUL,
 /// so the copy does too.
 pub fn c_string(bytes: &[u8]) -> std::ffi::CString {
@@ -262,36 +200,6 @@ mod tests {
         assert_eq!(span(v2(30.0, 30.0), v2(-10.0, 5.0)), (v2(20.0, 30.0), v2(10.0, 5.0)), "x only");
         assert_eq!(span(v2(30.0, 30.0), v2(10.0, -5.0)), (v2(30.0, 25.0), v2(10.0, 5.0)), "y only");
         assert_eq!(span(v2(3.0, 4.0), v2(0.0, 0.0)), (v2(3.0, 4.0), v2(0.0, 0.0)), "a zero size stays zero");
-    }
-
-    #[test]
-    fn strings_read_as_bytes_and_never_dereference_null() {
-        let text = "héllo";
-        let s = KStr { ptr: text.as_ptr(), len: text.len() as i64 };
-        // SAFETY: `s` describes `text`, which outlives the slice.
-        unsafe {
-            assert_eq!(str_bytes(&s), text.as_bytes());
-            assert_eq!(str_bytes(&KStr { ptr: std::ptr::null(), len: 0 }), b"");
-            assert_eq!(str_bytes(&KStr { ptr: std::ptr::null(), len: 5 }), b"", "null wins over a length");
-            assert_eq!(str_bytes(&KStr { ptr: text.as_ptr(), len: 0 }), b"");
-            assert_eq!(str_bytes(std::ptr::null()), b"");
-        }
-    }
-
-    #[test]
-    fn arrays_read_as_slices_and_never_dereference_null() {
-        let colors = [KColor { r: 1.0, g: 0.0, b: 0.0, a: 1.0 }, KColor { r: 0.0, g: 0.0, b: 1.0, a: 1.0 }];
-        let header = KSeq { ptr: colors.as_ptr().cast(), len: 2 };
-        // SAFETY: `header` describes `colors`, which outlives the slices.
-        unsafe {
-            assert_eq!(elems::<KColor>(&header), colors);
-            assert_eq!(elems::<KColor>(&KSeq { ptr: colors.as_ptr().cast(), len: 1 }), &colors[..1]);
-            assert!(elems::<KColor>(&KSeq { ptr: std::ptr::null(), len: 0 }).is_empty());
-            assert!(elems::<KColor>(&KSeq { ptr: std::ptr::null(), len: 5 }).is_empty(), "null wins over a length");
-            assert!(elems::<KColor>(&KSeq { ptr: colors.as_ptr().cast(), len: 0 }).is_empty());
-            assert!(elems::<KColor>(&KSeq { ptr: colors.as_ptr().cast(), len: -1 }).is_empty());
-            assert!(elems::<KColor>(std::ptr::null()).is_empty());
-        }
     }
 
     #[test]
@@ -368,16 +276,5 @@ mod tests {
         assert_eq!(c_string(b"abc").as_bytes(), b"abc");
         assert_eq!(c_string(b"ab\0cd").as_bytes(), b"ab");
         assert_eq!(c_string(b"").as_bytes(), b"");
-    }
-
-    #[test]
-    fn unaligned_reads_and_writes() {
-        // A `vec2` at an odd offset, as a compiled stack slot might be.
-        let mut buf = [0u8; 12];
-        // SAFETY: bytes 1..9 are inside `buf`.
-        unsafe {
-            write(buf.as_mut_ptr().add(1).cast::<V2>(), V2 { x: 1.5, y: -2.0 });
-            assert_eq!(read(buf.as_ptr().add(1).cast::<V2>()), V2 { x: 1.5, y: -2.0 });
-        }
     }
 }

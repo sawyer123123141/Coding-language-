@@ -262,3 +262,18 @@ fn random_is_a_built_in_module_that_needs_no_window() {
         assert!(kestrel_driver::needs_window(name), "{name}");
     }
 }
+
+#[test]
+fn file_is_a_built_in_module_that_needs_no_window() {
+    let dir = project("file", &[]);
+    let src = "use file
+main() {
+    let bytes = file.read(\"save.bin\") else { return }
+    print(bytes.len, file.exists(\"a\"), file.error())
+}
+";
+    let (compiled, text) = build(&dir, src);
+    assert_eq!(text, "");
+    assert_eq!(compiled.expect("compiles").builtins, ["file"]);
+    assert!(!kestrel_driver::needs_window("file"));
+}

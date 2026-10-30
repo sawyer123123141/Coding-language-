@@ -1,4 +1,4 @@
-//! What breaks `@prove(deterministic)`: a native (each in the words of what it reads), the
+//! What breaks `@prove(deterministic)`: a native (each in the words of what it reads or writes), the
 //! program's shared random generator, a call through a function value whose type isn't `pure`, and
 //! a call through an interface whose method is neither `pure` nor promises `deterministic`. The
 //! other contracts never read these events.
@@ -16,6 +16,9 @@ pub enum Effect {
     Keyboard,
     /// A native that reads the mouse (`input.mouse`).
     Mouse,
+    /// A native of the `file` module: one that writes (`file.write`) or one that reads
+    /// (`file.read`, and `file.exists`, `file.list_dir` and `file.error`, which read what is there).
+    File { writes: bool },
     /// Any other native: it talks to the window.
     Window,
     /// `randf`, `randf_range`, `randi_range` or `rand_seed`.
@@ -34,6 +37,8 @@ impl Effect {
             "window.delta" | "window.time" | "window.ticks_usec" | "window.fps" => Effect::Clock,
             "input.held" | "input.pressed" | "input.released" => Effect::Keyboard,
             "input.mouse" | "input.wheel" | "input.mouse_delta" => Effect::Mouse,
+            "file.write" | "file.write_text" | "file.make_dir" | "file.remove" => Effect::File { writes: true },
+            "file.read" | "file.read_text" | "file.exists" | "file.list_dir" | "file.error" => Effect::File { writes: false },
             _ => Effect::Window,
         }
     }
@@ -44,6 +49,8 @@ impl Effect {
             Effect::Clock => ", which reads the clock",
             Effect::Keyboard => ", which reads the keyboard",
             Effect::Mouse => ", which reads the mouse",
+            Effect::File { writes: false } => ", which reads a file",
+            Effect::File { writes: true } => ", which writes a file",
             Effect::Window => ", which talks to the window, which a deterministic function can't depend on",
             Effect::SharedRandom => ", which uses the program's shared random generator",
             Effect::ImpureFnValue => ", which isn't `pure`",

@@ -21,8 +21,8 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         vals.extend(self.call_args(args)?);
         let id = self.shared.funcs[fi.0 as usize];
         let result = self.call_id(id, &vals);
-        // Only built-in modules declare natives, and today all of them are the window library,
-        // whose graphics driver may change the float mode on this thread: put it back.
+        // Only built-in modules declare natives. The window library's graphics driver may change
+        // the float mode on this thread: put it back (cheap, so after the runtime's `file` natives too).
         if self.shared.kir.funcs[fi.0 as usize].native.is_some() {
             self.call_id(self.shared.rt.fpu_pin, &[]);
         }

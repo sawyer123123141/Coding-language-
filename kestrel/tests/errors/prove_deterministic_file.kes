@@ -1,0 +1,26 @@
+use file
+
+// A file is outside the program: what it holds, and whether a write lands, depend on more than
+// the arguments.
+
+@prove(deterministic)
+pub load() -> int {
+    let bytes = file.read("save.bin") else { return 0 }
+    bytes.len
+}
+
+@prove(deterministic)
+pub keep(n: u8) -> bool {
+    file.write("save.bin", [n])
+}
+
+@prove(deterministic)
+pub tidy() -> bool {
+    file.exists("old.bin") and file.remove("old.bin")
+}
+
+main() {}
+
+// error 6: `load` can't be proven `deterministic`: it calls `file.read` (line 8), which reads a file
+// error 12: `keep` can't be proven `deterministic`: it calls `file.write` (line 14), which writes a file
+// error 17: `tidy` can't be proven `deterministic`: it calls `file.exists` (line 19), which reads a file

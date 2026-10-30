@@ -1,7 +1,7 @@
-//! The modules that ship inside the compiler: `window`, `draw`, `draw3d`, `input` and `random`.
-//! They are ordinary Kestrel files, embedded here; the window ones have bodyless `native`
-//! functions that Rust implements (see `kestrel-window`). A program loads one with
-//! `use window`, exactly as it would a file next to it.
+//! The modules that ship inside the compiler: `window`, `draw`, `draw3d`, `input`, `random` and
+//! `file`. They are ordinary Kestrel files, embedded here; all but `random` have bodyless `native`
+//! functions that Rust implements (the window ones in `kestrel-window`, `file`'s in
+//! `kestrel-runtime`). A program loads one with `use window`, exactly as it would a file next to it.
 
 use std::path::Path;
 
@@ -9,16 +9,18 @@ use std::path::Path;
 const DIR: &str = "<builtin>";
 
 /// Each built-in module: its name, and its source.
-const MODULES: [(&str, &str); 5] = [
+const MODULES: [(&str, &str); 6] = [
     ("window", include_str!("../std/window.kes")),
     ("draw", include_str!("../std/draw.kes")),
     ("draw3d", include_str!("../std/draw3d.kes")),
     ("input", include_str!("../std/input.kes")),
     ("random", include_str!("../std/random.kes")),
+    ("file", include_str!("../std/file.kes")),
 ];
 
 /// Whether a program that uses built-in module `name` needs the window library (the window,
-/// drawing and input natives). `random` is plain Kestrel and needs only the runtime.
+/// drawing and input natives). `random` is plain Kestrel and `file`'s natives are the runtime's,
+/// so those two need only the runtime.
 pub fn needs_window(name: &str) -> bool {
     matches!(name, "window" | "draw" | "draw3d" | "input")
 }
@@ -59,7 +61,7 @@ mod tests {
 
     #[test]
     fn every_module_is_found_by_name() {
-        for name in ["window", "draw", "draw3d", "input", "random"] {
+        for name in ["window", "draw", "draw3d", "input", "random", "file"] {
             let (found, src) = find(name).expect(name);
             assert_eq!(found, name);
             assert!(src.starts_with("//"), "{name} starts with a comment");

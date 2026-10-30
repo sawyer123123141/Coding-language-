@@ -1,0 +1,42 @@
+// Files: reading, writing and listing them. No window is needed.
+//
+// A relative path is found next to the program: beside its `.kes` file under `kestrel run`, and
+// beside the executable in a built program, wherever either is started from. An absolute path is
+// used as given. `window.screenshot` and `draw.load_texture` follow the same rule.
+//
+// Nothing here stops the program. A call that fails gives `none` or `false`, and `file.error()`
+// says why, naming the path.
+//
+//     use file
+//     file.write("save.bin", to_bytes(game))
+//     let bytes = file.read("save.bin") else { print(file.error()); return }
+
+// The file's bytes, or `none` when it can't be read (it is missing, or is a folder).
+pub native read(path: string) -> list[u8]?
+
+// The file's text, or `none` when it can't be read or is not UTF-8 text.
+pub native read_text(path: string) -> string?
+
+// Replaces the file with `bytes`, making it if it is missing. `false` when it can't be written,
+// for example when its folder does not exist (`make_dir` makes folders).
+pub native write(path: string, bytes: [u8]) -> bool
+
+// Replaces the file with `text`, as UTF-8, making it if it is missing. `false` when it can't be written.
+pub native write_text(path: string, text: string) -> bool
+
+// Whether a file or a folder is at `path`.
+pub native exists(path: string) -> bool
+
+// The names of the files and folders in the folder at `path`, sorted, or `none` when it is not a folder.
+pub native list_dir(path: string) -> list[string]?
+
+// Makes the folder at `path`, and the folders it sits in when they are missing. `true` when the
+// folder exists afterwards.
+pub native make_dir(path: string) -> bool
+
+// Removes the file at `path`. A folder is never removed: that gives `false`.
+pub native remove(path: string) -> bool
+
+// Why the last call of this module failed, as a sentence that names the path ("could not open
+// `save.bin`: ..."), or "" when it succeeded.
+pub native error() -> string

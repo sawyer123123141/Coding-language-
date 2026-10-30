@@ -94,8 +94,8 @@ fn bad_parameter_and_return_types_are_errors() {
     assert_eq!(errors("native f(m: map[string, int])\nmain() {}\n"), vec![BAD_TYPE]);
     assert_eq!(errors("native f(x: int?)\nmain() {}\n"), vec![BAD_TYPE]);
     assert_eq!(errors("native f(a: Arena)\nmain() {}\n"), vec![BAD_TYPE]);
-    assert_eq!(errors("native f() -> string\nmain() {}\n"), vec![BAD_TYPE]);
     assert_eq!(errors("native f() -> [int]\nmain() {}\n"), vec![BAD_TYPE]);
+    assert_eq!(errors("native f() -> map[string, int]\nmain() {}\n"), vec![BAD_TYPE]);
 }
 
 #[test]
@@ -116,7 +116,7 @@ fn struct_and_enum_parameters_must_hold_only_simple_values() {
 
 #[test]
 fn each_bad_type_is_reported_once_at_its_own_place() {
-    let e = errors("native f(a: list[int], b: int, c: [string]) -> string\nmain() {}\n");
+    let e = errors("native f(a: list[int], b: int, c: [string]) -> [int]\nmain() {}\n");
     assert_eq!(e, vec![BAD_TYPE, BAD_TYPE, BAD_TYPE]);
 }
 
@@ -172,7 +172,7 @@ fn arrays_of_other_values_are_refused() {
         "native c(xs: list[int])\n".to_string(),
         "enum Dir {\n North\n}\nnative d(xs: [Dir])\n".to_string(),
         "struct Holder {\n names: [string]\n}\nnative e(h: Holder)\n".to_string(),
-        // A result can't hold an array or list, or a string.
+        // A struct result can't hold an array or list, or a string.
         format!("{data}native f() -> Data\n"),
         "struct Named {\n s: string\n}\nnative g() -> Named\n".to_string(),
     ];
@@ -280,4 +280,73 @@ fn natives_refuse_vec4() {
     p.builtin_ranges = std::iter::once(0..src.len() as u32).collect();
     let errs: Vec<String> = check(&p).1.into_iter().map(|d| d.message).collect();
     assert_eq!(errs, vec![BAD_TYPE]);
+}
+
+#[test]
+fn a_native_may_return_a_string_a_list_or_an_optional() {
+    let src = "struct Game {
+ x: float
+}
+native a() -> string
+native b() -> list[string]
+native c() -> list[u8]?
+native d() -> string?
+native e() -> list[string]?
+native f() -> list[vec2]
+native g() -> Game?
+native h() -> int?
+main() {}
+";
+    assert_eq!(errors(src), Vec::<String>::new());
+}
+
+#[test]
+fn a_native_result_list_must_hold_plain_items_or_strings() {
+    assert_eq!(errors("native f() -> list[list[int]]
+main() {}
+"), vec![BAD_TYPE]);
+    assert_eq!(errors("native f() -> list[[int]]
+main() {}
+"), vec![BAD_TYPE]);
+    assert_eq!(errors("native f() -> list[int?]
+main() {}
+"), vec![BAD_TYPE]);
+    assert_eq!(errors("struct Game {
+ a: Arena
+}
+native f() -> Game?
+main() {}
+"), vec![BAD_TYPE]);
+    assert_eq!(errors("struct Named {
+ s: string
+}
+native f() -> Named?
+main() {}
+"), vec![BAD_TYPE]);
+    assert_eq!(errors("enum E {
+ A
+}
+native f() -> E?
+main() {}
+"), vec![BAD_TYPE]);
+}
+
+#[test]
+fn a_native_that_returns_memory_never_frees_its_arguments_at_the_call() {
+    // `load` gives memory the caller keeps, so its call never runs in a scratch arena: memory made
+    // in its arguments may outlive the call, even next to an interpolated argument.
+    let src = "native load(path: string, n: int) -> list[u8]?
+native show(path: string, n: int)
+tag(n: int) -> string { return \"tag {n}\" }
+main() {
+ var kept = \"\"
+ let n = 1
+ let bytes = load(\"save{n}.bin\", if n > 0 { kept = tag(n); 1 } else { 2 })
+ print(kept)
+}
+";
+    assert_eq!(errors(src), Vec::<String>::new());
+    // The same arguments to a native with no result are freed at the call.
+    let freed = src.replace("let bytes = load(", "show(");
+    assert_eq!(errors(&freed), ["this memory is freed when the call to `show` returns, but `kept` lives longer"]);
 }
