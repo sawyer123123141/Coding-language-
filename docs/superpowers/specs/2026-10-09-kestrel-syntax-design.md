@@ -105,6 +105,12 @@ main() {
 - **Line continuation:** a newline does *not* end a statement when
   inside an unclosed `(` or `[`, when the line ends with a binary
   operator or `,`, or when the next line starts with `else` or `.`.
+  Two exceptions keep another language's spelling to its own line, for
+  its error message: `++` or `--` written together at the end of a line
+  ends it (`n--`), and so does a `>` or `>>` when the next line starts a
+  field (`name:`) or a declaration (`let`, `var`, `for`, `while`,
+  `return`, `struct`, `enum`, `interface`, `use`, `pub`), as after
+  `items: list<int>`.
 - **Strings:** `"..."`, interpolation with `{expr}`, escapes `\n \t \"
   \\ \{ \}`.
 - **Numbers:** `42`, `3.14`, `1_000_000`, `0xFF`. An integer literal is
@@ -452,7 +458,8 @@ them is an error ("`min` is a built-in name; pick another").
   `pure`; it allocates nothing and never fails, so `no_alloc`, `no_panic`
   and `deterministic` hold through it. It returns `i64` because Kestrel has
   no `u64` yet: the 64 bits are the same, printed signed. Keep it in an
-  `i64`: `int(checksum(x))` stops the program for most values. It reads a value's
+  `i64`: in a normal build `int(checksum(x))` stops the program for most
+  values (a `--release` build wraps). It reads a value's
   contents in a fixed order, never its padding: a bool is 0 or 1; `u8`,
   `int` and `i64` are their value as 64 bits (`checksum(1) ==
   checksum(i64(1))`); a `float` is its 32 bits and an `f64` its 64 bits,
