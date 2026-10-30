@@ -1,0 +1,42 @@
+// `to_bytes` of a Pong-like game state: its fields in order, with no padding. It is `pure`,
+// deterministic and can't fail, so a deterministic function can save the state it gets. (The
+// checksum below is of the bytes the reference encoder in `kestrel-runtime` writes, header and
+// all: see `cli/tests/bytes_reference.rs`.)
+struct Rng {
+    seed: i64
+}
+
+struct Game {
+    ball: vec2
+    score: int
+    rng: Rng
+}
+
+@prove(deterministic, no_panic)
+pub pure save(g: Game) -> list[u8] {
+    to_bytes(g)
+}
+
+/// The bytes after the header.
+body(b: list[u8]) -> list[u8] {
+    var out: list[u8] = []
+    for i from 13 to b.len { out.add(b[i]) }
+    out
+}
+
+main() {
+    let g = Game(ball: vec2(1.5, -2.0), score: 3, rng: Rng(seed: 258))
+    let b = save(g)
+    print(b.len, b[13])
+    print(body(b))
+    print(checksum(b))
+    // The same value gives the same bytes; another value other bytes.
+    print(checksum(to_bytes(g)) == checksum(b))
+    let h = Game(ball: vec2(1.5, -2.0), score: 4, rng: Rng(seed: 258))
+    print(checksum(to_bytes(h)) == checksum(b))
+}
+// expect: 33 0
+// expect: [0, 0, 192, 63, 0, 0, 0, 192, 3, 0, 0, 0, 2, 1, 0, 0, 0, 0, 0, 0]
+// expect: -3647219794495564169
+// expect: true
+// expect: false

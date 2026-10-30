@@ -149,6 +149,10 @@ fn builtin_tables_agree() {
     assert!(Builtin::global("sqrt").unwrap().is_pure());
     assert!(!Builtin::global("randf").unwrap().is_pure());
     assert!(!Builtin::global("rand_seed").unwrap().is_pure());
+    for name in ["to_bytes", "from_bytes", "first_difference"] {
+        assert!(Builtin::global(name).unwrap().is_pure(), "`{name}` is pure");
+    }
+    assert_eq!(Builtin::global("first_difference").unwrap().arity(), 2);
     assert!(Builtin::global("main").is_none());
 }
 
@@ -165,6 +169,10 @@ fn builtin_errors() {
         ("main() {\n print(sqrt(x: 4))\n}\n", "built-in functions take plain values, not labels or `var`"),
         ("main() {\n var x = 4.0\n print(sqrt(var x))\n}\n", "built-in functions take plain values, not labels or `var`"),
         ("main() {\n sqrt(4)\n}\n", "the result of `sqrt` is unused, so this line does nothing"),
+        ("main() {\n to_bytes(4)\n}\n", "the result of `to_bytes` is unused, so this line does nothing"),
+        ("main() {\n let b = to_bytes(1)\n print(from_bytes(b))\n}\n", "`from_bytes` needs the type to read, like `from_bytes[Game](bytes)`"),
+        ("main() {\n print(first_difference(1, 2))\n}\n", "`first_difference` isn't built yet"),
+        ("nothing() {}\nmain() {\n print(to_bytes(nothing()))\n}\n","`to_bytes` needs a value, and this gives nothing"),
         ("main() {\n let PI = 3\n}\n", "`PI` is a built-in name; pick another"),
         ("main() {\n let min = 3\n}\n", "`min` is a built-in name; pick another"),
         ("round(x: int) -> int { x }\nmain() {}\n", "`round` is a built-in name; pick another"),

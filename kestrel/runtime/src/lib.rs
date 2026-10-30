@@ -3,6 +3,7 @@
 
 pub mod arena;
 mod blocks;
+pub mod bytes;
 pub mod checksum;
 pub mod fpu;
 pub mod gpu;

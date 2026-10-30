@@ -11,7 +11,7 @@ use super::FuncLowerer;
 impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// The pointer and byte length of the string value `e`, read now (before any later operand
     /// is evaluated, which could change the place it came from).
-    fn str_parts(&mut self, e: &kir::Expr) -> Result<(Value, Value), String> {
+    pub(super) fn str_parts(&mut self, e: &kir::Expr) -> Result<(Value, Value), String> {
         let addr = self.materialize(e)?;
         let ptr = self.b.ins().load(self.ptr, MemFlagsData::trusted(), addr, 0);
         let len = self.b.ins().load(types::I64, MemFlagsData::trusted(), addr, LEN);

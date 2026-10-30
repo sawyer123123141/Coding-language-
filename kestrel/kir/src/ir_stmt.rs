@@ -34,7 +34,8 @@ pub enum Stmt {
     /// Sets the length (i64) of the list at a place to a value no greater than the old length;
     /// the items past it are not dropped, whoever shortens a list has moved or dropped them. An
     /// assign helper (see `Helpers::assign_fn`) also sets it on an array, and raises it within the
-    /// room `Cap` reports, then writes every item past the old length before anything reads it.
+    /// room `Cap` reports, then writes every item past the old length before anything reads it;
+    /// `to_bytes` raises it to the room `ListOp::Reserve` made, then writes every byte.
     SetLen(Place, Expr),
     /// `CopyItems(dst, src)`: copies the items of the array or list at `src` into the buffer of the
     /// one at `dst` and sets `dst`'s length to `src`'s. The items hold no heap memory, and `dst` has

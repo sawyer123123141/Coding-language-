@@ -40,10 +40,16 @@ pub enum Builtin {
     Sum,
     /// `checksum(x)`: a content hash of any value that can be copied and checksummed (an `i64`).
     Checksum,
+    /// `to_bytes(x)`: any value `checksum` takes, in the byte format (a `list[u8]`).
+    ToBytes,
+    /// `from_bytes[T](b)`: the value of type `T` that `to_bytes` wrote, or `none`.
+    FromBytes,
+    /// `first_difference(a, b)`: where two values of one type first differ, or `none`.
+    FirstDifference,
 }
 
 /// Every global function and constant. A new variant belongs here or in `METHODS`.
-const GLOBALS: [Builtin; 27] = [
+const GLOBALS: [Builtin; 30] = [
     Builtin::Sqrt,
     Builtin::Sin,
     Builtin::Cos,
@@ -71,6 +77,9 @@ const GLOBALS: [Builtin; 27] = [
     Builtin::Pi,
     Builtin::Tau,
     Builtin::Checksum,
+    Builtin::ToBytes,
+    Builtin::FromBytes,
+    Builtin::FirstDifference,
 ];
 
 const METHODS: [Builtin; 6] = [Builtin::Length, Builtin::Normalized, Builtin::Dot, Builtin::DistanceTo, Builtin::Cross, Builtin::Sum];
@@ -134,6 +143,9 @@ impl Builtin {
             Builtin::Cross => "cross",
             Builtin::Sum => "sum",
             Builtin::Checksum => "checksum",
+            Builtin::ToBytes => "to_bytes",
+            Builtin::FromBytes => "from_bytes",
+            Builtin::FirstDifference => "first_difference",
         }
     }
 
@@ -153,8 +165,8 @@ impl Builtin {
         match self {
             Pi | Tau | Randf | Length | Normalized | Sum => 0,
             Sqrt | Sin | Cos | Tan | Asin | Acos | Atan | Exp | Log | Floor | Ceil | Round | Abs | Sign | RandSeed | Dot
-            | DistanceTo | Cross | Checksum => 1,
-            Atan2 | Pow | Min | Max | RandfRange | RandiRange => 2,
+            | DistanceTo | Cross | Checksum | ToBytes | FromBytes => 1,
+            Atan2 | Pow | Min | Max | RandfRange | RandiRange | FirstDifference => 2,
             Clamp | Lerp => 3,
         }
     }

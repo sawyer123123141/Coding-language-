@@ -1,0 +1,17 @@
+struct P {
+    x: int
+    name: string
+}
+
+// `to_bytes` makes one list for its result: that is its only allocation.
+@prove(no_alloc)
+pub size(p: P) -> int {
+    let b = to_bytes(p)
+    b.len
+}
+
+main() {
+    print(size(P(x: 1, name: "a")))
+}
+
+// error 7: `size` can't be proven `no_alloc`: it allocates on line 9: `to_bytes` allocates its result

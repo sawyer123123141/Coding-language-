@@ -48,7 +48,7 @@ mod vec_make;
 mod vec_ops;
 mod wrap;
 
-pub(crate) use builtins::checksum_root;
+pub(crate) use builtins::{checksum_root, snapshot_verb};
 pub(crate) use consts::{check_consts, is_const_expr};
 pub(crate) use default_cycles::check_default_cycles;
 pub(crate) use structs::check_field_defaults;

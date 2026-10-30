@@ -9,3 +9,4 @@ kestrel-check.workspace = true
 
 [dev-dependencies]
 kestrel-driver.workspace = true
+kestrel-runtime.workspace = true

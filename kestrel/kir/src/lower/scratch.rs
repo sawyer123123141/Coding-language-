@@ -47,9 +47,9 @@ fn stmt_builds(s: &Stmt, calls: &mut Vec<FuncIdx>) -> bool {
         // A call through a table may run any method; a copy allocates the concrete value.
         Stmt::CallVirtual { .. } | Stmt::CopyIface(_) => true,
         Stmt::List(op, ..) => match op {
-            ListOp::Insert => true,
+            ListOp::Insert | ListOp::Reserve => true,
             // (The runtime sorts in buffers of its own.)
-            ListOp::RemoveAt | ListOp::Clear | ListOp::Compact | ListOp::Sort | ListOp::SortBy(_) => false,
+            ListOp::RemoveAt | ListOp::Clear | ListOp::Compact | ListOp::Sort | ListOp::SortBy(_) | ListOp::WriteBytes | ListOp::WriteCount => false,
         },
         Stmt::Call(g, _, _) => {
             calls.push(*g);

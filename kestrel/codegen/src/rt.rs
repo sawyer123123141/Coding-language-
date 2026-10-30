@@ -24,6 +24,10 @@ pub(crate) struct RtFuncs {
     pub list_insert: FuncId,
     pub list_clear: FuncId,
     pub list_compact: FuncId,
+    /// Gives a list room for exactly the bytes `to_bytes` writes.
+    pub list_reserve: FuncId,
+    /// Writes a string's length and bytes into a `to_bytes` result.
+    pub bytes_write_str: FuncId,
     pub copy_items: FuncId,
     pub current_arena: FuncId,
     pub panic_index: FuncId,
@@ -118,6 +122,8 @@ impl RtFuncs {
             list_insert: decl("kestrel_rt_list_insert", &[ptr, I64, I64, I64, I32, ptr], Some(ptr))?,
             list_clear: decl("kestrel_rt_list_clear", &[ptr, I64], None)?,
             list_compact: decl("kestrel_rt_list_compact", &[ptr, I64, I64, I64], None)?,
+            list_reserve: decl("kestrel_rt_list_reserve", &[ptr, I64, I64, I64], None)?,
+            bytes_write_str: decl("kestrel_rt_bytes_write_str", &[ptr, ptr, I64], None)?,
             copy_items: decl("kestrel_rt_copy_items", &[ptr, ptr, I64, I64], None)?,
             current_arena: decl("kestrel_rt_current_arena", &[], Some(ptr))?,
             panic_index: decl("kestrel_rt_panic_index", &[I64, I64, I32, ptr], None)?,
@@ -199,7 +205,7 @@ pub(crate) const MATHF: [(MathOp, &str, usize); 10] = [
 
 /// Addresses of every runtime export, for registering with the JIT.
 pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
-    use kestrel_runtime::{arena, checksum, fpu, gpu, list, map, map_copy, math, panic, par, print, sort, start, string, string_find, string_make, string_parse};
+    use kestrel_runtime::{arena, bytes, checksum, fpu, gpu, list, map, map_copy, math, panic, par, print, sort, start, string, string_find, string_make, string_parse};
     vec![
         ("kestrel_rt_print_i64", print::kestrel_rt_print_i64 as *const u8),
         ("kestrel_rt_print_f32", print::kestrel_rt_print_f32 as *const u8),
@@ -223,6 +229,8 @@ pub(crate) fn jit_symbols() -> Vec<(&'static str, *const u8)> {
         ("kestrel_rt_list_clear", list::kestrel_rt_list_clear as *const u8),
         ("kestrel_rt_list_compact", list::kestrel_rt_list_compact as *const u8),
         ("kestrel_rt_copy_items", list::kestrel_rt_copy_items as *const u8),
+        ("kestrel_rt_list_reserve", bytes::kestrel_rt_list_reserve as *const u8),
+        ("kestrel_rt_bytes_write_str", bytes::kestrel_rt_bytes_write_str as *const u8),
         ("kestrel_rt_current_arena", arena::kestrel_rt_current_arena as *const u8),
         ("kestrel_rt_panic_index", panic::kestrel_rt_panic_index as *const u8),
         ("kestrel_rt_arena_new", arena::kestrel_rt_arena_new as *const u8),

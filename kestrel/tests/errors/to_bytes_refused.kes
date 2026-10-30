@@ -1,0 +1,42 @@
+struct World {
+    mem: Arena
+    n: int
+}
+
+struct Fighter {
+    hp: int
+    on_hit: (int) -> int
+}
+
+interface Drawable {
+    draw(self)
+}
+
+struct Scene {
+    root: Drawable
+}
+
+look(w: World, f: Fighter, s: Scene, mem: Arena) {
+    print(to_bytes(w).len)
+    print(to_bytes(f).len)
+    print(to_bytes(s).len)
+    print(to_bytes(mem).len)
+    print(to_bytes(f.on_hit).len)
+    print(to_bytes(f.hp).len)
+    print(to_bytes())
+    print(to_bytes(1, 2))
+}
+
+// `to_bytes` is a built-in name.
+to_bytes(x: int) -> int { x }
+
+main() {}
+
+// error 20: `to_bytes` can't take a `World`, which holds an `Arena`; save the fields that hold the game's state instead
+// error 21: `to_bytes` can't take a `Fighter`, which holds a function value, whose address differs between builds; save the other fields instead
+// error 22: `to_bytes` can't take a `Scene`, which holds an interface value; save the fields that hold the game's state instead
+// error 23: `to_bytes` can't take an `Arena`; save the values that hold the game's state instead
+// error 24: `to_bytes` can't take a function value, whose address differs between builds
+// error 26: `to_bytes` takes one value
+// error 27: `to_bytes` takes one value
+// error 31: `to_bytes` is a built-in name; pick another

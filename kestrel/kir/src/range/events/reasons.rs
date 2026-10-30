@@ -173,7 +173,18 @@ impl Walk<'_> {
                     self.push(line, What::Call(*compare));
                 }
             }
-            ListOp::Clear | ListOp::Compact => {}
+            ListOp::Reserve => {
+                // Only `to_bytes` reserves room (see `lower::bytes`): for the list it gives.
+                let (direct, via, fails) = match self.builtin_of(p.root) {
+                    Some("to_bytes") => ("`to_bytes` allocates its result", "saves a value with `to_bytes`", "`to_bytes`"),
+                    _ => ("making room in the list allocates", "makes room in a list", "making room in the list"),
+                };
+                self.alloc(line, Some(direct.to_string()), via.to_string(), " and allocates its result");
+                let direct = format!("{fails} fails if its result would hold more than {limit} bytes");
+                let tail = format!(" and fails if its result would hold more than {limit} bytes");
+                self.fail_part(line, Some(direct), via.to_string(), &tail, Part::Resource);
+            }
+            ListOp::Clear | ListOp::Compact | ListOp::WriteBytes | ListOp::WriteCount => {}
         }
     }
 

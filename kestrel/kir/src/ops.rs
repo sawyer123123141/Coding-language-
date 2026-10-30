@@ -74,6 +74,19 @@ pub enum ListOp {
     /// `-> f64` (`SortKey::Float`) that gives the key of the item at the pointer `a`, widened; the
     /// runtime calls it once per item, in order. Its environment word is as for `Sort`.
     SortBy(SortKey),
+    /// `[n]` (an `i64`): gives the list room for at least `n` items; a list with less room gets a
+    /// new buffer of exactly `n` items in its own arena (`kestrel_rt_list_reserve`). The length and
+    /// the items are unchanged. Fails when `n` is more than a list can hold. Only `to_bytes` uses it
+    /// (see `lower::bytes`), to allocate its result once.
+    Reserve,
+    /// `[at, value]`, on a `list[u8]`: writes `value`'s bytes into the items from index `at` (an
+    /// `i64`), little-endian and unaligned: a bool one byte (0 or 1), a number its width (a float
+    /// its raw bits), a `vec4` or `ivec4` its lanes in order, a string its byte length as a `u32`
+    /// and then its bytes. The caller has made the length cover them; nothing is checked.
+    WriteBytes,
+    /// `[at, n]`, on a `list[u8]`: writes the `i64` `n` (a length, a count or a variant number, from
+    /// 0 to `u32::MAX`) as a `u32` into the items from index `at`, as `WriteBytes` does.
+    WriteCount,
 }
 
 /// The widened type of a `ListOp::SortBy` key.

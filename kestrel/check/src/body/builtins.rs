@@ -11,7 +11,7 @@ use super::closure::Impure;
 use super::lists::written;
 use super::BodyChecker;
 use crate::builtins::Builtin;
-use crate::snapshot::checksum_refusal;
+use crate::snapshot::snapshot_refusal;
 use crate::tables::Res;
 use crate::ty::Ty;
 use crate::vectors::is_lane_builtin;
@@ -31,6 +31,16 @@ fn count_words(n: usize) -> &'static str {
 /// `ws[i]`).
 pub(crate) fn checksum_root(arg: &Expr) -> Option<String> {
     matches!(arg.kind, ExprKind::Ident(_) | ExprKind::Field { .. } | ExprKind::Index { .. }).then(|| written(arg))
+}
+
+/// What a refusal of built-in `b` says to do with the other parts of a value ("save the fields
+/// that hold the game's state instead").
+pub(crate) fn snapshot_verb(b: Builtin) -> &'static str {
+    if b == Builtin::Checksum {
+        "checksum"
+    } else {
+        "save"
+    }
 }
 
 /// The functions that take floats and give a float (`sqrt`...`round`, `randf_range`).
@@ -82,35 +92,51 @@ impl<'a> BodyChecker<'a> {
                 Ty::Float
             }
             Builtin::RandiRange | Builtin::RandSeed => self.check_integer_args(e, b, args),
-            Builtin::Checksum => self.check_checksum(e, &args[0].value),
+            Builtin::Checksum => self.check_snapshot_arg(e, b, &args[0].value).map_or(Ty::Error, |_| Ty::I64),
+            Builtin::ToBytes => match self.check_snapshot_arg(e, b, &args[0].value) {
+                Some(()) => Ty::List(self.t.intern_elem(Ty::U8)),
+                None => Ty::Error,
+            },
+            Builtin::FromBytes | Builtin::FirstDifference => {
+                let msg = if b == Builtin::FromBytes {
+                    "`from_bytes` needs the type to read, like `from_bytes[Game](bytes)`"
+                } else {
+                    "`first_difference` isn't built yet"
+                };
+                self.error(e.span, msg);
+                self.check_loose_args(args);
+                Ty::Error
+            }
             _ if is_lane_builtin(b) => self.check_lane_call(e, b, args),
             _ if is_float_function(b) => self.check_float_args(e, b, args),
             _ => self.check_met_args(e, b, args, Self::number_arg),
         }
     }
 
-    /// `checksum(x)`: any value that can be copied and checksummed (see `snapshot`); an `i64`. A
-    /// placeholder's value is judged at each copy (`generic::copies`).
-    fn check_checksum(&mut self, e: &Expr, arg: &Expr) -> Ty {
+    /// The value of `checksum(x)` or `to_bytes(x)` (built-in `b`): any value that can be copied and
+    /// checksummed (see `snapshot`). `None` after an error. A placeholder's value is judged at each
+    /// copy (`generic::copies`).
+    fn check_snapshot_arg(&mut self, e: &Expr, b: Builtin, arg: &Expr) -> Option<()> {
         let ty = self.check_expr(arg, None);
         let ty = self.reject_never(arg, ty);
         if ty == Ty::Error {
-            return Ty::Error;
+            return None;
         }
+        let name = b.name();
         if ty == Ty::Unit {
-            self.error(arg.span, "`checksum` needs a value, and this gives nothing");
-            return Ty::Error;
+            self.error(arg.span, format!("`{name}` needs a value, and this gives nothing"));
+            return None;
         }
-        if let Some((msg, help)) = checksum_refusal(self.t, ty, checksum_root(arg).as_deref()) {
+        if let Some((msg, help)) = snapshot_refusal(self.t, ty, checksum_root(arg).as_deref(), name, snapshot_verb(b)) {
             let d = Diagnostic::error(e.span, msg);
             self.diags.push(match help {
                 Some(h) => d.with_help(h),
                 None => d,
             });
-            return Ty::Error;
+            return None;
         }
-        self.t.res.insert(e.id, Res::Builtin(Builtin::Checksum));
-        Ty::I64
+        self.t.res.insert(e.id, Res::Builtin(b));
+        Some(())
     }
 
     /// The random numbers read and change the generator, so no `pure` function

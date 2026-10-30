@@ -244,6 +244,8 @@ fn list_change(s: &Stmt) -> Option<(&Place, WriteKind)> {
         Stmt::CopyItems(dst, _) => (dst, WriteKind::Length(LenChange::Unknown)),
         Stmt::List(ListOp::Compact, p, _) => (p, WriteKind::Length(LenChange::Unknown)),
         Stmt::List(ListOp::Sort | ListOp::SortBy(_), p, _) | Stmt::Dup(p) => (p, WriteKind::Items),
+        // `Reserve` moves the items into new room; the writes change bytes, never the length.
+        Stmt::List(ListOp::Reserve | ListOp::WriteBytes | ListOp::WriteCount, p, _) => (p, WriteKind::Items),
         _ => return None,
     })
 }

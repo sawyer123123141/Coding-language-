@@ -15,6 +15,9 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// integer type), then the runtime moves the items. Range analysis relies on the arguments
     /// running before the place is found (`kir::range` `change_len`): keep that order.
     pub(crate) fn list_op(&mut self, op: kir::ListOp, list: &Place, args: &[kir::Expr]) -> Result<(), String> {
+        if matches!(op, kir::ListOp::Reserve | kir::ListOp::WriteBytes | kir::ListOp::WriteCount) {
+            return self.bytes_op(op, list, args);
+        }
         let ty = self.place_ty(list);
         let (size, align) = self.elem_size_align(ty);
         if op == kir::ListOp::Clear {
@@ -46,7 +49,13 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 let header = self.place_addr(list)?;
                 self.call_id(self.shared.rt.list_remove, &[header, at, size_v, l, f]);
             }
-            kir::ListOp::Clear | kir::ListOp::Compact | kir::ListOp::Sort | kir::ListOp::SortBy(_) => unreachable!("handled above"),
+            kir::ListOp::Clear
+            | kir::ListOp::Compact
+            | kir::ListOp::Sort
+            | kir::ListOp::SortBy(_)
+            | kir::ListOp::Reserve
+            | kir::ListOp::WriteBytes
+            | kir::ListOp::WriteCount => unreachable!("handled above"),
             kir::ListOp::Insert => {
                 let value = &args[1];
                 let v = if value.ty.is_aggregate() {

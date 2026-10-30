@@ -153,12 +153,13 @@ pub fn is_sort_comparison(name: &str) -> bool {
 
 /// The built-in a generated function (named `__kestrel_list_fn_filter_7`) implements.
 pub fn builtin_name(function_name: &str) -> Option<&'static str> {
-    const NAMES: [(&str, &str); 5] = [
+    const NAMES: [(&str, &str); 6] = [
         ("__kestrel_list_fn_filter_", "filter"),
         ("__kestrel_list_fn_map_", "map"),
         ("__kestrel_list_fn_any_", "any"),
         ("__kestrel_list_fn_all_", "all"),
         ("__kestrel_sort_by_", "sort_by"),
+        ("__kestrel_to_bytes_", "to_bytes"),
     ];
     NAMES.iter().find(|(prefix, _)| function_name.starts_with(prefix)).map(|&(_, name)| name)
 }

@@ -57,6 +57,11 @@ pub(crate) struct Helpers {
     pub(super) copy: HashMap<KTy, FuncIdx>,
     /// The `checksum` fold of each type that isn't one word (see `checksum`).
     pub(super) checksum: HashMap<KTy, FuncIdx>,
+    /// The `to_bytes` function of each type, and the size and write functions behind it (see
+    /// `bytes`).
+    pub(super) to_bytes: HashMap<KTy, FuncIdx>,
+    pub(super) bytes_size: HashMap<KTy, FuncIdx>,
+    pub(super) bytes_write: HashMap<KTy, FuncIdx>,
     /// The storage-reusing assignment of each type assigned that way (see `assign_into`).
     pub(super) assign: HashMap<KTy, FuncIdx>,
     /// The locals of the assign helper being built (see `assign_into`), which its copies add
@@ -106,6 +111,9 @@ impl Helpers {
             funcs,
             copy,
             checksum: HashMap::new(),
+            to_bytes: HashMap::new(),
+            bytes_size: HashMap::new(),
+            bytes_write: HashMap::new(),
             assign: HashMap::new(),
             assign_locals: Vec::new(),
             drop,

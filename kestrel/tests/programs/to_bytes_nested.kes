@@ -1,0 +1,71 @@
+// `to_bytes` of the containers: a list or array is a `u32` length then its items, a map its live
+// count then each live key and value in insertion order, an optional a 0 or a 1 and its payload,
+// an enum a `u32` variant number then that variant's fields, a struct its fields in order. A type
+// that holds itself through a list works.
+enum Shape {
+    Dot
+    Circle { r: float }
+    Box { w: u8, h: u8 }
+}
+
+struct Node {
+    id: u8
+    kids: list[Node]
+}
+
+struct Holder {
+    shape: Shape
+    maybe: int?
+    names: [string]
+}
+
+/// The bytes after the header.
+body(b: list[u8]) -> list[u8] {
+    var out: list[u8] = []
+    for i from 13 to b.len { out.add(b[i]) }
+    out
+}
+
+main() {
+    let xss: list[list[int]] = [[1, 2], [3], []]
+    print(body(to_bytes(xss)))
+
+    // Removed keys are left out; the order is the order the live keys went in.
+    var m = {"a": 1, "b": 2, "c": 3}
+    m.remove("a")
+    m["d"] = 4
+    print(body(to_bytes(m)))
+
+    let none_int: int? = none
+    let some_int: int? = 5
+    print(body(to_bytes(none_int)), body(to_bytes(some_int)))
+
+    print(body(to_bytes(Shape.Dot)))
+    print(body(to_bytes(Shape.Circle(r: 1.0))))
+    print(body(to_bytes(Shape.Box(w: 3, h: 4))))
+
+    let tree = Node(id: 1, kids: [Node(id: 2, kids: []), Node(id: 3, kids: [Node(id: 4, kids: [])])])
+    print(body(to_bytes(tree)))
+
+    let names: [string] = ["ab", "c"]
+    let h = Holder(shape: Shape.Box(w: 9, h: 8), maybe: none, names: names)
+    print(body(to_bytes(h)))
+    let shapes: list[Shape] = [Shape.Dot, Shape.Circle(r: 2.0)]
+    print(body(to_bytes(shapes)))
+
+    // A list that shrank keeps only its live items.
+    var ys: list[u8] = [1, 2, 3, 4]
+    ys.pop()
+    ys.pop()
+    print(body(to_bytes(ys)))
+}
+// expect: [3, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0]
+// expect: [3, 0, 0, 0, 1, 0, 0, 0, 98, 2, 0, 0, 0, 1, 0, 0, 0, 99, 3, 0, 0, 0, 1, 0, 0, 0, 100, 4, 0, 0, 0]
+// expect: [0] [1, 5, 0, 0, 0]
+// expect: [0, 0, 0, 0]
+// expect: [1, 0, 0, 0, 0, 0, 128, 63]
+// expect: [2, 0, 0, 0, 3, 4]
+// expect: [1, 2, 0, 0, 0, 2, 0, 0, 0, 0, 3, 1, 0, 0, 0, 4, 0, 0, 0, 0]
+// expect: [2, 0, 0, 0, 9, 8, 0, 2, 0, 0, 0, 2, 0, 0, 0, 97, 98, 1, 0, 0, 0, 99]
+// expect: [2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 64]
+// expect: [2, 0, 0, 0, 1, 2]

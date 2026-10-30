@@ -2,6 +2,8 @@ mod assign_into;
 mod assign_site;
 mod assume;
 mod builtins;
+mod bytes;
+mod bytes_fingerprint;
 mod call;
 mod checksum;
 mod closure;

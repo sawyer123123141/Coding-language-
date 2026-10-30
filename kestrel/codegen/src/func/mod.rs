@@ -2,6 +2,7 @@ mod aggregate;
 mod arenas;
 mod arith;
 mod assume;
+mod bytes;
 mod call;
 mod check;
 mod checksum;

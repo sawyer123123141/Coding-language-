@@ -1,0 +1,67 @@
+// `to_bytes(x)`: a 13-byte header (`KESB`, the format version, the type's fingerprint), then the
+// value, little-endian and without padding: a bool or `u8` one byte, an `int` or `float` four, an
+// `i64` or `f64` eight, a vector its lanes in order, a string a `u32` byte length then its bytes.
+
+/// The bytes after the header.
+body(b: list[u8]) -> list[u8] {
+    var out: list[u8] = []
+    for i from 13 to b.len { out.add(b[i]) }
+    out
+}
+
+main() {
+    print(to_bytes(true).len)
+    print(to_bytes(7).len)
+    print(to_bytes(1.5).len)
+    print(to_bytes("hé").len)
+
+    // The magic and the version.
+    let b = to_bytes(7)
+    print(b[0], b[1], b[2], b[3], b[4])
+    print(body(b))
+    print(body(to_bytes(-2)))
+    print(body(to_bytes(false)), body(to_bytes(true)), body(to_bytes(u8(200))))
+    print(body(to_bytes(1.5)))
+    print(body(to_bytes(i64(-1))))
+    print(body(to_bytes(f64(0.5))))
+    print(body(to_bytes("hé")))
+    print(body(to_bytes("")))
+    print(body(to_bytes(vec4(1, 2, 3, 4))))
+    print(body(to_bytes(ivec4(1, -1, 256, 0))))
+    print(body(to_bytes(vec2(0.5, -2.0))))
+
+    // A float's bits are kept as they are: -0.0 is not 0.0.
+    print(body(to_bytes(-0.0)))
+
+    // The fingerprint is the type's, not the value's.
+    let one = to_bytes(1)
+    let two = to_bytes(2)
+    var same = true
+    for i from 5 to 13 {
+        if one[i] != two[i] { same = false }
+    }
+    let f = to_bytes(1.0)
+    var differs = false
+    for i from 5 to 13 {
+        if one[i] != f[i] { differs = true }
+    }
+    print(same, differs)
+}
+// expect: 14
+// expect: 17
+// expect: 17
+// expect: 20
+// expect: 75 69 83 66 1
+// expect: [7, 0, 0, 0]
+// expect: [254, 255, 255, 255]
+// expect: [0] [1] [200]
+// expect: [0, 0, 192, 63]
+// expect: [255, 255, 255, 255, 255, 255, 255, 255]
+// expect: [0, 0, 0, 0, 0, 0, 224, 63]
+// expect: [3, 0, 0, 0, 104, 195, 169]
+// expect: [0, 0, 0, 0]
+// expect: [0, 0, 128, 63, 0, 0, 0, 64, 0, 0, 64, 64, 0, 0, 128, 64]
+// expect: [1, 0, 0, 0, 255, 255, 255, 255, 0, 1, 0, 0, 0, 0, 0, 0]
+// expect: [0, 0, 0, 63, 0, 0, 0, 192]
+// expect: [0, 0, 0, 128]
+// expect: true true

@@ -21,7 +21,7 @@ use crate::ty::Ty;
 pub(super) fn builtin_wrapper(name: &str) -> String {
     let b = Builtin::global(name);
     let whole = b.is_some_and(|b| {
-        matches!(b, Builtin::Min | Builtin::Max | Builtin::Abs | Builtin::Sign | Builtin::Clamp | Builtin::RandiRange | Builtin::RandSeed | Builtin::Checksum)
+        matches!(b, Builtin::Min | Builtin::Max | Builtin::Abs | Builtin::Sign | Builtin::Clamp | Builtin::RandiRange | Builtin::RandSeed | Builtin::Checksum | Builtin::ToBytes)
     });
     let ty = if whole || name == "print" { "int" } else { "float" };
     let names: &[&str] = match (name, b.map_or(1, Builtin::arity)) {

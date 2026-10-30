@@ -70,6 +70,9 @@ impl<'a> FnLowerer<'a> {
         if b == Builtin::Checksum {
             return self.checksum(&args[0].value, line);
         }
+        if b == Builtin::ToBytes {
+            return self.bytes_call(&args[0].value, ty);
+        }
         // On vectors, lane by lane (`lerp` combines whole vectors); a SIMD vector is one operation.
         if ty.is_vector() && b != Builtin::Lerp {
             return self.simd_lane_call(b, args, ty, line);

@@ -219,9 +219,9 @@ impl<'a> Walk<'a> {
             Some(Res::Convert(ty) | Res::SimdMake(ty)) => {
                 self.sub(ty, ctx)?;
             }
-            Some(Res::Builtin(Builtin::Checksum)) => {
+            Some(Res::Builtin(b @ (Builtin::Checksum | Builtin::ToBytes))) => {
                 if let Some((arg, root)) = checksum {
-                    self.checksum_copy(arg, root, span, ctx)?;
+                    self.checksum_copy(b, arg, root, span, ctx)?;
                 }
             }
             _ => {}
