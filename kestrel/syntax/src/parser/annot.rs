@@ -112,7 +112,7 @@ impl Parser {
 
     /// The source of tokens `from..to` as written, with one space wherever white space or a
     /// comment separates two of them; empty when the parser has no source.
-    fn tokens_text(&self, from: usize, to: usize) -> String {
+    pub(super) fn tokens_text(&self, from: usize, to: usize) -> String {
         if self.src.is_empty() {
             return String::new();
         }
@@ -129,7 +129,7 @@ impl Parser {
         text
     }
 
-    fn line_breaks_between(&self, from: u32, to: u32) -> usize {
+    pub(super) fn line_breaks_between(&self, from: u32, to: u32) -> usize {
         let at = |o: u32| o.saturating_sub(self.base) as usize;
         self.src.get(at(from)..at(to)).map_or(0, |t| t.bytes().filter(|&b| b == b'\n').count())
     }

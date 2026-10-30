@@ -5,6 +5,7 @@ mod closure;
 mod depth;
 mod expr;
 mod generics;
+mod habits;
 mod iface;
 mod item;
 mod members;
@@ -52,6 +53,8 @@ pub struct Parser {
     proves: Vec<ProveAnnot>,
     /// The ids of the integer literals written in hex.
     hex_literals: Vec<ExprId>,
+    /// Where a `..` range would be if one were written here, for its message (see `habits`).
+    range_at: habits::RangeAt,
 }
 
 /// What `Parser::attempt` puts back on a failure (see `snapshot`).
@@ -95,6 +98,7 @@ impl Parser {
             base: 0,
             proves: Vec::new(),
             hex_literals: Vec::new(),
+            range_at: habits::RangeAt::Plain,
         }
     }
 

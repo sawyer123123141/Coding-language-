@@ -108,6 +108,10 @@ impl Parser {
             Tok::At => return self.annot_in_expr(),
             Tok::If => return self.if_expr(),
             Tok::Match => return self.match_expr(),
+            Tok::Pipe => {
+                self.pipe_closure();
+                return Err(());
+            }
             other => {
                 self.error_here(format!("expected an expression, found {}", other.describe()));
                 return Err(());

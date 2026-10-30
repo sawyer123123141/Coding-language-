@@ -264,7 +264,8 @@ use {
 | `int` | 32-bit signed integer |
 | `float` | 32-bit float |
 | `bool` | `true` / `false` |
-| `i8 i16 i64 u8 u16 u32 u64` | sized integers |
+| `i64` | 64-bit signed integer |
+| `u8` | 8-bit unsigned integer, 0 to 255 (a byte) |
 | `f64` | 64-bit float |
 | `string` | text, UTF-8, a heap value like an array: copying a string copies its bytes into the current arena (literals stay in read-only data and belong to no arena). `s.len` and `s[i]` count characters, not bytes. `+`, `join`, `split`, `slice`, `find`, `upper`, `trim`, `to_int` and the rest: see "Lists and strings" |
 | `vec2 vec3 vec4` | float vectors, 2, 3 or 4 `float`s (Godot's `Vector2`, `Vector3`, `Vector4`). `vec4` is one 16-byte SIMD value, aligned to 16, that the CPU adds, multiplies and compares four lanes at a time; `vec2` and `vec3` are plain structs of floats (8 and 12 bytes) that scalar replacement splits into registers. See "Vectors" below |
@@ -449,8 +450,9 @@ them is an error ("`min` is a built-in name; pick another").
 - **`checksum(x) -> i64`** (the determinism round, 2026-10-27): a content
   hash of any value, to find where two runs of a game stopped agreeing.
   `pure`; it allocates nothing and never fails, so `no_alloc`, `no_panic`
-  and `deterministic` hold through it. It returns `i64` until Kestrel has
-  `u64`: the 64 bits are the same, printed signed. It reads a value's
+  and `deterministic` hold through it. It returns `i64` because Kestrel has
+  no `u64` yet: the 64 bits are the same, printed signed. Keep it in an
+  `i64`: `int(checksum(x))` stops the program for most values. It reads a value's
   contents in a fixed order, never its padding: a bool is 0 or 1; `u8`,
   `int` and `i64` are their value as 64 bits (`checksum(1) ==
   checksum(i64(1))`); a `float` is its 32 bits and an `f64` its 64 bits,
@@ -978,8 +980,9 @@ pure at(xs: [int], i: int) -> int {
 ## Out of scope (later specs)
 
 User-defined generics are built (see "Generics"; what they leave out is under "Not built" there, and in the generics spec's "Not this round"). Still out of scope: `is` type tests on interface values (and default method bodies, fields and inheritance between interfaces), error types beyond `?`, fixed-size arrays,
-C FFI declarations, GPU/shader code. Also not yet: optional function types, methods and
-built-ins as values, `reduce`, `reverse`, a comparator sort.
+C FFI declarations, GPU/shader code. Also not yet: the other sized integers `i8`, `i16`,
+`u16`, `u32` and `u64` (the integers are `int`, `i64` and `u8`), optional function types,
+methods and built-ins as values, `reduce`, `reverse`, a comparator sort.
 
 ## Resolved in review
 

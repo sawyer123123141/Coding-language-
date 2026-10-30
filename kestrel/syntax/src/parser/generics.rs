@@ -9,6 +9,10 @@ use crate::token::Tok;
 impl Parser {
     /// `[T, K: key]` after a name; empty when the next token isn't `[`.
     pub(super) fn type_params(&mut self) -> PResult<Vec<TypeParam>> {
+        if self.at(&Tok::Lt) {
+            self.angle_type_params();
+            return Err(());
+        }
         if !self.at(&Tok::LBracket) {
             return Ok(Vec::new());
         }

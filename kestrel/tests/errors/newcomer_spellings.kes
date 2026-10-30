@@ -1,0 +1,72 @@
+// error 32: Kestrel writes generic types with square brackets: `list[string]`
+// error 35: enum variants declare their data in braces: `Slime { size: int, hp: int }`
+// error 38: Kestrel writes generic types with square brackets: `Stack[T]`
+// error 41: Kestrel functions don't use `fn`: write `name(params) { ... }`
+// error 42: Kestrel functions don't use `func`: write `name(params) { ... }`
+// error 43: Kestrel functions don't use `def`: write `name(params) { ... }`
+// error 44: Kestrel writes generic types with square brackets: `list[Item]`
+// error 46: Kestrel writes generic types with square brackets: `map[string, int]`
+// error 47: Kestrel writes generic types with square brackets: `list[string]()`
+// error 48: Kestrel writes ranges as `for i from 0 to 10` (`to` leaves `10` out)
+// error 49: Kestrel writes ranges as `for i from 1 to n + 1` (`to` leaves its end out, so `+ 1` takes `n` too)
+// error 50: `par for` needs items to work on, not a range; loop over an array or list: `par for p in ps { ... }`
+// error 52: Kestrel has no `..` slices; take part of a string with `s.slice(from, to)`, or copy part of a list in a `for i from a to b` loop
+// error 53: Kestrel has no `..` ranges; loop over numbers with `for i from 0 to n` (`to` leaves `n` out)
+// error 54: Kestrel writes closures as `(a) { a }`
+// error 55: Kestrel writes closures as `(a, b) { a + b }`
+// error 56: Kestrel writes closures as `() { ... }`
+// error 59: a `match` arm takes the variant's data as one name: write `Slime s { ... }` and use `s.size`
+// error 60: `match` arms don't use `=>`: write `Boss { ... }`
+// error 61: Kestrel writes the catch-all arm as `else { ... }`
+// error 63: a `for` loop's variable can't be marked `var`: write `for x in xs`; changing `x` changes the item
+// error 64: a `for` loop's variable can't be marked `var`: write `par for x in xs`; changing `x` changes the item
+// error 65: a `for` loop's counter can't be marked `var`: write `for i from 0 to 3`; to change it as you go, use a `while` loop
+// error 67: Kestrel has no `++`: write `n += 1`
+// error 68: Kestrel has no `--`: write `n -= 1`
+// error 69: Kestrel writes `else if`, not `elif`
+// error 70: Kestrel writes a variable that can change as `var m`, not `let mut m`
+// error 71: Kestrel uses `and`, not `&&`
+// Spellings from other languages: each error says how Kestrel writes it.
+struct Item {
+    name: string
+    tags: list<string>
+}
+enum Enemy {
+    Slime(size: int, hp: int)
+    Boss
+}
+struct Stack<T> {
+    items: list[T]
+}
+fn first() {}
+func second() {}
+def third() {}
+lightest(items: list<Item>) -> int { 0 }
+main() {
+    var counts: Map<string, int> = map[string, int]()
+    let names = list<string>()
+    for i in 0..10 { print(i) }
+    for i in 1..=n { print(i) }
+    par for i in 0..10 { print(i) }
+    var xs = [3, 1, 2]
+    let part = xs[0..2]
+    let r = 0..5
+    xs.sort_by(|a| a)
+    let add = |a, b| a + b
+    let one = || 1
+    let e = Enemy.Boss
+    match e {
+        Slime(size, hp) => { print(size) }
+        Boss => { }
+        _ => { }
+    }
+    for var x in xs { x = 1 }
+    par for var x in xs { x = 1 }
+    for var i from 0 to 3 { print(i) }
+    var n = 0
+    n++
+    n--
+    if n > 1 { print(1) } elif n > 0 { print(2) }
+    let mut m = 1
+    let both = true && false
+}

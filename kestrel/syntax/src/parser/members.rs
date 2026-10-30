@@ -86,6 +86,9 @@ impl Parser {
 
     fn enum_member_after_annots(&mut self, owner: &str, variants: &mut Vec<VariantDecl>, methods: &mut Vec<FnDecl>) -> PResult<()> {
         let start = self.span();
+        if self.variant_in_parens() {
+            return Err(());
+        }
         let is_method = matches!(self.peek(), Tok::Pub | Tok::Pure | Tok::Native) || self.peek_at(1) == &Tok::LParen;
         if is_method {
             let is_pub = self.eat(&Tok::Pub);

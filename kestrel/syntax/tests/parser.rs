@@ -59,7 +59,7 @@ fn continuation_and_else_on_next_line() {
 fn par_for() {
     assert_eq!(body("par for c in world {\n c.x = 1\n}"), "{(par-for c world {(= (. c x) 1)})}");
     assert_eq!(body("par for i, c in world {}"), "{(par-for i c world {})}");
-    assert_eq!(errs("main() {\n par for i from 0 to 3 {}\n}\n")[0], "`par for` needs items to work on; loop over an array or list");
+    assert_eq!(errs("main() {\n par for i from 0 to 3 {}\n}\n")[0], "`par for` needs items to work on; loop over an array or list: `par for p in ps { ... }`");
     assert_eq!(errs("main() {\n par x\n}\n")[0], "expected `for` after `par`, found name `x`");
 }
 

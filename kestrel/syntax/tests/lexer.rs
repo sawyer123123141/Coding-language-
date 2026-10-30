@@ -11,6 +11,10 @@ fn errors(src: &str) -> Vec<String> {
     lex(src).1.into_iter().map(|d| d.message).collect()
 }
 
+fn toks_ignoring_errors(src: &str) -> Vec<Tok> {
+    lex(src).0.into_iter().map(|t| t.tok).collect()
+}
+
 fn id(s: &str) -> Tok {
     Tok::Ident(s.into())
 }
@@ -111,6 +115,11 @@ fn helpful_errors() {
     assert_eq!(errors("a && b"), vec!["Kestrel uses `and`, not `&&`"]);
     assert_eq!(errors("a || b"), vec!["Kestrel uses `or`, not `||`"]);
     assert_eq!(errors("!a"), vec!["Kestrel uses `not`, not `!`"]);
+    // `&&` and `||` between values still lex as `and` and `or`, so nothing else is reported.
+    assert_eq!(toks_ignoring_errors("a && b || c"), vec![id("a"), Tok::And, id("b"), Tok::Or, id("c"), Tok::Eof]);
+    // Where a value starts, `||` is a closure with no parameters.
+    assert_eq!(errors("f(|| 1)"), vec!["Kestrel writes closures as `() { ... }`"]);
+    assert_eq!(errors("let g = || 1"), vec!["Kestrel writes closures as `() { ... }`"]);
     assert_eq!(errors("\"hp {}\""), vec!["empty `{}` in a string; write `\\{` for a brace"]);
     assert_eq!(errors("\"hp {x\""), vec!["unterminated `{` in a string"]);
     assert_eq!(errors("\"a {\"b\"}\""), vec!["unterminated `{` in a string"]);

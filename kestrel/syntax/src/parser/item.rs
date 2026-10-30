@@ -50,8 +50,8 @@ impl Parser {
                 self.native_decl(is_pub, false, start)
             }
             Tok::Struct => self.struct_decl(is_pub, start),
-            Tok::Ident(name) if name == "fn" => {
-                self.error_here("Kestrel functions don't use `fn`: write `name(params) { ... }`");
+            Tok::Ident(kw) if kw == "fn" || (matches!(kw.as_str(), "func" | "def" | "function") && matches!(self.peek_at(1), Tok::Ident(_))) => {
+                self.error_here(format!("Kestrel functions don't use `{kw}`: write `name(params) {{ ... }}`"));
                 Err(())
             }
             Tok::Ident(_) => self.fn_decl(is_pub, false, start),
@@ -209,6 +209,9 @@ impl Parser {
     /// without `->` the function gives nothing.
     #[inline(never)]
     fn fn_type(&mut self) -> PResult<TypeExpr> {
+        if self.peek_at(1) == &Tok::Lt && !self.at(&Tok::LParen) {
+            return self.angle_type();
+        }
         let start = self.span();
         let is_pure = self.eat(&Tok::Pure);
         let (params, mut end) = self.nested_type(|p| {
@@ -239,8 +242,9 @@ impl Parser {
     }
 
     pub(crate) fn type_expr(&mut self) -> PResult<TypeExpr> {
-        if self.at(&Tok::LParen) || (self.at(&Tok::Pure) && self.peek_at(1) == &Tok::LParen) {
-            // A function type is parsed apart: this frame is on the stack once per nesting level.
+        if self.at(&Tok::LParen) || (self.at(&Tok::Pure) && self.peek_at(1) == &Tok::LParen) || self.peek_at(1) == &Tok::Lt {
+            // A function type (or another language's `list<Item>`) is parsed apart: this frame is
+            // on the stack once per nesting level.
             return self.fn_type();
         }
         let start = self.span();

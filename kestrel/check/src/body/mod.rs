@@ -355,7 +355,15 @@ impl<'a> BodyChecker<'a> {
             }
         }
         let msg = format!("expected {}, found {}", self.tn(to), self.tn(from));
-        if from.is_numeric() && to.is_numeric() {
+        if from.is_numeric() && to.is_numeric() && !from.is_float() && !to.is_float() {
+            // A narrower int: the conversion stops the program when the value doesn't fit (a
+            // checksum's `i64` rarely does), so keeping the wider type comes first.
+            let (f, t) = (from.name(), to.name());
+            let help = format!(
+                "store it as `{f}` instead (annotate the variable or the return type `{f}`); `{t}(...)` also works, but stops the program if the value doesn't fit in {t}"
+            );
+            self.error_help(e.span, msg, help);
+        } else if from.is_numeric() && to.is_numeric() {
             self.error_help(e.span, msg, format!("convert it explicitly: `{}(...)`", to.name()));
         } else {
             self.error(e.span, msg);

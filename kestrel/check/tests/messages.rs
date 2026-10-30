@@ -1,5 +1,6 @@
 //! The help that comes with an error says what to do: a missing struct, an enum or a constant
-//! called like a function, and a vector given only some of its components.
+//! called like a function, a vector given only some of its components, and a number that
+//! needs narrowing.
 
 use kestrel_check::check;
 use kestrel_syntax::parse;
@@ -66,3 +67,15 @@ fn a_vector_needs_every_component_or_none() {
     assert_eq!(errors("main() {\n let v = vec3(1)\n print(v)\n}\n"), vec![]);
     assert_eq!(errors("let O = vec3()\nmain() {\n let v = vec2()\n print(O, v)\n}\n"), vec![]);
 }
+
+#[test]
+fn a_narrowing_that_can_stop_the_program_suggests_the_wider_type_first() {
+    let src = "struct G {\n x: int\n}\ntotal(g: G) -> int {\n checksum(g)\n}\nmain() {}\n";
+    let help = "store it as `i64` instead (annotate the variable or the return type `i64`); `int(...)` also works, but stops the program if the value doesn't fit in int";
+    assert_eq!(errors(src), one("expected int, found i64", help));
+    let help = "store it as `int` instead (annotate the variable or the return type `int`); `u8(...)` also works, but stops the program if the value doesn't fit in u8";
+    assert_eq!(errors("main() {\n var n = 300\n let b: u8 = n\n}\n"), one("expected u8, found int", help));
+    // A float converts without stopping the program: it is cut to the nearest value in range.
+    assert_eq!(errors("main() {\n let f = 1.5\n let i: int = f\n}\n"), one("expected int, found float", "convert it explicitly: `int(...)`"));
+}
+

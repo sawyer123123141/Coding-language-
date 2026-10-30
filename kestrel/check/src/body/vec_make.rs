@@ -85,7 +85,9 @@ impl<'a> BodyChecker<'a> {
         let mut ok = true;
         for (a, &ty) in args.iter().zip(tys) {
             if matches!(ty, Ty::Float | Ty::F64 | Ty::I64) {
-                let msg = format!("`{}` holds ints, found {}; convert it with `int(...)` first", self.tn(vt), self.tn(ty));
+                // From an `i64` the conversion stops the program when the value doesn't fit.
+                let traps = if ty == Ty::I64 { ", which stops the program if the value doesn't fit in int" } else { "" };
+                let msg = format!("`{}` holds ints, found {}; convert it with `int(...)` first{traps}", self.tn(vt), self.tn(ty));
                 self.error(a.value.span, msg);
                 ok = false;
             }

@@ -1,0 +1,21 @@
+// error 15: `Slime` is a variant of `Enemy`: write `Enemy.Slime(...)`
+// error 16: `Boss` is a variant of `Enemy`: write `Enemy.Boss`
+// error 17: Kestrel writes a missing value as `none`, not `null`
+// error 18: Kestrel writes a missing value as `none`, not `nil`
+// error 19: Kestrel writes a missing value as `none`, not `None`
+// error 13: expected int, found i64
+// error 20: expected int, found i64
+struct G { x: int }
+enum Enemy {
+    Slime { size: int }
+    Boss
+}
+total(g: G) -> int { checksum(g) }
+main() {
+    let a = Slime(size: 1)
+    let b = Boss
+    let c: int? = null
+    let d = nil
+    let e = None
+    let s: int = checksum(G(1))
+}

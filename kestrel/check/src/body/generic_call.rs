@@ -103,6 +103,22 @@ impl<'a> BodyChecker<'a> {
         Ty::Error
     }
 
+    /// For a name that isn't one but is a variant of an enum (the first by name when several have
+    /// it): the message that says how to write it, "`Slime` is a variant of `Enemy`: write
+    /// `Enemy.Slime(...)`" (with `(...)` when it has fields).
+    pub(crate) fn bare_variant(&self, name: &str) -> Option<String> {
+        let mut owners: Vec<(&String, &crate::tables::VariantInfo)> = self
+            .t
+            .enum_by_name
+            .iter()
+            .filter_map(|(en, &eid)| self.t.enm(eid).variants.iter().find(|v| v.name == name).map(|v| (en, v)))
+            .collect();
+        owners.sort_by_key(|(en, _)| *en);
+        let (en, v) = owners.first()?;
+        let args = if v.fields.is_empty() { "" } else { "(...)" };
+        Some(format!("`{name}` is a variant of `{en}`: write `{en}.{name}{args}`"))
+    }
+
     /// How to build a value of enum `eid` written `prefix` (`Maybe`, `Maybe[int]`): from its
     /// first variant, "`Maybe[int].Nothing`" or "`Result[int, string].Ok(...)`".
     pub(crate) fn variant_example(&self, eid: EnumId, prefix: &str) -> String {

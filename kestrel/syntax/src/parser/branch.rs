@@ -42,6 +42,10 @@ impl Parser {
         let pattern = if self.eat(&Tok::Else) {
             Pattern::Else(start)
         } else {
+            if matches!(self.peek(), Tok::Ident(n) if n == "_") {
+                self.error_here("Kestrel writes the catch-all arm as `else { ... }`");
+                return Err(());
+            }
             let (name, name_span) = self.expect_ident("a variant name or `else`")?;
             let binding = match self.peek().clone() {
                 Tok::Ident(b) => {
@@ -50,6 +54,7 @@ impl Parser {
                 }
                 _ => None,
             };
+            self.arm_spelling(&name, binding.as_ref().map(|b| b.name.as_str()))?;
             Pattern::Variant { name, name_span, binding }
         };
         let (body, h) = self.block_with_height()?;
@@ -66,6 +71,10 @@ impl Parser {
         let start = self.expect(&Tok::If, "`if`")?;
         let cond = self.in_head(Self::expr)?;
         let (then_block, mut inner) = self.block_with_height()?;
+        if matches!(self.peek(), Tok::Ident(k) if k == "elif") {
+            self.elif();
+            return Err(());
+        }
         let else_block = if self.eat(&Tok::Else) {
             if self.at(&Tok::If) {
                 let nested = self.if_expr()?;

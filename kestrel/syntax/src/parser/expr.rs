@@ -49,7 +49,7 @@ impl Parser {
         let rhs = self.bit_or()?;
         let e = self.binary(op, lhs, rhs);
         if cmp_op(self.peek()).is_some() {
-            self.error_here("comparisons can't be chained; combine them with `and`");
+            self.chained_comparison(&e);
             return Err(());
         }
         Ok(e)
@@ -86,6 +86,10 @@ impl Parser {
     fn add_expr(&mut self) -> PResult<Expr> {
         let mut lhs = self.mul_expr()?;
         loop {
+            if (self.at(&Tok::Plus) && self.peek_at(1) == &Tok::Plus) || self.at_decrement() {
+                self.step_spelling(&lhs);
+                return Err(());
+            }
             let op = match self.peek() {
                 Tok::Plus => BinaryOp::Add,
                 Tok::Minus => BinaryOp::Sub,
@@ -148,6 +152,10 @@ impl Parser {
                 let span = e.span.to(end);
                 e = self.expr_node(ExprKind::CallValue { callee: Box::new(e), args }, span);
                 continue;
+            }
+            if self.at(&Tok::Dot) && self.peek_at(1) == &Tok::Dot {
+                self.range_spelling();
+                return Err(());
             }
             if !self.eat(&Tok::Dot) {
                 break;

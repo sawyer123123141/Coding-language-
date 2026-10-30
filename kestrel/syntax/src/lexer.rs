@@ -30,6 +30,17 @@ impl<'a> Lexer<'a> {
         self.toks.push(Token { tok, span: Span::new(start, self.pos) });
     }
 
+    /// Whether the last token ends a value, so an operator may follow it.
+    fn after_value(&self) -> bool {
+        self.toks.last().is_some_and(|t| {
+            matches!(
+                t.tok,
+                Tok::Ident(_) | Tok::Int(_) | Tok::Hex(_) | Tok::Float(_) | Tok::Str(_) | Tok::StrParts(_)
+                    | Tok::True | Tok::False | Tok::NoneKw | Tok::SelfKw | Tok::RParen | Tok::RBracket | Tok::RBrace
+            )
+        })
+    }
+
     fn error(&mut self, start: usize, msg: impl Into<String>) {
         // Clamp to the source so a span never points past the end of the file.
         let end = self.pos.max(start + 1).min(self.src.len());
@@ -248,8 +259,14 @@ impl<'a> Lexer<'a> {
         }
         if &two == b"&&" || &two == b"||" {
             self.pos += 2;
-            let msg = if two[0] == b'&' { "Kestrel uses `and`, not `&&`" } else { "Kestrel uses `or`, not `||`" };
+            // Where a value starts, `||` is another language's closure with no parameters.
+            if two[0] == b'|' && !self.after_value() {
+                return self.error(start, "Kestrel writes closures as `() { ... }`");
+            }
+            // Between values it is lexed as the keyword, so the rest of the line still parses.
+            let (msg, tok) = if two[0] == b'&' { ("Kestrel uses `and`, not `&&`", Tok::And) } else { ("Kestrel uses `or`, not `||`", Tok::Or) };
             self.error(start, msg);
+            self.push(tok, start);
             return;
         }
         let ch = self.src[self.pos..].chars().next().unwrap();

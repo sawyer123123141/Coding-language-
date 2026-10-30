@@ -182,6 +182,10 @@ impl<'a> BodyChecker<'a> {
                 None => String::new(),
             };
             self.error(e.span, format!("`{name}` is an enum; use one of its variants{example}"));
+        } else if let Some(msg) = self.bare_variant(name) {
+            self.error(e.span, msg);
+        } else if matches!(name, "null" | "nil" | "None") {
+            self.error(e.span, format!("Kestrel writes a missing value as `none`, not `{name}`"));
         } else {
             self.error(e.span, format!("unknown name `{name}`"));
         }

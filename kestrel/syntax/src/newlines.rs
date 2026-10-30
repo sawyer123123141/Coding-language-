@@ -13,7 +13,8 @@ pub fn filter(raw: Vec<Token>) -> Vec<Token> {
                 j += 1;
             }
             let in_parens = matches!(brackets.last(), Some(Tok::LParen) | Some(Tok::LBracket));
-            let prev_continues = out.last().is_none_or(|p| p.tok.continues_line());
+            // `n++` and `n--` end their line, so their message doesn't swallow the next one.
+            let prev_continues = out.last().is_none_or(|p| p.tok.continues_line()) && !ends_in_step(&out);
             let next_continues = matches!(
                 raw.get(j).map(|t| &t.tok),
                 None | Some(Tok::Else) | Some(Tok::Dot) | Some(Tok::RBrace) | Some(Tok::Eof)
@@ -35,4 +36,9 @@ pub fn filter(raw: Vec<Token>) -> Vec<Token> {
         i += 1;
     }
     out
+}
+
+/// Whether `out` ends in `++` or `--` written together: another language's step, which ends a line.
+fn ends_in_step(out: &[Token]) -> bool {
+    matches!(out, [.., a, b] if a.span.end == b.span.start && matches!((&a.tok, &b.tok), (Tok::Plus, Tok::Plus) | (Tok::Minus, Tok::Minus)))
 }

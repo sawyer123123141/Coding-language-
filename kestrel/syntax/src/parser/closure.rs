@@ -24,7 +24,7 @@ impl Parser {
 
     /// The index of the bracket that closes the one at `open`. One scan records the match of
     /// every bracket it closes along the way, so a pile of nested parentheses is scanned once.
-    fn close_of(&mut self, open: usize) -> Option<usize> {
+    pub(super) fn close_of(&mut self, open: usize) -> Option<usize> {
         if let Some(&close) = self.closes.get(&open) {
             return Some(close);
         }
@@ -58,8 +58,13 @@ impl Parser {
 
     fn closure_head<T>(&mut self, head: bool, f: impl FnOnce(&mut Self) -> T) -> T {
         let saved = std::mem::replace(&mut self.no_closure_head, head);
+        // Inside brackets a `..` is no longer the loop's own range (see `habits`).
+        let range_at = if head { None } else { Some(std::mem::take(&mut self.range_at)) };
         let result = f(self);
         self.no_closure_head = saved;
+        if let Some(r) = range_at {
+            self.range_at = r;
+        }
         result
     }
 

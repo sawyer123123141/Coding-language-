@@ -6,6 +6,7 @@
 //! for real, so malformed nested brackets (`a[b[c[`) cost linear work per level. Only when the
 //! types parse is the index tried too, inside `attempt`.
 
+use super::habits::RangeAt;
 use super::{PResult, Parser};
 use crate::ast::{Expr, ExprKind, TypeExpr};
 use crate::span::Span;
@@ -41,7 +42,7 @@ impl Parser {
     fn index_part(&mut self) -> PResult<(Expr, Span)> {
         self.nested(|p| {
             p.bump();
-            let index = p.inside_brackets(Self::expr)?;
+            let index = p.inside_brackets(|p| p.with_range_at(RangeAt::Index, Self::expr))?;
             Ok((index, p.expect(&Tok::RBracket, "`]`")?))
         })
     }

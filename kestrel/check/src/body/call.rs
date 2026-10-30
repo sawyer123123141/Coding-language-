@@ -81,6 +81,8 @@ impl<'a> BodyChecker<'a> {
                     return self.check_const_call(e, c, sig, *name_span, args);
                 }
                 self.error_help(*name_span, format!("`{name}` is a constant, not a function"), format!("use it without `()`: `{name}`"));
+            } else if let Some(msg) = self.bare_variant(name) {
+                self.error(*name_span, msg);
             } else if name.starts_with(|c: char| c.is_ascii_uppercase()) {
                 self.error_help(
                     *name_span,
