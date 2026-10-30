@@ -1,6 +1,7 @@
-//! `ExprKind::Hash`: one step of `checksum`'s fold, as the runtime's `checksum` defines it. A
-//! number becomes one 64-bit word (a NaN the canonical quiet NaN first) and is mixed in place; a
-//! string's bytes go to `kestrel_rt_hash_bytes`.
+//! `ExprKind::Hash`: one step of `checksum`'s fold, as the runtime's `checksum` defines it, or a
+//! float's raw bits (`Bits`, which `first_difference` compares). A number becomes one 64-bit word
+//! (a NaN the canonical quiet NaN first) and is mixed in place; a string's bytes go to
+//! `kestrel_rt_hash_bytes`.
 
 use cranelift_codegen::ir::condcodes::FloatCC;
 use cranelift_codegen::ir::{types, InstBuilder, MemFlagsData, Value};
@@ -26,6 +27,14 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
         Ok(match op {
             HashOp::Mix => self.mix_value(h, &args[1])?,
             HashOp::Finish => self.finish(h),
+            HashOp::Bits => match args[0].ty {
+                KTy::F32 => {
+                    let bits = self.b.ins().bitcast(types::I32, MemFlagsData::new(), h);
+                    self.b.ins().uextend(types::I64, bits)
+                }
+                KTy::F64 => self.b.ins().bitcast(types::I64, MemFlagsData::new(), h),
+                other => unreachable!("`Hash(Bits)` of a {other:?}, which isn't a float"),
+            },
         })
     }
 

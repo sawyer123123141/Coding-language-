@@ -1,5 +1,6 @@
-//! Making new strings: `trim`, `upper`, `lower`, `join` and `split`. Each result is a new string
-//! in the current arena (`split` also makes the list), never a view into the source.
+//! Making new strings: `trim`, `upper`, `lower`, `join` and `split`, and the hex text of a float's
+//! bits that `first_difference` shows. Each result is a new string in the current arena (`split`
+//! also makes the list), never a view into the source.
 
 use std::borrow::Cow;
 
@@ -64,6 +65,19 @@ pub unsafe extern "C" fn kestrel_rt_str_join(parts: *const KStr, count: i64, sep
         }
         KStr::make(&joined, out);
     }
+}
+
+/// `0x` and the low `digits` hex digits (upper case) of `bits`, as a new string: `first_difference`
+/// shows a float's bits this way (`0x42CE8000`, 8 digits for a `float`, 16 for an `f64`).
+///
+/// # Safety
+/// `out` must be valid for writing 16 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn kestrel_rt_str_hex(bits: i64, digits: i64, out: *mut KStr) {
+    let digits = digits.clamp(1, 16) as usize;
+    let text = format!("0x{:0digits$X}", bits as u64 & (u64::MAX >> (64 - 4 * digits)));
+    // SAFETY: the caller guarantees `out`.
+    unsafe { KStr::make(text.as_bytes(), out) };
 }
 
 /// The pieces of the string between the separators, as a new `list[string]` written at `out`;
@@ -136,6 +150,13 @@ mod tests {
         string(&out)
     }
 
+    fn hex(bits: i64, digits: i64) -> String {
+        let mut out = zero();
+        // SAFETY: `out` is a `KStr`.
+        unsafe { kestrel_rt_str_hex(bits, digits, &mut out) };
+        string(&out)
+    }
+
     fn join(parts: &[&str], sep: &str) -> String {
         let mut items = Vec::new();
         for p in parts {
@@ -180,6 +201,17 @@ mod tests {
             assert_eq!(case("ß", true), "SS");
             assert_eq!(case("", true), "");
             assert_eq!(case("日本", true), "日本");
+        });
+    }
+
+    #[test]
+    fn hex_shows_the_low_digits_of_the_bits() {
+        in_arena(|| {
+            assert_eq!(hex(0x42CE_8000, 8), "0x42CE8000");
+            assert_eq!(hex(0, 8), "0x00000000");
+            assert_eq!(hex(-1, 8), "0xFFFFFFFF");
+            assert_eq!(hex(0x7FF8_0000_0000_0000, 16), "0x7FF8000000000000");
+            assert_eq!(hex(f64::to_bits(-0.0) as i64, 16), "0x8000000000000000");
         });
     }
 

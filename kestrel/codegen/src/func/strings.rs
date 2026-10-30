@@ -53,6 +53,12 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
     /// written at `dest`.
     pub(crate) fn str_into(&mut self, op: StrOp, args: &[kir::Expr], ty: KTy, line: u32, dest: Value) -> Result<(), String> {
         let rt = self.shared.rt;
+        if op == StrOp::Hex {
+            let bits = self.str_int(&args[0])?;
+            let digits = self.str_int(&args[1])?;
+            self.call_id(rt.str_hex, &[bits, digits, dest]);
+            return Ok(());
+        }
         let (ptr, len) = self.str_parts(&args[0])?;
         match op {
             StrOp::At => {
@@ -105,6 +111,7 @@ impl<'a, 'b, M: Module> FuncLowerer<'a, 'b, M> {
                 self.b.ins().store(MemFlagsData::trusted(), value, dest, at);
             }
             StrOp::Chars | StrOp::CharLen | StrOp::Find | StrOp::Starts | StrOp::Ends | StrOp::Cmp => unreachable!("{op:?} is a number"),
+            StrOp::Hex => unreachable!("`Hex` is written above"),
         }
         Ok(())
     }

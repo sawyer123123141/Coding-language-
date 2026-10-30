@@ -36,10 +36,10 @@ pub(crate) fn checksum_root(arg: &Expr) -> Option<String> {
 /// What a refusal of built-in `b` says to do with the other parts of a value ("save the fields
 /// that hold the game's state instead").
 pub(crate) fn snapshot_verb(b: Builtin) -> &'static str {
-    if b == Builtin::Checksum {
-        "checksum"
-    } else {
-        "save"
+    match b {
+        Builtin::Checksum => "checksum",
+        Builtin::FirstDifference => "compare",
+        _ => "save",
     }
 }
 
@@ -97,13 +97,9 @@ impl<'a> BodyChecker<'a> {
                 Some(()) => Ty::List(self.t.intern_elem(Ty::U8)),
                 None => Ty::Error,
             },
-            Builtin::FromBytes | Builtin::FirstDifference => {
-                let msg = if b == Builtin::FromBytes {
-                    "`from_bytes` needs the type to read, like `from_bytes[Game](bytes)`"
-                } else {
-                    "`first_difference` isn't built yet"
-                };
-                self.error(e.span, msg);
+            Builtin::FirstDifference => self.check_first_difference(e, args),
+            Builtin::FromBytes => {
+                self.error(e.span, "`from_bytes` needs the type to read, like `from_bytes[Game](bytes)`");
                 self.check_loose_args(args);
                 Ty::Error
             }
@@ -122,6 +118,12 @@ impl<'a> BodyChecker<'a> {
         if ty == Ty::Error {
             return None;
         }
+        self.snapshot_value(e, b, arg, ty)
+    }
+
+    /// `arg`, of type `ty` (not an error), as the value built-in `b` takes: a value that can be
+    /// copied and checksummed. `None` after an error.
+    fn snapshot_value(&mut self, e: &Expr, b: Builtin, arg: &Expr, ty: Ty) -> Option<()> {
         let name = b.name();
         if ty == Ty::Unit {
             self.error(arg.span, format!("`{name}` needs a value, and this gives nothing"));
@@ -137,6 +139,44 @@ impl<'a> BodyChecker<'a> {
         }
         self.t.res.insert(e.id, Res::Builtin(b));
         Some(())
+    }
+
+    /// `first_difference(a, b)`: two values of one type that can be copied and checksummed (the
+    /// second converts to the first's type, as a literal or a `T` going into a `T?` does). Its
+    /// value is a `string?`.
+    fn check_first_difference(&mut self, e: &Expr, args: &[Arg]) -> Ty {
+        let (a, b) = (&args[0].value, &args[1].value);
+        let ta = self.check_expr(a, None);
+        let ta = self.reject_never(a, ta);
+        let tb = self.check_expr(b, Some(ta).filter(|&t| t != Ty::Error));
+        let tb = self.reject_never(b, tb);
+        if ta == Ty::Error || tb == Ty::Error {
+            return Ty::Error;
+        }
+        if ta == Ty::Unit {
+            // Says the first value gives nothing.
+            self.snapshot_value(e, Builtin::FirstDifference, a, ta);
+            return Ty::Error;
+        }
+        if ta != tb && tb != Ty::Unit {
+            let into_optional = matches!(ta, Ty::Optional(inner) if tb.coerces_to(self.t.elem(inner)));
+            if !tb.coerces_to(ta) && !into_optional {
+                let msg = format!("`first_difference` compares two values of one type; these are `{}` and `{}`", self.tn(ta), self.tn(tb));
+                self.error(e.span, msg);
+                return Ty::Error;
+            }
+            self.coerce(b, tb, ta);
+        }
+        let first = Builtin::FirstDifference;
+        if tb == Ty::Unit {
+            // Says the second value gives nothing.
+            self.snapshot_value(e, first, b, tb);
+            return Ty::Error;
+        }
+        match self.snapshot_value(e, first, a, ta) {
+            Some(()) => Ty::Optional(self.t.intern_elem(Ty::Str)),
+            None => Ty::Error,
+        }
     }
 
     /// The random numbers read and change the generator, so no `pure` function

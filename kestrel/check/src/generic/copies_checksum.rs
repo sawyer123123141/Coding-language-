@@ -1,6 +1,6 @@
-//! `checksum(x)` and `to_bytes(x)` in each copy of a generic (see `copies`): the checker judges a
-//! placeholder's value as having no fault (see `snapshot`), so each copy judges its argument with
-//! its own types.
+//! `checksum(x)`, `to_bytes(x)` and `first_difference(a, b)` in each copy of a generic (see
+//! `copies`): the checker judges a placeholder's value as having no fault (see `snapshot`), so each
+//! copy judges its argument with its own types.
 
 use kestrel_syntax::ast::{Expr, ExprId, ExprKind};
 use kestrel_syntax::{Diagnostic, Span};
@@ -14,11 +14,13 @@ use crate::snapshot::snapshot_refusal;
 /// `body::checksum_root`).
 pub(super) type ChecksumArg = Option<(ExprId, Option<String>)>;
 
-/// The argument of `e` when it calls `checksum` or `to_bytes` with one value (reserved names, so
-/// no user function is called that).
+/// The argument of `e` when it calls `checksum` or `to_bytes` with one value, or the first of
+/// `first_difference`'s two (reserved names, so no user function is called that).
 pub(super) fn checksum_arg(e: &Expr) -> ChecksumArg {
     match &e.kind {
         ExprKind::Call { name, args, .. } if (name == "checksum" || name == "to_bytes") && args.len() == 1 => Some((args[0].value.id, checksum_root(&args[0].value))),
+        // Both values have the first one's type.
+        ExprKind::Call { name, args, .. } if name == "first_difference" && args.len() == 2 => Some((args[0].value.id, checksum_root(&args[0].value))),
         _ => None,
     }
 }

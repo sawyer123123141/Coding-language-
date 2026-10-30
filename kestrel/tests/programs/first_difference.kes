@@ -1,0 +1,178 @@
+// `first_difference(a, b)`: `none` when two values of one type are equal (floats by their bits),
+// otherwise where they first differ, in the order `to_bytes` writes a value, then both values as
+// `print` prints them. A list's length comes before its items; a map's keys go in `a`'s order,
+// then the keys only `b` has; an enum's variant comes before its fields; an optional's
+// `none` or value before its payload. Floats that print alike but differ show their bits.
+struct Pad {
+    up: bool
+    down: bool
+}
+
+struct Input {
+    p1: Pad
+    p2: Pad
+}
+
+enum State {
+    Alive
+    Dead { since: int }
+}
+
+struct Game {
+    ball: vec2
+    name: string
+    inputs: list[Input]
+    scores: map[string, int]
+    state: State
+    target: int?
+    spin: vec4
+}
+
+struct P {
+    x: float
+}
+
+struct Node {
+    v: int
+    kids: list[Node]
+}
+
+pad(up: bool) -> Pad {
+    Pad(up: up, down: false)
+}
+
+game() -> Game {
+    let inputs: list[Input] = [Input(p1: pad(false), p2: pad(true)), Input(p1: pad(false), p2: pad(false)), Input(p1: pad(true), p2: pad(false))]
+    Game(ball: vec2(1.5, 2.0), name: "ana", inputs: inputs, scores: {"ana": 3, "bo": 4}, state: State.Alive, target: none, spin: vec4(0.5))
+}
+
+leaf(v: int) -> Node {
+    Node(v: v, kids: [])
+}
+
+@prove(deterministic)
+pub pure where_differ(a: Game, b: Game) -> string? {
+    first_difference(a, b)
+}
+
+main() {
+    let g = game()
+    print(where_differ(g, g))
+    print(where_differ(g, game()))
+
+    var h = game()
+    h.ball.x = 1.25
+    print(where_differ(g, h))
+    h = game()
+    h.name = "bo"
+    print(where_differ(g, h))
+    h = game()
+    h.inputs.add(Input(p1: pad(false), p2: pad(false)))
+    print(where_differ(g, h))
+    h = game()
+    h.inputs[2].p1.up = false
+    print(where_differ(g, h))
+
+    // Maps: a key only `a` has, a key only `b` has, a value, and the same entries in another order.
+    h = game()
+    h.scores.remove("ana")
+    print(where_differ(g, h))
+    h = game()
+    h.scores["cy"] = 5
+    print(where_differ(g, h))
+    h = game()
+    h.scores["bo"] = 7
+    print(where_differ(g, h))
+    h = game()
+    h.scores = {"bo": 4, "ana": 3}
+    print(where_differ(g, h))
+
+    // Enums and optionals.
+    h = game()
+    h.state = State.Dead(since: 3)
+    print(where_differ(g, h))
+    var dead = game()
+    dead.state = State.Dead(since: 4)
+    print(where_differ(dead, h))
+    h = game()
+    h.target = 5
+    print(where_differ(g, h))
+    print(where_differ(h, g))
+    var other = game()
+    other.target = 6
+    print(where_differ(h, other))
+    h = game()
+    h.spin = vec4(0.5, 0.25, 0.5, 0.5)
+    print(where_differ(g, h))
+
+    // Whole values: a scalar has no path.
+    print(first_difference(1.5, 1.25))
+    print(first_difference(1, 1))
+    print(first_difference(State.Dead(since: 1), State.Dead(since: 2)))
+    let none_int: int? = none
+    print(first_difference(none_int, 3))
+
+    // Floats compare by their bits: -0.0 and 0.0 differ, and two NaNs with different bits print
+    // alike, so their bits follow.
+    print(first_difference(P(x: -0.0), P(x: 0.0)))
+    let z = 0.0
+    let nan = abs(z / z)
+    print(first_difference(P(x: nan), P(x: -nan)))
+    print(first_difference(P(x: nan), P(x: nan)))
+    print(first_difference(f64(nan), -f64(nan)))
+
+    // Collections at the top, inside each other, and holding their own type.
+    let xs: list[int] = [1, 2]
+    let ys: list[int] = [1, 3]
+    let zs: list[int] = [1, 2, 3]
+    print(first_difference(xs, ys))
+    print(first_difference(xs, zs))
+    let xss: list[list[int]] = [[1], [4]]
+    let yss: list[list[int]] = [[1], [5]]
+    print(first_difference(xss, yss))
+    let words: [string] = ["a", "b"]
+    let other_words: [string] = ["a", "c"]
+    print(first_difference(words, other_words))
+    let t1 = Node(v: 1, kids: [leaf(2), Node(v: 3, kids: [leaf(4)])])
+    let t2 = Node(v: 1, kids: [leaf(2), Node(v: 3, kids: [leaf(9)])])
+    print(first_difference(t1, t2))
+    print(first_difference({3: 1}, {3: 2}))
+    let lists: map[string, list[int]] = {"a": [1, 2]}
+    let empty: map[string, list[int]] = {}
+    print(first_difference(lists, empty))
+    let small: list[u8] = [1, 2]
+    let big: list[u8] = [1, 200]
+    print(first_difference(small, big))
+}
+// expect: none
+// expect: none
+// expect: ball.x: 1.5 and 1.25
+// expect: name: "ana" and "bo"
+// expect: inputs.len: 3 and 4
+// expect: inputs[2].p1.up: true and false
+// expect: scores["ana"]: 3 and missing
+// expect: scores["cy"]: missing and 5
+// expect: scores["bo"]: 4 and 7
+// expect: scores: the same keys in another order
+// expect: state: Alive and Dead
+// expect: state.since: 4 and 3
+// expect: target: none and a value
+// expect: target: a value and none
+// expect: target: 5 and 6
+// expect: spin.y: 0.5 and 0.25
+// expect: 1.5 and 1.25
+// expect: none
+// expect: since: 1 and 2
+// expect: none and a value
+// expect: x: -0 and 0
+// expect: x: NaN and NaN (bits 0x7FC00000 and 0xFFC00000)
+// expect: none
+// expect: NaN and NaN (bits 0x7FF8000000000000 and 0xFFF8000000000000)
+// expect: [1]: 2 and 3
+// expect: len: 2 and 3
+// expect: [1][0]: 4 and 5
+// expect: [1]: "b" and "c"
+// expect: kids[1].kids[0].v: 4 and 9
+// expect: [3]: 1 and 2
+// expect: ["a"]: [1, 2] and missing
+// expect: [1]: 2 and 200

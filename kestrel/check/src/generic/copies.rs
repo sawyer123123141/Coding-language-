@@ -219,7 +219,7 @@ impl<'a> Walk<'a> {
             Some(Res::Convert(ty) | Res::SimdMake(ty)) => {
                 self.sub(ty, ctx)?;
             }
-            Some(Res::Builtin(b @ (Builtin::Checksum | Builtin::ToBytes))) => {
+            Some(Res::Builtin(b @ (Builtin::Checksum | Builtin::ToBytes | Builtin::FirstDifference))) => {
                 if let Some((arg, root)) = checksum {
                     self.checksum_copy(b, arg, root, span, ctx)?;
                 }

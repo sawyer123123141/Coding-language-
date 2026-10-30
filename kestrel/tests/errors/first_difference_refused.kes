@@ -1,0 +1,44 @@
+struct World {
+    mem: Arena
+    n: int
+}
+
+struct Fighter {
+    hp: int
+    on_hit: (int) -> int
+}
+
+struct Game {
+    score: int
+}
+
+struct Replay {
+    frames: int
+}
+
+look(w: World, f: Fighter, mem: Arena, g: Game, r: Replay) {
+    print(first_difference(w, w))
+    print(first_difference(f, f))
+    print(first_difference(mem, mem))
+    print(first_difference(f.on_hit, f.on_hit))
+    print(first_difference(g, r))
+    print(first_difference(1, "one"))
+    print(first_difference(g))
+    print(first_difference(g, g, g))
+    print(first_difference(1.5, 2))
+}
+
+// `first_difference` is a built-in name.
+first_difference(x: int) -> int { x }
+
+main() {}
+
+// error 20: `first_difference` can't compare a `World`, which holds an `Arena`; compare the fields that hold the game's state instead
+// error 21: `first_difference` can't compare a `Fighter`, which holds a function value, whose address differs between builds; compare the other fields instead
+// error 22: `first_difference` can't compare an `Arena`; compare the values that hold the game's state instead
+// error 23: `first_difference` can't compare a function value, whose address differs between builds
+// error 24: `first_difference` compares two values of one type; these are `Game` and `Replay`
+// error 25: `first_difference` compares two values of one type; these are `int` and `string`
+// error 26: `first_difference` takes two values
+// error 27: `first_difference` takes two values
+// error 32: `first_difference` is a built-in name; pick another

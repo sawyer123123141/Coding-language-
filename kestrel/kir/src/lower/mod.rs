@@ -11,6 +11,7 @@ mod collections;
 mod compare;
 mod consts;
 mod copies;
+mod difference;
 mod env;
 mod expr;
 mod fnvalue;

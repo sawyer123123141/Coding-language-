@@ -70,6 +70,9 @@ impl<'a> FnLowerer<'a> {
         if b == Builtin::Checksum {
             return self.checksum(&args[0].value, line);
         }
+        if b == Builtin::FirstDifference {
+            return self.difference_call(args, ty);
+        }
         if b == Builtin::ToBytes {
             return self.bytes_call(&args[0].value, ty);
         }

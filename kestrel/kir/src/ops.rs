@@ -139,10 +139,13 @@ pub enum StrOp {
     ToInt,
     /// `[s]`: a `float?`, `none` unless `s` is a finite number.
     ToFloat,
+    /// `[bits, digits]`: a new string of `0x` and the low `digits` hex digits (upper case) of the
+    /// `i64` `bits`, as `first_difference` shows a float's bits (`0x42CE8000`).
+    Hex,
 }
 
-/// What `ExprKind::Hash` does: one step of `checksum`'s fold (see the runtime's `checksum`). Both
-/// give an `i64`; neither allocates or fails.
+/// What `ExprKind::Hash` does: one step of `checksum`'s fold (see the runtime's `checksum`), or a
+/// float's raw bits. Each gives an `i64`; none allocates or fails.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HashOp {
     /// `[h, x]`: `x` mixed into the fold `h` (an `i64`). `x` is a bool (0 or 1), a `u8` (its
@@ -153,4 +156,7 @@ pub enum HashOp {
     Mix,
     /// `[h]`: the fold finished (SplitMix64's finaliser), the value `checksum` gives.
     Finish,
+    /// `[x]`: the raw bits of the `float` (zero-extended) or `f64` `x`, NaN payloads and the sign
+    /// of zero kept: `first_difference` compares floats by these.
+    Bits,
 }

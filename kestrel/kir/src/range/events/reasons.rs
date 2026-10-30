@@ -202,6 +202,7 @@ impl Walk<'_> {
             StrOp::Lower => makes("lower"),
             StrOp::Join => makes("join"),
             StrOp::Split => (format!("`{}.split({})` makes a new list", text(0), text(1)), "splits a string into a new list".to_string()),
+            StrOp::Hex => ("`first_difference` makes a new string".to_string(), "makes a new string with `first_difference`".to_string()),
             StrOp::Chars | StrOp::CharLen | StrOp::Find | StrOp::Starts | StrOp::Cmp | StrOp::Ends | StrOp::ToInt | StrOp::ToFloat => return,
         };
         self.alloc(line, Some(direct), via, "");
