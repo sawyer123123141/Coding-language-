@@ -649,6 +649,9 @@ The user's friend asked for the IR to be inspected for redundant operations. Dum
 67. **An exe test that links `window` and `file` together** exists only as a build check (fix wave item 14); a headless run of such a program would also prove the symbols resolve at run time. Tests.
 68. **Replaying a program that reads files**: `file` is read again at replay, so a save changed between recording and replay gives a (correct) "replay differs". Recording `file.read` results would make replays self-contained; a format addition for a later round. Not syntax.
 69. **The replay file's native log has no per-frame index**, so a differing replay says the frame but not the native call's position inside it; and the mismatch note compares the program's file name only. Both cheap, when someone needs them. Not syntax.
+70. **`to_bytes` and `from_bytes` go one item at a time over lists of plain numbers** (a 100k `list[int]`: `to_bytes` 49 µs against a 6.4 µs copy, 7.6x; `from_bytes` 65 µs). A bulk copy for lists whose items are plain numbers or vectors (the bytes are the memory, little-endian) would make both one memcpy. Not syntax.
+71. **Some runs copy every 400 KB list 13-18 times slower** (90-128 µs instead of about 7 µs, for the whole run, in 5 of 18 bench runs of `bench/io/bytes.kes`). Likely the spare-block cache in `runtime/src/blocks.rs` handing out a block in a slow state (fresh from Windows, page faults on first touch) each time, or an alignment accident. Measure which, then warm or keep the block. Not syntax.
+72. **`from_bytes`'s `Reserve` reason says it "fails if its result would hold more than ... bytes"**, which the `i32::MAX` check rules out as fix wave 2 found for the list-add reason; make it the allocation only. Not syntax.
 
 ## Cheap, fix when the area is next touched
 
