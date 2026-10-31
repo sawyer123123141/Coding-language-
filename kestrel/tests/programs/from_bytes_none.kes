@@ -79,6 +79,8 @@ main() {
     print("bool 2:", from_bytes[bool](set(to_bytes(true), 13, 2)))
     let some_int: int? = 5
     print("optional 2:", from_bytes[int?](set(to_bytes(some_int), 13, 2)))
+    print("bool 200:", from_bytes[bool](set(to_bytes(true), 13, 200)))
+    print("optional 200:", from_bytes[int?](set(to_bytes(some_int), 13, 200)))
     print("variant 3:", from_bytes[Shape](set(to_bytes(Shape.Dot), 13, 3)))
     print("variant 9:", from_bytes[Shape](set(to_bytes(Shape.Dot), 13, 9)))
     print("variant past i32:", from_bytes[Shape](set_count(to_bytes(Shape.Dot), 13, 255, 255, 255, 255)))
@@ -131,6 +133,8 @@ main() {
 // expect: trailing: none
 // expect: bool 2: none
 // expect: optional 2: none
+// expect: bool 200: none
+// expect: optional 200: none
 // expect: variant 3: none
 // expect: variant 9: none
 // expect: variant past i32: none

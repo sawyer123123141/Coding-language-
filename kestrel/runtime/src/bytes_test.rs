@@ -75,6 +75,35 @@ fn reserving_gives_exactly_the_room_asked_for_and_keeps_the_items() {
     }
 }
 
+/// Set for the child process of `a_negative_room_fails_instead_of_returning`.
+const RESERVE_CHILD: &str = "KESTREL_TEST_RESERVE_CHILD";
+
+/// The child half of `a_negative_room_fails_instead_of_returning`: does nothing unless the parent
+/// set `RESERVE_CHILD`. Reserving room for -1 items must stop the program (exit 101), so getting
+/// past the call exits 0.
+#[test]
+fn reserve_negative_child() {
+    if std::env::var_os(RESERVE_CHILD).is_none() {
+        return;
+    }
+    let mut l = List { ptr: std::ptr::null_mut(), len: 0, cap: 0, arena: std::ptr::null_mut() };
+    // SAFETY: `l` is a valid empty list of 4-byte items.
+    unsafe { kestrel_rt_list_reserve(&mut l, -1, 4, 4) };
+    std::process::exit(0);
+}
+
+#[test]
+fn a_negative_room_fails_instead_of_returning() {
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["bytes::tests::reserve_negative_child", "--exact", "--nocapture", "--test-threads=1"])
+        .env(RESERVE_CHILD, "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(101), "{stderr}");
+    assert!(stderr.contains("kestrel: a list can't hold"), "{stderr}");
+}
+
 #[test]
 fn a_string_is_written_as_its_length_then_its_bytes() {
     let mut buf = [0xAAu8; 9];
@@ -127,6 +156,18 @@ fn decode_reads_back_what_encode_wrote() {
 }
 
 #[test]
+fn a_struct_ending_in_an_empty_struct_reads_back_at_the_end_of_the_input() {
+    // `Tagged { id: int, k: Unit }` is written in 4 bytes, the fewest its type takes.
+    let tagged = RefTy::Struct(vec![RefTy::Int, RefTy::Struct(vec![])]);
+    assert_eq!((tagged.min_size(), RefTy::Struct(vec![]).min_size()), (4, 0));
+    let item = |id| RefValue::Struct(vec![RefValue::Int(id), RefValue::Struct(vec![])]);
+    let tags = RefValue::List(vec![item(1), item(2)]);
+    assert_eq!(round_trip(&tags, &list(tagged)), Some(tags));
+    let units = RefValue::Map(vec![(s("a"), RefValue::Struct(vec![])), (s("b"), RefValue::Struct(vec![]))]);
+    assert_eq!(round_trip(&units, &RefTy::Map(Box::new(RefTy::Str), Box::new(RefTy::Struct(vec![])))), Some(units));
+}
+
+#[test]
 fn decode_refuses_every_wrong_input() {
     let good = encode(&RefValue::Int(7), 77);
     assert!(decode(&good, &RefTy::Int, 77).is_some());
@@ -156,8 +197,9 @@ fn decode_refuses_every_wrong_input() {
     assert_eq!(decode(&body(&[0xFF, 0xFF, 0xFF, 0x7F, 0, 0, 0]), &list(RefTy::U8), 77), None);
     assert_eq!(decode(&body(&[0, 0, 0, 0x80]), &list(RefTy::Struct(vec![])), 77), None);
     assert_eq!(decode(&body(&[2, 0, 0, 0, 1, 0, 0, 0]), &list(RefTy::Int), 77), None);
-    // An empty struct counts as one byte: a list of them is bounded by the bytes left.
-    assert_eq!(decode(&body(&[1, 0, 0, 0]), &list(RefTy::Struct(vec![])), 77), None);
+    // An empty struct takes no bytes, so any length up to `i32::MAX` of them is read.
+    let units = decode(&body(&[3, 0, 0, 0]), &list(RefTy::Struct(vec![])), 77);
+    assert_eq!(units, Some(RefValue::List(vec![RefValue::Struct(vec![]); 3])));
     // A key twice.
     let m = RefValue::Map(vec![(RefValue::U8(1), RefValue::U8(2)), (RefValue::U8(1), RefValue::U8(3))]);
     assert_eq!(round_trip(&m, &RefTy::Map(Box::new(RefTy::U8), Box::new(RefTy::U8))), None);
@@ -211,16 +253,20 @@ fn random_value(ty: &RefTy, rng: &mut Lcg) -> RefValue {
 fn damaged_bytes_never_panic_and_never_read_as_another_value() {
     let shape = RefTy::Enum(vec![vec![], vec![RefTy::Float, RefTy::Str], vec![list(RefTy::U8)]]);
     let item = RefTy::Struct(vec![RefTy::Str, RefTy::Int, shape.clone(), opt(RefTy::I64)]);
+    // Structs that end in an empty struct, which takes no bytes.
+    let tagged = RefTy::Struct(vec![RefTy::Int, RefTy::Struct(vec![])]);
     let types = [
         RefTy::Struct(vec![RefTy::I64, RefTy::F64, RefTy::Bool, list(item.clone()), RefTy::Map(Box::new(RefTy::Str), Box::new(list(RefTy::U8))), opt(RefTy::F64)]),
         list(item),
         RefTy::Map(Box::new(RefTy::Int), Box::new(opt(shape.clone()))),
         list(list(RefTy::Str)),
         shape,
+        list(tagged),
+        RefTy::Map(Box::new(RefTy::Str), Box::new(RefTy::Struct(vec![]))),
     ];
     let mut rng = Lcg(0x5EED);
     let (mut read, mut refused) = (0, 0);
-    for i in 0..50 {
+    for i in 0..70 {
         let ty = &types[i % types.len()];
         let value = random_value(ty, &mut rng);
         let bytes = encode(&value, 77);

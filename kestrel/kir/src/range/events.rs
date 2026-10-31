@@ -275,7 +275,7 @@ impl Walk<'_> {
             ExprKind::NewArena => self.alloc(line, Some("`Arena()` makes a new arena".to_string()), "makes a new arena".to_string(), ""),
             ExprKind::Format(parts) => {
                 self.print(parts);
-                self.alloc(line, Some("string interpolation makes a new string".to_string()), "builds a string with interpolation".to_string(), "");
+                self.format_alloc(e, line);
             }
             ExprKind::ArrayNew(n) => {
                 self.expr(n);

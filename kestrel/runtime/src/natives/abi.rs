@@ -82,12 +82,9 @@ pub unsafe fn elems<'a, T>(s: *const KSeq) -> &'a [T] {
     std::slice::from_raw_parts(s.ptr.cast::<T>(), s.len as usize)
 }
 
-/// A new list in the current arena holding `n` items that `fill` writes, one at a time through
-/// the pointer to each (`fill(k, at)`). Its capacity is its length.
-///
-/// # Safety
-/// `fill` must write a valid `T` at every pointer it is given.
-unsafe fn list_of<T>(n: usize, mut fill: impl FnMut(usize, *mut T)) -> List {
+/// A new list in the current arena with room for `n` `T`s and length `n`, its items not written
+/// yet. Its capacity is its length.
+fn unwritten_list<T>(n: usize) -> List {
     if !items_fit(n as i64) {
         list_too_long();
     }
@@ -96,20 +93,34 @@ unsafe fn list_of<T>(n: usize, mut fill: impl FnMut(usize, *mut T)) -> List {
         std::ptr::null_mut()
     } else {
         // SAFETY: the current arena is alive while it is on the stack.
-        let items = unsafe { (*arena).alloc_uninit(n * std::mem::size_of::<T>(), std::mem::align_of::<T>()) }.cast::<T>();
-        for k in 0..n {
-            // SAFETY: `items` has room for `n` aligned `T`s.
-            fill(k, unsafe { items.add(k) });
-        }
-        items.cast::<u8>()
+        unsafe { (*arena).alloc_uninit(n * std::mem::size_of::<T>(), std::mem::align_of::<T>()) }
     };
     List { ptr, len: n as i64, cap: n as i64, arena }
 }
 
-/// A `list[u8]` of a copy of `bytes`, in the current arena.
+/// A new list in the current arena holding `n` items that `fill` writes, one at a time through
+/// the pointer to each (`fill(k, at)`). Its capacity is its length.
+///
+/// # Safety
+/// `fill` must write a valid `T` at every pointer it is given.
+unsafe fn list_of<T>(n: usize, mut fill: impl FnMut(usize, *mut T)) -> List {
+    let list = unwritten_list::<T>(n);
+    let items = list.ptr.cast::<T>();
+    for k in 0..n {
+        // SAFETY: `items` has room for `n` aligned `T`s.
+        fill(k, unsafe { items.add(k) });
+    }
+    list
+}
+
+/// A `list[u8]` of a copy of `bytes`, in the current arena, copied whole.
 pub fn byte_list(bytes: &[u8]) -> List {
-    // SAFETY: each pointer `list_of` gives is room for one byte.
-    unsafe { list_of(bytes.len(), |k, at: *mut u8| at.write(bytes[k])) }
+    let list = unwritten_list::<u8>(bytes.len());
+    if !bytes.is_empty() {
+        // SAFETY: the list's fresh memory has room for exactly these bytes.
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), list.ptr, bytes.len()) };
+    }
+    list
 }
 
 /// A `list[string]` of copies of `items`, in the current arena (the strings' bytes too).
@@ -118,12 +129,15 @@ pub fn string_list<S: AsRef<[u8]>>(items: &[S]) -> List {
     unsafe { list_of(items.len(), |k, at: *mut KStr| KStr::make(items[k].as_ref(), at)) }
 }
 
-/// Writes `value` as an optional's value at `out`: tag 1, then `value`.
+/// Writes `value` as an optional's value at `out`: zeros over the whole optional (so its padding
+/// is defined, as `write_none` leaves it), then tag 1 and `value`.
 ///
 /// # Safety
 /// `out` must be valid for writing a `KOpt<T>` (not necessarily aligned).
 pub unsafe fn write_some<T>(out: *mut KOpt<T>, value: T) {
-    write(out, KOpt { tag: 1, value });
+    std::ptr::write_bytes(out.cast::<u8>(), 0, std::mem::size_of::<KOpt<T>>());
+    out.cast::<u8>().write(1);
+    std::ptr::addr_of_mut!((*out).value).write_unaligned(value);
 }
 
 /// Writes `none` at `out`: tag 0, and zeros where a value would be.

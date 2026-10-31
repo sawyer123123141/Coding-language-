@@ -1,0 +1,28 @@
+// A function that saves and loads a value with a list, a map and a string proves `no_panic` and
+// `deterministic`: `to_bytes` and `from_bytes` are `pure`, give the same bytes everywhere, and never
+// stop the program (damaged bytes give `none`).
+struct Save {
+    names: list[string]
+    scores: map[string, int]
+    title: string
+}
+
+@prove(no_panic, deterministic)
+pub pure reload(s: Save) -> Save? {
+    from_bytes[Save](to_bytes(s))
+}
+
+@prove(no_panic, deterministic)
+pub pure size(s: Save) -> int {
+    to_bytes(s).len
+}
+
+main() {
+    let s = Save(names: ["ana", "bo"], scores: {"ana": 3, "bo": 5}, title: "cup")
+    let back = reload(s) else {
+        print("none")
+        return
+    }
+    print(back.names, back.scores, back.title, size(s), checksum(back) == checksum(s))
+}
+// expect: ["ana", "bo"] {"ana": 3, "bo": 5} cup 62 true

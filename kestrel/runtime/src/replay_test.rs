@@ -215,6 +215,30 @@ fn a_different_line_shows_both() {
 }
 
 #[test]
+fn a_failure_after_an_unfinished_line_reads_back() {
+    // What a run that prints "partial" with no line break and then fails is recorded as.
+    let mut keep = Keep::default();
+    keep.print(b"frame 2
+partial");
+    keep.end(&Ending::Failure("boom on line 3".to_string()));
+    let mut file = sample();
+    file.output = keep.entries;
+    assert!(matches!(file.output[..], [Entry::Line(_), Entry::Partial(_), Entry::Failure(_)]), "{:?}", file.output);
+    assert_eq!(ReplayFile::from_bytes(&file.to_bytes().unwrap()), Ok(file.clone()));
+
+    // An unfinished line is last, or just before the failure; nowhere else.
+    for output in [
+        vec![Entry::Partial(b"a".to_vec()), Entry::Line(b"b".to_vec())],
+        vec![Entry::Partial(b"a".to_vec()), Entry::Partial(b"b".to_vec())],
+        vec![Entry::Partial(b"a".to_vec()), Entry::Line(b"b".to_vec()), Entry::Failure("boom".to_string())],
+        vec![Entry::Failure("boom".to_string()), Entry::Partial(b"a".to_vec())],
+    ] {
+        file.output = output;
+        assert_eq!(ReplayFile::from_bytes(&file.to_bytes().unwrap()), Err(Unreadable::NotReplay), "{:?}", file.output);
+    }
+}
+
+#[test]
 fn a_recorded_failure_must_recur() {
     let mut keep = Keep::default();
     keep.print(b"frame 2\npartial");

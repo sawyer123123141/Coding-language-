@@ -9,8 +9,16 @@ pure name(b: list[u8]) -> string? {
     from_bytes[string](b)
 }
 
+// A list of optionals is made as its items are read.
+@prove(no_alloc)
+pure maybes(b: list[u8]) -> list[int?]? {
+    from_bytes[list[int?]](b)
+}
+
 main() {
-    print(count(to_bytes(1)), name(to_bytes("a")))
+    let none_yet: list[int?] = []
+    print(count(to_bytes(1)), name(to_bytes("a")), maybes(to_bytes(none_yet)))
 }
 
 // error 7: `name` can't be proven `no_alloc`: it calls `from_bytes` (line 9), which makes the strings it reads (line 9)
+// error 13: `maybes` can't be proven `no_alloc`: it calls `from_bytes` (line 15), which makes the lists it reads (line 15)

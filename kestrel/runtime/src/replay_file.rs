@@ -176,10 +176,16 @@ impl ReplayFile {
             let text = r.bytes()?;
             output.push(match kind {
                 0 => Entry::Line(text),
-                1 if i + 1 == count => Entry::Partial(text),
+                // Last, or just before the failure that ended the run after it.
+                1 if i + 2 >= count => Entry::Partial(text),
                 2 if i + 1 == count => Entry::Failure(String::from_utf8(text).map_err(|_| Unreadable::NotReplay)?),
                 _ => return Err(Unreadable::NotReplay),
             });
+        }
+        if let [.., Entry::Partial(_), last] = &output[..] {
+            if !matches!(last, Entry::Failure(_)) {
+                return Err(Unreadable::NotReplay);
+            }
         }
         if r.at != bytes.len() {
             return Err(Unreadable::NotReplay);

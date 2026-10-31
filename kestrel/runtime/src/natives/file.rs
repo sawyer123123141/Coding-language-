@@ -14,12 +14,17 @@ use std::io::Read;
 use super::abi::{byte_list, elems, str_bytes, string_list, write_none, write_some, KOpt, KSeq};
 use super::error;
 use super::paths::resolve;
-use crate::arena::List;
+use crate::arena::{List, MAX_ITEMS};
 use crate::string::KStr;
 
 /// A native's `bool`.
 fn flag(ok: bool) -> u8 {
     u8::from(ok)
+}
+
+/// Why a file of `len` bytes can't be read: a `list[u8]` holds at most `MAX_ITEMS` bytes.
+fn too_long(len: u64) -> Option<&'static str> {
+    (len > MAX_ITEMS as u64).then_some("the file is larger than a list can hold")
 }
 
 /// The bytes of the file at `path`, or `None` with the error recorded.
@@ -31,9 +36,21 @@ fn read_bytes(path: &[u8]) -> Option<Vec<u8>> {
             return None;
         }
     };
-    let mut bytes = Vec::new();
+    // The size the file says it has: a huge file is refused before it is read, and the rest is
+    // read into room made once. It may change meanwhile, so what was read is checked again.
+    let len = file.metadata().map(|m| m.len()).unwrap_or(0);
+    let refuse = |why: &str| error::set(error::sentence("read", path, why));
+    if let Some(why) = too_long(len) {
+        refuse(why);
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(len as usize);
     if let Err(e) = file.read_to_end(&mut bytes) {
         error::set_io("read", path, &e);
+        return None;
+    }
+    if let Some(why) = too_long(bytes.len() as u64) {
+        refuse(why);
         return None;
     }
     error::clear();
@@ -203,4 +220,18 @@ pub unsafe extern "C" fn kestrel_file_remove(path: *const KStr) -> u8 {
 #[no_mangle]
 pub unsafe extern "C" fn kestrel_file_error(out: *mut KStr) {
     KStr::make(error::get().as_bytes(), out);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_file_longer_than_a_list_can_hold_is_refused_in_a_sentence() {
+        assert_eq!(too_long(0), None);
+        assert_eq!(too_long(i32::MAX as u64), None);
+        let why = too_long(i32::MAX as u64 + 1).expect("one byte too many");
+        assert_eq!(too_long(u64::MAX), Some(why));
+        assert_eq!(error::sentence("read", b"big.bin", why), "could not read `big.bin`: the file is larger than a list can hold");
+    }
 }

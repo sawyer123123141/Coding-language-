@@ -13,8 +13,10 @@
 //!   themselves through a collection work, as `to_bytes`'s do.
 //! - Every read checks that its bytes are there first. A length or count is checked, before
 //!   anything is made for it, to be at most `i32::MAX` and at most the bytes left divided by the
-//!   fewest bytes an item takes (`min_size`), so a hostile length never allocates more than a fixed
-//!   multiple of the input's size. A list is made with exactly its length as its room. A string
+//!   fewest bytes an item takes (`min_size`). A list is made with exactly its length as its room,
+//!   unless its items take more than 4 times as much memory as bytes (`grows`): then it grows as
+//!   they are read, so a hostile length never makes more than 4 times the input's size up front.
+//!   Items of 0 bytes take no room and are not read at all. A string
 //!   must be valid UTF-8 (`ReadBytes` gives the empty string otherwise). A map is built by adding
 //!   each key, and a key already there fails it.
 //!
@@ -28,7 +30,7 @@ use kestrel_syntax::ast;
 use super::bytes::{fingerprint, fixed_size, helper, int, load, local, number, word_size, wrapping, HEADER, MAGIC, VERSION};
 use super::helpers::{elem_of, expr, with, Helpers};
 use super::map_helpers::key_value;
-use super::{kty, FnLowerer};
+use super::{kty, layout, FnLowerer};
 use crate::ir::*;
 
 // The locals of a read function: the bytes, the next byte, the value read, a count and a loop
@@ -43,11 +45,12 @@ const F_SRC: LocalIdx = LocalIdx(0);
 const F_AT: LocalIdx = LocalIdx(1);
 const F_OUT: LocalIdx = LocalIdx(2);
 
-/// The fewest bytes a value of type `ty` takes, at least 1: what a claimed length is checked
-/// against. (An empty struct takes none but counts as 1, so a list of them is bounded too.)
+/// The fewest bytes a value of type `ty` takes: what a claimed length is checked against. A struct
+/// is the sum of its fields, so an empty struct (or one of empty structs) takes 0: a list of those
+/// is read with no loop (see `bytes_read_fn`).
 fn min_size(ty: KTy, t: &Tables) -> i64 {
     match ty {
-        KTy::Struct(s) => t.structs[s.0 as usize].fields.iter().map(|f| min_size(kty(f.ty), t)).sum::<i64>().max(1),
+        KTy::Struct(s) => t.structs[s.0 as usize].fields.iter().map(|f| min_size(kty(f.ty), t)).sum::<i64>(),
         KTy::Str | KTy::Array(_) | KTy::List(_) | KTy::Map(..) | KTy::Enum(_) => 4,
         KTy::Optional(_) => 1,
         _ => word_size(ty).unwrap_or_else(|| unreachable!("the checker refuses `from_bytes` of a {ty:?}")),
@@ -96,17 +99,29 @@ fn skip(n: Expr) -> Stmt {
 }
 
 /// The `u32` at `at`, widened, into the local `n`, then past it; fails unless it is at most
-/// `i32::MAX` and that many items of at least `min` bytes fit in the bytes left.
+/// `i32::MAX` and that many items of at least `min` bytes fit in the bytes left (any number of
+/// items of 0 bytes do).
 fn count(n: LocalIdx, min: i64) -> Vec<Stmt> {
-    vec![
+    let mut out = vec![
         need(int(4, KTy::I64)),
         Stmt::Let(n, expr(ExprKind::Cast(Box::new(read(KTy::I32))), KTy::I64)),
         skip(int(4, KTy::I64)),
         // Read as an `int`, a length past `i32::MAX` is negative.
         fail_if(cmp(BinOp::Lt, local(n), int(0, KTy::I64))),
+    ];
+    if min > 0 {
         // At most `i32::MAX` items of at most a few thousand bytes: the product fits.
-        fail_if(cmp(BinOp::Gt, wrapping(BinOp::MulWrap, local(n), int(min, KTy::I64)), left())),
-    ]
+        out.push(fail_if(cmp(BinOp::Gt, wrapping(BinOp::MulWrap, local(n), int(min, KTy::I64)), left())));
+    }
+    out
+}
+
+/// Whether the items of a list or array of `elem` are read one by one into a list that grows as
+/// they come, instead of into room made up front for the claimed length: when an item's size in
+/// memory is more than 4 times the fewest bytes it is written in, room for a hostile length would
+/// be a large multiple of the input's size.
+fn grows(elem: KTy, t: &Tables) -> bool {
+    i64::from(layout::size_align(t, elem).0) > 4 * min_size(elem, t)
 }
 
 /// The locals of the read function being built.
@@ -235,22 +250,45 @@ impl Helpers {
         let n = || local(R_N);
         let mut body = Vec::new();
         match ty {
-            KTy::Array(_) | KTy::List(_) => {
+            KTy::Array(e) | KTy::List(e) => {
                 let elem = elem_of(ty, t);
-                body.extend(count(R_N, min_size(elem, t)));
-                if matches!(ty, KTy::List(_)) {
-                    body.push(Stmt::Assign(out.clone(), expr(ExprKind::ListNew, ty)));
-                    body.push(Stmt::List(ListOp::Reserve, out.clone(), vec![n()]));
-                    // The room is exactly `n`, and every item is written before anything reads it.
-                    body.push(Stmt::SetLen(out.clone(), n()));
+                let min = min_size(elem, t);
+                body.extend(count(R_N, min));
+                // Items of a fixed size are all there: the length was checked against it.
+                let room = fixed_size(elem, t).is_some();
+                let index = |p: &Place| with(p, Proj::Index { at: local(R_I), check: IndexCheck::Known });
+                if min > 0 && grows(elem, t) {
+                    // Into a list that grows as the items come (`out` itself for a list), so a
+                    // hostile length makes nothing the bytes don't hold; an array is then copied
+                    // from it into one of exactly its length.
+                    let items = if matches!(ty, KTy::List(_)) { out.clone() } else { Place::local(fr.temp("items", KTy::List(e))) };
+                    body.push(Stmt::Assign(items.clone(), expr(ExprKind::ListNew, KTy::List(e))));
+                    let item = fr.temp("item", elem);
+                    let mut each = self.read_stmts(&mut fr, Place::local(item), elem, room, list, t);
+                    each.push(Stmt::ListAdd(items.clone(), load(Place::local(item), elem)));
+                    body.push(Stmt::ForRange { var: R_I, start: int(0, KTy::I64), end: n(), body: each });
+                    if matches!(ty, KTy::Array(_)) {
+                        body.push(Stmt::Assign(out.clone(), expr(ExprKind::ArrayNew(Box::new(n())), ty)));
+                        let copy = vec![Stmt::Assign(index(&out), load(index(&items), elem))];
+                        body.push(Stmt::ForRange { var: R_I, start: int(0, KTy::I64), end: n(), body: copy });
+                    }
                 } else {
-                    body.push(Stmt::Assign(out.clone(), expr(ExprKind::ArrayNew(Box::new(n())), ty)));
+                    if matches!(ty, KTy::List(_)) {
+                        body.push(Stmt::Assign(out.clone(), expr(ExprKind::ListNew, ty)));
+                        body.push(Stmt::List(ListOp::Reserve, out.clone(), vec![n()]));
+                        // The room is exactly `n`, and every item is written before anything reads it.
+                        body.push(Stmt::SetLen(out.clone(), n()));
+                    } else {
+                        body.push(Stmt::Assign(out.clone(), expr(ExprKind::ArrayNew(Box::new(n())), ty)));
+                    }
+                    // Items of 0 bytes have nothing to read (and room for them takes no memory),
+                    // so any length is read with no loop. Otherwise the loop never changes the
+                    // list's length, so `i` stays below it.
+                    if min > 0 {
+                        let each = self.read_stmts(&mut fr, index(&out), elem, room, list, t);
+                        body.push(Stmt::ForRange { var: R_I, start: int(0, KTy::I64), end: n(), body: each });
+                    }
                 }
-                // The loop never changes the list's length, so `i` stays below it. Items of a fixed
-                // size are all there: the length was checked against it.
-                let item = with(&out, Proj::Index { at: local(R_I), check: IndexCheck::Known });
-                let each = self.read_stmts(&mut fr, item, elem, fixed_size(elem, t).is_some(), list, t);
-                body.push(Stmt::ForRange { var: R_I, start: int(0, KTy::I64), end: n(), body: each });
             }
             KTy::Map(..) => {
                 let (k, v) = key_value(ty, t);

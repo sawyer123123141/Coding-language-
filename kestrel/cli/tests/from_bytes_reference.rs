@@ -164,3 +164,41 @@ fn a_length_the_bytes_cant_hold_is_never_allocated() {
     let without = arena_bytes(&write("claims_control", &program(false)));
     assert!(with <= without + 4096, "reading the claims grew the arena from {without} to {with} bytes");
 }
+
+#[test]
+fn items_far_bigger_in_memory_than_in_bytes_are_not_made_up_front() {
+    // A `vec4?` takes 32 bytes in memory and can be written in 1, so room for every item a length
+    // claims would be 32 times the input. Here a 40-byte input claims 4,294,967,295 items, and
+    // 2,000-byte ones claim as many items as their bytes could hold, each item a byte that is not
+    // 0 or 1 or a length past `i32::MAX` (so the first item already fails), for lists and an array.
+    let header = |desc: &str| encode(&V::List(Vec::new()), fingerprint(desc))[..13].to_vec();
+    let claim = |desc: &str, count: u32, len: usize| {
+        let mut b = [header(desc), count.to_le_bytes().to_vec()].concat();
+        b.resize(len, 0xFF);
+        b
+    };
+    let reads = [
+        ("list[vec4?]", claim("list[vec4?]", u32::MAX, 40)),
+        ("list[vec4?]", claim("list[vec4?]", 2000 - 17, 2000)),
+        ("[vec4?]", claim("array[vec4?]", 2000 - 17, 2000)),
+        ("list[list[u8]]", claim("list[list[u8]]", (2000 - 17) / 4, 2000)),
+    ];
+    let program = |read: bool| {
+        let mut body = String::new();
+        for (i, (ty, bytes)) in reads.iter().enumerate() {
+            body.push_str(&format!("    let b{i}: list[u8] = {}\n", literal(bytes)));
+            if read {
+                body.push_str(&format!("    let r{i} = from_bytes[{ty}](b{i})\n    print(r{i})\n"));
+            } else {
+                body.push_str(&format!("    print(b{i}.len)\n"));
+            }
+        }
+        format!("main() {{\n{body}}}\n")
+    };
+    let read = write("big_items", &program(true));
+    let (stdout, _) = run(&read, &[]);
+    assert_eq!(stdout.lines().collect::<Vec<_>>(), vec!["none"; reads.len()]);
+    let with = arena_bytes(&read);
+    let without = arena_bytes(&write("big_items_control", &program(false)));
+    assert!(with <= without + 4096, "reading the claims grew the arena from {without} to {with} bytes");
+}

@@ -43,6 +43,37 @@ struct Game {
 }
 
 #[test]
+fn the_module_a_type_lives_in_is_not_part_of_its_description() {
+    let mut t = tables(
+        "enum State {
+    Alive
+    Dead { since: int }
+}
+struct Rng {
+    seed: i64
+}
+struct Game {
+    rng: Rng
+    state: State
+}",
+    );
+    let game = strukt(&t, "Game");
+    let desc = "struct Game{rng:struct Rng{seed:i64},state:enum State{Alive,Dead{since:int}}}";
+    assert_eq!(description(game, &t), desc);
+    // The same types as the linker names them when they come from modules (and a generic copy).
+    let rename = |t: &mut Tables, from: &str, to: &str| {
+        let s = t.structs.iter_mut().find(|s| s.name == from).expect("the struct");
+        s.name = to.to_string();
+    };
+    rename(&mut t, "Rng", "util.rng.Rng");
+    rename(&mut t, "Game", "game.Game");
+    t.enums.iter_mut().find(|e| e.name == "State").expect("the enum").name = "game.State".to_string();
+    assert_eq!(description(game, &t), desc);
+    assert_eq!(super::own_name("geom.Stack[geom.Point, int]"), "Stack[Point, int]");
+    assert_eq!(super::own_name("Point"), "Point");
+}
+
+#[test]
 fn reordering_two_fields_changes_the_fingerprint() {
     let a = tables("struct P {\n    x: int\n    y: int\n}");
     let b = tables("struct P {\n    y: int\n    x: int\n}");

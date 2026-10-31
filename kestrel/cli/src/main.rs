@@ -123,11 +123,13 @@ fn run() -> ExitCode {
         }
     };
     let src = without_bom(&src);
-    if args.cmd == "build" {
-        if let Err(e) = check_output(&args) {
-            eprintln!("kestrel: {e}");
-            return ExitCode::from(2);
-        }
+    let output = match args.cmd.as_str() {
+        "build" => check_output(&args),
+        _ => check_record(&args),
+    };
+    if let Err(e) = output {
+        eprintln!("kestrel: {e}");
+        return ExitCode::from(2);
     }
     let (compiled, diagnostics) = kestrel_driver::compile(&args.path, src, args.style);
     eprint!("{diagnostics}");
@@ -220,6 +222,16 @@ fn check_output(args: &Args) -> Result<(), String> {
     Ok(())
 }
 
+/// Refuses a `run --record` whose recording would overwrite the program.
+fn check_record(args: &Args) -> Result<(), String> {
+    match &args.record {
+        Some(record) if same_file(Path::new(record), Path::new(&args.path)) => {
+            Err("`--record` would overwrite the program; give it another file name".to_string())
+        }
+        _ => Ok(()),
+    }
+}
+
 /// The library a program is linked with: programs that use `window`, `draw`, `draw3d` or `input`
 /// need the window library, which carries the runtime as well; the rest (`random` is plain
 /// Kestrel) need the runtime alone.
@@ -247,7 +259,7 @@ fn build(module: &kestrel_kir::Module, opts: Options, args: &Args, lib: Lib) -> 
 mod tests {
     use std::process::Command;
 
-    use super::{lib_for, output_path, parse_args, proofs_checked, without_bom, Lib};
+    use super::{check_record, lib_for, output_path, parse_args, proofs_checked, without_bom, Lib};
 
     fn args(list: &[&str]) -> Option<super::Args> {
         parse_args(list.iter().map(|s| s.to_string()).collect())
@@ -311,6 +323,23 @@ mod tests {
         assert!(args(&["replay", "g.kes", "r.replay", "--", "a"]).is_none());
         assert!(args(&["replay", "g.kes", "r.replay", "--record", "s.replay"]).is_none());
         assert!(args(&["replay", "g.kes", "r.replay", "-o", "x"]).is_none());
+    }
+
+    #[test]
+    fn a_recording_never_overwrites_the_program() {
+        let a = args(&["run", "dir/g.kes", "--record", "dir/g.kes"]).unwrap();
+        assert_eq!(check_record(&a), Err("`--record` would overwrite the program; give it another file name".to_string()));
+        assert_eq!(check_record(&args(&["run", "dir/g.kes", "--record", "dir/g.replay"]).unwrap()), Ok(()));
+        assert_eq!(check_record(&args(&["run", "dir/g.kes"]).unwrap()), Ok(()));
+        // Another spelling of the same file is refused too.
+        let dir = std::env::temp_dir().join(format!("kestrel-record-check-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        let program = dir.join("g.kes");
+        std::fs::write(&program, "main() {}\n").unwrap();
+        let alias = dir.join("sub").join("..").join("g.kes");
+        let a = args(&["run", program.to_str().unwrap(), "--record", alias.to_str().unwrap()]).unwrap();
+        assert!(check_record(&a).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -5,7 +5,9 @@
 //! `vec3`, `ivec2` and `ivec3` too), `list[T]`, `array[T]`, `map[K,V]` and `T?`, a struct as
 //! `struct Game{ball:vec2,score:int}` and an enum as `enum State{Alive,Dead{since:int}}`. A struct
 //! or enum met again inside itself is written by its name alone. Renaming or reordering fields
-//! changes it, so bytes of one shape are never read as another.
+//! changes it, so bytes of one shape are never read as another. A type is named as it is
+//! declared, without the module it lives in (`Point`, never `geom.Point`): the shape is what must
+//! match, not the file, so a type moved into a module still reads the saves it wrote.
 
 use kestrel_check::Tables;
 
@@ -36,7 +38,8 @@ pub(super) fn checksum_of_text(bytes: &[u8]) -> i64 {
     (z ^ (z >> 31)) as i64
 }
 
-/// The fingerprint of type `ty`: the `checksum` of its `description`.
+/// The fingerprint of type `ty`: the `checksum` of its `description`, which names types without
+/// their modules.
 pub(crate) fn fingerprint(ty: KTy, t: &Tables) -> i64 {
     checksum_of_text(description(ty, t).as_bytes())
 }
@@ -81,24 +84,24 @@ fn describe(ty: KTy, t: &Tables, inside: &mut Vec<KTy>, out: &mut String) {
             let info = &t.structs[s.0 as usize];
             // A built-in struct (`vec2`...) is a scalar by name.
             if info.item == usize::MAX || inside.contains(&ty) {
-                out.push_str(&info.name);
+                out.push_str(&own_name(&info.name));
                 return;
             }
             inside.push(ty);
             out.push_str("struct ");
-            out.push_str(&info.name);
+            out.push_str(&own_name(&info.name));
             fields(info.fields.iter().map(|f| (f.name.as_str(), kty(f.ty))), t, inside, out);
             inside.pop();
         }
         KTy::Enum(e) => {
             let info = &t.enums[e.0 as usize];
             if inside.contains(&ty) {
-                out.push_str(&info.name);
+                out.push_str(&own_name(&info.name));
                 return;
             }
             inside.push(ty);
             out.push_str("enum ");
-            out.push_str(&info.name);
+            out.push_str(&own_name(&info.name));
             out.push('{');
             for (i, v) in info.variants.iter().enumerate() {
                 if i > 0 {
@@ -114,6 +117,27 @@ fn describe(ty: KTy, t: &Tables, inside: &mut Vec<KTy>, out: &mut String) {
         }
         KTy::Arena | KTy::Gpu | KTy::Fn | KTy::Iface => unreachable!("the checker refuses `to_bytes` of a value holding a {ty:?}"),
     }
+}
+
+/// A struct's or enum's name without the modules the linker puts before it, in a generic copy's
+/// type arguments too: `geom.Stack[geom.Point, int]` is `Stack[Point, int]`.
+pub(super) fn own_name(name: &str) -> String {
+    let mut out = String::new();
+    let mut word = String::new();
+    for c in name.chars() {
+        if c.is_alphanumeric() || c == '_' {
+            word.push(c);
+        } else {
+            // A word followed by a dot is a module.
+            if c != '.' {
+                out.push_str(&word);
+                out.push(c);
+            }
+            word.clear();
+        }
+    }
+    out.push_str(&word);
+    out
 }
 
 /// `{name:type,...}` added to `out`.

@@ -148,6 +148,14 @@ impl Walk<'_> {
             self.fail_part(line, Some(format!("`{name}` fails if its list would hold more than {limit} items")), via, &fail_tail, Part::Resource);
             return;
         }
+        // `from_bytes` adds the items of a list whose items are much bigger in memory than in
+        // bytes as it reads them (see `lower::bytes_read`).
+        if self.builtin_of(p.root) == Some("from_bytes") {
+            let via = "makes the lists it reads".to_string();
+            self.alloc(line, Some("`from_bytes` makes the lists it reads".to_string()), via.clone(), "");
+            self.fail_part(line, Some(format!("`from_bytes` fails if a list it reads would hold more than {limit} items")), via, &fail_tail, Part::Resource);
+            return;
+        }
         self.alloc(line, Some(format!("`add` may grow {xs}")), format!("adds to {xs}"), " and may grow the list");
         self.fail_part(line, Some(format!("`add` fails if {xs} would hold more than {limit} items")), format!("adds to {xs}"), &fail_tail, Part::Resource);
     }
@@ -197,6 +205,32 @@ impl Walk<'_> {
         }
     }
 
+    /// The allocation of a string interpolation `e`.
+    pub(super) fn format_alloc(&mut self, e: &Expr, line: u32) {
+        let (direct, via) = if self.made_by_first_difference(std::slice::from_ref(e)) {
+            first_difference_alloc()
+        } else {
+            ("string interpolation makes a new string".to_string(), "builds a string with interpolation".to_string())
+        };
+        self.alloc(line, Some(direct), via, "");
+    }
+    /// Whether `xs` are code `first_difference` made: in one of its functions, or inlined from one
+    /// (they use its locals). Its strings are its result, so they are named as such.
+    fn made_by_first_difference(&self, xs: &[Expr]) -> bool {
+        if crate::range::report::builtin_name(&self.f.name) == Some("first_difference") {
+            return true;
+        }
+        let mut found = false;
+        for x in xs {
+            crate::visit::walk_expr(x, &mut |n| {
+                if let crate::visit::Node::Place(p, _) = n {
+                    found |= self.builtin_of(p.root) == Some("first_difference");
+                }
+            });
+        }
+        found
+    }
+
     /// The events of a string operation.
     pub(super) fn str_op(&mut self, op: StrOp, xs: &[Expr], line: u32) {
         let names: Vec<String> = xs.iter().map(|x| self.expr_name(x)).collect();
@@ -211,9 +245,11 @@ impl Walk<'_> {
             StrOp::Lower => makes("lower"),
             StrOp::Join => makes("join"),
             StrOp::Split => (format!("`{}.split({})` makes a new list", text(0), text(1)), "splits a string into a new list".to_string()),
-            StrOp::Hex => ("`first_difference` makes a new string".to_string(), "makes a new string with `first_difference`".to_string()),
+            StrOp::Hex => first_difference_alloc(),
             StrOp::Chars | StrOp::CharLen | StrOp::Find | StrOp::Starts | StrOp::Cmp | StrOp::Ends | StrOp::ToInt | StrOp::ToFloat => return,
         };
+        // Inside `first_difference` (cutting its path's leading `.`), the string is its result.
+        let (direct, via) = if self.made_by_first_difference(xs) { first_difference_alloc() } else { (direct, via) };
         self.alloc(line, Some(direct), via, "");
         match op {
             StrOp::At => {
@@ -279,4 +315,9 @@ pub(super) fn quoted(text: String, unnamed: &str) -> String {
     } else {
         format!("`{text}`")
     }
+}
+
+/// How an allocation `first_difference` makes reads: its result, as `to_bytes`'s.
+fn first_difference_alloc() -> (String, String) {
+    ("`first_difference` allocates its result".to_string(), "compares with `first_difference`".to_string())
 }

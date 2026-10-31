@@ -1,0 +1,10 @@
+// `from_bytes` and `first_difference` can't be function values: no closure of one type stands in
+// for them, so the message says to call them instead of offering a wrapper.
+main() {
+    let f = from_bytes
+    let g = first_difference
+    print(f, g)
+}
+
+// error 4: `from_bytes` can't be a value; call it where you need it
+// error 5: `first_difference` can't be a value; call it where you need it

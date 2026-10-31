@@ -53,11 +53,39 @@ pub fn start(args: &Args, replaying: Option<ReplayFile>) {
 /// Ends recording or replaying once `main` has returned with exit code `code`: writes the
 /// recording, or prints the replay's report and gives its exit code (0 matches, 1 differs).
 pub fn finish(code: i32) -> Result<i32, String> {
-    match replay::finish(Ending::Returned)? {
-        Report::Off | Report::Recorded => Ok(code),
-        report => {
-            println!("{}", report.text().unwrap_or_default());
-            Ok(report.exit_code())
-        }
+    let (text, code) = outcome(code, &replay::finish(Ending::Returned)?);
+    if let Some(text) = text {
+        println!("{text}");
+    }
+    Ok(code)
+}
+
+/// What `kestrel replay` prints and the exit code it gives, for a run whose `main` gave `code` and
+/// ended with `report`. A run that ends with a code of its own (a failure inside the runtime that
+/// the recording does not have) stopped the replay: exit 1, never a match. Recording, or neither,
+/// prints nothing and keeps `code`.
+fn outcome(code: i32, report: &Report) -> (Option<String>, i32) {
+    match report {
+        Report::Off | Report::Recorded => (None, code),
+        _ if code != 0 => (Some(format!("replay stopped: the program failed with exit code {code}")), 1),
+        report => (report.text(), report.exit_code()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{outcome, Report};
+
+    #[test]
+    fn a_replay_that_ends_with_its_own_exit_code_never_matches() {
+        let matches = Report::Matches { frames: 5, lines: 5 };
+        assert_eq!(outcome(0, &matches), (Some("replay matches (5 frames, 5 lines)".to_string()), 0));
+        let stopped = Some("replay stopped: the program failed with exit code 101".to_string());
+        assert_eq!(outcome(101, &matches), (stopped.clone(), 1));
+        assert_eq!(outcome(101, &Report::Differs("replay differs at frame 2".to_string())), (stopped, 1));
+        assert_eq!(outcome(0, &Report::Differs("replay differs at frame 2".to_string())), (Some("replay differs at frame 2".to_string()), 1));
+        // Recording, or neither: the program's own code.
+        assert_eq!(outcome(3, &Report::Recorded), (None, 3));
+        assert_eq!(outcome(0, &Report::Off), (None, 0));
     }
 }

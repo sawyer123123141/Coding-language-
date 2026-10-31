@@ -122,6 +122,60 @@ main() {
 }
 
 #[test]
+fn interpolated_paths_and_a_list_built_by_add() {
+    let runs = Runs::new("interpolated");
+    // Every path is interpolated, and the text and names are used after more strings are made:
+    // like `read`'s, their results live in the caller's arena. `write` takes a `list[u8]` built
+    // by `add`, not only an array literal.
+    let src = r#"use file
+main() {
+    let n = 1
+    var bytes: list[u8] = []
+    for i from 0 to 5 {
+        bytes.add(u8(i * 10))
+    }
+    print(file.write("data{n}.bin", bytes))
+    print(file.write_text("note{n}.txt", "hi {n}"), file.make_dir("sub{n}"), file.write_text("sub{n}/x{n}.txt", ""))
+    let note = file.read_text("note{n}.txt") else { return }
+    let names = file.list_dir("sub{n}") else { return }
+    var noise = list[string]()
+    for i from 0 to 100 {
+        noise.add("noise {i}")
+    }
+    print(note, note.len, names.join(" "), noise.len)
+    let back = file.read("data{n}.bin") else { return }
+    print(back)
+}
+"#;
+    runs.expect(src, "true
+true true true
+hi 1 4 x1.txt 100
+[0, 10, 20, 30, 40]
+");
+    assert_eq!(runs.file("data1.bin"), [0, 10, 20, 30, 40]);
+}
+
+#[test]
+fn a_window_program_that_uses_file_builds() {
+    // An exe that uses `window` links the window library, which must carry the runtime's natives
+    // too (`file` here): the link fails on a missing symbol. It is built, not run.
+    let dir = scratch("window_build");
+    let src = "use window
+use file
+main() {
+    window.open(64, 64, \"file\")
+    while window.frame() {
+        print(file.exists(\"x.txt\"))
+    }
+}
+";
+    fs::write(dir.join("prog.kes"), src).unwrap();
+    let built = dir.join(format!("prog{}", std::env::consts::EXE_SUFFIX));
+    ok(kestrel().arg("build").arg(dir.join("prog.kes")).arg("-o").arg(&built), "kestrel build");
+    assert!(built.is_file(), "no executable at {}", built.display());
+}
+
+#[test]
 fn a_write_replaces_the_whole_file() {
     let runs = Runs::new("replace");
     runs.each(|dir| fs::write(dir.join("old.bin"), [9; 100]).unwrap());

@@ -7,4 +7,4 @@ main() {
 }
 
 // error 4: `from_bytes` needs the type to read, like `from_bytes[Game](bytes)`
-// error 6: `from_bytes` needs the type to read, like `from_bytes[Game](bytes)`
+// error 6: `from_bytes` can't be a value; call it where you need it

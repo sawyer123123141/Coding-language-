@@ -11,8 +11,8 @@
 //!
 //! The native log's ids are `NativeId`'s (`ids.rs`), one per logged native in module order.
 //!
-//! Natives run on the program's main thread, but `print` may run on a `par for` thread too, so
-//! the state is behind a `Mutex`. When nothing is recorded or replayed, a native pays one atomic load.
+//! A `par for` body can't print (the checker refuses it), but natives and `print` can run on the
+//! compiler's thread as well as the program's, so the state is behind a `Mutex`. When nothing is recorded or replayed, a native pays one atomic load.
 
 mod compare;
 mod ids;

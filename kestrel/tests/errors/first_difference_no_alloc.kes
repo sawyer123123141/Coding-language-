@@ -1,0 +1,17 @@
+struct P {
+    x: int
+    name: string
+}
+
+// `first_difference` makes its result, the text of the difference: that is what it allocates.
+@prove(no_alloc)
+pub differ(a: P, b: P) -> bool {
+    let d = first_difference(a, b) else { return false }
+    d.len > 0
+}
+
+main() {
+    print(differ(P(x: 1, name: "a"), P(x: 2, name: "a")))
+}
+
+// error 7: `differ` can't be proven `no_alloc`: it allocates on line 9: `first_difference` allocates its result

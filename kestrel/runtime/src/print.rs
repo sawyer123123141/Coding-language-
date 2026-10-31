@@ -13,14 +13,19 @@ impl Write for Sink {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         match self {
             Sink::Stdout(w) => {
-                let n = w.write(bytes)?;
-                // A recording keeps what reaches stdout; a replay compares it, and stops at a
-                // line that differs, after showing the output that came before it.
-                if let Err(stop) = crate::replay::print_bytes(&bytes[..n]) {
+                let written = w.write(bytes);
+                // A recording keeps what the program printed, even when stdout fails (then all of
+                // it, since nothing writes it again); a replay compares it, and stops at a line
+                // that differs, after showing the output that came before it.
+                let printed = match &written {
+                    Ok(n) => &bytes[..*n],
+                    Err(_) => bytes,
+                };
+                if let Err(stop) = crate::replay::print_bytes(printed) {
                     let _ = w.flush();
                     stop.exit();
                 }
-                Ok(n)
+                written
             }
             Sink::Buffer(b) => b.write(bytes),
         }

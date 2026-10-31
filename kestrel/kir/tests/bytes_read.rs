@@ -54,3 +54,36 @@ fn each_type_gets_one_function() {
     assert_eq!(count("__kestrel_from_bytes_"), 2);
     assert_eq!(count("__kestrel_bytes_read_"), 2);
 }
+
+#[test]
+fn a_list_of_empty_structs_is_read_with_no_loop() {
+    let src = "struct Unit {\n}\nmain() {\n    let b: list[u8] = []\n    let xs = from_bytes[list[list[Unit]]](b) else { return }\n    print(xs.len)\n}\n";
+    let m = lower_src(src);
+    let f = read_fn(&m, |t| matches!(t, KTy::List(e) if matches!(m.elem(e), KTy::Struct(_))));
+    // Its items take no bytes: no bound against the bytes left (only the `i32::MAX` check), no loop.
+    assert!(!f.body.iter().any(|s| matches!(s, Stmt::ForRange { .. })), "a loop over items of 0 bytes");
+    assert!(!f.body.iter().any(|s| matches!(s, Stmt::If { cond, .. } if has_mul_wrap(cond))), "a bound for items of 0 bytes");
+    assert!(f.body.iter().any(|s| matches!(s, Stmt::SetLen(..))));
+}
+
+#[test]
+fn items_far_bigger_in_memory_than_in_bytes_grow_their_list() {
+    let src = "main() {\n    let b: list[u8] = []\n    let xs = from_bytes[list[int?]](b) else { return }\n    let ys = from_bytes[[int?]](b) else { return }\n    print(xs.len, ys.len)\n}\n";
+    let m = lower_src(src);
+    let adds = |body: &[Stmt]| body.iter().any(|s| matches!(s, Stmt::ListAdd(..)));
+    for f in [read_fn(&m, |t| matches!(t, KTy::List(_))), read_fn(&m, |t| matches!(t, KTy::Array(_)))] {
+        // No room for the claimed length up front: the items are added as they are read.
+        assert!(!f.body.iter().any(|s| matches!(s, Stmt::List(ListOp::Reserve, ..) | Stmt::SetLen(..))), "{}", f.name);
+        let Some(Stmt::ForRange { body, .. }) = f.body.iter().find(|s| matches!(s, Stmt::ForRange { .. })) else { panic!("the loop over the items") };
+        assert!(adds(body), "{}", f.name);
+    }
+    // The array is made, at its length, only once every item has been read.
+    let f = read_fn(&m, |t| matches!(t, KTy::Array(_)));
+    let made = f.body.iter().position(|s| matches!(s, Stmt::Assign(_, Expr { kind: ExprKind::ArrayNew(_), .. }))).expect("the array");
+    let read = f.body.iter().position(|s| matches!(s, Stmt::ForRange { .. })).expect("the loop over the items");
+    assert!(read < made);
+    // Items close to their bytes in size still get their room up front.
+    let m = lower_src("main() {\n    let b: list[u8] = []\n    let xs = from_bytes[list[int]](b) else { return }\n    print(xs.len)\n}\n");
+    let f = read_fn(&m, |t| matches!(t, KTy::List(_)));
+    assert!(f.body.iter().any(|s| matches!(s, Stmt::List(ListOp::Reserve, ..))));
+}

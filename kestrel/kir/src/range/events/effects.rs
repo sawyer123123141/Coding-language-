@@ -77,3 +77,53 @@ impl Walk<'_> {
         self.push(line, What::Effect(effect, r));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Effect;
+
+    /// Every native of the modules that need no window, with its effect. A native added to one of
+    /// them, or renamed, fails `every_windowless_native_has_its_own_effect` until it is pinned here,
+    /// so none can fall through to `Effect::Window`.
+    const PINNED: &[(&str, Effect)] = &[
+        ("file.read", Effect::File { writes: false }),
+        ("file.read_text", Effect::File { writes: false }),
+        ("file.write", Effect::File { writes: true }),
+        ("file.write_text", Effect::File { writes: true }),
+        ("file.exists", Effect::File { writes: false }),
+        ("file.list_dir", Effect::File { writes: false }),
+        ("file.make_dir", Effect::File { writes: true }),
+        ("file.remove", Effect::File { writes: true }),
+        ("file.error", Effect::File { writes: false }),
+        ("time.now", Effect::Clock),
+        ("time.unix", Effect::Clock),
+        ("time.sleep", Effect::Sleep),
+        ("args.all", Effect::Process { environment: false }),
+        ("args.program", Effect::Process { environment: false }),
+        ("env.get", Effect::Process { environment: true }),
+    ];
+
+    /// The natives `src` (a module's `.kes` file) declares, as `module.name`.
+    fn natives(module: &str, src: &str) -> Vec<String> {
+        src.lines()
+            .filter_map(|l| l.trim().strip_prefix("pub native "))
+            .map(|rest| format!("{module}.{}", rest.split('(').next().unwrap_or_default().trim()))
+            .collect()
+    }
+
+    #[test]
+    fn every_windowless_native_has_its_own_effect() {
+        let declared: Vec<String> = [
+            natives("file", include_str!("../../../../driver/std/file.kes")),
+            natives("time", include_str!("../../../../driver/std/time.kes")),
+            natives("args", include_str!("../../../../driver/std/args.kes")),
+            natives("env", include_str!("../../../../driver/std/env.kes")),
+        ]
+        .concat();
+        let pinned: Vec<&str> = PINNED.iter().map(|(name, _)| *name).collect();
+        assert_eq!(declared, pinned, "pin each native of `file`, `time`, `args` and `env` to its effect");
+        for (name, effect) in PINNED {
+            assert_eq!(Effect::of_native(name), *effect, "{name}");
+        }
+    }
+}

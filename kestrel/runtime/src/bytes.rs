@@ -14,7 +14,7 @@
 //! then its payload when 1; an enum a `u32` variant number, then that variant's fields; a struct
 //! its fields in order.
 
-use crate::arena::{list_too_long, List, MAX_ITEMS};
+use crate::arena::{items_fit, list_too_long, List};
 use crate::checksum::{finish, mix_bytes, START};
 use crate::string::KStr;
 
@@ -35,7 +35,7 @@ pub fn fingerprint(description: &str) -> i64 {
 
 /// Gives the list at `list` room for at least `n` items of `elem_size` bytes: a list with less
 /// room moves its items into a new buffer of exactly `n` items, from the list's own arena. The
-/// length is unchanged. Fails when `n` is more than a list can hold.
+/// length is unchanged. Fails when `n` is more than a list can hold, or negative.
 ///
 /// # Safety
 /// `list` must point to a valid `List` whose items are `elem_size` bytes.
@@ -43,11 +43,13 @@ pub fn fingerprint(description: &str) -> i64 {
 pub unsafe extern "C" fn kestrel_rt_list_reserve(list: *mut List, n: i64, elem_size: i64, align: i64) {
     // SAFETY: the caller guarantees `list`.
     let l = unsafe { &mut *list };
+    // Before the room check, so a negative `n` (never made by compiled code) can't return and
+    // reach a `SetLen`.
+    if !items_fit(n) {
+        list_too_long();
+    }
     if n <= l.cap {
         return;
-    }
-    if n > MAX_ITEMS {
-        list_too_long();
     }
     if l.arena.is_null() {
         l.arena = crate::arena::program_arena();
@@ -187,14 +189,14 @@ pub enum RefTy {
 }
 
 impl RefTy {
-    /// The fewest bytes a value of this type takes, at least 1: the bound a length is checked
-    /// against before anything is made for it.
+    /// The fewest bytes a value of this type takes: the bound a length is checked against before
+    /// anything is made for it. A struct is the sum of its fields, so an empty struct takes 0.
     pub fn min_size(&self) -> usize {
         match self {
             RefTy::Bool | RefTy::U8 | RefTy::Opt(_) => 1,
             RefTy::Int | RefTy::Float | RefTy::Str | RefTy::List(_) | RefTy::Map(..) | RefTy::Enum(_) => 4,
             RefTy::I64 | RefTy::F64 => 8,
-            RefTy::Struct(fields) => fields.iter().map(RefTy::min_size).sum::<usize>().max(1),
+            RefTy::Struct(fields) => fields.iter().map(RefTy::min_size).sum::<usize>(),
         }
     }
 }
@@ -240,6 +242,14 @@ pub fn read_value(bytes: &[u8], at: &mut usize, ty: &RefTy) -> Option<RefValue> 
             let text = std::str::from_utf8(&bytes[*at..*at + n]).ok()?;
             *at += n;
             RefValue::Str(text.to_string())
+        }
+        RefTy::List(item) if item.min_size() == 0 => {
+            // Items of 0 bytes (empty structs) read nothing: any length of them is the same value
+            // repeated. (Compiled code makes no memory for them; this makes a `RefValue` each, so
+            // tests keep such lengths small.)
+            let n = count(at, 0)?;
+            let unit = read_value(bytes, at, item)?;
+            RefValue::List(vec![unit; n])
         }
         RefTy::List(item) => {
             let n = count(at, item.min_size())?;

@@ -1,5 +1,7 @@
 node_modules/
 *.log
+# Replay files a run writes (`--record`, Pong at the end of every run).
+*.replay
 .DS_Store
 .worktrees/
 

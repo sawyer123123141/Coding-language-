@@ -1,0 +1,85 @@
+// `from_bytes` and the sizes of items. An empty struct is written in 0 bytes, so a list of structs
+// that end in one, or a map of them, reads back even when it ends the input; a list of lists of
+// them claiming 2,147,483,647 items each reads at once, with no loop over the items. Items much
+// bigger in memory than in bytes (optionals, lists) grow their list as they are read, and an array
+// of them is copied out of that list: they read back the same.
+struct Unit {
+}
+
+struct Tagged {
+    id: int
+    k: Unit
+}
+
+main() {
+    let tags: list[Tagged] = [Tagged(id: 1, k: Unit()), Tagged(id: 2, k: Unit())]
+    let t = from_bytes[list[Tagged]](to_bytes(tags)) else {
+        print("tags: none")
+        return
+    }
+    print("tags:", t.len, t[0].id, t[1].id, checksum(t) == checksum(tags))
+    let m = {"a": Unit(), "b": Unit()}
+    let back = from_bytes[map[string, Unit]](to_bytes(m)) else {
+        print("map: none")
+        return
+    }
+    print("map:", back.len, checksum(back) == checksum(m))
+    let units: list[Unit] = [Unit(), Unit(), Unit()]
+    let u = from_bytes[list[Unit]](to_bytes(units)) else {
+        print("units: none")
+        return
+    }
+    print("units:", u.len, to_bytes(units).len)
+
+    // About 64 KB: a header, a count of 16,379 lists, and each list's count 2,147,483,647.
+    let empty: list[list[Unit]] = []
+    var hostile = to_bytes(empty)
+    let n = (65536 - hostile.len) / 4
+    hostile[13] = u8(n & 255)
+    hostile[14] = u8((n >> 8) & 255)
+    for i from 0 to n {
+        hostile.add(255)
+        hostile.add(255)
+        hostile.add(255)
+        hostile.add(127)
+    }
+    let h = from_bytes[list[list[Unit]]](hostile) else {
+        print("hostile: none")
+        return
+    }
+    print("hostile:", hostile.len, h.len, h[0].len, h[n - 1].len)
+
+    // Items that grow their list as they are read.
+    let opts: list[vec4?] = [vec4(1, 2, 3, 4), none, vec4(-1, 0, 0.5, 8)]
+    let o = from_bytes[list[vec4?]](to_bytes(opts)) else {
+        print("optionals: none")
+        return
+    }
+    print("optionals:", o, checksum(o) == checksum(opts))
+    let arr: [int?] = [3, none, 5, none]
+    let a = from_bytes[[int?]](to_bytes(arr)) else {
+        print("array: none")
+        return
+    }
+    print("array:", a, checksum(a) == checksum(arr))
+    let nested: [list[int]] = [[1, 2], [], [3]]
+    let nb = from_bytes[[list[int]]](to_bytes(nested)) else {
+        print("nested: none")
+        return
+    }
+    print("nested:", nb, checksum(nb) == checksum(nested))
+    let none_left: [int?] = []
+    let e = from_bytes[[int?]](to_bytes(none_left)) else {
+        print("empty array: none")
+        return
+    }
+    print("empty array:", e.len)
+}
+// expect: tags: 2 1 2 true
+// expect: map: 2 true
+// expect: units: 3 17
+// expect: hostile: 65533 16379 2147483647 2147483647
+// expect: optionals: [vec4(x: 1, y: 2, z: 3, w: 4), none, vec4(x: -1, y: 0, z: 0.5, w: 8)] true
+// expect: array: [3, none, 5, none] true
+// expect: nested: [[1, 2], [], [3]] true
+// expect: empty array: 0

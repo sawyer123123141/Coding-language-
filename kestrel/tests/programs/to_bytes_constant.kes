@@ -1,0 +1,16 @@
+// A constant can hold `to_bytes` of a literal struct: it is built once, before `main`, and reads
+// back like any other bytes.
+struct P {
+    x: int
+    name: string
+}
+
+let SAVED = to_bytes(P(x: 7, name: "ana"))
+
+main() {
+    print(SAVED.len, SAVED[13])
+    let p = from_bytes[P](SAVED) else { return }
+    print(p.x, p.name)
+}
+// expect: 24 7
+// expect: 7 ana

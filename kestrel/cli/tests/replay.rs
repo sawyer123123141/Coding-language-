@@ -184,6 +184,18 @@ fn a_changed_call_order_is_reported() {
 }
 
 #[test]
+fn a_replay_ignores_the_window_settings() {
+    // A replay opens no window, so settings that would stop `kestrel run` (a headless frame
+    // count that isn't a number) or hide the window change nothing.
+    let dir = scratch("window_env");
+    let (main, file) = (program(&dir, MOUSE), dir.join("run.replay"));
+    exits(&record(&main, &file, Window::Quiet(5), &[]), 0, "the recorded run");
+    let out = replay(&main, &file, &[("KESTREL_HEADLESS", "bad"), ("KESTREL_HIDDEN", "1")]);
+    exits(&out, 0, "the replay");
+    assert_eq!(report(&out), "replay matches (5 frames, 5 lines)");
+}
+
+#[test]
 fn a_version_mismatch_is_reported_but_runs() {
     let dir = scratch("version");
     let (main, file) = (program(&dir, MOUSE), dir.join("run.replay"));
