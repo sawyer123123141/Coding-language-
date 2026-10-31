@@ -635,6 +635,21 @@ The user's friend asked for the IR to be inspected for redundant operations. Dum
 - **Cleanup stack in codegen.** `break`/`continue`/`return` jump directly, but `arena { }` exits and scope-end drops need cleanup on every exit edge.
 - **Runtime stdout buffer is thread-local.** It must change before `par for` (sub-project 3).
 
+## Found while building the I/O round (2026-10-29 to 2026-10-30)
+
+58. **A Kestrel program cannot set its exit code.** `main` returns nothing and only a failure exits (101), so Pong's file check prints its result and the tests read the line. An `exit(code)` built-in (or `main() -> int`) is the fix; the name and form are the user's. Syntax.
+59. **`args.program()` under `kestrel replay` is the path as typed**, not the recorded one; a program that prints it differs when replayed from another folder. Record it in the replay file (a format version bump) and return it under replay. Not syntax.
+60. **The voxel engine leaks a few hundred bytes per F9 load** (the `Save` value and the read bytes stay in the program arena), and a walking player stands still for a frame or two after a load until its column is Ready again. Read the save inside an `arena { }` and copy out what is kept; pre-load the player's column before switching. Not syntax.
+61. **`apply_edits_in` scans every edit once per column load.** Fine at hundreds of edits; a per-column index (map from column key to edit indices) when saves grow to tens of thousands. Not syntax.
+62. **Bytes are read and written one `u8` at a time** in `to_bytes`/`from_bytes` for `list[u8]` items (and `byte_list` in the runtime copied one byte per call before the fix wave). A bulk copy op for plain items would speed replay files and saves. Not syntax.
+63. **`from_bytes`'s allocation on hostile input is bounded by a constant multiple of the input size** (at most 4 after the fix wave: items whose in-memory size is more than four times their fewest bytes are added as they decode). The spec's anti-goal wanted the input size itself; tighten by growing every list as it decodes, at some speed cost for well-formed saves. Not syntax.
+64. **Map keys hash unseeded** (by determinism), so a hostile save can pick colliding keys and make building a large map quadratic. Documented in the spec; a per-program seed would break replay files, so this is a documentation item unless saves become untrusted input. Not syntax.
+65. **`print` from `par for` bodies is forbidden, so the replay tee's shared line splitter never interleaves today**; if that rule ever relaxes, the tee needs per-thread line buffers. Not syntax.
+66. **Natives that return heap values are not scratch-arena'd**, so a native with an interpolated string argument leaves that text in the enclosing arena per call (the checker's `returns_memory` also counts `int?` and other optionals of scalars, which hold no memory). Narrow `returns_memory` to results that hold memory. Not syntax.
+67. **An exe test that links `window` and `file` together** exists only as a build check (fix wave item 14); a headless run of such a program would also prove the symbols resolve at run time. Tests.
+68. **Replaying a program that reads files**: `file` is read again at replay, so a save changed between recording and replay gives a (correct) "replay differs". Recording `file.read` results would make replays self-contained; a format addition for a later round. Not syntax.
+69. **The replay file's native log has no per-frame index**, so a differing replay says the frame but not the native call's position inside it; and the mismatch note compares the program's file name only. Both cheap, when someone needs them. Not syntax.
+
 ## Cheap, fix when the area is next touched
 
 - `-2147483648` / `i64::MIN` literals can't be written (special-case `Neg(Int)`).
