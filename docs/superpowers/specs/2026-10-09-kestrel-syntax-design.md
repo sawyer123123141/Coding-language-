@@ -194,6 +194,30 @@ main() {
 
 **`random`** (the determinism round, 2026-10-27) is a fifth built-in module, and unlike the others it is plain Kestrel with no `native`, so it needs no window library and works in a program that never opens one. `use { Rng from random }` gives `Rng(seed: 42)`, a seeded random number generator that lives in the game state (GDScript's `RandomNumberGenerator`, whose seed and state sit inside the object). Its one field, `seed`, is the generator's state: it starts as the seed and moves on with every draw, so it is copied and checksummed with the state around it. Every method is `pure` and takes `var self`: `next() -> i64` (SplitMix64, equal bit for bit to the reference algorithm for the same seed), `randf() -> float` in `[0, 1)`, `randf_range(lo, hi) -> float`, and `randi_range(lo, hi) -> int` with both ends included, the ends in either order, and no overflow over the whole `int` range. The global `randf()` family stays for toys; `@prove(deterministic)` refuses it, and `Rng` is what to use instead. A built-in module's name can't be a file next to the program, so the program test `tests/programs/random.kes` became `global_random.kes`.
 
+**`file`, `time`, `args` and `env`** (the I/O round, 2026-10-29) are four more built-in modules of natives that need no window library, so they work in any program, under `kestrel run` and in a built exe. None of them is `pure`, so `pure` functions and `par for` bodies can't call them, and `@prove(deterministic)` names the call ("which reads a file", "which reads the clock", "which reads the command line", "which reads the environment"). Relative paths resolve next to the program under `run` and next to the exe when built, as `window.screenshot` does; absolute paths are used as given.
+
+| Native | Meaning |
+|---|---|
+| `file.read(path) -> list[u8]?` | the whole file as bytes, `none` when it can't be read |
+| `file.read_text(path) -> string?` | the whole file as text, `none` when it can't be read or isn't UTF-8 |
+| `file.write(path, bytes: [u8]) -> bool` | replace the file's contents (a `list[u8]` passes as `[u8]`) |
+| `file.write_text(path, text) -> bool` | the same with a string |
+| `file.exists(path) -> bool` | whether a file or directory is there |
+| `file.list_dir(path) -> list[string]?` | the names in a directory, sorted bytewise; `none` when it isn't one (`list` is a built-in name, so the native can't be called that) |
+| `file.make_dir(path) -> bool` | make a directory and its parents |
+| `file.remove(path) -> bool` | remove a file, never a directory |
+| `file.error() -> string` | why the last call failed, naming the path ("could not open `save.bin`: the system cannot find the file specified"), or `""` after a success; read it before `exists`, which clears it |
+| `time.now() -> f64` | seconds since the program started (monotonic) |
+| `time.unix() -> i64` | seconds since 1970 UTC |
+| `time.sleep(seconds: f64)` | wait; a negative or NaN argument returns at once |
+| `args.all() -> list[string]` | the program's arguments: under `kestrel run game.kes a b` they are `["a", "b"]` (every word after the file that isn't a compiler flag, and everything after `--`); in a built exe, everything after the exe |
+| `args.program() -> string` | the `.kes` path as typed under `run`, the exe's path when built |
+| `env.get(name) -> string?` | an environment variable, `none` when unset or not UTF-8 |
+
+Natives may return strings, lists of plain items or strings, and optionals of those since this round; such a native never runs in a call's scratch arena, so its result lives in the current arena.
+
+**Recording and replaying a window program** needs no code: `kestrel run game.kes --record run.replay` logs every result of a `window`, `draw`, `draw3d`, `input` or `time` native and every `print` line, and `kestrel replay game.kes run.replay` runs the program again with no window, feeding the logged results back and comparing the output line by line: `replay matches (N frames, M lines)`, or `replay differs at frame F, line L` with both lines, or `replay differs at frame F: the program called input.mouse where the recording has window.delta` when the call order changed. A run that fails is recorded too, and must fail the same way. `args.all()` is recorded; `file` and `env` are read again. Details: `2026-10-29-io-round-design.md`, decision 7.
+
 ### Methods
 
 Declared inside a `struct` or `enum` body. First parameter is `self`
@@ -482,6 +506,49 @@ them is an error ("`min` is a built-in name; pick another").
   interface value ("..., which holds an interface value; ..."). In a
   generic, each copy is judged with its own types: `checksum(xs)` with
   `xs: list[T]` is fine for `T = int` and refused for `T` an interface.
+- **`to_bytes(x) -> list[u8]`** (the I/O round, 2026-10-29): the value as
+  bytes, for save files, replays and bug reports (Godot's `var_to_bytes`).
+  It takes exactly what `checksum` takes and refuses the rest in its own
+  words ("`to_bytes` can't take a `World`, which holds an `Arena`; save the
+  fields that hold the game's state instead"). `pure`; it allocates its
+  result once (under `@prove(no_alloc)`: "`to_bytes` allocates its
+  result") and never fails. The bytes are a 13-byte header (`KESB`, a
+  format version byte, then an `i64` fingerprint of the type's shape: its
+  name, field names and types, so a save of one shape is never read as
+  another), then the value little-endian with no padding in `checksum`'s
+  order: a bool is one byte, `u8` one, `int` four, `i64` eight, `float`
+  its four raw bits (NaN payloads kept) and `f64` its eight, a vector its
+  lanes; a string is a `u32` byte length then its UTF-8; an array or list a
+  `u32` length then its items; a map a `u32` live count then each live key
+  and value in insertion order; an optional one byte then the value when
+  1; an enum a `u32` variant number then that variant's fields; a struct
+  its fields in order. The exact layout is in `2026-10-29-io-round-design.md`,
+  decision 2; renaming or reordering a field changes the fingerprint.
+- **`from_bytes[T](b: list[u8]) -> T?`**: reads a value back. The type is
+  written in brackets, as a generic call (`from_bytes[Game](bytes)`; a
+  bare `from_bytes(b)` says what to write). `pure`; it builds the value in
+  the current arena. It gives `none`, and never stops the program or
+  allocates by a length the bytes claim, on: a wrong header, version or
+  fingerprint; bytes that end early; a bool or optional byte that isn't 0
+  or 1; a variant number past the enum; a string that isn't UTF-8; a
+  length past `i32::MAX` or past the bytes left; a repeated map key; or
+  bytes left over. After a round trip `checksum(x) == checksum(y)`. Map
+  keys use the unseeded deterministic hash, so a hostile file can pick
+  colliding keys and make a large map slow to build (never wrong).
+- **`first_difference(a, b) -> string?`**: where two values of one type
+  first differ, as a path with both values (`ball.x: 1.5 and 1.25`,
+  `inputs.len: 3 and 4`, `inputs[2].p1.up: true and false`,
+  `scores["ana"]: 3 and missing`, `state: Alive and Dead`, `target: none
+  and a value`; a bare scalar gives `1.5 and 1.25`), or `none` when they
+  are equal. Floats compare by their bits: `-0.0` and `0.0` differ (`x: -0
+  and 0`), and two NaNs that print alike get their bits appended (`nan and
+  nan (bits 0x7FC00000 and 0x7FC00001)`). Two maps with the same entries in
+  another order differ (`scores: the same keys in another order`), because
+  insertion order is the value's order for `to_bytes` and `checksum` too.
+  `pure`; equal values allocate nothing, a difference allocates its text.
+  It takes what `checksum` takes ("`first_difference` can't compare a
+  `World`, which holds an `Arena`; compare the fields that hold the game's
+  state instead") and both arguments must have one type.
 
 The full table of argument and result types is in
 `2026-10-10-window-design.md` ("Global math and random numbers").

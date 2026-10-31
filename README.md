@@ -299,6 +299,12 @@ Kestrel can promise, and the compiler checks, that a function gives the same bit
 
 `kestrel/demos/pong/` is a rollback Pong: two peers in one process over a simulated network with delay, jitter and loss, prediction and rollback, and an in-memory replay. Run it from `kestrel/` with `cargo run -q -p kestrel-cli -- run demos/pong/pong.kes` (W and S move, Tab shows the other peer, R replays and says whether the replay matches). The cost, the measurements and the method are in `kestrel/bench/determinism/results.md`: the own math is 1.1 to 2.7 times slower per call than the C runtime's, and a snapshot of a 58 MB voxel pool takes 19 ms where it took 49.
 
+## Files and replays
+
+Any value a snapshot can copy turns into bytes and back: `to_bytes(game)` gives a `list[u8]` with a header naming the type's shape, and `from_bytes[Game](bytes)` reads it again or gives `none` for damaged or foreign bytes (never a crash). `first_difference(a, b)` names the first field where two values differ (`ball.x: 1.5 and 1.25`). Four small built-in modules need no window: `file` (`read`, `read_text`, `write`, `write_text`, `exists`, `list_dir`, `make_dir`, `remove`, `error`), `time` (`now`, `unix`, `sleep`), `args` (`all`, `program`) and `env` (`get`). Paths resolve next to the program.
+
+Any window program can be recorded and replayed with no code: `kestrel run game.kes --record run.replay` logs what the window, input and clock natives returned and what the program printed; `kestrel replay game.kes run.replay` runs it again without a window and says `replay matches (N frames, M lines)` or where the output first differed. One `.replay` file is the bug report. Pong writes `pong.replay` at the end of a run and checks a file passed as its argument (`kestrel run demos/pong/pong.kes pong.replay`); the voxel engine saves on F5 and loads on F9 (`world.save`: seed, player and edits).
+
 ## Layout
 
 - `kestrel/`: the compiler, a Cargo workspace.
