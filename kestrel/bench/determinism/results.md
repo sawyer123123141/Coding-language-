@@ -1,3 +1,170 @@
+# The I/O round (2026-10-30)
+
+Measured 2026-10-30 on the user's PC (Ryzen 7 5800X, 8 cores, 16 threads, Windows 11), the PC
+free: no build, no Godot, no Roblox running (checked with `tasklist` before each block). The
+compiler is `target/release/kestrel.exe` built `--release` at 45dcfe8, every program run with
+`kestrel run --release` (the JIT), at normal priority. **Load** is the whole machine's CPU use
+(`\Processor(_Total)\% Processor Time`, 2 s) before and after each block; the background was the
+Claude app, OneDrive's sync and Defender, about one to two threads of 16 (2-15%). Spec:
+`docs/superpowers/specs/2026-10-29-io-round-design.md` ("Measurements").
+
+**Short version:** a `Game` snapshot copy costs about 1 ns, `to_bytes` of it about 70 ns over an
+empty arena (most of it the arena's first block, not the encoding), `from_bytes` about 6 ns.
+For a 100,000-item `list[int]`, `to_bytes` is **7.6 times slower than a copy** (49 against 6.4
+µs) and `from_bytes` 10 times (65 µs): both go one item at a time where the copy is one memcpy.
+`--record` costs Pong **0.17 µs a frame** (8% of its 2.1 µs frame) and the voxel engine nothing
+measurable. `file.write` and `file.read` run at the OS's speed (about 320 and 1,370 MB/s, the
+same as Rust's `std::fs` within noise for writes; reads are about 10% slower, one extra copy). A
+replay check runs at the game's own speed.
+
+## How it was measured
+
+- **`bench/io/bytes.kes`**: Pong's `Game` (copied from `demos/pong/game.kes`, with its `Rng`),
+  10,000 iterations of each operation, and a `list[int]` of 100,000 items, 100 iterations;
+  `long` as the program's argument runs 100 times as many (1,000,000 and 10,000), for totals
+  well above the clock's noise. Every iteration runs in an `arena { }` of its own and changes the
+  state a little first (`nudge`, or one item, or one byte of the encoding for `from_bytes`), so
+  nothing folds away. The copy is a save into a ring of 16 (`ring[i & 15] = g`, as a rollback
+  keeps them) for `Game`, and `var snap = xs` with one item of `snap` changed for the list. A
+  control loop with the same change and the same arena but no copy and no encoding is timed too
+  and taken out ("net"); the raw time is given as well. Timed with `time.now()` around each loop.
+- **`bench/io/files.kes`** (not `file.kes`: `file` is a built-in module, so a program can't have
+  that name): writes a 1 MB (2^20 bytes) `list[u8]` with `file.write` 20 times, then reads it
+  with `file.read` 20 times, each in its own arena, to `C:/kt/file-bench.bin` (outside OneDrive).
+  The same loop in Rust (`std::fs::write`, `std::fs::read`, `rustc -O`, a scratch program not
+  kept) ran in turn with it as the reference.
+- **Pong**: `KESTREL_HEADLESS=<frames> KESTREL_HEADLESS_QUIET=1 kestrel run --release pong.kes`,
+  with and without `--record C:/kt/pong-bench.replay`, and `kestrel replay pong.kes
+  C:/kt/pong-bench.replay --release`, the three in turn in each round, the whole process timed by
+  PowerShell's `Measure-Command`. Run from a copy of `demos/pong/` in `C:/kt/pongb/`, so the
+  `pong.replay` Pong writes at the end doesn't land in the synced folder. The whole process is
+  mostly compiling (a 1-frame run takes 107 ms), so 600 frames can't show a per-frame cost; 6,000
+  and 60,000 frames were run as well.
+- **Voxel engine**: `voxel/bench.kes` in a hidden window (`KESTREL_HIDDEN=1`), as `measure.py`
+  runs it, but under `kestrel run --release` (`--record` is a `run` flag, so not the built exe)
+  and from a copy in `C:/kt/voxb/` with the circle shortened to 30 s (`measure.py` shortens it to
+  100 s the same way); 4,386 frames a run. Three rounds of plain then recorded. The same in a
+  headless window (`KESTREL_HEADLESS=6000`, whose fake clock makes the bench's own times 0) timed
+  whole by `Measure-Command`, six rounds: the CPU work alone, with no GPU and no display.
+
+Medians of 3 runs unless said, with the range (min to max) in brackets.
+
+## `to_bytes` and `from_bytes` against a snapshot copy
+
+Load 10.8% before, 9.8% after (`long`: 9.8% before, 14.1% after).
+
+| ns per operation | 10,000 / 100 iterations | `long`: 1,000,000 / 10,000 |
+|---|---:|---:|
+| empty loop, no arena (`Game`) | 0.65 (0.64-0.65) | 0.74 (0.63-0.80) |
+| control: arena and change (`Game`) | 35.2 (35.1-35.2) | 36.2 (36.0-36.5) |
+| `Game` copy, net | 1.1 (1.0-4.1) | **1.1** (1.1-1.2) |
+| `to_bytes(g)`, net | 72.3 (71.4-74.8) | **69.3** (69.1-73.6) |
+| `to_bytes(g)`, raw | 107.4 (106.6-110.0) | 105.5 (105.1-110.1) |
+| `from_bytes[Game](b)`, net | 7.3 (2.3-7.3) | **6.2** (4.1-7.2) |
+| `from_bytes[Game](b)`, raw | 43.1 (43.0-52.2) | 44.3 (43.5-44.4) |
+| list copy (100,000 `int`s), net | 8,390 (7,505-**121,339**) | **6,443** (6,405-6,964) |
+| list `to_bytes`, net | 48,874 (48,804-50,162) | **49,131** (48,142-53,242) |
+| list `from_bytes`, net | 64,507 (64,436-64,852) | **65,270** (65,067-65,428) |
+
+Byte sizes: `Game` **53 bytes** (the 13-byte header and 40 of fields); the list **400,017 bytes**
+(the header, a 4-byte length and 4 bytes an item).
+
+- **`Game`: `to_bytes` is about 65 times a copy, but the encoding is not where the time goes.**
+  An empty `arena { }` costs 36 ns, and an arena that allocates once (a scratch probe:
+  `array[u8](53)` in an arena, 1,000,000 times) costs 89 ns: its first allocation takes a
+  64 KB block from the thread's spares and gives it back at the end, about 53 ns. `to_bytes`
+  raw (105 ns) is that plus about 18 ns of sizing and writing 53 bytes. `from_bytes` makes
+  nothing in the arena (a `Game?` is a plain value) and costs about 6 ns. So a rollback that
+  serializes one small state per frame in an arena of its own pays about 0.1 µs; the arena's
+  first block is the cost to cut (a smaller first block, or one block kept warm per thread
+  without the spares' search), not the byte format.
+- **The list: `to_bytes` is 7.6 times slower than a copy, `from_bytes` 10 times.** The copy is a
+  memcpy of 400 KB (about 60 GB/s, in the L3 cache); `to_bytes` writes the 100,000 items one at a
+  time (0.49 ns, about 2 cycles, an item: 8 GB/s), and `from_bytes` reads them one at a time
+  with its checks (0.65 ns an item). For a list of plain numbers the format is the memory's own
+  layout (little-endian, no padding), so both could be one memcpy (and the read one bounds
+  check); that would bring them to about copy speed. Not done in this round.
+- **In some runs every list copy was 15-20 times slower.** In 5 of 18 runs of the list copy (here
+  the first 10,000/100 run: 121 µs; earlier runs of the same loop: 90, 91, 95 and 128 µs), every
+  copy in that run took 90-128 µs instead of 6.4-8.4. That is about what faulting in 400 KB of
+  fresh pages (about 100 of them) on every copy would cost, as if the copy's block weren't
+  recycled warm in those runs; a scratch probe that times each copy alone (2,000 copies, 8 runs)
+  never showed it. I did not find the cause; it is worth a look in the runtime's block recycling
+  (`runtime/src/blocks.rs`). `to_bytes` and `from_bytes`, which also make a 400 KB block each
+  iteration, never showed it.
+
+## The per-frame cost of `--record`
+
+Pong, headless and quiet, the whole process in ms:
+
+| frames (rounds) | plain | `--record` | difference | `kestrel replay` |
+|---|---:|---:|---:|---:|
+| 1 (5) | 107.1 (106.7-113.9) | 108.5 (106.7-127.5) | +1.4 | 108.0 (106.6-114.9) |
+| **600 (3)** | 111.6 (106.5-117.1) | 109.8 (108.4-126.5) | -1.8 | 110.5 (110.4-112.2) |
+| 600 (11) | 111.7 (109.7-117.2) | 112.8 (108.9-128.5) | +1.1 | 113.2 (108.1-122.8) |
+| 6,000 (5) | 121.5 (119.0-176.8) | 124.0 (119.3-138.3) | +2.5 | 122.1 (118.6-134.8) |
+| **60,000 (5)** | 235.6 (229.2-243.4) | 245.9 (241.7-249.4) | **+10.3** | 242.9 (239.3-248.8) |
+
+Load 9.0% before and 2.7% after the 3 rounds of 600; 5-8% for the others. The replay file is
+12.0 KB for 600 frames and 1.1 MB for 60,000 (about 20 bytes a frame: Pong's `window.frame`,
+`input.held` and `time` results).
+
+- **`--record` costs Pong about 0.17 µs a frame** (10.3 ms over 60,000 frames), against a frame
+  of about 2.1 µs (235.6 - 107.1 ms over 60,000 frames): 8% of Pong's work, nothing against a
+  16.7 ms frame. At 600 frames the difference (-1.8 to +1.1 ms) is below the noise of a process
+  that spends 107 ms compiling; 600 frames can't measure it, as the 1-frame row shows.
+
+The voxel engine, hidden window, the bench's own medians over each phase's frames (ms):
+
+| work time per frame | plain | `--record` |
+|---|---:|---:|
+| fill (135 frames), median | 7.61 (7.53-7.92) | 7.83 (7.67-7.85) |
+| fly20 (1,200), median | 0.818 (0.797-0.821) | 0.818 (0.816-0.820) |
+| fly100 (1,200), median | 6.68 (6.63-6.75) | 6.57 (6.48-6.83) |
+| edits (51), median | 2.28 (2.06-2.43) | 2.16 (2.03-3.06) |
+| circle (1,800), median | 0.869 (0.868-0.971) | 0.861 (0.782-0.971) |
+| circle, 99th percentile | 9.00 (8.51-10.90) | 9.42 (8.55-11.25) |
+| fill, whole (`fill_ms`) | 1,139 (1,099-1,165) | 1,145 (1,142-1,165) |
+| whole process | 14,224 (14,071-14,519) | 14,213 (13,890-14,937) |
+| headless, whole process (6 rounds) | 8,319 (8,260-8,459) | 8,410 (8,284-14,813) |
+
+Load 3.3% before, 11.4% after (headless: 8.3% and 2.6% before, 4.8% and 11.2% after). The
+replay file is 314 KB for 4,386 frames (about 72 bytes a frame).
+
+- **`--record` costs the voxel engine nothing measurable**: every phase's median is within the
+  run-to-run range (fly20 is 0.818 ms both ways), and so are the whole runs, hidden and headless.
+  Its frames log more than Pong's (about 72 bytes a frame), still a fraction of a microsecond
+  against frames of 0.8-8 ms. One headless recorded run took 14.8 s instead of 8.3 (1 of 6); the
+  hidden runs never did, and I did not find why.
+- Two exploratory hidden runs before the timed ones (one plain, one recorded) were paced by the
+  display: every phase's work median was 16.6 ms and a run took 75 s, where the timed runs took
+  14 s. The window asks for vsync (`FLAG_VSYNC_HINT`), and a driver may wait for it in the
+  frame's first GL call, inside the work time; both modes were alike, so it doesn't change the
+  comparison, but a work time of 16.6 ms in this bench means it waited for the display, not that
+  the frame took that long.
+
+## 1 MB file read and write
+
+Load 2.4% before, 6.4% after. 20 files each; MB/s, and ms per 1 MB file:
+
+| | Kestrel `file.*` | Rust `std::fs` (reference) |
+|---|---:|---:|
+| write | **315 MB/s** (264-360), 3.17 ms | 323 MB/s (245-340), 3.09 ms |
+| read | **1,367 MB/s** (1,063-1,409), 0.73 ms | 1,544 MB/s (1,445-1,589), 0.65 ms |
+
+- **Writes run at the OS's speed** (`file.write` is `std::fs::write`), which on this PC is about
+  3 ms for a 1 MB file, most of it opening, truncating and closing the file with Defender
+  watching. **Reads are about 10% slower than Rust's**: `file.read` reads the file into a Rust
+  buffer and then copies it once into the arena's `list[u8]` (about 0.07 ms a MB); reading
+  straight into the list would remove it.
+
+## Replay check speed
+
+`kestrel replay pong.kes C:/kt/pong-bench.replay --release` of a 600-frame recording, the whole
+process: **110.5 ms** (110.4-112.2), against 111.6 for playing the same 600 frames (table
+above). A replay runs at the speed of the game itself, with no window: of 60,000 frames, 242.9 ms
+against 235.6 played (+3%), so for a short recording it is almost all compiling.
+
 # Fast float math (2026-10-28)
 
 Measured 2026-10-29 on the user's PC (Ryzen 7 5800X, 8 cores, 16 threads, Windows 11), the PC

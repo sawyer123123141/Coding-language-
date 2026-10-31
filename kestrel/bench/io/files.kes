@@ -1,0 +1,61 @@
+// File read and write of 1 MB, for the I/O round's measurements (`bench/determinism/results.md`,
+// "The I/O round"). Run with
+//
+//   kestrel run --release bench/io/files.kes [path]
+//
+// (Not `file.kes`: `file` is a built-in module, so a program can't have that name.)
+//
+// It writes a 1 MB `list[u8]` with `file.write` 20 times, then reads it back with `file.read`
+// 20 times, each in an `arena { }` of its own, and prints the MB/s of each (1 MB is 2^20 bytes).
+// The path defaults to `file-bench.bin` next to this program; give one outside a synced folder
+// (OneDrive) so the sync doesn't take part, such as `C:/kt/file-bench.bin`. The file is removed
+// at the end.
+use time
+use file
+use args
+
+let SIZE = 1048576
+let TIMES = 20
+
+main() {
+    var path = "file-bench.bin"
+    let words = args.all()
+    if words.len > 0 {
+        path = words[0]
+    }
+    var data: list[u8] = []
+    for i from 0 to SIZE {
+        data.add(u8((i * 31 + 7) & 255))
+    }
+
+    var t = time.now()
+    for i from 0 to TIMES {
+        arena {
+            data[i] = u8(i)
+            if not file.write(path, data) {
+                print(file.error())
+                return
+            }
+        }
+    }
+    let wrote = time.now() - t
+
+    var acc = 0
+    t = time.now()
+    for i from 0 to TIMES {
+        arena {
+            let back = file.read(path) else {
+                print(file.error())
+                return
+            }
+            acc += back.len + int(back[i])
+        }
+    }
+    let read = time.now() - t
+    file.remove(path)
+
+    let mb = f64(TIMES) * f64(SIZE) / 1048576.0
+    print("write {mb / wrote} MB/s ({wrote * 1000.0 / f64(TIMES)} ms per 1 MB file)")
+    print("read {mb / read} MB/s ({read * 1000.0 / f64(TIMES)} ms per 1 MB file)")
+    print("acc {acc}")
+}

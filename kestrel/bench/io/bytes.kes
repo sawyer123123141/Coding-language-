@@ -1,0 +1,196 @@
+// `to_bytes` and `from_bytes` against a snapshot copy, for the I/O round's measurements
+// (`bench/determinism/results.md`, "The I/O round"). Run with
+//
+//   kestrel run --release bench/io/bytes.kes [long]
+//
+// Two states: Pong's `Game` (`demos/pong/game.kes`, copied here with its `Rng`), 10,000 times
+// each, and a `list[int]` of 100,000 items, 100 times each (`long`: 100 times as many, for totals
+// well above the clock's noise). Every iteration runs in an `arena { }` of its own, so memory does
+// not grow, and changes the state a little first, so no two iterations copy or encode the same
+// value and nothing folds away. A control loop does the same change and the same arena with no
+// copy and no encoding (for `from_bytes`, the same change to the bytes); its time is printed too,
+// and the per-operation numbers have it taken out. It prints ns per operation and the byte sizes.
+use time
+use args
+use { Rng from random }
+
+struct Game {
+    ball: vec2
+    vel: vec2
+    pad1: float
+    pad2: float
+    score1: int
+    score2: int
+    rng: Rng
+}
+
+let GAMES = 10000
+let LISTS = 100
+let LONG = 100
+let ITEMS = 100000
+
+pure new_game() -> Game {
+    Game(ball: vec2(400, 250), vel: vec2(360, 120), pad1: 250.0, pad2: 250.0, score1: 0, score2: 0,
+        rng: Rng(seed: 1337))
+}
+
+// A frame's worth of change.
+pure nudge(var g: Game, i: int) {
+    g.ball = g.ball + g.vel * 0.001
+    g.score1 += i & 1
+    g.rng.seed = g.rng.seed ^ i64(i)
+}
+
+pure sum(g: Game) -> int {
+    g.score1 + g.score2 + int(g.ball.x) + int(g.rng.seed & 1023)
+}
+
+// Nanoseconds per iteration of a loop of `n` that took `seconds`.
+pure per(seconds: f64, n: int) -> f64 {
+    seconds * 1000000000.0 / f64(n)
+}
+
+main() {
+    var scale = 1
+    for a in args.all() {
+        if a == "long" { scale = LONG }
+    }
+    let games = GAMES * scale
+    let lists = LISTS * scale
+    var g = new_game()
+    var acc = 0
+
+    // The loop with no arena, to show what the arena costs.
+    var t = time.now()
+    for i from 0 to games {
+        nudge(var g, i)
+        acc += g.score1
+    }
+    let game_bare = per(time.now() - t, games)
+
+    // The control: the change and the arena alone.
+    t = time.now()
+    for i from 0 to games {
+        arena {
+            nudge(var g, i)
+            acc += g.score1
+        }
+    }
+    let game_control = per(time.now() - t, games)
+
+    // A snapshot: the game saved into a ring of 16, as a rollback keeps them.
+    var ring: list[Game] = []
+    for i from 0 to 16 {
+        ring.add(g)
+    }
+    t = time.now()
+    for i from 0 to games {
+        arena {
+            nudge(var g, i)
+            ring[i & 15] = g
+        }
+    }
+    let game_copy = per(time.now() - t, games)
+    acc += sum(ring[3])
+
+    t = time.now()
+    for i from 0 to games {
+        arena {
+            nudge(var g, i)
+            let b = to_bytes(g)
+            acc += b.len + int(b[i & 15])
+        }
+    }
+    let game_to = per(time.now() - t, games)
+
+    // `from_bytes` reads one fixed encoding; the change goes into the bytes it reads (after the
+    // 13-byte header: a field of `vel`).
+    var gb = to_bytes(g)
+    let game_size = gb.len
+    t = time.now()
+    for i from 0 to games {
+        arena {
+            gb[24] = u8(i & 255)
+            acc += int(gb[i & 15])
+        }
+    }
+    let game_from_control = per(time.now() - t, games)
+    t = time.now()
+    for i from 0 to games {
+        arena {
+            gb[24] = u8(i & 255)
+            let back = from_bytes[Game](gb) else { return }
+            acc += back.score1
+        }
+    }
+    let game_from = per(time.now() - t, games)
+
+    print("game bare loop {game_bare} ns per iteration, no arena")
+    print("game control {game_control} ns per iteration")
+    print("game copy {game_copy - game_control} ns ({game_copy} raw)")
+    print("game to_bytes {game_to - game_control} ns ({game_to} raw)")
+    print("game from_bytes {game_from - game_from_control} ns ({game_from} raw, control {game_from_control})")
+    print("game bytes {game_size}")
+
+    var xs: list[int] = []
+    for i from 0 to ITEMS {
+        xs.add(i * 7)
+    }
+
+    t = time.now()
+    for i from 0 to lists {
+        arena {
+            xs[i % ITEMS] += 1
+            acc += xs[(i + 1) % ITEMS]
+        }
+    }
+    let list_control = per(time.now() - t, lists)
+
+    t = time.now()
+    for i from 0 to lists {
+        arena {
+            xs[i % ITEMS] += 1
+            var snap = xs
+            snap[(i + 1) % ITEMS] += 1
+            acc += snap[(i + 1) % ITEMS]
+        }
+    }
+    let list_copy = per(time.now() - t, lists)
+
+    t = time.now()
+    for i from 0 to lists {
+        arena {
+            xs[i % ITEMS] += 1
+            let b = to_bytes(xs)
+            acc += b.len + int(b[i & 15])
+        }
+    }
+    let list_to = per(time.now() - t, lists)
+
+    var lb = to_bytes(xs)
+    let list_size = lb.len
+    t = time.now()
+    for i from 0 to lists {
+        arena {
+            lb[17 + 4 * (i % ITEMS)] = u8(i & 255)
+            acc += int(lb[i & 15])
+        }
+    }
+    let list_from_control = per(time.now() - t, lists)
+    t = time.now()
+    for i from 0 to lists {
+        arena {
+            lb[17 + 4 * (i % ITEMS)] = u8(i & 255)
+            let back = from_bytes[list[int]](lb) else { return }
+            acc += back[(i + 1) % ITEMS]
+        }
+    }
+    let list_from = per(time.now() - t, lists)
+
+    print("list control {list_control} ns per iteration")
+    print("list copy {list_copy - list_control} ns ({list_copy} raw)")
+    print("list to_bytes {list_to - list_control} ns ({list_to} raw)")
+    print("list from_bytes {list_from - list_from_control} ns ({list_from} raw, control {list_from_control})")
+    print("list bytes {list_size}")
+    print("acc {acc}")
+}
