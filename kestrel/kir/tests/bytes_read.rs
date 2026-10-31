@@ -4,6 +4,8 @@
 use kestrel_kir::*;
 use kestrel_syntax::{parse, LineIndex};
 
+mod range_common;
+
 fn lower_src(src: &str) -> Module {
     let (p, d) = parse(src);
     assert!(d.is_empty(), "parse: {:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>());
@@ -86,4 +88,19 @@ fn items_far_bigger_in_memory_than_in_bytes_grow_their_list() {
     let m = lower_src("main() {\n    let b: list[u8] = []\n    let xs = from_bytes[list[int]](b) else { return }\n    print(xs.len)\n}\n");
     let f = read_fn(&m, |t| matches!(t, KTy::List(_)));
     assert!(f.body.iter().any(|s| matches!(s, Stmt::List(ListOp::Reserve, ..))));
+}
+
+#[test]
+fn a_list_read_by_growing_cant_hold_too_many_items() {
+    // Its length is checked against `i32::MAX` before any item is added, so its adds can't fail.
+    use kestrel_kir::range::report::ItemKind::{Allocation, CanFail};
+    let src = "pub load(b: list[u8]) -> int {
+    let xs = from_bytes[list[int?]](b) else { return 0 }
+    xs.len
+}";
+    let (_, r) = range_common::reported(src, kestrel_kir::range::Arith::Checked);
+    let f = range_common::func_report(&r, "load");
+    let (allocs, fails) = (range_common::items_of(f, Allocation), range_common::items_of(f, CanFail));
+    assert!(allocs.iter().any(|(_, t)| t.contains("makes the lists it reads")), "{allocs:?}");
+    assert!(!fails.iter().any(|(_, t)| t.contains("items")), "{fails:?}");
 }

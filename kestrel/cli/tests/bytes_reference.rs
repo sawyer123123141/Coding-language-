@@ -127,8 +127,8 @@ main() {
         ("int?", V::Opt(None)),
         ("enum Shape{Dot,Circle{r:float}}", V::Enum(1, vec![float(2.5)])),
         ("struct P{a:int,s:string,xs:list[int]}", V::Struct(vec![V::Int(-7), s("hi"), V::List(vec![V::Int(4), V::Int(5)])])),
-        // A type met again inside itself is written by name only.
-        ("struct Node{id:u8,kids:list[Node]}", V::Struct(vec![V::U8(1), V::List(vec![V::Struct(vec![V::U8(2), V::List(Vec::new())])])])),
+        // A type met again inside itself is written as how far out it is: `^1` is the innermost.
+        ("struct Node{id:u8,kids:list[^1]}", V::Struct(vec![V::U8(1), V::List(vec![V::Struct(vec![V::U8(2), V::List(Vec::new())])])])),
         ("int?", V::Opt(Some(Box::new(V::Int(9))))),
         ("map[string,int]", V::Map(vec![(s("a"), V::Int(1)), (s("c"), V::Int(3))])),
         ("list[int]", V::List(vec![V::Int(2), V::Int(3)])),

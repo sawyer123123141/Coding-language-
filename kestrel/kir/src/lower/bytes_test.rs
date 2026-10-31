@@ -108,7 +108,7 @@ struct All {
     let all = strukt(&t, "All");
     let cases = [
         ("s", "enum State{Alive,Dead{since:int}}"),
-        ("n", "struct Node{kids:list[Node]}"),
+        ("n", "struct Node{kids:list[^1]}"),
         ("xs", "array[f64]"),
         ("m", "map[string,list[u8]]"),
         ("o", "bool?"),
@@ -119,6 +119,31 @@ struct All {
     for (name, want) in cases {
         assert_eq!(description(field(&t, all, name), &t), want, "field `{name}`");
     }
+}
+
+#[test]
+fn a_type_met_again_inside_itself_is_written_as_how_far_out_it_is() {
+    // `a.Node` holds `b.Node`s, and each `b.Node` holds `a.Node`s in one program and `b.Node`s in
+    // the other. Back-references by name would describe both as `Node`.
+    let shape = |inner: &str| {
+        let mut t = tables(&format!("struct ANode {{
+    kids: list[BNode]
+    x: int
+}}
+struct BNode {{
+    kids: list[{inner}]
+}}"));
+        for (from, to) in [("ANode", "a.Node"), ("BNode", "b.Node")] {
+            t.structs.iter_mut().find(|s| s.name == from).expect("the struct").name = to.to_string();
+        }
+        let a = KTy::Struct(StructIdx(t.structs.iter().position(|s| s.name == "a.Node").expect("a.Node") as u32));
+        (description(a, &t), fingerprint(a, &t))
+    };
+    let (mutual, mutual_fp) = shape("ANode");
+    let (nested, nested_fp) = shape("BNode");
+    assert_eq!(mutual, "struct Node{kids:list[struct Node{kids:list[^2]}],x:int}");
+    assert_eq!(nested, "struct Node{kids:list[struct Node{kids:list[^1]}],x:int}");
+    assert_ne!(mutual_fp, nested_fp);
 }
 
 #[test]

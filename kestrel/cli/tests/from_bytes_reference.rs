@@ -16,6 +16,14 @@ const DECLS: &str = "enum Shape {
     Label { text: string, size: u8 }
 }
 
+struct Unit {
+}
+
+struct Tagged {
+    id: int
+    k: Unit
+}
+
 struct P {
     a: int
     name: string
@@ -24,10 +32,13 @@ struct P {
     sh: Shape
     m: map[string, int]
     ok: bool
+    os: list[int?]
+    ls: list[list[u8]]
+    t: list[Tagged]
 }
 ";
 
-const DESCRIPTION: &str = "struct P{a:int,name:string,xs:list[u8],o:i64?,sh:enum Shape{Dot,Label{text:string,size:u8}},m:map[string,int],ok:bool}";
+const DESCRIPTION: &str = "struct P{a:int,name:string,xs:list[u8],o:i64?,sh:enum Shape{Dot,Label{text:string,size:u8}},m:map[string,int],ok:bool,os:list[int?],ls:list[list[u8]],t:list[struct Tagged{id:int,k:struct Unit{}}]}";
 
 /// Writes `src` as a program in a fresh folder named for `name`.
 fn write(name: &str, src: &str) -> PathBuf {
@@ -60,7 +71,12 @@ fn literal(bytes: &[u8]) -> String {
 
 fn ty() -> T {
     let shape = T::Enum(vec![vec![], vec![T::Str, T::U8]]);
-    T::Struct(vec![T::Int, T::Str, T::List(Box::new(T::U8)), T::Opt(Box::new(T::I64)), shape, T::Map(Box::new(T::Str), Box::new(T::Int)), T::Bool])
+    let list = |t: T| T::List(Box::new(t));
+    // `os` and `ls` are read by growing (their items are far bigger in memory than in bytes), and
+    // `t`'s items end in an empty struct.
+    let tagged = T::Struct(vec![T::Int, T::Struct(vec![])]);
+    let fields = vec![T::Int, T::Str, list(T::U8), T::Opt(Box::new(T::I64)), shape, T::Map(Box::new(T::Str), Box::new(T::Int)), T::Bool];
+    T::Struct([fields, vec![list(T::Opt(Box::new(T::Int))), list(list(T::U8)), list(tagged)]].concat())
 }
 
 fn value() -> V {
@@ -73,6 +89,9 @@ fn value() -> V {
         V::Enum(1, vec![s("ok"), V::U8(3)]),
         V::Map(vec![(s("b"), V::Int(2)), (s("a"), V::Int(1))]),
         V::Bool(true),
+        V::List(vec![V::Opt(None), V::Opt(Some(Box::new(V::Int(5))))]),
+        V::List(vec![V::List(vec![V::U8(9)]), V::List(vec![])]),
+        V::List(vec![V::Struct(vec![V::Int(1), V::Struct(vec![])]), V::Struct(vec![V::Int(2), V::Struct(vec![])])]),
     ])
 }
 

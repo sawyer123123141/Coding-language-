@@ -4,7 +4,10 @@
 //! The description writes scalars by name (`int`, `f64`, `string`, `vec4`; the built-in `vec2`,
 //! `vec3`, `ivec2` and `ivec3` too), `list[T]`, `array[T]`, `map[K,V]` and `T?`, a struct as
 //! `struct Game{ball:vec2,score:int}` and an enum as `enum State{Alive,Dead{since:int}}`. A struct
-//! or enum met again inside itself is written by its name alone. Renaming or reordering fields
+//! or enum met again inside itself is written as how far out it is among the types being
+//! described: `^1` for the innermost, `^2` for the one around it (`struct Node{kids:list[^1]}`). A
+//! name would not do: two mutually recursive `Node`s from different modules would describe the
+//! same as one `Node` holding itself. Renaming or reordering fields
 //! changes it, so bytes of one shape are never read as another. A type is named as it is
 //! declared, without the module it lives in (`Point`, never `geom.Point`): the shape is what must
 //! match, not the file, so a type moved into a module still reads the saves it wrote.
@@ -83,8 +86,11 @@ fn describe(ty: KTy, t: &Tables, inside: &mut Vec<KTy>, out: &mut String) {
         KTy::Struct(s) => {
             let info = &t.structs[s.0 as usize];
             // A built-in struct (`vec2`...) is a scalar by name.
-            if info.item == usize::MAX || inside.contains(&ty) {
+            if info.item == usize::MAX {
                 out.push_str(&own_name(&info.name));
+                return;
+            }
+            if back_reference(ty, inside, out) {
                 return;
             }
             inside.push(ty);
@@ -95,8 +101,7 @@ fn describe(ty: KTy, t: &Tables, inside: &mut Vec<KTy>, out: &mut String) {
         }
         KTy::Enum(e) => {
             let info = &t.enums[e.0 as usize];
-            if inside.contains(&ty) {
-                out.push_str(&own_name(&info.name));
+            if back_reference(ty, inside, out) {
                 return;
             }
             inside.push(ty);
@@ -117,6 +122,15 @@ fn describe(ty: KTy, t: &Tables, inside: &mut Vec<KTy>, out: &mut String) {
         }
         KTy::Arena | KTy::Gpu | KTy::Fn | KTy::Iface => unreachable!("the checker refuses `to_bytes` of a value holding a {ty:?}"),
     }
+}
+
+/// Whether `ty` is one of the types being described (`inside`); if so, `^n` added to `out`, where
+/// `n` counts from the innermost (1) outward.
+fn back_reference(ty: KTy, inside: &[KTy], out: &mut String) -> bool {
+    let Some(n) = inside.iter().rev().position(|t| *t == ty) else { return false };
+    out.push('^');
+    out.push_str(&(n + 1).to_string());
+    true
 }
 
 /// A struct's or enum's name without the modules the linker puts before it, in a generic copy's

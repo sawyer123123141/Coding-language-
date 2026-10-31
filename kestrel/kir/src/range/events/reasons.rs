@@ -149,11 +149,10 @@ impl Walk<'_> {
             return;
         }
         // `from_bytes` adds the items of a list whose items are much bigger in memory than in
-        // bytes as it reads them (see `lower::bytes_read`).
+        // bytes as it reads them (see `lower::bytes_read`). It checks the length against
+        // `i32::MAX` first, so the adds can't make the list too long.
         if self.builtin_of(p.root) == Some("from_bytes") {
-            let via = "makes the lists it reads".to_string();
-            self.alloc(line, Some("`from_bytes` makes the lists it reads".to_string()), via.clone(), "");
-            self.fail_part(line, Some(format!("`from_bytes` fails if a list it reads would hold more than {limit} items")), via, &fail_tail, Part::Resource);
+            self.alloc(line, Some("`from_bytes` makes the lists it reads".to_string()), "makes the lists it reads".to_string(), "");
             return;
         }
         self.alloc(line, Some(format!("`add` may grow {xs}")), format!("adds to {xs}"), " and may grow the list");

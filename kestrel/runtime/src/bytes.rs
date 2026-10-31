@@ -257,7 +257,9 @@ pub fn read_value(bytes: &[u8], at: &mut usize, ty: &RefTy) -> Option<RefValue> 
         }
         RefTy::Map(k, v) => {
             let n = count(at, k.min_size() + v.min_size())?;
-            let mut entries: Vec<(RefValue, RefValue)> = Vec::with_capacity(n);
+            // Room for no more entries than bytes left: when a key and its value both take 0 bytes
+            // (`map[Unit, Unit]`) the count is bounded only by `i32::MAX`.
+            let mut entries: Vec<(RefValue, RefValue)> = Vec::with_capacity(n.min(bytes.len() - *at));
             for _ in 0..n {
                 let key = read_value(bytes, at, k)?;
                 if entries.iter().any(|(e, _)| *e == key) {

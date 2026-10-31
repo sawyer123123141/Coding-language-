@@ -203,6 +203,10 @@ fn decode_refuses_every_wrong_input() {
     // A key twice.
     let m = RefValue::Map(vec![(RefValue::U8(1), RefValue::U8(2)), (RefValue::U8(1), RefValue::U8(3))]);
     assert_eq!(round_trip(&m, &RefTy::Map(Box::new(RefTy::U8), Box::new(RefTy::U8))), None);
+    // A map of 0-byte keys and values claiming `i32::MAX` entries has its second key twice, and
+    // gets no room for the claim first.
+    let unit = || Box::new(RefTy::Struct(vec![]));
+    assert_eq!(decode(&body(&[0xFF, 0xFF, 0xFF, 0x7F]), &RefTy::Map(unit(), unit()), 77), None);
 }
 
 /// A fixed-seed 64-bit linear congruential generator.
